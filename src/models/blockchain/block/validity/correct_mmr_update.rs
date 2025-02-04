@@ -36,10 +36,6 @@ pub struct CorrectMmrUpdate {
 }
 
 impl ConsensusProgram for CorrectMmrUpdate {
-    fn source(&self) {
-        todo!()
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -48,5 +44,17 @@ impl ConsensusProgram for CorrectMmrUpdate {
         static HASH: OnceLock<Digest> = OnceLock::new();
 
         *HASH.get_or_init(|| self.program().hash())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+
+    impl ConsensusProgramSpecification for CorrectMmrUpdate {
+        fn source(&self) {
+            todo!()
+        }
     }
 }

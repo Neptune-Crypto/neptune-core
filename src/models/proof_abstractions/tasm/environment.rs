@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 
 use tasm_lib::prelude::Digest;
-use tasm_lib::triton_vm::prelude::NonDeterminism;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 thread_local! {
@@ -26,10 +25,11 @@ thread_local! {
     pub(super) static PROGRAM_DIGEST: RefCell<Digest> = RefCell::new(Digest::default());
 }
 
+#[cfg(test)]
 pub(crate) fn init(
     program_digest: Digest,
     input: &[BFieldElement],
-    nondeterminism: NonDeterminism,
+    nondeterminism: tasm_lib::triton_vm::prelude::NonDeterminism,
 ) {
     PUB_INPUT.with(|v| {
         *v.borrow_mut() = input.to_vec().into();

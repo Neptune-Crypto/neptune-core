@@ -21,13 +21,9 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
 
 #[derive(
     Clone,
@@ -113,46 +109,6 @@ impl SecretWitness for KernelToOutputsWitness {
 pub struct KernelToOutputs;
 
 impl ConsensusProgram for KernelToOutputs {
-    fn source(&self) {
-        let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let ktow: KernelToOutputsWitnessMemory = tasmlib::decode_from_memory(start_address);
-
-        // divine in the salted output UTXOs with hash
-        let salted_output_utxos: &SaltedUtxos = &ktow.output_utxos;
-        let output_utxos: &Vec<Utxo> = &salted_output_utxos.utxos;
-
-        // divine in the commitment randomness
-        let sender_randomnesses: &Vec<Digest> = &ktow.sender_randomnesses;
-        let receiver_digests: &Vec<Digest> = &ktow.receiver_digests;
-
-        // compute the canonical commitments (= addition records)
-        let mut addition_records: Vec<AdditionRecord> = Vec::with_capacity(output_utxos.len());
-        let mut i = 0;
-        while i < output_utxos.len() {
-            let addition_record: AdditionRecord = commit(
-                Hash::hash(&output_utxos[i]),
-                sender_randomnesses[i],
-                receiver_digests[i],
-            );
-            addition_records.push(addition_record);
-            i += 1;
-        }
-
-        // authenticate the addition records against the txk mast hash
-        let addition_records_hash: Digest = Hash::hash(&addition_records);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            txk_digest,
-            TransactionKernelField::Outputs as u32,
-            addition_records_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-
-        // output hash of salted output UTXOs
-        let salted_output_utxos_hash: Digest = Hash::hash(salted_output_utxos);
-        tasmlib::tasmlib_io_write_to_stdout___digest(salted_output_utxos_hash);
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
@@ -344,13 +300,60 @@ mod test {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
+    use tasm_lib::triton_vm;
     use test_strategy::proptest;
 
-    use super::KernelToOutputsWitness;
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::SecretWitness;
+    use super::*;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::triton_vm::proof::Claim;
+    use crate::triton_vm::stark::Stark;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::commit;
+
+    impl ConsensusProgramSpecification for KernelToOutputs {
+        fn source(&self) {
+            let txk_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let start_address: BFieldElement =
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+            let ktow: KernelToOutputsWitnessMemory = tasm::decode_from_memory(start_address);
+
+            // divine in the salted output UTXOs with hash
+            let salted_output_utxos: &SaltedUtxos = &ktow.output_utxos;
+            let output_utxos: &Vec<Utxo> = &salted_output_utxos.utxos;
+
+            // divine in the commitment randomness
+            let sender_randomnesses: &Vec<Digest> = &ktow.sender_randomnesses;
+            let receiver_digests: &Vec<Digest> = &ktow.receiver_digests;
+
+            // compute the canonical commitments (= addition records)
+            let mut addition_records: Vec<AdditionRecord> = Vec::with_capacity(output_utxos.len());
+            let mut i = 0;
+            while i < output_utxos.len() {
+                let addition_record: AdditionRecord = commit(
+                    Hash::hash(&output_utxos[i]),
+                    sender_randomnesses[i],
+                    receiver_digests[i],
+                );
+                addition_records.push(addition_record);
+                i += 1;
+            }
+
+            // authenticate the addition records against the txk mast hash
+            let addition_records_hash: Digest = Hash::hash(&addition_records);
+            tasm::tasmlib_hashing_merkle_verify(
+                txk_digest,
+                TransactionKernelField::Outputs as u32,
+                addition_records_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            // output hash of salted output UTXOs
+            let salted_output_utxos_hash: Digest = Hash::hash(salted_output_utxos);
+            tasm::tasmlib_io_write_to_stdout___digest(salted_output_utxos_hash);
+        }
+    }
 
     #[proptest(cases = 12)]
     fn kernel_to_outputs_proptest(
@@ -397,10 +400,6 @@ mod test {
 
         assert_eq!(kernel_to_outputs_witness.output(), tasm_result);
     }
-    use tasm_lib::triton_vm;
-
-    use crate::triton_vm::proof::Claim;
-    use crate::triton_vm::stark::Stark;
 
     #[test]
     fn kernel_to_outputs_failing_proof() {

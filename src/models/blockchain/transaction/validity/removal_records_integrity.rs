@@ -10,7 +10,6 @@ use rand::RngCore;
 use rand::SeedableRng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -37,18 +36,12 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
@@ -367,102 +360,6 @@ impl RemovalRecordsIntegrityWitness {
 }
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
-    fn source(&self) {
-        let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let rriw: RemovalRecordsIntegrityWitnessMemory = tasmlib::decode_from_memory(start_address);
-
-        // divine in the salted input UTXOs with hash
-        let salted_input_utxos: &SaltedUtxos = &rriw.input_utxos;
-        let input_utxos: &[Utxo] = &salted_input_utxos.utxos;
-
-        // divine in the mutator set accumulator
-        let aocl: MmrAccumulator = rriw.aocl;
-        let swbfi: MmrAccumulator = rriw.swbfi;
-
-        // authenticate the mutator set accumulator against the txk mast hash
-        let aocl_mmr_bagged: Digest = aocl.bag_peaks();
-        let inactive_swbf_bagged: Digest = swbfi.bag_peaks();
-        let left = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
-        let active_swbf_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
-        let default = Digest::default();
-        let right = Hash::hash_pair(active_swbf_digest, default);
-        let msah: Digest = Hash::hash_pair(left, right);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            txk_digest,
-            TransactionKernelField::MutatorSetHash as u32,
-            Hash::hash(&msah),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
-        // authenticate divined removal records against txk mast hash
-        let removal_records_digest: Digest = Hash::hash(&rriw.removal_records);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            txk_digest,
-            TransactionKernelField::Inputs as u32,
-            removal_records_digest,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
-        // authenticate coinbase against kernel mast hash
-        let coinbase: Option<NativeCurrencyAmount> = rriw.coinbase;
-        let coinbase_leaf: Digest = Hash::hash(&coinbase);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            txk_digest,
-            TransactionKernelField::Coinbase as u32,
-            coinbase_leaf,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
-        // Assert that a coinbase transaction has no inputs. This, combined with
-        // a potential future softfork requiring each block to have at least one
-        // input in its transaction, forces the miner to prove at least one
-        // execution of a `Merge` which removes any incentive to mine empty
-        // blocks. Mining empty blocks could otherwise be beneficial since it
-        // allows the miner to complete the proofs faster and get to the
-        // guessing part as soon as possible, to the detriment of the network.
-        assert!(coinbase.is_none() || input_utxos.is_empty());
-
-        // iterate over all input UTXOs
-        let mut input_index: usize = 0;
-        while input_index < input_utxos.len() {
-            let utxo: &Utxo = &input_utxos[input_index];
-            let utxo_hash = Hash::hash(utxo);
-            let claimed_absolute_indices: &AbsoluteIndexSet =
-                &rriw.removal_records[input_index].absolute_indices;
-
-            // verify AOCL membership
-            let aocl_leaf_index: u64 = tasmlib::tasmlib_io_read_secin___u64();
-            let receiver_preimage: Digest = tasmlib::tasmlib_io_read_secin___digest();
-            let sender_randomness: Digest = tasmlib::tasmlib_io_read_secin___digest();
-            let addition_record: AdditionRecord =
-                commit(utxo_hash, sender_randomness, receiver_preimage.hash());
-            assert!(tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
-                &aocl.peaks(),
-                aocl.num_leafs(),
-                aocl_leaf_index,
-                addition_record.canonical_commitment,
-            ));
-
-            // calculate absolute index set
-            let index_set = get_swbf_indices(
-                utxo_hash,
-                sender_randomness,
-                receiver_preimage,
-                aocl_leaf_index,
-            );
-
-            assert_eq!(index_set, claimed_absolute_indices.to_array());
-
-            input_index += 1;
-        }
-
-        // compute and output hash of salted input UTXOs
-        let hash_of_inputs: Digest = Hash::hash(salted_input_utxos);
-        tasmlib::tasmlib_io_write_to_stdout___digest(hash_of_inputs);
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
@@ -972,9 +869,14 @@ pub mod neptune_arbitrary {
     use super::*;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::commit;
+    use crate::util_types::mutator_set::get_swbf_indices;
+    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 
     impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
-        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
             let num_inputs = u.int_in_range(1..=3usize)?;
             let _num_outputs = u.int_in_range(1..=3usize)?;
             let _num_public_announcements = u.int_in_range(0..=2usize)?;
@@ -1087,11 +989,119 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseResult;
     use proptest::test_runner::TestRunner;
+    use strum::EnumCount;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use test_strategy::proptest;
 
     use super::*;
+    use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::TransactionKernelModifier;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::commit;
+    use crate::util_types::mutator_set::get_swbf_indices;
+    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+
+    impl ConsensusProgramSpecification for RemovalRecordsIntegrity {
+        fn source(&self) {
+            let txk_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+
+            let start_address: BFieldElement =
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+            let rriw: RemovalRecordsIntegrityWitnessMemory =
+                tasm::decode_from_memory(start_address);
+
+            // divine in the salted input UTXOs with hash
+            let salted_input_utxos: &SaltedUtxos = &rriw.input_utxos;
+            let input_utxos: &[Utxo] = &salted_input_utxos.utxos;
+
+            // divine in the mutator set accumulator
+            let aocl: MmrAccumulator = rriw.aocl;
+            let swbfi: MmrAccumulator = rriw.swbfi;
+
+            // authenticate the mutator set accumulator against the txk mast hash
+            let aocl_mmr_bagged: Digest = aocl.bag_peaks();
+            let inactive_swbf_bagged: Digest = swbfi.bag_peaks();
+            let left = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
+            let active_swbf_digest: Digest = tasm::tasmlib_io_read_secin___digest();
+            let default = Digest::default();
+            let right = Hash::hash_pair(active_swbf_digest, default);
+            let msah: Digest = Hash::hash_pair(left, right);
+            tasm::tasmlib_hashing_merkle_verify(
+                txk_digest,
+                TransactionKernelField::MutatorSetHash as u32,
+                Hash::hash(&msah),
+                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            );
+
+            // authenticate divined removal records against txk mast hash
+            let removal_records_digest: Digest = Hash::hash(&rriw.removal_records);
+            tasm::tasmlib_hashing_merkle_verify(
+                txk_digest,
+                TransactionKernelField::Inputs as u32,
+                removal_records_digest,
+                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            );
+
+            // authenticate coinbase against kernel mast hash
+            let coinbase: Option<NativeCurrencyAmount> = rriw.coinbase;
+            let coinbase_leaf: Digest = Hash::hash(&coinbase);
+            tasm::tasmlib_hashing_merkle_verify(
+                txk_digest,
+                TransactionKernelField::Coinbase as u32,
+                coinbase_leaf,
+                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            );
+
+            // Assert that a coinbase transaction has no inputs. This, combined with
+            // a potential future softfork requiring each block to have at least one
+            // input in its transaction, forces the miner to prove at least one
+            // execution of a `Merge` which removes any incentive to mine empty
+            // blocks. Mining empty blocks could otherwise be beneficial since it
+            // allows the miner to complete the proofs faster and get to the
+            // guessing part as soon as possible, to the detriment of the network.
+            assert!(coinbase.is_none() || input_utxos.is_empty());
+
+            // iterate over all input UTXOs
+            let mut input_index: usize = 0;
+            while input_index < input_utxos.len() {
+                let utxo: &Utxo = &input_utxos[input_index];
+                let utxo_hash = Hash::hash(utxo);
+                let claimed_absolute_indices: &AbsoluteIndexSet =
+                    &rriw.removal_records[input_index].absolute_indices;
+
+                // verify AOCL membership
+                let aocl_leaf_index: u64 = tasm::tasmlib_io_read_secin___u64();
+                let receiver_preimage: Digest = tasm::tasmlib_io_read_secin___digest();
+                let sender_randomness: Digest = tasm::tasmlib_io_read_secin___digest();
+                let addition_record: AdditionRecord =
+                    commit(utxo_hash, sender_randomness, receiver_preimage.hash());
+                assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
+                    &aocl.peaks(),
+                    aocl.num_leafs(),
+                    aocl_leaf_index,
+                    addition_record.canonical_commitment,
+                ));
+
+                // calculate absolute index set
+                let index_set = get_swbf_indices(
+                    utxo_hash,
+                    sender_randomness,
+                    receiver_preimage,
+                    aocl_leaf_index,
+                );
+
+                assert_eq!(index_set, claimed_absolute_indices.to_array());
+
+                input_index += 1;
+            }
+
+            // compute and output hash of salted input UTXOs
+            let hash_of_inputs: Digest = Hash::hash(salted_input_utxos);
+            tasm::tasmlib_io_write_to_stdout___digest(hash_of_inputs);
+        }
+    }
 
     fn prop_positive(
         removal_records_integrity_witness: RemovalRecordsIntegrityWitness,

@@ -23,12 +23,10 @@ use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm;
@@ -85,71 +83,6 @@ impl SecretWitness for CollectTypeScriptsWitness {
 pub struct CollectTypeScripts;
 
 impl ConsensusProgram for CollectTypeScripts {
-    fn source(&self) {
-        let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-        let sou_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let ctsw: CollectTypeScriptsWitness = tasmlib::decode_from_memory(start_address);
-
-        // divine in the salted input UTXOs with hash
-        let salted_input_utxos: &SaltedUtxos = &ctsw.salted_input_utxos;
-        let input_utxos: &Vec<Utxo> = &salted_input_utxos.utxos;
-
-        // verify that the divined data matches with the explicit input digest
-        let salted_input_utxos_hash: Digest = Hash::hash(salted_input_utxos);
-        assert_eq!(siu_digest, salted_input_utxos_hash);
-
-        // divine in the salted output UTXOs with hash
-        let salted_output_utxos: &SaltedUtxos = &ctsw.salted_output_utxos;
-        let output_utxos: &Vec<Utxo> = &salted_output_utxos.utxos;
-
-        // verify that the divined data matches with the explicit input digest
-        let salted_output_utxos_hash: Digest = Hash::hash(salted_output_utxos);
-        assert_eq!(sou_digest, salted_output_utxos_hash);
-
-        // iterate over all input UTXOs and collect the type script hashes
-        let mut type_script_hashes: Vec<Digest> = Vec::with_capacity(input_utxos.len());
-        let mut i = 0;
-        while i < input_utxos.len() {
-            let utxo: &Utxo = &input_utxos[i];
-
-            let mut j = 0;
-            while j < utxo.coins().len() {
-                let coin: &Coin = &utxo.coins()[j];
-                if !type_script_hashes.contains(&coin.type_script_hash) {
-                    type_script_hashes.push(coin.type_script_hash);
-                }
-                j += 1;
-            }
-
-            i += 1;
-        }
-
-        // iterate over all output UTXOs and collect the type script hashes
-        i = 0;
-        while i < output_utxos.len() {
-            let utxo: &Utxo = &output_utxos[i];
-
-            let mut j = 0;
-            while j < utxo.coins().len() {
-                let coin: &Coin = &utxo.coins()[j];
-                if !type_script_hashes.contains(&coin.type_script_hash) {
-                    type_script_hashes.push(coin.type_script_hash);
-                }
-                j += 1;
-            }
-
-            i += 1;
-        }
-
-        // output all type script hashes
-        i = 0;
-        while i < type_script_hashes.len() {
-            tasmlib::tasmlib_io_write_to_stdout___digest(type_script_hashes[i]);
-            i += 1;
-        }
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let field_with_size_salted_input_utxos =
@@ -391,17 +324,84 @@ mod test {
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::stark::Stark;
     use test_strategy::proptest;
 
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
-    use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
+    use super::*;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::proof_abstractions::SecretWitness;
+
+    impl ConsensusProgramSpecification for CollectTypeScripts {
+        fn source(&self) {
+            let siu_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let sou_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let start_address: BFieldElement =
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+            let ctsw: CollectTypeScriptsWitness = tasm::decode_from_memory(start_address);
+
+            // divine in the salted input UTXOs with hash
+            let salted_input_utxos: &SaltedUtxos = &ctsw.salted_input_utxos;
+            let input_utxos: &Vec<Utxo> = &salted_input_utxos.utxos;
+
+            // verify that the divined data matches with the explicit input digest
+            let salted_input_utxos_hash: Digest = Tip5::hash(salted_input_utxos);
+            assert_eq!(siu_digest, salted_input_utxos_hash);
+
+            // divine in the salted output UTXOs with hash
+            let salted_output_utxos: &SaltedUtxos = &ctsw.salted_output_utxos;
+            let output_utxos: &Vec<Utxo> = &salted_output_utxos.utxos;
+
+            // verify that the divined data matches with the explicit input digest
+            let salted_output_utxos_hash: Digest = Tip5::hash(salted_output_utxos);
+            assert_eq!(sou_digest, salted_output_utxos_hash);
+
+            // iterate over all input UTXOs and collect the type script hashes
+            let mut type_script_hashes: Vec<Digest> = Vec::with_capacity(input_utxos.len());
+            let mut i = 0;
+            while i < input_utxos.len() {
+                let utxo: &Utxo = &input_utxos[i];
+
+                let mut j = 0;
+                while j < utxo.coins().len() {
+                    let coin: &Coin = &utxo.coins()[j];
+                    if !type_script_hashes.contains(&coin.type_script_hash) {
+                        type_script_hashes.push(coin.type_script_hash);
+                    }
+                    j += 1;
+                }
+
+                i += 1;
+            }
+
+            // iterate over all output UTXOs and collect the type script hashes
+            i = 0;
+            while i < output_utxos.len() {
+                let utxo: &Utxo = &output_utxos[i];
+
+                let mut j = 0;
+                while j < utxo.coins().len() {
+                    let coin: &Coin = &utxo.coins()[j];
+                    if !type_script_hashes.contains(&coin.type_script_hash) {
+                        type_script_hashes.push(coin.type_script_hash);
+                    }
+                    j += 1;
+                }
+
+                i += 1;
+            }
+
+            // output all type script hashes
+            i = 0;
+            while i < type_script_hashes.len() {
+                tasm::tasmlib_io_write_to_stdout___digest(type_script_hashes[i]);
+                i += 1;
+            }
+        }
+    }
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
         let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
@@ -431,7 +431,9 @@ mod test {
     fn derived_witness_generates_accepting_program_proptest(
         #[strategy(0usize..5)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs),#_num_outputs,2))]
+        #[strategy(
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, 2)
+        )]
         primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
@@ -441,8 +443,10 @@ mod test {
     fn derived_witness_with_timelocks_generates_accepting_program_proptest(
         #[strategy(0usize..5)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
-        #[strategy(arb::<Timestamp>())] _now: Timestamp,
-        #[strategy(arbitrary_primitive_witness_with_active_timelocks(#_num_inputs,#_num_outputs,2, #_now))]
+        #[strategy(arb())] _now: Timestamp,
+        #[strategy(
+            arbitrary_primitive_witness_with_active_timelocks(#_num_inputs, #_num_outputs, 2, #_now)
+        )]
         primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;

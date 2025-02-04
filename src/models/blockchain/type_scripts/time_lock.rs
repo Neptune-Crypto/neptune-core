@@ -14,7 +14,6 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::math::tip5::Tip5;
 
 use super::TypeScript;
 use super::TypeScriptWitness;
@@ -26,11 +25,9 @@ use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasm;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::Hash;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock;
@@ -58,73 +55,6 @@ impl TimeLock {
 }
 
 impl ConsensusProgram for TimeLock {
-    #[allow(clippy::needless_return)]
-    fn source(&self) {
-        // get in the current program's hash digest
-        let self_digest: Digest = tasm::own_program_digest();
-
-        // read standard input:
-        //  - transaction kernel mast hash
-        //  - input salted utxos digest
-        //  - output salted utxos digest
-        // (All type scripts take this triple as input.)
-        let tx_kernel_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
-        let input_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
-        let _output_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
-
-        // divine the timestamp and authenticate it against the kernel mast hash
-        let leaf_index: u32 = 5;
-        let timestamp: BFieldElement = tasm::tasmlib_io_read_secin___bfe();
-        let leaf: Digest = Hash::hash_varlen(&timestamp.encode());
-        let tree_height: u32 = 3;
-        tasm::tasmlib_hashing_merkle_verify(tx_kernel_digest, leaf_index, leaf, tree_height);
-
-        // get pointers to objects living in nondeterministic memory:
-        //  - input Salted UTXOs
-        let input_utxos_pointer: u64 = tasm::tasmlib_io_read_secin___bfe().value();
-
-        // it's important to read the outputs digest too, but we actually don't care about
-        // the output UTXOs (in this type script)
-        let _output_utxos_pointer: u64 = tasm::tasmlib_io_read_secin___bfe().value();
-
-        // authenticate salted input UTXOs against the digest that was read from stdin
-        let input_salted_utxos: SaltedUtxos =
-            tasm::decode_from_memory(BFieldElement::new(input_utxos_pointer));
-        let input_salted_utxos_digest: Digest = Tip5::hash(&input_salted_utxos);
-        assert_eq!(input_salted_utxos_digest, input_utxos_digest);
-
-        // iterate over inputs
-        let input_utxos = input_salted_utxos.utxos;
-        let mut i = 0;
-        while i < input_utxos.len() {
-            // get coins
-            let coins = input_utxos[i].coins();
-
-            // if this typescript is present
-            let mut j: usize = 0;
-            while j < coins.len() {
-                let coin: &Coin = &coins[j];
-                if coin.type_script_hash == self_digest {
-                    // extract state
-                    let state: &Vec<BFieldElement> = &coin.state;
-
-                    // assert format
-                    assert!(state.len() == 1);
-
-                    // extract timestamp
-                    let release_date: BFieldElement = state[0];
-
-                    // test time lock
-                    assert!(release_date.value() < timestamp.value());
-                }
-                j += 1;
-            }
-            i += 1;
-        }
-
-        return;
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let (library, audit_preloaded_data, audit_subroutine) = {
             let mut library = Library::new();
@@ -1070,7 +1000,6 @@ pub mod neptune_arbitrary {
 
 #[cfg(test)]
 mod test {
-    use num_traits::Zero;
     use proptest::collection::vec;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
@@ -1079,17 +1008,84 @@ mod test {
     use proptest::strategy::Just;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use tasm_lib::twenty_first::math::tip5::Tip5;
     use test_strategy::proptest;
     use tokio::runtime::Runtime;
 
-    use super::TimeLockWitness;
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
-    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
-    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::proof_abstractions::SecretWitness;
+    use super::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
+    use super::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
+    use super::*;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+
+    impl ConsensusProgramSpecification for TimeLock {
+        #[expect(clippy::needless_return)]
+        fn source(&self) {
+            // get in the current program's hash digest
+            let self_digest: Digest = tasm::own_program_digest();
+
+            // read standard input:
+            //  - transaction kernel mast hash
+            //  - input salted utxos digest
+            //  - output salted utxos digest
+            // (All type scripts take this triple as input.)
+            let tx_kernel_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let input_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let _output_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+
+            // divine the timestamp and authenticate it against the kernel mast hash
+            let leaf_index: u32 = 5;
+            let timestamp: BFieldElement = tasm::tasmlib_io_read_secin___bfe();
+            let leaf: Digest = Tip5::hash_varlen(&timestamp.encode());
+            let tree_height: u32 = 3;
+            tasm::tasmlib_hashing_merkle_verify(tx_kernel_digest, leaf_index, leaf, tree_height);
+
+            // get pointers to objects living in nondeterministic memory:
+            //  - input Salted UTXOs
+            let input_utxos_pointer: u64 = tasm::tasmlib_io_read_secin___bfe().value();
+
+            // it's important to read the outputs digest too, but we actually don't care about
+            // the output UTXOs (in this type script)
+            let _output_utxos_pointer: u64 = tasm::tasmlib_io_read_secin___bfe().value();
+
+            // authenticate salted input UTXOs against the digest that was read from stdin
+            let input_salted_utxos: SaltedUtxos =
+                tasm::decode_from_memory(BFieldElement::new(input_utxos_pointer));
+            let input_salted_utxos_digest: Digest = Tip5::hash(&input_salted_utxos);
+            assert_eq!(input_salted_utxos_digest, input_utxos_digest);
+
+            // iterate over inputs
+            let input_utxos = input_salted_utxos.utxos;
+            let mut i = 0;
+            while i < input_utxos.len() {
+                // get coins
+                let coins = input_utxos[i].coins();
+
+                // if this typescript is present
+                let mut j: usize = 0;
+                while j < coins.len() {
+                    let coin: &Coin = &coins[j];
+                    if coin.type_script_hash == self_digest {
+                        // extract state
+                        let state: &Vec<BFieldElement> = &coin.state;
+
+                        // assert format
+                        assert!(state.len() == 1);
+
+                        // extract timestamp
+                        let release_date: BFieldElement = state[0];
+
+                        // test time lock
+                        assert!(release_date.value() < timestamp.value());
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+
+            return;
+        }
+    }
 
     #[proptest(cases = 20)]
     fn test_unlocked(
@@ -1099,7 +1095,14 @@ mod test {
         #[strategy(vec(Just(Timestamp::zero()), #_num_inputs))] _release_dates: Vec<Timestamp>,
         #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().min().unwrap()))]
         _transaction_timestamp: Timestamp,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_transaction_timestamp)))]
+        #[strategy(
+            TimeLockWitness::arbitrary_with((
+                #_release_dates,
+                #_num_outputs,
+                #_num_public_announcements,
+                #_transaction_timestamp,
+            ))
+        )]
         time_lock_witness: TimeLockWitness,
     ) {
         let rust_result = TimeLock.run_rust(
@@ -1156,11 +1159,26 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs))]
+        #[strategy(
+            vec(
+                Timestamp::arbitrary_between(
+                    Timestamp::now() - Timestamp::days(7),
+                    Timestamp::now() - Timestamp::days(1),
+                ),
+                #_num_inputs,
+            )
+        )]
         _release_dates: Vec<Timestamp>,
         #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().max().unwrap()))]
         _tx_timestamp: Timestamp,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_tx_timestamp)))]
+        #[strategy(
+            TimeLockWitness::arbitrary_with((
+                #_release_dates,
+                #_num_outputs,
+                #_num_public_announcements,
+                #_tx_timestamp,
+            ))
+        )]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());
@@ -1189,12 +1207,26 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs
-        ))]
+        #[strategy(
+            vec(
+                Timestamp::arbitrary_between(
+                    Timestamp::now() - Timestamp::days(7),
+                    Timestamp::now() - Timestamp::days(1),
+                ),
+                #_num_inputs,
+            )
+        )]
         _release_dates: Vec<Timestamp>,
         #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().max().unwrap()))]
         _tx_timestamp: Timestamp,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_tx_timestamp + Timestamp::days(1))))]
+        #[strategy(
+            TimeLockWitness::arbitrary_with((
+                #_release_dates,
+                #_num_outputs,
+                #_num_public_announcements,
+                #_tx_timestamp + Timestamp::days(1),
+            ))
+        )]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());

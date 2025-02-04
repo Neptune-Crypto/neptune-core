@@ -13,7 +13,6 @@ use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::isa::triton_instr;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Claim;
@@ -30,8 +29,6 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-use crate::models::proof_abstractions::tasm::builtins::verify_stark;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::verifier::verify;
 
@@ -67,55 +64,6 @@ impl BlockProgram {
 }
 
 impl ConsensusProgram for BlockProgram {
-    fn source(&self) {
-        let block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let block_witness: BlockProofWitness = tasmlib::decode_from_memory(start_address);
-        let claims: Vec<Claim> = block_witness.claims;
-        let proofs: Vec<Proof> = block_witness.proofs;
-
-        let block_body = &block_witness.block_body;
-
-        let txk_mast_hash: Digest = tasmlib::tasmlib_io_read_secin___digest();
-        let txk_mast_hash_as_leaf = Tip5::hash(&txk_mast_hash);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            block_body_digest,
-            BlockBodyField::TransactionKernel as u32,
-            txk_mast_hash_as_leaf,
-            BlockBody::MAST_HEIGHT as u32,
-        );
-
-        // Verify fee is legal
-        let fee = &block_body.transaction_kernel.fee;
-        let fee_hash = Tip5::hash(fee);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            txk_mast_hash,
-            TransactionKernelField::Fee as u32,
-            fee_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-
-        assert!(!fee.is_negative());
-        assert!(*fee <= NativeCurrencyAmount::max());
-
-        // Verify that merge bit is set
-        let merge_bit_hash = Tip5::hash(&1);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            txk_mast_hash,
-            TransactionKernelField::MergeBit as u32,
-            merge_bit_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-
-        let mut i = 0;
-        while i < claims.len() {
-            tasmlib::tasmlib_io_write_to_stdout___digest(Tip5::hash(&claims[i]));
-            verify_stark(Stark::default(), &claims[i], &proofs[i]);
-
-            i += 1;
-        }
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
@@ -358,6 +306,7 @@ pub(crate) mod test {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::vm::PublicInput;
     use tracing_test::traced_test;
 
@@ -372,7 +321,9 @@ pub(crate) mod test {
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TritonVmProofJobOptions;
     use crate::models::blockchain::transaction::Transaction;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::builtins::verify_stark;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -380,6 +331,58 @@ pub(crate) mod test {
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::mock_genesis_global_state;
+
+    impl ConsensusProgramSpecification for BlockProgram {
+        fn source(&self) {
+            let block_body_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let start_address: BFieldElement =
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+            let block_witness: BlockProofWitness = tasm::decode_from_memory(start_address);
+            let claims: Vec<Claim> = block_witness.claims;
+            let proofs: Vec<Proof> = block_witness.proofs;
+
+            let block_body = &block_witness.block_body;
+
+            let txk_mast_hash: Digest = tasm::tasmlib_io_read_secin___digest();
+            let txk_mast_hash_as_leaf = Tip5::hash(&txk_mast_hash);
+            tasm::tasmlib_hashing_merkle_verify(
+                block_body_digest,
+                BlockBodyField::TransactionKernel as u32,
+                txk_mast_hash_as_leaf,
+                BlockBody::MAST_HEIGHT as u32,
+            );
+
+            // Verify fee is legal
+            let fee = &block_body.transaction_kernel.fee;
+            let fee_hash = Tip5::hash(fee);
+            tasm::tasmlib_hashing_merkle_verify(
+                txk_mast_hash,
+                TransactionKernelField::Fee as u32,
+                fee_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            assert!(!fee.is_negative());
+            assert!(*fee <= NativeCurrencyAmount::max());
+
+            // Verify that merge bit is set
+            let merge_bit_hash = Tip5::hash(&1);
+            tasm::tasmlib_hashing_merkle_verify(
+                txk_mast_hash,
+                TransactionKernelField::MergeBit as u32,
+                merge_bit_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            let mut i = 0;
+            while i < claims.len() {
+                tasm::tasmlib_io_write_to_stdout___digest(Tip5::hash(&claims[i]));
+                verify_stark(Stark::default(), &claims[i], &proofs[i]);
+
+                i += 1;
+            }
+        }
+    }
 
     #[traced_test]
     #[test]

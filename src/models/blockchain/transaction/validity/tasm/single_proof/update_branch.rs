@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -28,9 +27,7 @@ use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
@@ -157,196 +154,6 @@ impl UpdateWitness {
         nondeterminism
             .individual_tokens
             .extend_from_slice(&self.old_kernel.merge_bit.encode());
-    }
-
-    pub(crate) fn branch_source(
-        &self,
-        single_proof_program_digest: Digest,
-        new_txk_digest: Digest,
-    ) {
-        // divine the witness for this proof
-        let uw: UpdateWitness = tasmlib::decode_from_memory(UPDATE_WITNESS_ADDRESS);
-
-        // get the kernel of the out-of-date transaction
-        let old_txk_digest: Digest = uw.old_kernel_mast_hash;
-        let old_txk_digest_as_input: Vec<BFieldElement> =
-            old_txk_digest.reversed().values().to_vec();
-
-        // verify the proof of the out-of-date transaction
-        let claim: Claim =
-            Claim::new(single_proof_program_digest).with_input(old_txk_digest_as_input);
-        let proof: &Proof = &uw.old_proof;
-        tasmlib::verify_stark(Stark::default(), &claim, proof);
-
-        // authenticate the new mutator set accumulator against the txk mast hash
-        let new_aocl_mmr: MmrAccumulator = uw.new_aocl;
-        let new_aocl_mmr_bagged = new_aocl_mmr.bag_peaks();
-        let new_inactive_swbf_bagged: Digest = uw.new_swbfi_bagged;
-        let new_left: Digest = Hash::hash_pair(new_aocl_mmr_bagged, new_inactive_swbf_bagged);
-        let new_active_swbf_digest: Digest = uw.new_swbfa_hash;
-        let default: Digest = Digest::default();
-        let new_right: Digest = Hash::hash_pair(new_active_swbf_digest, default);
-        let new_msah: Digest = Hash::hash_pair(new_left, new_right);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::MutatorSetHash as u32,
-            Hash::hash(&new_msah),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
-        // authenticate the old mutator set accumulator against the txk mast hash
-        let old_aocl_mmr: MmrAccumulator = uw.old_aocl;
-        let old_aocl_mmr_bagged = old_aocl_mmr.bag_peaks();
-        let old_inactive_swbf_bagged: Digest = uw.old_swbfi_bagged;
-        let old_left: Digest = Hash::hash_pair(old_aocl_mmr_bagged, old_inactive_swbf_bagged);
-        let old_active_swbf_digest: Digest = uw.old_swbfa_hash;
-        let old_right: Digest = Hash::hash_pair(old_active_swbf_digest, default);
-        let old_msah: Digest = Hash::hash_pair(old_left, old_right);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::MutatorSetHash as u32,
-            Hash::hash(&old_msah),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
-        // mutator set can change, but we only care about extensions of the AOCL MMR
-        tasmlib::verify_mmr_successor_proof(&old_aocl_mmr, &new_aocl_mmr, &uw.aocl_successor_proof);
-
-        // verify update ...
-
-        // authenticate inputs
-        let old_inputs = &uw.old_kernel.inputs;
-        let new_inputs = &uw.new_kernel.inputs;
-        let old_inputs_hash: Digest = Hash::hash(old_inputs);
-        let new_inputs_hash: Digest = Hash::hash(new_inputs);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::Inputs as u32,
-            old_inputs_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Inputs as u32,
-            new_inputs_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
-        // inputs' index sets are identical
-        let mut old_index_set_digests: Vec<Digest> = Vec::new();
-        let mut new_index_set_digests: Vec<Digest> = Vec::new();
-        assert_eq!(old_inputs.len(), new_inputs.len());
-        let mut i: usize = 0;
-        while i < old_inputs.len() {
-            old_index_set_digests.push(Hash::hash(&old_inputs[i].absolute_indices));
-            new_index_set_digests.push(Hash::hash(&new_inputs[i].absolute_indices));
-            i += 1;
-        }
-        old_index_set_digests.sort();
-        new_index_set_digests.sort();
-        assert_eq!(old_index_set_digests, new_index_set_digests);
-
-        // outputs are identical
-        let outputs_hash: Digest = uw.outputs_hash;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::Outputs as u32,
-            outputs_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Outputs as u32,
-            outputs_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-
-        // public announcements are identical
-        let public_announcements_hash: Digest = uw.public_announcements_hash;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::PublicAnnouncements as u32,
-            public_announcements_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::PublicAnnouncements as u32,
-            public_announcements_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-
-        // fees are identical
-        let fee_hash: Digest = Hash::hash(&uw.new_kernel.fee);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::Fee as u32,
-            fee_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Fee as u32,
-            fee_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-
-        // coinbases is both transaction is `None`
-        let coinbase: Option<NativeCurrencyAmount> = None;
-        let coinbase_hash: Digest = Tip5::hash(&coinbase);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::Coinbase as u32,
-            coinbase_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Coinbase as u32,
-            coinbase_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-
-        // timestamp increases or no change
-        let new_timestamp: Timestamp = uw.new_kernel.timestamp;
-        let new_timestamp_hash: Digest = Hash::hash(&new_timestamp);
-        let old_timestamp: Timestamp = uw.old_kernel.timestamp;
-        let old_timestamp_hash: Digest = Hash::hash(&old_timestamp);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::Timestamp as u32,
-            old_timestamp_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Timestamp as u32,
-            new_timestamp_hash,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-        assert!(new_timestamp >= old_timestamp);
-
-        // merge bit unchanged
-        let merge_bit: BFieldElement = tasmlib::tasmlib_io_read_secin___bfe();
-
-        // May God have mercy upon my soul
-        assert!(merge_bit.value() == 0 || merge_bit.value() == 1);
-        let merge_bit: bool = merge_bit.value() != 0;
-
-        let merge_bit_leaf = Tip5::hash(&merge_bit);
-
-        tasmlib::tasmlib_hashing_merkle_verify(
-            old_txk_digest,
-            TransactionKernelField::MergeBit as u32,
-            merge_bit_leaf,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::MergeBit as u32,
-            merge_bit_leaf,
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
     }
 }
 
@@ -831,14 +638,13 @@ impl BasicSnippet for UpdateBranch {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use itertools::Itertools;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use strum::EnumCount;
     use tasm_lib::triton_vm::prelude::*;
-    use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -847,10 +653,203 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionKernelModifier;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
     // The main tests are actually in [`../../single_proof.rs`].
+
+    impl UpdateWitness {
+        pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {
+            // divine the witness for this proof
+            let uw: UpdateWitness = tasm::decode_from_memory(UPDATE_WITNESS_ADDRESS);
+
+            // get the kernel of the out-of-date transaction
+            let old_txk_digest: Digest = uw.old_kernel_mast_hash;
+            let old_txk_digest_as_input: Vec<BFieldElement> =
+                old_txk_digest.reversed().values().to_vec();
+
+            // verify the proof of the out-of-date transaction
+            let claim: Claim =
+                Claim::new(single_proof_program_digest).with_input(old_txk_digest_as_input);
+            let proof: &Proof = &uw.old_proof;
+            tasm::verify_stark(Stark::default(), &claim, proof);
+
+            // authenticate the new mutator set accumulator against the txk mast hash
+            let new_aocl_mmr: MmrAccumulator = uw.new_aocl;
+            let new_aocl_mmr_bagged = new_aocl_mmr.bag_peaks();
+            let new_inactive_swbf_bagged: Digest = uw.new_swbfi_bagged;
+            let new_left: Digest = Hash::hash_pair(new_aocl_mmr_bagged, new_inactive_swbf_bagged);
+            let new_active_swbf_digest: Digest = uw.new_swbfa_hash;
+            let default: Digest = Digest::default();
+            let new_right: Digest = Hash::hash_pair(new_active_swbf_digest, default);
+            let new_msah: Digest = Hash::hash_pair(new_left, new_right);
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::MutatorSetHash as u32,
+                Hash::hash(&new_msah),
+                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            );
+
+            // authenticate the old mutator set accumulator against the txk mast hash
+            let old_aocl_mmr: MmrAccumulator = uw.old_aocl;
+            let old_aocl_mmr_bagged = old_aocl_mmr.bag_peaks();
+            let old_inactive_swbf_bagged: Digest = uw.old_swbfi_bagged;
+            let old_left: Digest = Hash::hash_pair(old_aocl_mmr_bagged, old_inactive_swbf_bagged);
+            let old_active_swbf_digest: Digest = uw.old_swbfa_hash;
+            let old_right: Digest = Hash::hash_pair(old_active_swbf_digest, default);
+            let old_msah: Digest = Hash::hash_pair(old_left, old_right);
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::MutatorSetHash as u32,
+                Hash::hash(&old_msah),
+                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            );
+
+            // mutator set can change, but we only care about extensions of the AOCL MMR
+            tasm::verify_mmr_successor_proof(
+                &old_aocl_mmr,
+                &new_aocl_mmr,
+                &uw.aocl_successor_proof,
+            );
+
+            // verify update ...
+
+            // authenticate inputs
+            let old_inputs = &uw.old_kernel.inputs;
+            let new_inputs = &uw.new_kernel.inputs;
+            let old_inputs_hash: Digest = Hash::hash(old_inputs);
+            let new_inputs_hash: Digest = Hash::hash(new_inputs);
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::Inputs as u32,
+                old_inputs_hash,
+                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            );
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::Inputs as u32,
+                new_inputs_hash,
+                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            );
+
+            // inputs' index sets are identical
+            let mut old_index_set_digests: Vec<Digest> = Vec::new();
+            let mut new_index_set_digests: Vec<Digest> = Vec::new();
+            assert_eq!(old_inputs.len(), new_inputs.len());
+            let mut i: usize = 0;
+            while i < old_inputs.len() {
+                old_index_set_digests.push(Hash::hash(&old_inputs[i].absolute_indices));
+                new_index_set_digests.push(Hash::hash(&new_inputs[i].absolute_indices));
+                i += 1;
+            }
+            old_index_set_digests.sort();
+            new_index_set_digests.sort();
+            assert_eq!(old_index_set_digests, new_index_set_digests);
+
+            // outputs are identical
+            let outputs_hash: Digest = uw.outputs_hash;
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::Outputs as u32,
+                outputs_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::Outputs as u32,
+                outputs_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            // public announcements are identical
+            let public_announcements_hash: Digest = uw.public_announcements_hash;
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::PublicAnnouncements as u32,
+                public_announcements_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::PublicAnnouncements as u32,
+                public_announcements_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            // fees are identical
+            let fee_hash: Digest = Hash::hash(&uw.new_kernel.fee);
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::Fee as u32,
+                fee_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::Fee as u32,
+                fee_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            // coinbases is both transaction is `None`
+            let coinbase: Option<NativeCurrencyAmount> = None;
+            let coinbase_hash: Digest = Tip5::hash(&coinbase);
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::Coinbase as u32,
+                coinbase_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::Coinbase as u32,
+                coinbase_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+
+            // timestamp increases or no change
+            let new_timestamp: Timestamp = uw.new_kernel.timestamp;
+            let new_timestamp_hash: Digest = Hash::hash(&new_timestamp);
+            let old_timestamp: Timestamp = uw.old_kernel.timestamp;
+            let old_timestamp_hash: Digest = Hash::hash(&old_timestamp);
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::Timestamp as u32,
+                old_timestamp_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::Timestamp as u32,
+                new_timestamp_hash,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            assert!(new_timestamp >= old_timestamp);
+
+            // merge bit unchanged
+            let merge_bit: BFieldElement = tasm::tasmlib_io_read_secin___bfe();
+
+            // May God have mercy upon my soul
+            assert!(merge_bit.value() == 0 || merge_bit.value() == 1);
+            let merge_bit: bool = merge_bit.value() != 0;
+
+            let merge_bit_leaf = Tip5::hash(&merge_bit);
+
+            tasm::tasmlib_hashing_merkle_verify(
+                old_txk_digest,
+                TransactionKernelField::MergeBit as u32,
+                merge_bit_leaf,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::MergeBit as u32,
+                merge_bit_leaf,
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+        }
+    }
 
     /// Return an update witness where the mutator set has had both elements
     /// added and removed.

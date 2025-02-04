@@ -411,6 +411,7 @@ pub mod test {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
 
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(
@@ -423,7 +424,7 @@ pub mod test {
     impl ProofCollection {
         pub(crate) fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
             fn witness_halts_gracefully(
-                program: impl ConsensusProgram,
+                program: impl ConsensusProgramSpecification,
                 witness: impl SecretWitness,
             ) -> bool {
                 program
