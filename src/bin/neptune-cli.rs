@@ -625,8 +625,8 @@ async fn main() -> Result<()> {
                 println!("Share count n must be larger than 1.");
                 return Ok(());
             }
-            if *t >= *n {
-                println!("Cannot split secret into fewer shares than would be required to reproduce the original secret. Try setting t < n.");
+            if *t > *n {
+                println!("Cannot split secret into fewer shares than would be required to reproduce the original secret. Try setting t <= n.");
                 return Ok(());
             }
             if *t <= 1 {
