@@ -1497,15 +1497,12 @@ impl GlobalState {
         // removing all transaction that became invalid/was mined by this
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
-        let (mempool_events, update_jobs) = self
-            .mempool
-            .update_with_block_and_predecessor(
-                &new_block,
-                &tip_parent,
-                self.proving_capability(),
-                self.cli().compose,
-            )
-            .await;
+        let (mempool_events, update_jobs) = self.mempool.update_with_block_and_predecessor(
+            &new_block,
+            &tip_parent,
+            self.proving_capability(),
+            self.cli().compose,
+        );
 
         // update wallet state with relevant UTXOs from this block
         self.wallet_state
