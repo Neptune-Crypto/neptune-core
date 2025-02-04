@@ -249,6 +249,16 @@ pub struct Args {
     /// Exposing the data directory leaks some privacy. Disable to prevent.
     #[clap(long)]
     pub disable_cookie_hint: bool,
+
+    /// Set to true to maintain a "nop" transaction with no inputs and outputs
+    /// in the mempool. This should make composition faster in the case that
+    /// there are no other transactions to be mined. This nop transaction will
+    /// not count towards the total number of transactions allowed in the
+    /// mempool. If there are fee-paying transactions to be mined, this will,
+    /// however, slow down composition, as the nop transaction is always
+    /// maintained.
+    #[clap(long)]
+    pub maintain_nop_transaction: bool,
 }
 
 impl Default for Args {

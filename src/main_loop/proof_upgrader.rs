@@ -74,10 +74,11 @@ pub enum UpgradeJob {
 
 #[derive(Clone, Debug)]
 pub struct UpdateMutatorSetDataJob {
-    old_kernel: TransactionKernel,
+    pub(crate) old_kernel: TransactionKernel,
     old_single_proof: Proof,
     old_mutator_set: MutatorSetAccumulator,
     mutator_set_update: MutatorSetUpdate,
+    pub(crate) new_timestamp: Option<Timestamp>,
 }
 
 impl UpdateMutatorSetDataJob {
@@ -86,12 +87,14 @@ impl UpdateMutatorSetDataJob {
         old_single_proof: Proof,
         old_mutator_set: MutatorSetAccumulator,
         mutator_set_update: MutatorSetUpdate,
+        new_timestamp: Option<Timestamp>,
     ) -> Self {
         Self {
             old_kernel,
             old_single_proof,
             old_mutator_set,
             mutator_set_update,
+            new_timestamp,
         }
     }
 
@@ -105,6 +108,7 @@ impl UpdateMutatorSetDataJob {
             old_single_proof,
             old_mutator_set,
             mutator_set_update,
+            new_timestamp,
         } = self;
         info!("Proof-upgrader: Start update proof");
         let ret = Transaction::new_with_updated_mutator_set_records_given_proof(
@@ -114,7 +118,7 @@ impl UpdateMutatorSetDataJob {
             old_single_proof,
             triton_vm_job_queue,
             proof_job_options,
-            None,
+            new_timestamp,
         )
         .await?;
         info!("Proof-upgrader, update: Done");
@@ -266,6 +270,7 @@ impl UpgradeJob {
         let priority = match tx_origin {
             TransactionOrigin::Foreign => TritonVmJobPriority::Lowest,
             TransactionOrigin::Own => TritonVmJobPriority::High,
+            TransactionOrigin::NopForCoinbaseMerge => TritonVmJobPriority::Normal,
         };
 
         // process in a loop.  in case a new block comes in while processing
@@ -397,6 +402,7 @@ impl UpgradeJob {
                     old_single_proof: single_proof,
                     old_mutator_set: mutator_set_for_tx,
                     mutator_set_update: ms_update,
+                    new_timestamp: None,
                 }
             };
 
