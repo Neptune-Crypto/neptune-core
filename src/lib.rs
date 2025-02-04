@@ -156,8 +156,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     let (peer_task_to_main_tx, peer_task_to_main_rx) =
         mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
-    // Create handshake data which is used when connecting to outgoing peers specified in the
-    // CLI arguments
     let networking_state = NetworkingState::new(peer_map, peer_databases);
 
     let light_state: LightState = LightState::from(latest_block.clone());
@@ -218,16 +216,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         }
     }));
 
-    let own_handshake_data: HandshakeData = global_state_lock
-        .lock_guard()
-        .await
-        .get_own_handshakedata()
-        .await;
-    info!(
-        "Most known canonical block has height {}",
-        own_handshake_data.tip_header.height
-    );
-
     // Check if we need to restore the wallet database, and if so, do it.
     info!("Checking if we need to restore UTXOs");
     global_state_lock
@@ -238,6 +226,15 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("UTXO restoration check complete");
 
     // Connect to peers, and provide each peer task with a thread-safe copy of the state
+    let own_handshake_data: HandshakeData = global_state_lock
+        .lock_guard()
+        .await
+        .get_own_handshakedata()
+        .await;
+    info!(
+        "Most known canonical block has height {}",
+        own_handshake_data.tip_header.height
+    );
     let mut task_join_handles = vec![];
     for peer_address in global_state_lock.cli().peers.clone() {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
