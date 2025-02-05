@@ -6,6 +6,7 @@ use serde::Serialize;
 use super::transfer_transaction::TransactionProofQuality;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::tasm_lib::prelude::Digest;
 
@@ -31,6 +32,15 @@ pub(crate) struct TransactionNotification {
     /// The quality of the proof. Denotes how much effort it takes to get the
     /// transaction included in a block. Higher quality means less effort.
     pub(crate) proof_quality: TransactionProofQuality,
+
+    /// How much fee is the transaction paying?
+    pub(crate) fee: NativeCurrencyAmount,
+
+    /// How many inputs does the transaction have?
+    pub(crate) num_inputs: u64,
+
+    /// How many outputs does the transaction have?
+    pub(crate) num_outputs: u64,
 }
 
 impl TryFrom<&Transaction> for TransactionNotification {
@@ -48,6 +58,9 @@ impl TryFrom<&Transaction> for TransactionNotification {
             txid: transaction.kernel.txid(),
             mutator_set_hash: transaction.kernel.mutator_set_hash,
             proof_quality,
+            fee: transaction.kernel.fee,
+            num_inputs: transaction.kernel.inputs.len().try_into().unwrap(),
+            num_outputs: transaction.kernel.outputs.len().try_into().unwrap(),
         })
     }
 }
