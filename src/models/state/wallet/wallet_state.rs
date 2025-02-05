@@ -1413,7 +1413,11 @@ impl WalletState {
         Ok(input_funds)
     }
 
-    pub async fn get_all_own_coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
+    pub async fn get_all_own_coins_with_possible_timelocks(
+        &self,
+        mutator_set_accumulator: &MutatorSetAccumulator,
+        tip_digest: Digest,
+    ) -> Vec<CoinWithPossibleTimeLock> {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
@@ -1421,11 +1425,17 @@ impl WalletState {
         pin_mut!(stream); // needed for iteration
 
         while let Some(mutxo) = stream.next().await {
-            if mutxo.spent_in_block.is_some()
-                || mutxo.abandoned_at.is_some()
+            if mutxo.abandoned_at.is_some()
                 || mutxo.get_latest_membership_proof_entry().is_none()
                 || mutxo.confirmed_in_block.is_none()
             {
+                continue;
+            }
+            let Some(msmp) = mutxo.membership_proof_ref_for_block(tip_digest) else {
+                continue;
+            };
+            let is_spent = !mutator_set_accumulator.verify(Tip5::hash(&mutxo.utxo), msmp);
+            if is_spent {
                 continue;
             }
             let coin = CoinWithPossibleTimeLock {

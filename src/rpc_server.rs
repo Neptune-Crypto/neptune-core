@@ -1740,12 +1740,14 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self
-            .state
-            .lock_guard()
-            .await
+        let state = self.state.lock_guard().await;
+        let tip = state.chain.light_state();
+        let tip_hash = tip.hash();
+        let tip_msa = tip.mutator_set_accumulator_after();
+
+        Ok(state
             .wallet_state
-            .get_all_own_coins_with_possible_timelocks()
+            .get_all_own_coins_with_possible_timelocks(&tip_msa, tip_hash)
             .await)
     }
 
