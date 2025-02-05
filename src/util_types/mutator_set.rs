@@ -84,12 +84,12 @@ pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) 
 }
 
 #[cfg(test)]
-mod accumulation_scheme_tests {
-    use accumulation_scheme_tests::ms_membership_proof::MsMembershipProof;
-    use accumulation_scheme_tests::removal_record::RemovalRecord;
+mod test {
     use rand::prelude::*;
     use rand::Rng;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+    use test::ms_membership_proof::MsMembershipProof;
+    use test::removal_record::RemovalRecord;
 
     use super::*;
     use crate::tests::shared::mock_item_and_randomnesses;
@@ -553,10 +553,9 @@ mod accumulation_scheme_tests {
                     items_and_membership_proofs[j].0,
                     &items_and_membership_proofs[j].1
                 ));
-                let update_res = items_and_membership_proofs[j]
+                items_and_membership_proofs[j]
                     .1
                     .update_from_remove(&removal_record.clone());
-                assert!(update_res.is_ok());
             });
 
             // remove item from set

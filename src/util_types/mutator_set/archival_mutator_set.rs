@@ -778,7 +778,7 @@ mod archival_mutator_set_tests {
 
         // Update all MPs
         for (i, (mp, &itm)) in mps.iter_mut().zip_eq(items.iter()).enumerate() {
-            mp.revert_update_from_remove(&rem0).unwrap();
+            mp.revert_update_from_remove(&rem0);
             assert!(
                 i == saw_collission_at.0 .1 || archival_mutator_set.verify(itm, mp).await,
                 "MS MP must be valid after reversing a removal update"
@@ -796,7 +796,7 @@ mod archival_mutator_set_tests {
 
         // Update all MPs
         for (mp, &itm) in mps.iter_mut().zip_eq(items.iter()) {
-            mp.revert_update_from_remove(&rem1).unwrap();
+            mp.revert_update_from_remove(&rem1);
             assert!(
                 archival_mutator_set.verify(itm, mp).await,
                 "MS MP must be valid after reversing a removal update"

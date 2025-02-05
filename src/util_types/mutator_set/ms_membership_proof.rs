@@ -468,10 +468,7 @@ impl MsMembershipProof {
         Ok(ret)
     }
 
-    pub fn update_from_remove(
-        &mut self,
-        removal_record: &RemovalRecord,
-    ) -> Result<bool, Box<dyn Error>> {
+    pub fn update_from_remove(&mut self, removal_record: &RemovalRecord) -> bool {
         // Removing items does not slide the active window. We only
         // need to take into account new indices in the sparse Bloom
         // filter, and only in the inactive part. Specifically: we
@@ -511,15 +508,14 @@ impl MsMembershipProof {
                     .collect_vec(),
             );
 
-        Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
+        !mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty()
     }
 
-    /// Resets a membership proof to its state prior to updating it
+    /// Reverts a membership proof to its state prior to updating it
     /// with a removal record.
-    pub fn revert_update_from_remove(
-        &mut self,
-        removal_record: &RemovalRecord,
-    ) -> Result<bool, Box<dyn Error>> {
+    ///
+    /// Returns `true` iff the membership proof changed.
+    pub fn revert_update_from_remove(&mut self, removal_record: &RemovalRecord) -> bool {
         // The logic here is essentially the same as in
         // `update_from_remove` but with the new and old chunks
         // swapped.
@@ -558,7 +554,7 @@ impl MsMembershipProof {
                     .collect_vec(),
             );
 
-        Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
+        !mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty()
     }
 }
 
@@ -791,8 +787,7 @@ mod ms_proof_tests {
             own_membership_proof
                 .as_mut()
                 .unwrap()
-                .update_from_remove(applied_removal_record)
-                .expect("Could not update membership proof from removal record");
+                .update_from_remove(applied_removal_record);
 
             archival_mutator_set.remove(applied_removal_record).await;
 
@@ -815,8 +810,7 @@ mod ms_proof_tests {
             own_membership_proof
                 .as_mut()
                 .unwrap()
-                .revert_update_from_remove(revert_removal_record)
-                .expect("Could not revert update from removal record.");
+                .revert_update_from_remove(revert_removal_record);
 
             archival_mutator_set
                 .revert_remove(revert_removal_record)
@@ -902,7 +896,7 @@ mod ms_proof_tests {
         for i in (0..ms_size).rev() {
             ams.revert_remove(&removal_records[i]).await;
             for mp in mps.iter_mut().take(ms_size) {
-                mp.revert_update_from_remove(&removal_records[i]).unwrap();
+                mp.revert_update_from_remove(&removal_records[i]);
             }
             for j in 0..ms_size {
                 if j < i {
@@ -1256,8 +1250,7 @@ mod ms_proof_tests {
 
                 // update the other membership proofs with the removal record
                 for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
-                    mp.update_from_remove(&removal_record)
-                        .expect("Could not update from remove.");
+                    mp.update_from_remove(&removal_record);
                 }
 
                 // don't lose track of the removed item
@@ -1352,8 +1345,7 @@ mod ms_proof_tests {
                                             for (_, mp) in
                                                 tracked_items_and_membership_proofs.iter_mut()
                                             {
-                                                mp.revert_update_from_remove(&removal_record)
-                                                    .expect("Could not revert remove.");
+                                                mp.revert_update_from_remove(&removal_record);
                                             }
 
                                             match removed_items_and_membership_proofs.pop() {

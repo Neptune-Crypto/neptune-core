@@ -764,8 +764,7 @@ mod ms_accumulator_tests {
                     let mut update_by_remove_return_values: Vec<bool> = vec![];
                     for mp in membership_proofs_sequential.iter_mut() {
                         let update_res_seq = mp.update_from_remove(&removal_record);
-                        assert!(update_res_seq.is_ok());
-                        update_by_remove_return_values.push(update_res_seq.unwrap());
+                        update_by_remove_return_values.push(update_res_seq);
                     }
 
                     // remove item from set
@@ -904,7 +903,7 @@ mod ms_accumulator_tests {
                 let (item, membership_proof) = items_and_membership_proofs.swap_remove(index);
                 let removal_record = msa.drop(item, &membership_proof);
                 for (_it, mp) in items_and_membership_proofs.iter_mut() {
-                    mp.update_from_remove(&removal_record).unwrap();
+                    mp.update_from_remove(&removal_record);
                 }
                 msa.remove(&removal_record);
             } else {

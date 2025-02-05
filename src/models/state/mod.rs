@@ -1190,10 +1190,7 @@ impl GlobalState {
                 // revert removals
                 let removal_records = revert_block.kernel.body.transaction_kernel.inputs.clone();
                 for removal_record in removal_records.iter().rev() {
-                    // membership_proof.revert_update_from_removal(&removal);
-                    membership_proof
-                        .revert_update_from_remove(removal_record)
-                        .expect("Could not revert membership proof from removal record.");
+                    membership_proof.revert_update_from_remove(removal_record);
                 }
 
                 // revert additions
@@ -1255,9 +1252,7 @@ impl GlobalState {
 
                 // apply removals
                 for removal_record in removals.iter() {
-                    membership_proof
-                        .update_from_remove(removal_record)
-                        .expect("Could not update membership proof from removal record.");
+                    membership_proof.update_from_remove(removal_record);
                     block_msa.remove(removal_record);
                 }
 
