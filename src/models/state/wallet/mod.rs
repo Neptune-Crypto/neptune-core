@@ -699,12 +699,22 @@ mod wallet_tests {
         let now = genesis_block.header().timestamp + Timestamp::months(10);
 
         let allocate_input_utxos = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
-            let tip_digest = alice_.lock_guard().await.chain.light_state().hash();
+            let (tip_digest, ms_acc) = alice_
+                .lock(|alice_global_state| {
+                    (
+                        alice_global_state.chain.light_state().hash(),
+                        alice_global_state
+                            .chain
+                            .light_state()
+                            .mutator_set_accumulator_after(),
+                    )
+                })
+                .await;
             alice_
                 .lock_guard()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds(amount, tip_digest, now)
+                .allocate_sufficient_input_funds(amount, tip_digest, &ms_acc, now)
                 .await
         };
         let num_utxos_in_allocation = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
@@ -809,6 +819,7 @@ mod wallet_tests {
             .allocate_sufficient_input_funds(
                 liquid_mining_reward.scalar_mul(2),
                 next_block.hash(),
+                &next_block.mutator_set_accumulator_after(),
                 now,
             )
             .await
@@ -855,7 +866,11 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .confirmed_balance(next_block.hash(), next_block.header().timestamp)
+            .confirmed_balance(
+                next_block.hash(),
+                &next_block.mutator_set_accumulator_after(),
+                next_block.header().timestamp,
+            )
             .await;
         assert!(
             alice_balance
@@ -1071,7 +1086,10 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .get_wallet_status_from_lock(first_block_after_spree.hash())
+            .get_wallet_status_from_lock(
+                first_block_after_spree.hash(),
+                &first_block_after_spree.mutator_set_accumulator_after(),
+            )
             .await;
         assert_eq!(
             expected_num_expected_mutxos_alice,
@@ -1083,12 +1101,8 @@ mod wallet_tests {
             "Wallet must have 0 synced, spent UTXOs"
         );
         assert!(
-            alice_wallet_status.unsynced_spent.is_empty(),
-            "Wallet must have 0 unsynced spent UTXOs"
-        );
-        assert!(
-            alice_wallet_status.unsynced_unspent.is_empty(),
-            "Wallet must have 0 unsynced unspent UTXOs"
+            alice_wallet_status.unsynced.is_empty(),
+            "Wallet must have 0 unsynced UTXOs"
         );
 
         // Bob mines a block, ignoring Alice's spree and forking instead
@@ -1633,7 +1647,11 @@ mod wallet_tests {
                         .lock_guard()
                         .await
                         .wallet_state
-                        .confirmed_balance(genesis_block.hash(), seven_months_after_launch)
+                        .confirmed_balance(
+                            genesis_block.hash(),
+                            &genesis_block.mutator_set_accumulator_after(),
+                            seven_months_after_launch
+                        )
                         .await
                 );
             }

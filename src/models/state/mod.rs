@@ -338,8 +338,9 @@ impl GlobalState {
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         let tip_digest = self.chain.light_state().hash();
+        let mutator_set_accumulator = self.chain.light_state().mutator_set_accumulator_after();
         self.wallet_state
-            .get_wallet_status_from_lock(tip_digest)
+            .get_wallet_status_from_lock(tip_digest, &mutator_set_accumulator)
             .await
     }
 
@@ -763,7 +764,7 @@ impl GlobalState {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
         let tip = self.chain.light_state();
-        let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after().clone();
+        let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after();
         let tip_digest = tip.hash();
 
         // 1. create/add change output if necessary.
@@ -772,7 +773,12 @@ impl GlobalState {
         // collect spendable inputs
         let tx_inputs = self
             .wallet_state
-            .allocate_sufficient_input_funds(total_spend, tip_digest, timestamp)
+            .allocate_sufficient_input_funds(
+                total_spend,
+                tip_digest,
+                &tip_mutator_set_accumulator,
+                timestamp,
+            )
             .await?;
 
         let total_spendable = tx_inputs
@@ -2209,7 +2215,10 @@ mod global_state_tests {
             3,
             alice
                 .wallet_state
-                .get_wallet_status_from_lock(mock_block_1a.hash())
+                .get_wallet_status_from_lock(
+                    mock_block_1a.hash(),
+                    &mock_block_1a.mutator_set_accumulator_after()
+                )
                 .await
                 .synced_unspent
                 .len()
@@ -2235,10 +2244,13 @@ mod global_state_tests {
         // Verify that two MUTXOs are unsynced, and that 1 (from genesis) is synced
         let alice_wallet_status_after_reorg = alice
             .wallet_state
-            .get_wallet_status_from_lock(parent_block.hash())
+            .get_wallet_status_from_lock(
+                parent_block.hash(),
+                &parent_block.mutator_set_accumulator_after(),
+            )
             .await;
         assert_eq!(1, alice_wallet_status_after_reorg.synced_unspent.len());
-        assert_eq!(2, alice_wallet_status_after_reorg.unsynced_unspent.len());
+        assert_eq!(2, alice_wallet_status_after_reorg.unsynced.len());
 
         // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
         // genesis block is not.
@@ -2330,7 +2342,10 @@ mod global_state_tests {
                 3,
                 alice
                     .wallet_state
-                    .get_wallet_status_from_lock(block_1.hash())
+                    .get_wallet_status_from_lock(
+                        block_1.hash(),
+                        &block_1.mutator_set_accumulator_after()
+                    )
                     .await
                     .synced_unspent
                     .len()
@@ -2349,7 +2364,10 @@ mod global_state_tests {
         // Verify that all both MUTXOs have synced MPs
         let wallet_status_on_a_fork = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_a_block.hash())
+            .get_wallet_status_from_lock(
+                fork_a_block.hash(),
+                &fork_a_block.mutator_set_accumulator_after(),
+            )
             .await;
 
         assert_eq!(3, wallet_status_on_a_fork.synced_unspent.len());
@@ -2363,7 +2381,10 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let alice_wallet_status_on_b_fork_before_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash())
+            .get_wallet_status_from_lock(
+                fork_b_block.hash(),
+                &fork_b_block.mutator_set_accumulator_after(),
+            )
             .await;
         assert_eq!(
             0,
@@ -2373,9 +2394,7 @@ mod global_state_tests {
         );
         assert_eq!(
             3,
-            alice_wallet_status_on_b_fork_before_resync
-                .unsynced_unspent
-                .len()
+            alice_wallet_status_on_b_fork_before_resync.unsynced.len()
         );
 
         // Run the resync and verify that MPs are synced
@@ -2385,13 +2404,13 @@ mod global_state_tests {
             .unwrap();
         let wallet_status_on_b_fork_after_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash())
+            .get_wallet_status_from_lock(
+                fork_b_block.hash(),
+                &fork_b_block.mutator_set_accumulator_after(),
+            )
             .await;
         assert_eq!(3, wallet_status_on_b_fork_after_resync.synced_unspent.len());
-        assert_eq!(
-            0,
-            wallet_status_on_b_fork_after_resync.unsynced_unspent.len()
-        );
+        assert_eq!(0, wallet_status_on_b_fork_after_resync.unsynced.len());
 
         // Make a new chain c with genesis block as LUCA. Verify that the genesis UTXO can be synced
         // to this new chain
@@ -2403,7 +2422,10 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let alice_wallet_status_on_c_fork_before_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash())
+            .get_wallet_status_from_lock(
+                fork_c_block.hash(),
+                &fork_c_block.mutator_set_accumulator_after(),
+            )
             .await;
         assert_eq!(
             0,
@@ -2413,9 +2435,7 @@ mod global_state_tests {
         );
         assert_eq!(
             3,
-            alice_wallet_status_on_c_fork_before_resync
-                .unsynced_unspent
-                .len()
+            alice_wallet_status_on_c_fork_before_resync.unsynced.len()
         );
 
         // Run the resync and verify that UTXO from genesis is synced, but that
@@ -2426,10 +2446,13 @@ mod global_state_tests {
             .unwrap();
         let alice_ws_c_after_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash())
+            .get_wallet_status_from_lock(
+                fork_c_block.hash(),
+                &fork_c_block.mutator_set_accumulator_after(),
+            )
             .await;
         assert_eq!(1, alice_ws_c_after_resync.synced_unspent.len());
-        assert_eq!(2, alice_ws_c_after_resync.unsynced_unspent.len());
+        assert_eq!(2, alice_ws_c_after_resync.unsynced.len());
 
         // Also check that UTXO from 1a is considered abandoned
         let alice_mutxos = alice.wallet_state.wallet_db.monitored_utxos();

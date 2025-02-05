@@ -1225,10 +1225,12 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let gs = self.state.lock_guard().await;
+        let tip_hash = gs.chain.light_state().hash();
+        let mutator_set_accumulator = gs.chain.light_state().mutator_set_accumulator_after();
 
         Ok(gs
             .wallet_state
-            .unconfirmed_balance(gs.chain.light_state().hash(), Timestamp::now())
+            .unconfirmed_balance(tip_hash, &mutator_set_accumulator, Timestamp::now())
             .await)
     }
 
@@ -1430,11 +1432,12 @@ impl RPC for NeptuneRPCServer {
             state.mempool.num_own_txs()
         };
         let cpu_temp = None; // disable for now.  call is too slow.
+        let mutator_set_accumulator = state.chain.light_state().mutator_set_accumulator_after();
         let unconfirmed_balance = {
             log_slow_scope!(fn_name!() + "::unconfirmed_balance()");
             state
                 .wallet_state
-                .unconfirmed_balance(tip_digest, now)
+                .unconfirmed_balance(tip_digest, &mutator_set_accumulator, now)
                 .await
         };
         let proving_capability = self.state.cli().proving_capability();
@@ -3280,10 +3283,15 @@ mod rpc_server_tests {
                 .await;
 
                 {
+                    let genesis_block_hash = genesis_block.hash();
                     let state_lock = rpc_server.state.lock_guard().await;
+                    let mutator_set_accumulator = state_lock
+                        .chain
+                        .light_state()
+                        .mutator_set_accumulator_after();
                     let original_balance = state_lock
                         .wallet_state
-                        .confirmed_balance(genesis_block.hash(), timestamp)
+                        .confirmed_balance(genesis_block_hash, &mutator_set_accumulator, timestamp)
                         .await;
                     assert!(original_balance.is_zero(), "Original balance assumed zero");
                 };
@@ -3296,9 +3304,14 @@ mod rpc_server_tests {
 
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
+                    let block_1_hash = block_1.hash();
+                    let mutator_set_accumulator = state_lock
+                        .chain
+                        .light_state()
+                        .mutator_set_accumulator_after();
                     let new_balance = state_lock
                         .wallet_state
-                        .confirmed_balance(block_1.hash(), timestamp)
+                        .confirmed_balance(block_1_hash, &mutator_set_accumulator, timestamp)
                         .await;
                     let mut expected_balance = Block::block_subsidy(block_1.header().height);
                     expected_balance.div_two();

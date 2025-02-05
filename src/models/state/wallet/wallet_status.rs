@@ -33,10 +33,15 @@ impl Display for WalletStatusElement {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WalletStatus {
+    /// UTXOs that have a synced and valid membership proof
     pub synced_unspent: Vec<(WalletStatusElement, MsMembershipProof)>,
-    pub unsynced_unspent: Vec<WalletStatusElement>,
+
+    /// UTXOs that do not have a synced membership proof
+    pub unsynced: Vec<WalletStatusElement>,
+
+    /// UTXOs that have a synced membership proof but it is invalid (probably
+    /// because it was spent)
     pub synced_spent: Vec<WalletStatusElement>,
-    pub unsynced_spent: Vec<WalletStatusElement>,
 }
 
 impl WalletStatus {
@@ -57,11 +62,12 @@ impl WalletStatus {
             .sum::<NativeCurrencyAmount>()
     }
 
-    /// Sum of value of monitored unsynced, unspent UTXOs. Does not check for
-    /// spendability, as that can only be determined once the monitored UTXO
-    /// is synced.
-    pub fn unsynced_unspent_amount(&self) -> NativeCurrencyAmount {
-        self.unsynced_unspent
+    /// Sum of value of monitored unsynced UTXOs.
+    ///
+    /// Does not check for spendability, as that can only be determined once the
+    /// monitored UTXO is synced.
+    pub fn unsynced_amount(&self) -> NativeCurrencyAmount {
+        self.unsynced
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
@@ -69,13 +75,6 @@ impl WalletStatus {
 
     pub fn synced_spent_amount(&self) -> NativeCurrencyAmount {
         self.synced_spent
-            .iter()
-            .map(|wse| wse.utxo.get_native_currency_amount())
-            .sum::<NativeCurrencyAmount>()
-    }
-
-    pub fn unsynced_spent_amount(&self) -> NativeCurrencyAmount {
-        self.unsynced_spent
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
@@ -115,15 +114,12 @@ impl Display for WalletStatus {
                 .map(|x| x.0.to_string())
                 .join(",")
         );
-        let unsynced_unspent_count: usize = self.unsynced_unspent.len();
-        let unsynced_unspent: String = format!(
-            "unsynced, unspent UTXOS: count: {}, amount: {:?}\n[{}]",
-            unsynced_unspent_count,
-            self.unsynced_unspent_amount(),
-            self.unsynced_unspent
-                .iter()
-                .map(|x| x.to_string())
-                .join(",")
+        let unsynced_count: usize = self.unsynced.len();
+        let unsynced: String = format!(
+            "unsynced UTXOS: count: {}, amount: {:?}\n[{}]",
+            unsynced_count,
+            self.unsynced_amount(),
+            self.unsynced.iter().map(|x| x.to_string()).join(",")
         );
         let synced_spent_count: usize = self.synced_spent.len();
         let synced_spent: String = format!(
@@ -132,21 +128,10 @@ impl Display for WalletStatus {
             self.synced_spent_amount(),
             self.synced_spent.iter().map(|x| x.to_string()).join(",")
         );
-        let unsynced_spent_count: usize = self.unsynced_spent.len();
-        let unsynced_spent: String = format!(
-            "unsynced, spent UTXOS: count: {}, amount: {:?}\n[{}]",
-            unsynced_spent_count,
-            self.unsynced_spent_amount(),
-            self.unsynced_spent.iter().map(|x| x.to_string()).join(",")
-        );
         write!(
             f,
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}",
-            synced_unspent_available,
-            synced_unspent_timelocked,
-            unsynced_unspent,
-            synced_spent,
-            unsynced_spent
+            "{}\n\n{}\n\n{}\n\n{}",
+            synced_unspent_available, synced_unspent_timelocked, unsynced, synced_spent,
         )
     }
 }
