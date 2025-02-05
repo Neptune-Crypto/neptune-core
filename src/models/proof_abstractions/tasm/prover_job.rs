@@ -200,25 +200,25 @@ impl ProverJob {
         assert_eq!(self.claim.program_digest, self.program.hash());
         assert_eq!(self.claim.output, vm_state.public_output);
 
-        let padded_height = vm_state.cycle_count.next_power_of_two();
+        let padded_height_processor_table = vm_state.cycle_count.next_power_of_two();
 
         tracing::info!(
-            "VM program execution finished: padded-height: {}",
-            padded_height
+            "VM program execution finished: padded-height (processor table): {}",
+            padded_height_processor_table
         );
 
         match self.job_settings.max_log2_padded_height_for_proofs {
-            Some(limit) if 2u32.pow(limit.into()) < padded_height => {
+            Some(limit) if 2u32.pow(limit.into()) < padded_height_processor_table => {
                 let ph_limit = 2u32.pow(limit.into());
 
                 tracing::warn!(
                     "proof-complexity-limit-exceeded. ({} > {})  The proof will not be generated",
-                    padded_height,
+                    padded_height_processor_table,
                     ph_limit
                 );
 
                 Err(ProverJobError::ProofComplexityLimitExceeded {
-                    result: padded_height,
+                    result: padded_height_processor_table,
                     limit: ph_limit,
                 })
             }
@@ -326,7 +326,13 @@ impl ProverJob {
                 let output = result?;
                 match output.status.code() {
                     Some(0) => {
-                        let proof = bincode::deserialize(&output.stdout)?;
+                        let proof: Proof = bincode::deserialize(&output.stdout)?;
+                        tracing::info!(
+                            "Generated proof, with padded height: {}",
+                            proof.padded_height()
+                                .map(|x| x.to_string())
+                                .unwrap_or_else(|e| format!("could not get padded height from proof.\nGot: {e}"))
+                        );
                         Ok(ProverProcessCompletion::Finished(proof))
                     }
                     Some(code) => Err(VmProcessError::NonZeroExitCode(code)),
