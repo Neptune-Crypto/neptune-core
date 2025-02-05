@@ -144,6 +144,16 @@ impl MonitoredUtxo {
             .push_front((block_digest, updated_membership_proof));
     }
 
+    pub fn membership_proof_ref_for_block(
+        &self,
+        block_digest: Digest,
+    ) -> Option<&MsMembershipProof> {
+        self.blockhash_to_membership_proof
+            .iter()
+            .find(|x| x.0 == block_digest)
+            .map(|x| &x.1)
+    }
+
     pub fn get_membership_proof_for_block(
         &self,
         block_digest: Digest,
