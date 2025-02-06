@@ -443,11 +443,8 @@ pub(super) fn prepare_coinbase_transaction_stateless(
     info!("Creating coinbase for block of height {next_block_height}.");
 
     let coinbase_amount = Block::block_subsidy(next_block_height);
-    let Some(guesser_fee) =
-        coinbase_amount.lossy_f64_fraction_mul(composer_parameters.guesser_fee_fraction())
-    else {
-        bail!("Guesser fee times block subsidy must be valid amount");
-    };
+    let guesser_fee =
+        coinbase_amount.lossy_f64_fraction_mul(composer_parameters.guesser_fee_fraction());
 
     info!("Setting guesser_fee to {guesser_fee}.");
 

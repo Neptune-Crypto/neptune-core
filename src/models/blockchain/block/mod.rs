@@ -1589,10 +1589,7 @@ pub(crate) mod block_tests {
             let mut transaction = make_mock_transaction(vec![], vec![]);
 
             transaction.kernel = TransactionKernelModifier::default()
-                .fee(
-                    NativeCurrencyAmount::from_nau(1337.into())
-                        .expect("given number should be valid NativeCurrencyAmount amount"),
-                )
+                .fee(NativeCurrencyAmount::from_nau(1337.into()))
                 .modify(transaction.kernel);
 
             let mut block = invalid_block_with_transaction(&genesis_block, transaction);

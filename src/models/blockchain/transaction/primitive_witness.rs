@@ -934,7 +934,6 @@ pub mod neptune_arbitrary {
 mod test {
     use itertools::izip;
     use itertools::Itertools;
-    use num_bigint::BigInt;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
     use num_traits::Zero;
@@ -1636,7 +1635,7 @@ mod test {
                 | ((u32s[1] as u128) << 32)
                 | ((u32s[2] as u128) << 64)
                 | ((u32s[3] as u128) << 96);
-            total = total + NativeCurrencyAmount::from_nau(BigInt::from(amount)).unwrap();
+            total = total + NativeCurrencyAmount::from_nau(amount.try_into().unwrap());
         }
         prop_assert!(total <= NativeCurrencyAmount::coins(42000000));
     }

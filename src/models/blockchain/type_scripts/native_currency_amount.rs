@@ -9,12 +9,11 @@ use anyhow::bail;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
-use num_bigint::ToBigInt;
 use num_rational::BigRational;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use num_traits::FromPrimitive;
-use num_traits::One;
+use num_traits::ToPrimitive;
 use num_traits::Zero;
 use regex::Regex;
 use serde::Deserialize;
@@ -128,58 +127,21 @@ impl NativeCurrencyAmount {
         dictionary
     }
 
-    /// Convert the amount to Neptune atomic units (nau) as a 64-bit floating point.
-    /// Note that this function loses precision!
+    /// Convert the amount to Neptune atomic units (nau) as a 64-bit floating
+    /// point number. Note that this function loses precision!
     pub fn to_nau_f64(&self) -> f64 {
-        if self.is_zero() {
-            return 0.0;
-        }
-        let nau = self.to_nau();
-        let bit_size = nau.bits();
-        let shift = if bit_size > 52 { bit_size - 52 } else { 0 };
-        let (_sign, digits) = (nau >> shift).to_u64_digits();
-        let top_digit = digits[0];
-        let mut float = top_digit as f64;
-        for _ in 0..shift {
-            float *= 2.0;
-        }
-        float
+        self.0 as f64
     }
 
     /// Convert the amount to Neptune atomic units (nau)
-    pub fn to_nau(&self) -> BigInt {
-        BigInt::from_i128(self.0).unwrap()
+    pub fn to_nau(&self) -> i128 {
+        self.0
     }
 
-    /// Convert the number of Neptune atomic units (nau) to an amount of Neptune coins
-    pub fn from_nau(nau: BigInt) -> Option<Self> {
-        let (sign, digits) = nau.to_u64_digits();
-
-        // we can't represent numbers with too many limbs
-        if digits.len() > 2 {
-            return None;
-        }
-
-        // flip and recurse if we are dealing with negative numbers
-        if sign == num_bigint::Sign::Minus {
-            let positive_nau = Self::from_nau(-nau)?;
-            return Some(-positive_nau);
-        }
-
-        // pad with zeros if necessary
-        let mut limbs = digits.clone();
-        while limbs.len() < 2 {
-            limbs.push(0);
-        }
-
-        // if the top bit is set then we can't represent this number using this struct
-        if limbs.last().unwrap() >> 63 != 0 {
-            return None;
-        }
-
-        // compute and return conversion
-        let number = (limbs[0] as u128) | ((limbs[1] as u128) << 64);
-        Some(Self(number as i128))
+    /// Convert the number of Neptune atomic units (nau) to a
+    /// `NativeCurrencyAmount`.
+    pub fn from_nau(nau: i128) -> Self {
+        Self(nau)
     }
 
     pub fn scalar_mul(&self, factor: u32) -> Self {
@@ -195,19 +157,27 @@ impl NativeCurrencyAmount {
     /// # Panics
     ///
     /// If the provided fraction is not between 0 and 1 (inclusive).
-    pub(crate) fn lossy_f64_fraction_mul(&self, fraction: f64) -> Option<NativeCurrencyAmount> {
-        assert!((0.0..=1.0).contains(&fraction));
+    pub(crate) fn lossy_f64_fraction_mul(&self, fraction: f64) -> NativeCurrencyAmount {
+        assert!(
+            (0.0..=1.0).contains(&fraction),
+            "fraction must be between 0 and 1"
+        );
 
-        if fraction == 1.0 {
-            return Some(*self);
+        if self.is_negative() {
+            return self.neg().lossy_f64_fraction_mul(fraction);
         }
 
-        let value_as_f64 = self.0 as f64;
+        if fraction == 1.0 {
+            return *self;
+        }
+
+        let value_as_f64 = self.to_nau_f64();
         let res = fraction * value_as_f64;
-        let as_bigint = res
-            .to_bigint()?
-            .clamp(BigInt::from(0u32), BigInt::from(self.0));
-        Self::from_nau(as_bigint)
+        let as_i128 = match res.to_i128() {
+            Some(i) => i.clamp(0, self.0),
+            None => 0_i128,
+        };
+        Self::from_nau(as_i128)
     }
 
     /// Generate an iterator for the running balance, updated with each item.
@@ -430,7 +400,7 @@ impl TryFrom<f64> for NativeCurrencyAmount {
     type Error = FloatConversionError;
 
     fn try_from(value: f64) -> Result<Self, Self::Error> {
-        let u = if value.is_nan() {
+        let i = if value.is_nan() {
             Err(FloatConversionError::NaN)
         } else if value.is_infinite() {
             Err(FloatConversionError::Infinity)
@@ -441,11 +411,7 @@ impl TryFrom<f64> for NativeCurrencyAmount {
         } else {
             Ok(value as i128)
         }?;
-        let bi = BigInt::from(u);
-        match Self::from_nau(bi) {
-            Some(nc) => Ok(nc),
-            None => Err(FloatConversionError::InvalidAmount),
-        }
+        Ok(Self::from_nau(i))
     }
 }
 
@@ -474,7 +440,7 @@ impl FromStr for NativeCurrencyAmount {
         };
         let power = substrings[2].len();
         let ten = BigInt::from_str("10")?;
-        let mut decimal_shift = BigInt::one();
+        let mut decimal_shift = BigInt::from_u8(1).unwrap();
         for _ in 0..power {
             decimal_shift *= ten.clone();
         }
@@ -491,9 +457,16 @@ impl FromStr for NativeCurrencyAmount {
                 _ => unreachable!(),
             }
         };
-        match Self::from_nau(nau) {
-            Some(nc) => Ok(nc),
-            None => Err(anyhow::Error::msg("invalid amount of Neptune coins")),
+        if -BigInt::from(Self::MAX_NAU) > nau || nau > BigInt::from(Self::MAX_NAU) {
+            return Err(anyhow::Error::msg(
+                "amount of Neptune coins too large or too small",
+            ));
+        }
+        match i128::try_from(nau) {
+            Ok(i) => Ok(Self(i)),
+            Err(e) => Err(anyhow::Error::msg(format!(
+                "invalid amount of Neptune coins: {e:?}"
+            ))),
         }
     }
 }
@@ -572,14 +545,13 @@ pub mod neptune_arbitrary {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use std::ops::ShlAssign;
     use std::str::FromStr;
 
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use get_size2::GetSize;
     use itertools::Itertools;
-    use num_bigint::Sign;
+    use num_bigint::BigInt;
     use num_traits::FromPrimitive;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
@@ -589,7 +561,6 @@ pub(crate) mod test {
     use proptest_arbitrary_interop::arb;
     use rand::thread_rng;
     use rand::Rng;
-    use rand::RngCore;
     use test_strategy::proptest;
 
     use super::*;
@@ -605,15 +576,6 @@ pub(crate) mod test {
         ((NativeCurrencyAmount::MAX_NAU + 1)..=i128_max)
             .prop_map(NativeCurrencyAmount)
             .boxed()
-    }
-
-    #[test]
-    fn test_slice_conversion() {
-        let mut rng = thread_rng();
-        let sl = (0..4).map(|_| rng.next_u32() >> 1).collect_vec();
-        let int = BigInt::from_slice(Sign::Plus, &sl);
-        let amount = NativeCurrencyAmount::from_nau(int.clone()).unwrap();
-        assert_eq!(amount.to_nau(), int);
     }
 
     #[test]
@@ -680,11 +642,11 @@ pub(crate) mod test {
         let mut rng = thread_rng();
         let a: u64 = rng.gen_range(0..(1 << 63));
         let b: u64 = rng.gen_range(0..(1 << 63));
-        let a_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(a.into()).unwrap();
-        let b_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(b.into()).unwrap();
+        let a_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(a.into());
+        let b_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(b.into());
         assert_eq!(
             a_amount + b_amount,
-            NativeCurrencyAmount::from_nau((a + b).into()).unwrap()
+            NativeCurrencyAmount::from_nau((a + b).into())
         );
     }
 
@@ -698,7 +660,7 @@ pub(crate) mod test {
     #[test]
     fn simple_f64_lossy_mul_half() {
         let one_hundred = NativeCurrencyAmount::coins(100);
-        let half_of_one_hundred = one_hundred.lossy_f64_fraction_mul(0.5).unwrap();
+        let half_of_one_hundred = one_hundred.lossy_f64_fraction_mul(0.5);
 
         // Assert that the value is in a reasonable range, close enough.
         assert!(
@@ -712,17 +674,14 @@ pub(crate) mod test {
         let one_hundred = NativeCurrencyAmount::coins(100);
         assert_eq!(
             NativeCurrencyAmount::zero(),
-            one_hundred.lossy_f64_fraction_mul(0f64).unwrap()
+            one_hundred.lossy_f64_fraction_mul(0f64)
         );
     }
 
     #[test]
     fn simple_f64_lossy_mul_one() {
         let one_hundred = NativeCurrencyAmount::coins(100);
-        assert_eq!(
-            one_hundred,
-            one_hundred.lossy_f64_fraction_mul(1f64).unwrap()
-        );
+        assert_eq!(one_hundred, one_hundred.lossy_f64_fraction_mul(1f64));
     }
 
     #[test]
@@ -749,11 +708,10 @@ pub(crate) mod test {
 
     #[test]
     fn conversion_factor_is_optimal() {
-        let forty_two_million = BigInt::from_i32(42000000).unwrap();
+        let forty_two_million = BigInt::from_i32(42_000_000).unwrap();
         let conversion_factor =
             BigInt::from_i128(NativeCurrencyAmount::conversion_factor()).unwrap();
-        let mut two_pow_127 = BigInt::one();
-        two_pow_127.shl_assign(127);
+        let two_pow_127 = BigInt::from_i8(1).unwrap() << 127;
         assert!(conversion_factor.clone() * forty_two_million.clone() < two_pow_127);
 
         // let's also test optimality:
@@ -768,8 +726,7 @@ pub(crate) mod test {
     fn from_decimal_test() {
         let parsed = NativeCurrencyAmount::from_str("-10.125").unwrap();
         let cf = NativeCurrencyAmount::conversion_factor() >> 3;
-        let fixed = -(NativeCurrencyAmount::from_nau(BigInt::from_i128(cf).unwrap()).unwrap()
-            + NativeCurrencyAmount::coins(10));
+        let fixed = -(NativeCurrencyAmount::from_nau(cf) + NativeCurrencyAmount::coins(10));
         assert_eq!(parsed.clone(), fixed);
         assert!(parsed.is_negative());
         println!("parsed: {}", parsed);
@@ -935,7 +892,7 @@ pub(crate) mod test {
         #[strategy(-NativeCurrencyAmount::MAX_NAU..=NativeCurrencyAmount::MAX_NAU)] num_naus: i128,
     ) {
         let val = NativeCurrencyAmount(num_naus);
-        prop_assert_eq!(val, NativeCurrencyAmount::from_nau(val.to_nau()).unwrap());
+        prop_assert_eq!(val, NativeCurrencyAmount::from_nau(val.to_nau()));
     }
 
     #[proptest]

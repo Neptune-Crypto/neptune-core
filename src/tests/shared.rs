@@ -414,7 +414,7 @@ pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
 pub fn pseudorandom_amount(seed: [u8; 32]) -> NativeCurrencyAmount {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let number: u128 = rng.gen::<u128>() >> 10;
-    NativeCurrencyAmount::from_nau(number.into()).unwrap()
+    NativeCurrencyAmount::from_nau(number.try_into().unwrap())
 }
 
 pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {

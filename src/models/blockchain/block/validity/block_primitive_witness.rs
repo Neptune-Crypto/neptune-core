@@ -248,7 +248,7 @@ pub(crate) mod test {
                     )| {
                         let mut input_amounts = input_distribution
                             .into_iter()
-                            .map(|fraction| total_input.lossy_f64_fraction_mul(fraction).unwrap())
+                            .map(|fraction| total_input.lossy_f64_fraction_mul(fraction))
                             .collect_vec();
                         input_amounts.push(
                             total_input
