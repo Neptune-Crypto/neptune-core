@@ -273,7 +273,7 @@ impl NativeCurrencyAmount {
     /// corresponding to `-NativeCurrencyAmount::MAX` and
     /// `NativeCurrencyAmount::from_nau(BigInt::from(1u8)).unwrap()`; see tests
     /// `display_lossless_can_produce_36_chars` and
-    /// `display_lossless_can_produce_43_chars`.
+    /// `display_lossless_can_produce_44_chars`.
     pub(crate) fn display_lossless(&self) -> String {
         self.display_n_decimals(34)
     }
@@ -545,8 +545,6 @@ pub mod neptune_arbitrary {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use std::str::FromStr;
-
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use get_size2::GetSize;
