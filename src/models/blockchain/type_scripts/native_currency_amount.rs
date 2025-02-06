@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use anyhow::bail;
 use get_size2::GetSize;
+use itertools::Itertools;
 use num_bigint::BigInt;
 use num_bigint::ToBigInt;
 use num_rational::BigRational;
@@ -29,7 +30,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 /// Records an amount of Neptune coins. Amounts are internally represented by an
 /// atomic unit called Neptune atomic units (nau), which itself is represented
-///  as a 128 bit integer.
+/// as a 128 bit integer.
 ///
 /// 1 Neptune coin = 10^30 * 2^2 nau.
 ///
@@ -258,6 +259,53 @@ impl NativeCurrencyAmount {
             .rev()
             .map(|b| triton_instr!(push b))
             .collect()
+    }
+
+    /// Display the `NativeCurrencyAmount` as a fractional number of coins in
+    /// base 10 with `n` decimal digits after the comma.
+    ///
+    /// This method rounds the amount if necessary. To avoid losing precision,
+    /// set `n` to `usize::MAX` or anything greater than or equal to 34, or just
+    /// call [`Self::display_lossless`].
+    pub(crate) fn display_n_decimals(&self, n: usize) -> String {
+        if self.is_negative() {
+            return "-".to_owned() + &self.neg().display_n_decimals(n);
+        }
+
+        let conversion_factor = Self::conversion_factor();
+
+        let mut remainder = self.0;
+        let integer_part = remainder / conversion_factor;
+        remainder %= conversion_factor;
+
+        let mut decimals = vec![integer_part];
+        for _ in 0..n {
+            remainder *= 10;
+            let digit = remainder / conversion_factor;
+            remainder %= conversion_factor;
+            decimals.push(digit);
+        }
+        if (remainder * 10) / conversion_factor > 5 {
+            *decimals.last_mut().unwrap() += 1;
+        }
+
+        format!(
+            "{}.{}",
+            decimals[0],
+            decimals.iter().skip(1).copied().join("")
+        )
+    }
+
+    /// Display the `NativeCurrencyAmount` as a fractional number of coins in
+    /// base 10 with enough decimal places to guarantee zero precision loss.
+    ///
+    /// The maximum and minimum lengths of the produced strings are 44 and 36,
+    /// corresponding to `-NativeCurrencyAmount::MAX` and
+    /// `NativeCurrencyAmount::from_nau(BigInt::from(1u8)).unwrap()`; see tests
+    /// `display_lossless_can_produce_36_chars` and
+    /// `display_lossless_can_produce_43_chars`.
+    pub(crate) fn display_lossless(&self) -> String {
+        self.display_n_decimals(34)
     }
 }
 
@@ -509,6 +557,14 @@ pub mod neptune_arbitrary {
         pub(crate) fn arbitrary_coinbase() -> BoxedStrategy<Option<Self>> {
             arb::<Option<NativeCurrencyAmount>>()
                 .prop_map(|coinbase| coinbase.map(|c| c.abs()))
+                .boxed()
+        }
+
+        /// Generate a strategy for a NativeCurrencyAmount anywhere between the
+        /// minimum and maximum numbers (extrema included).
+        pub(crate) fn arbitrary_full_range() -> BoxedStrategy<Self> {
+            (-Self::MAX_NAU..=Self::MAX_NAU)
+                .prop_map(NativeCurrencyAmount::from_nau)
                 .boxed()
         }
     }
@@ -945,5 +1001,29 @@ pub(crate) mod test {
     #[test]
     fn can_negate_zero() {
         println!("{}", -NativeCurrencyAmount(0));
+    }
+
+    #[proptest]
+    fn display_lossless_matches_parse(
+        #[strategy(NativeCurrencyAmount::arbitrary_full_range())] amount: NativeCurrencyAmount,
+    ) {
+        let as_string = amount.display_lossless();
+        let parsed = NativeCurrencyAmount::from_str(&as_string).unwrap();
+        prop_assert_eq!(parsed, amount);
+    }
+
+    #[test]
+    fn display_lossless_can_have_36_chars() {
+        assert_eq!(
+            36,
+            NativeCurrencyAmount::from_nau(1.into())
+                .display_lossless()
+                .len()
+        );
+    }
+
+    #[test]
+    fn display_lossless_can_have_44_chars() {
+        assert_eq!(44, (-NativeCurrencyAmount::max()).display_lossless().len());
     }
 }
