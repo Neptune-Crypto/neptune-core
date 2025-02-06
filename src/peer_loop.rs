@@ -12,6 +12,7 @@ use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
+use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
@@ -1220,7 +1221,14 @@ impl PeerLoopHandler {
 
                 let transaction: Transaction = (*transaction).into();
 
-                // 1. If transaction is invalid, punish.
+                // 1. If transaction has no inputs, ignore.
+                if transaction.kernel.inputs.is_empty() {
+                    // TODO: Punish here?
+                    warn!("Received transaction with no inputs");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 2. If transaction is invalid, punish.
                 if !transaction.is_valid().await {
                     warn!("Received invalid tx");
                     self.punish(NegativePeerSanction::InvalidTransaction)
@@ -1228,7 +1236,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 2. If transaction has coinbase, punish.
+                // 3. If transaction has coinbase, punish.
                 // Transactions received from peers have not been mined yet.
                 // Only the miner is allowed to produce transactions with non-empty coinbase fields.
                 if transaction.kernel.coinbase.is_some() {
@@ -1238,7 +1246,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 3. If transaction is already known, ignore.
+                // 4. If transaction is already known, ignore.
                 if self
                     .global_state_lock
                     .lock_guard()
@@ -1256,7 +1264,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 4 if transaction is not confirmable, punish.
+                // 5. if transaction is not confirmable, punish.
                 let mutator_set_accumulator_after = self
                     .global_state_lock
                     .lock_guard()
@@ -1275,7 +1283,7 @@ impl PeerLoopHandler {
 
                 let tx_timestamp = transaction.kernel.timestamp;
 
-                // 5. Ignore if transaction is too old
+                // 6. Ignore if transaction is too old
                 let now = self.now();
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
@@ -1283,7 +1291,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 6. Ignore if transaction is too far into the future
+                // 7. Ignore if transaction is too far into the future
                 if tx_timestamp
                     > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {
@@ -1312,7 +1320,7 @@ impl PeerLoopHandler {
             PeerMessage::TransactionNotification(tx_notification) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
 
-                // 1. Ignore if we already know this transaction, and
+                // Ignore if we already know this transaction, and
                 // the proof quality is not higher than what we already know.
                 let state = self.global_state_lock.lock_guard().await;
                 let transaction_of_same_or_higher_proof_quality_is_known =
@@ -1322,6 +1330,12 @@ impl PeerLoopHandler {
                     );
                 if transaction_of_same_or_higher_proof_quality_is_known {
                     debug!("transaction with same or higher proof quality was already known");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Ignore transactions with no input
+                if tx_notification.num_inputs.is_zero() {
+                    debug!("transaction has no inputs, ignoring.");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -1338,7 +1352,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 2. Request the actual `Transaction` from peer
+                // Request the actual `Transaction` from peer
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
                     .await?;
@@ -1806,6 +1820,8 @@ mod peer_loop_tests {
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::SpendingKey;
+    use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::fake_valid_block_for_tests;
@@ -3171,20 +3187,27 @@ mod peer_loop_tests {
                 .await
                 .unwrap();
 
-        let spending_key = state_lock
+        let spending_key: SpendingKey = state_lock
             .lock_guard()
             .await
             .wallet_state
             .wallet_secret
-            .nth_symmetric_key_for_tests(0);
+            .nth_symmetric_key_for_tests(0)
+            .into();
         let genesis_block = Block::genesis(network);
-        let now = genesis_block.kernel.header.timestamp;
+        let now = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        let tx_output = TxOutput::onchain_native_currency(
+            NativeCurrencyAmount::coins(1),
+            Digest::default(),
+            spending_key.to_address().unwrap(),
+            false,
+        );
         let (transaction_1, _change_output) = state_lock
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
-                Default::default(),
-                spending_key.into(),
+                vec![tx_output].into(),
+                spending_key,
                 UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(0),
                 now,
