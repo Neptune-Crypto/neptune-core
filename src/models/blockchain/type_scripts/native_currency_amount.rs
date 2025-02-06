@@ -415,10 +415,10 @@ impl TryFrom<f64> for NativeCurrencyAmount {
     }
 }
 
-impl FromStr for NativeCurrencyAmount {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl NativeCurrencyAmount {
+    /// Convert a decimal string representation of a not necessarily integral
+    /// amount of native currency into a `NativeCurrencyAmount` object.
+    pub fn coins_from_str(s: &str) -> Result<Self, anyhow::Error> {
         let re = Regex::new(r#"^(-?)([0-9]*)\.?([0-9]*)$"#).unwrap();
         let Some((_full, substrings)) = re.captures(s).map(|c| c.extract::<3>()) else {
             bail!("invalid amount: unmatched regex");
@@ -586,7 +586,7 @@ pub(crate) mod test {
             let number = rng.gen_range(0..42000000);
             let amount = NativeCurrencyAmount::coins(number);
             let string = amount.to_string();
-            let reconstructed_amount = NativeCurrencyAmount::from_str(&string)
+            let reconstructed_amount = NativeCurrencyAmount::coins_from_str(&string)
                 .expect("Coult not parse as number a string generated from a number.");
 
             assert_eq!(amount, reconstructed_amount);
@@ -724,7 +724,7 @@ pub(crate) mod test {
 
     #[test]
     fn from_decimal_test() {
-        let parsed = NativeCurrencyAmount::from_str("-10.125").unwrap();
+        let parsed = NativeCurrencyAmount::coins_from_str("-10.125").unwrap();
         let cf = NativeCurrencyAmount::conversion_factor() >> 3;
         let fixed = -(NativeCurrencyAmount::from_nau(cf) + NativeCurrencyAmount::coins(10));
         assert_eq!(parsed.clone(), fixed);
@@ -748,7 +748,7 @@ pub(crate) mod test {
             "42000000",
             "-42000000",
         ] {
-            let nc = NativeCurrencyAmount::from_str(s)
+            let nc = NativeCurrencyAmount::coins_from_str(s)
                 .unwrap_or_else(|e| panic!("cannot decode {} because {}", s, e));
             println!("{s}: {nc}");
         }
@@ -770,10 +770,10 @@ pub(crate) mod test {
         ] {
             println!("trying to parse {s} ...");
             assert!(
-                NativeCurrencyAmount::from_str(s).is_err(),
+                NativeCurrencyAmount::coins_from_str(s).is_err(),
                 "valid parsing: {}; parsed to: {}",
                 s,
-                NativeCurrencyAmount::from_str(s).unwrap()
+                NativeCurrencyAmount::coins_from_str(s).unwrap()
             );
         }
     }
@@ -965,7 +965,7 @@ pub(crate) mod test {
         #[strategy(NativeCurrencyAmount::arbitrary_full_range())] amount: NativeCurrencyAmount,
     ) {
         let as_string = amount.display_lossless();
-        let parsed = NativeCurrencyAmount::from_str(&as_string).unwrap();
+        let parsed = NativeCurrencyAmount::coins_from_str(&as_string).unwrap();
         prop_assert_eq!(parsed, amount);
     }
 

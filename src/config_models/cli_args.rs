@@ -127,7 +127,7 @@ pub struct Args {
     /// Determines the minimum fee to take as a reward for upgrading foreign
     /// transaction proofs. Foreign transactions where a fee below this
     /// threshold cannot be collected by proof upgrading will not be upgraded.
-    #[clap(long, default_value = "0.01")]
+    #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_gobbling_fee: NativeCurrencyAmount,
 
     /// Prune the mempool when it exceeds this size in RAM.
