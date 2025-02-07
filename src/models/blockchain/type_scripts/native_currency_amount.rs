@@ -237,7 +237,7 @@ impl NativeCurrencyAmount {
     /// This method rounds the amount if necessary. To avoid losing precision,
     /// set `n` to `usize::MAX` or anything greater than or equal to 34, or just
     /// call [`Self::display_lossless`].
-    pub(crate) fn display_n_decimals(&self, n: usize) -> String {
+    pub fn display_n_decimals(&self, n: usize) -> String {
         if self.is_negative() {
             return "-".to_owned() + &self.neg().display_n_decimals(n);
         }
@@ -274,7 +274,7 @@ impl NativeCurrencyAmount {
     /// `NativeCurrencyAmount::from_nau(BigInt::from(1u8)).unwrap()`; see tests
     /// `display_lossless_can_produce_36_chars` and
     /// `display_lossless_can_produce_44_chars`.
-    pub(crate) fn display_lossless(&self) -> String {
+    pub fn display_lossless(&self) -> String {
         self.display_n_decimals(34)
     }
 }
