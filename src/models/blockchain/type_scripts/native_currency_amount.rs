@@ -448,8 +448,8 @@ impl NativeCurrencyAmount {
             BigInt::from_str(substrings[2])?
         };
         let power = substrings[2].len();
-        let ten = BigInt::from_str("10")?;
-        let mut decimal_shift = BigInt::from_u8(1).unwrap();
+        let ten = BigInt::from(10_u8);
+        let mut decimal_shift = BigInt::from(1_u8);
         for _ in 0..power {
             decimal_shift *= ten.clone();
         }
