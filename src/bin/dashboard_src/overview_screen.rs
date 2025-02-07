@@ -36,9 +36,11 @@ use super::screen::Screen;
 
 #[derive(Debug, Clone, Default)]
 pub struct OverviewData {
-    available_balance: Option<NativeCurrencyAmount>,
-    available_unconfirmed_balance: Option<NativeCurrencyAmount>,
-    timelocked_balance: Option<NativeCurrencyAmount>,
+    confirmed_available_balance: Option<NativeCurrencyAmount>,
+    confirmed_total_balance: Option<NativeCurrencyAmount>,
+    unconfirmed_available_balance: Option<NativeCurrencyAmount>,
+    unconfirmed_total_balance: Option<NativeCurrencyAmount>,
+
     confirmations: Option<BlockHeight>,
     synchronization_percentage: Option<f64>,
 
@@ -158,9 +160,10 @@ impl OverviewScreen {
                                 own_overview_data.max_num_peers = Some(resp.max_num_peers);
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
-                                own_overview_data.available_balance = Some(resp.available_balance);
-                                own_overview_data.available_unconfirmed_balance = Some(resp.available_unconfirmed_balance);
-                                own_overview_data.timelocked_balance = Some(resp.timelocked_balance);
+                                own_overview_data.confirmed_available_balance = Some(resp.confirmed_available_balance);
+                                own_overview_data.confirmed_total_balance = Some(resp.confirmed_total_balance);
+                                own_overview_data.unconfirmed_available_balance = Some(resp.unconfirmed_available_balance);
+                                own_overview_data.unconfirmed_total_balance = Some(resp.unconfirmed_total_balance);
                                 own_overview_data.mining_status = resp.mining_status;
                                 own_overview_data.confirmations = resp.confirmations;
                                 own_overview_data.cpu_temperature = resp.cpu_temp;
@@ -319,23 +322,33 @@ impl Widget for OverviewScreen {
             };
         }
 
-        // balance
+        let width = 17; // 8 whole coin digits, 1 decimal point, 8 decimal digits
+
+        // confirmed balance
         lines.push(format!(
-            "available balance: {} {}",
-            dashifnotset!(data.available_balance),
+            "confirmed balance:   total: {:>width$}  available: {:>width$}   {}",
+            dashifnotset!(data.confirmed_total_balance),
+            dashifnotset!(data.confirmed_available_balance),
             match data.confirmations {
+                Some(c) if c == 1.into() => format!("({} confirmation)", c),
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),
             },
         ));
-        lines.push(format!(
-            "unconfirmed balance: {}",
-            dashifnotset!(data.available_unconfirmed_balance),
-        ));
-        lines.push(format!(
-            "time-locked balance: {}",
-            dashifnotset!(data.timelocked_balance),
-        ));
+
+        // we only display the unconfirmed balance row if a field is
+        // different from the confirmed balance row fields.
+        if data.unconfirmed_available_balance != data.confirmed_available_balance
+            || data.unconfirmed_total_balance != data.confirmed_total_balance
+        {
+            // unconfirmed balance
+            lines.push(format!(
+                "unconfirmed balance: total: {:>width$}  available: {:>width$}",
+                dashifnotset!(data.unconfirmed_total_balance),
+                dashifnotset!(data.unconfirmed_available_balance),
+            ));
+        }
+
         lines.push(format!(
             "synchronization: {}",
             match data.synchronization_percentage {

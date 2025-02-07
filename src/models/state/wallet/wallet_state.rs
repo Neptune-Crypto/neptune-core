@@ -476,27 +476,48 @@ impl WalletState {
         (incoming, outgoing)
     }
 
-    pub async fn confirmed_balance(
-        &self,
-        tip_digest: Digest,
-        mutator_set_accumulator: &MutatorSetAccumulator,
-        timestamp: Timestamp,
-    ) -> NativeCurrencyAmount {
-        let wallet_status = self
-            .get_wallet_status_from_lock(tip_digest, mutator_set_accumulator)
-            .await;
-
-        wallet_status.synced_unspent_liquid_amount(timestamp)
+    /// returns confirmed, total balance (includes timelocked utxos)
+    pub fn confirmed_total_balance(&self, wallet_status: &WalletStatus) -> NativeCurrencyAmount {
+        wallet_status.synced_unspent_total_amount()
     }
 
-    pub async fn unconfirmed_balance(
+    /// returns confirmed, available balance (excludes timelocked utxos)
+    pub fn confirmed_available_balance(
         &self,
-        tip_digest: Digest,
-        mutator_set_accumulator: &MutatorSetAccumulator,
+        wallet_status: &WalletStatus,
         timestamp: Timestamp,
     ) -> NativeCurrencyAmount {
-        self.confirmed_balance(tip_digest, mutator_set_accumulator, timestamp)
-            .await
+        wallet_status.synced_unspent_available_amount(timestamp)
+    }
+
+    /// returns unconfirmed, available balance (excludes timelocked utxos)
+    pub fn unconfirmed_available_balance(
+        &self,
+        wallet_status: &WalletStatus,
+        timestamp: Timestamp,
+    ) -> NativeCurrencyAmount {
+        self.confirmed_available_balance(wallet_status, timestamp)
+            .checked_sub(
+                &self
+                    .mempool_spent_utxos_iter()
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .expect("balance must never be negative")
+            .checked_add(
+                &self
+                    .mempool_unspent_utxos_iter()
+                    .filter(|utxo| utxo.can_spend_at(timestamp))
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .expect("balance must never overflow")
+    }
+
+    /// returns unconfirmed, total balance (includes timelocked utxos)
+    pub fn unconfirmed_total_balance(&self, wallet_status: &WalletStatus) -> NativeCurrencyAmount {
+        wallet_status
+            .synced_unspent_total_amount()
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()
@@ -1309,7 +1330,8 @@ impl WalletState {
             .await
     }
 
-    pub async fn get_wallet_status_from_lock(
+    /// see [WalletStatus] for a description
+    pub async fn get_wallet_status(
         &self,
         tip_digest: Digest,
         mutator_set_accumulator: &MutatorSetAccumulator,
@@ -1317,6 +1339,8 @@ impl WalletState {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
         let mut synced_spent = vec![];
+
+        #[cfg(test)]
         let mut unsynced = vec![];
 
         let stream = monitored_utxos.stream().await;
@@ -1338,15 +1362,20 @@ impl WalletState {
                     ));
                 }
             } else {
-                let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
-                unsynced.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
+                #[cfg(test)]
+                {
+                    let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
+                    unsynced.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
+                }
             }
         }
 
         WalletStatus {
             synced_unspent,
-            unsynced,
             synced_spent,
+
+            #[cfg(test)]
+            unsynced,
         }
     }
 
@@ -1364,11 +1393,11 @@ impl WalletState {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status = self
-            .get_wallet_status_from_lock(tip_digest, mutator_set_accumulator)
+            .get_wallet_status(tip_digest, mutator_set_accumulator)
             .await;
 
         // First check that we have enough. Otherwise return an error.
-        let available = wallet_status.synced_unspent_liquid_amount(timestamp);
+        let available = wallet_status.synced_unspent_available_amount(timestamp);
         if available < total_spend {
             bail!(
                 "Insufficient funds. Requested: {}, Available: {}",
@@ -1558,17 +1587,17 @@ mod tests {
         let mutator_set_accumulator_after_genesis = genesis.mutator_set_accumulator_after();
         let alice_ws_genesis = alice
             .wallet_state
-            .get_wallet_status_from_lock(genesis_digest, &mutator_set_accumulator_after_genesis)
+            .get_wallet_status(genesis_digest, &mutator_set_accumulator_after_genesis)
             .await;
 
         // First, check that error is returned, when available balance is not
         // there, as it is timelocked.
         let one_coin = NativeCurrencyAmount::coins(1);
         assert!(alice_ws_genesis
-            .synced_unspent_liquid_amount(launch_timestamp)
+            .synced_unspent_available_amount(launch_timestamp)
             .is_zero());
         assert!(!alice_ws_genesis
-            .synced_unspent_liquid_amount(released_timestamp)
+            .synced_unspent_available_amount(released_timestamp)
             .is_zero());
         assert!(
             alice
@@ -1726,20 +1755,19 @@ mod tests {
             .set_new_tip(block2.clone())
             .await
             .unwrap();
-        assert_eq!(
-            NativeCurrencyAmount::coins(14),
-            alice
-                .lock_guard()
-                .await
+        {
+            let ags = alice.lock_guard().await;
+            let wallet_status = ags
                 .wallet_state
-                .confirmed_balance(
-                    block2.hash(),
-                    &block2.mutator_set_accumulator_after(),
-                    tx_block2.kernel.timestamp
-                )
-                .await,
-            "Both UTXOs must be registered by wallet and contribute to balance"
-        );
+                .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(
+                NativeCurrencyAmount::coins(14),
+                ags.wallet_state
+                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp),
+                "Both UTXOs must be registered by wallet and contribute to balance"
+            );
+        }
 
         // Repeat the outputs to Alice in block 3 and verify correct new
         // balance.
@@ -1764,20 +1792,19 @@ mod tests {
             .set_new_tip(block3.clone())
             .await
             .unwrap();
-        assert_eq!(
-            NativeCurrencyAmount::coins(28),
-            alice
-                .lock_guard()
-                .await
+        {
+            let ags = alice.lock_guard().await;
+            let wallet_status = ags
                 .wallet_state
-                .confirmed_balance(
-                    block3.hash(),
-                    &block3.mutator_set_accumulator_after(),
-                    tx_block2.kernel.timestamp
-                )
-                .await,
-            "All four UTXOs must be registered by wallet and contribute to balance"
-        );
+                .get_wallet_status(block3.hash(), &block3.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(
+                NativeCurrencyAmount::coins(28),
+                ags.wallet_state
+                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp),
+                "All four UTXOs must be registered by wallet and contribute to balance"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1850,20 +1877,20 @@ mod tests {
             .set_new_tip(block2.clone())
             .await
             .unwrap();
-        assert!(
-            alice
-                .lock_guard()
-                .await
+        {
+            let ags = alice.lock_guard().await;
+            let wallet_status = ags
                 .wallet_state
-                .confirmed_balance(
-                    block2.hash(),
-                    &block2.mutator_set_accumulator_after(),
-                    tx_block2.kernel.timestamp
-                )
-                .await
-                .is_zero(),
-            "UTXO with bad typescript state may not count towards balance"
-        );
+                .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                .await;
+
+            assert!(
+                ags.wallet_state
+                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp)
+                    .is_zero(),
+                "UTXO with bad typescript state may not count towards balance"
+            );
+        }
         assert!(
             alice
                 .lock_guard()
@@ -1950,20 +1977,20 @@ mod tests {
             .set_new_tip(block2.clone())
             .await
             .unwrap();
-        assert!(
-            alice
-                .lock_guard()
-                .await
+        {
+            let ags = alice.lock_guard().await;
+            let wallet_status = ags
                 .wallet_state
-                .confirmed_balance(
-                    block2.hash(),
-                    &block2.mutator_set_accumulator_after(),
-                    tx_block2.kernel.timestamp
-                )
-                .await
-                .is_zero(),
-            "UTXO with unknown typescript may not count towards balance"
-        );
+                .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                .await;
+
+            assert!(
+                ags.wallet_state
+                    .confirmed_available_balance(&wallet_status, tx_block2.kernel.timestamp)
+                    .is_zero(),
+                "UTXO with unknown typescript may not count towards balance"
+            );
+        }
         assert!(
             alice
                 .lock_guard()
@@ -2456,38 +2483,38 @@ mod tests {
             let guesser_utxos = new_block_found.guesser_fee_utxo_infos;
             let block1 = new_block_found.block;
 
-            assert!(
-                !bob.global_state_lock
-                    .lock_guard()
-                    .await
+            {
+                let bgs = bob.global_state_lock.lock_guard().await;
+                let wallet_status = bgs
                     .wallet_state
-                    .confirmed_balance(
-                        block1.hash(),
-                        &block1.mutator_set_accumulator_after(),
-                        block1_timestamp
-                    )
-                    .await
-                    .is_positive(),
-                "Must show zero-balance before adding block to state"
-            );
+                    .get_wallet_status(block1.hash(), &block1.mutator_set_accumulator_after())
+                    .await;
+
+                assert!(
+                    !bgs.wallet_state
+                        .confirmed_available_balance(&wallet_status, block1_timestamp)
+                        .is_positive(),
+                    "Must show zero-balance before adding block to state"
+                );
+            }
             bob.set_new_self_mined_tip(block1.as_ref().clone(), guesser_utxos)
                 .await
                 .unwrap();
 
-            assert!(
-                bob.global_state_lock
-                    .lock_guard()
-                    .await
+            {
+                let bgs = bob.global_state_lock.lock_guard().await;
+                let wallet_status = bgs
                     .wallet_state
-                    .confirmed_balance(
-                        block1.hash(),
-                        &block1.mutator_set_accumulator_after(),
-                        block1_timestamp
-                    )
-                    .await
-                    .is_positive(),
-                "Must show positive balance after successful PoW-guess"
-            );
+                    .get_wallet_status(block1.hash(), &block1.mutator_set_accumulator_after())
+                    .await;
+
+                assert!(
+                    bgs.wallet_state
+                        .confirmed_available_balance(&wallet_status, block1_timestamp)
+                        .is_positive(),
+                    "Must show positive balance after successful PoW-guess"
+                );
+            }
 
             // Verify expected qualities of wallet, that:
             // 1. guesser-preimage was added to list(s)
@@ -2653,20 +2680,20 @@ mod tests {
             bob.set_new_self_mined_tip(block2.clone(), vec![])
                 .await
                 .unwrap();
-            assert!(
-                !bob.global_state_lock
-                    .lock_guard()
-                    .await
+            {
+                let bgs = bob.global_state_lock.lock_guard().await;
+                let wallet_status = bgs
                     .wallet_state
-                    .confirmed_balance(
-                        block2.hash(),
-                        &block2.mutator_set_accumulator_after(),
-                        block2_timestamp
-                    )
-                    .await
-                    .is_positive(),
-                "Must show zero liquid balance after spending liquid guesser UTXO"
-            );
+                    .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                    .await;
+
+                assert!(
+                    !bgs.wallet_state
+                        .confirmed_available_balance(&wallet_status, block2_timestamp)
+                        .is_positive(),
+                    "Must show zero liquid balance after spending liquid guesser UTXO"
+                );
+            }
         }
     }
 
@@ -2731,16 +2758,16 @@ mod tests {
                 // verify that confirmed and unconfirmed balances.
                 let gs = global_state_lock.lock_guard().await;
                 let msa = gs.chain.light_state().mutator_set_accumulator_after();
+                let wallet_status = gs.wallet_state.get_wallet_status(tip_digest, &msa).await;
+
                 assert_eq!(
                     gs.wallet_state
-                        .confirmed_balance(tip_digest, &msa, timestamp)
-                        .await,
+                        .confirmed_available_balance(&wallet_status, timestamp),
                     half_coinbase_amt
                 );
                 assert_eq!(
                     gs.wallet_state
-                        .unconfirmed_balance(tip_digest, &msa, timestamp)
-                        .await,
+                        .unconfirmed_available_balance(&wallet_status, timestamp),
                     half_coinbase_amt
                 );
 
@@ -2781,16 +2808,16 @@ mod tests {
             {
                 let gs = global_state_lock.lock_guard().await;
                 let msa = gs.chain.light_state().mutator_set_accumulator_after();
+                let wallet_status = gs.wallet_state.get_wallet_status(tip_digest, &msa).await;
+
                 assert_eq!(
                     gs.wallet_state
-                        .confirmed_balance(tip_digest, &msa, timestamp)
-                        .await,
+                        .confirmed_available_balance(&wallet_status, timestamp),
                     half_coinbase_amt
                 );
                 assert_eq!(
                     gs.wallet_state
-                        .unconfirmed_balance(tip_digest, &msa, timestamp)
-                        .await,
+                        .unconfirmed_available_balance(&wallet_status, timestamp),
                     half_coinbase_amt.checked_sub(&send_amt).unwrap()
                 );
             }
@@ -2802,19 +2829,22 @@ mod tests {
                 .mempool_clear()
                 .await;
 
-            // verify that wallet's unconfirmed balance is `coinbase amt` again.
-            let msa = global_state_lock
-                .lock(|gs| gs.chain.light_state().mutator_set_accumulator_after())
-                .await;
-            assert_eq!(
-                global_state_lock
-                    .lock_guard()
-                    .await
-                    .wallet_state
-                    .unconfirmed_balance(tip_digest, &msa, timestamp)
-                    .await,
-                half_coinbase_amt
-            );
+            {
+                // verify that wallet's unconfirmed balance is `coinbase amt` again.
+                let msa = global_state_lock
+                    .lock(|gs| gs.chain.light_state().mutator_set_accumulator_after())
+                    .await;
+
+                let gs = global_state_lock.lock_guard().await;
+                let wallet_status = gs.wallet_state.get_wallet_status(tip_digest, &msa).await;
+
+                // verify that wallet's unconfirmed balance is `coinbase amt` again.
+                assert_eq!(
+                    gs.wallet_state
+                        .unconfirmed_available_balance(&wallet_status, timestamp),
+                    half_coinbase_amt
+                );
+            }
 
             Ok(())
         }

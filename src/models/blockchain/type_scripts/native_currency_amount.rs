@@ -486,7 +486,7 @@ impl Display for NativeCurrencyAmount {
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
-    use ::arbitrary::Arbitrary;
+    use arbitrary::Arbitrary;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
     use proptest_arbitrary_interop::arb;

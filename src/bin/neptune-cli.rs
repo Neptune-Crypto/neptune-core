@@ -179,11 +179,11 @@ enum Command {
         block_selector: BlockSelector,
     },
 
-    /// retrieve confirmed balance
-    SyncedBalance,
+    /// retrieve confirmed balance (excludes time-locked utxos)
+    ConfirmedAvailableBalance,
 
-    /// retrieve unconfirmed balance (includes unconfirmed transactions)
-    SyncedBalanceUnconfirmed,
+    /// retrieve unconfirmed balance (includes unconfirmed transactions, excludes time-locked utxos)
+    UnconfirmedAvailableBalance,
 
     /// retrieve wallet status information
     WalletStatus,
@@ -824,12 +824,12 @@ async fn main() -> Result<()> {
                 println!("{}", res.unwrap());
             }
         }
-        Command::SyncedBalance => {
-            let val = client.synced_balance(ctx, token).await??;
+        Command::ConfirmedAvailableBalance => {
+            let val = client.confirmed_available_balance(ctx, token).await??;
             println!("{val}");
         }
-        Command::SyncedBalanceUnconfirmed => {
-            let val = client.synced_balance_unconfirmed(ctx, token).await??;
+        Command::UnconfirmedAvailableBalance => {
+            let val = client.unconfirmed_available_balance(ctx, token).await??;
             println!("{val}");
         }
         Command::WalletStatus => {

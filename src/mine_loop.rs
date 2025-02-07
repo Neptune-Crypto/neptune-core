@@ -1164,7 +1164,7 @@ pub(crate) mod mine_loop_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_liquid_amount(now)
+                .synced_unspent_available_amount(now)
                 .is_zero(),
             "Assumed to be premine-recipient"
         );
