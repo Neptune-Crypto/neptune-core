@@ -129,11 +129,17 @@ impl NativeCurrencyAmount {
 
     /// Convert the amount to Neptune atomic units (nau) as a 64-bit floating
     /// point number. Note that this function loses precision!
+    ///
+    /// Quantities whose unit is nau are used for internal logic and are not to
+    /// be used for user-facing displays.
     pub fn to_nau_f64(&self) -> f64 {
         self.0 as f64
     }
 
-    /// Convert the amount to Neptune atomic units (nau)
+    /// Convert the amount (of Neptune Coins) to Neptune atomic units (nau).
+    ///
+    /// Quantities whose unit is nau are used for internal logic and are not to
+    /// be used for user-facing displays.
     pub fn to_nau(&self) -> i128 {
         self.0
     }
