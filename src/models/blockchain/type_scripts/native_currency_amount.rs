@@ -467,15 +467,13 @@ impl NativeCurrencyAmount {
             }
         };
         if -BigInt::from(Self::MAX_NAU) > nau || nau > BigInt::from(Self::MAX_NAU) {
-            return Err(anyhow::Error::msg(
-                "amount of Neptune coins too large or too small",
-            ));
+            bail!("amount of Neptune coins too large or too small",);
         }
         match i128::try_from(nau) {
             Ok(i) => Ok(Self(i)),
-            Err(e) => Err(anyhow::Error::msg(format!(
-                "invalid amount of Neptune coins: {e:?}"
-            ))),
+            Err(e) => {
+                bail!("invalid amount of Neptune coins: {e:?}");
+            }
         }
     }
 }
