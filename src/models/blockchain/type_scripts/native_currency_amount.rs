@@ -144,6 +144,9 @@ impl NativeCurrencyAmount {
         Self(nau)
     }
 
+    /// Multiply the amount by a non-negative 32-bit number.
+    ///
+    /// Crashes in case of overflow.
     pub fn scalar_mul(&self, factor: u32) -> Self {
         let factor_as_i128 = factor as i128;
         let (res, overflow) = self.0.overflowing_mul(factor_as_i128);
