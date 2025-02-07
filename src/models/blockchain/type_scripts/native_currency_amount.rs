@@ -473,26 +473,7 @@ impl NativeCurrencyAmount {
 
 impl Display for NativeCurrencyAmount {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let conversion_factor = Self::conversion_factor();
-        let sign = self.is_negative();
-        let sign_symbol = if sign { "-" } else { "" };
-        let nau = if sign { -self.0 } else { self.0 };
-        let rational = (nau as f64) / (conversion_factor as f64);
-        let rounded = (100.0 * rational).round();
-        if rounded.is_zero() {
-            write!(f, "0")
-        } else {
-            let mut s = format!("{}", rounded);
-            while s.len() <= 2 {
-                s = format!("0{s}");
-            }
-            let (int, flo): (&str, &str) = s.split_at(s.len() - 2);
-            if flo == "00" {
-                write!(f, "{}{}", sign_symbol, int)
-            } else {
-                write!(f, "{}{}.{}", sign_symbol, int, flo)
-            }
-        }
+        write!(f, "{}", self.display_n_decimals(8))
     }
 }
 
@@ -907,7 +888,7 @@ pub(crate) mod test {
     #[proptest]
     fn new_and_display_consistency_proptest(#[strategy(0u32..=42000000)] num_coins: u32) {
         let val = NativeCurrencyAmount::coins(num_coins);
-        assert_eq!(format!("{val}"), num_coins.to_string());
+        assert_eq!(format!("{val}"), format!("{num_coins}.00000000"));
     }
 
     #[proptest]
@@ -980,5 +961,12 @@ pub(crate) mod test {
     #[test]
     fn display_lossless_can_have_44_chars() {
         assert_eq!(44, (-NativeCurrencyAmount::max()).display_lossless().len());
+    }
+
+    #[proptest]
+    fn display_agrees_with_display_8_decimals(
+        #[strategy(NativeCurrencyAmount::arbitrary_full_range())] amount: NativeCurrencyAmount,
+    ) {
+        prop_assert_eq!(format!("{}", amount), amount.display_n_decimals(8))
     }
 }
