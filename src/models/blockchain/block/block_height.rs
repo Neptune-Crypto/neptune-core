@@ -22,9 +22,9 @@ use crate::prelude::twenty_first;
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct BlockHeight(BFieldElement);
 
-// Assuming a block time of 294 seconds, and a halving every three years,
-// the number of blocks per halving cycle is 321630.
-pub const BLOCKS_PER_GENERATION: u64 = 321630;
+// Assuming a block time of 588 seconds, and a halving every three years,
+// the number of blocks per halving cycle is 160815.
+pub const BLOCKS_PER_GENERATION: u64 = 160815;
 
 impl BlockHeight {
     pub fn get_generation(&self) -> u64 {

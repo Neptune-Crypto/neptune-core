@@ -27,8 +27,8 @@ use crate::prelude::twenty_first;
 
 /// Desired/average time between blocks.
 ///
-/// 294000 milliseconds equals 4.9 minutes.
-pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(294000);
+/// 588000 milliseconds equals 9.8 minutes.
+pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
 
 /// Minimum time between blocks.
 ///

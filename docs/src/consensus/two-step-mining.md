@@ -14,7 +14,7 @@ Making one guess involves sampling a random number and hashing 7 times using the
 
 ## Block Rewards
 
-In the beginning of Neptune's life, every block is allowed to mint a certain number of Neptune coins. This number is known as the *block subsidy*. The initial subsidy is set to `INITIAL_BLOCK_SUBSIDY = 64`. This subsidy is halved automatically every `BLOCKS_PER_GENERATION = 321630` blocks , which corresponds to approximately three years.
+In the beginning of Neptune's life, every block is allowed to mint a certain number of Neptune coins. This number is known as the *block subsidy*. The initial subsidy is set to `INITIAL_BLOCK_SUBSIDY = 128`. This subsidy is halved automatically every `BLOCKS_PER_GENERATION = 160815` blocks , which corresponds to approximately three years.
 
 In addition to the block subsidy, blocks also redistribute the transaction fees paid by the transactions included in their block. The sum of the block subsidy and the transaction fees is the *block reward*.
 
