@@ -18,8 +18,8 @@ pub mod dashboard_src;
 #[derive(Debug, Parser, Clone)]
 #[clap(name = "neptune-dashboard", about = "Terminal user interface")]
 pub struct Config {
-    /// Sets the server address to connect to.
-    #[clap(long, default_value = "9799", value_name = "PORT")]
+    /// Sets the neptune-core rpc server localhost port to connect to.
+    #[clap(short, long, default_value = "9799", value_name = "port")]
     port: u16,
 
     /// neptune-core data directory containing wallet and blockchain state
