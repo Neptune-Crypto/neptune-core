@@ -18,7 +18,7 @@ export RUST_LOG=debug;
 
 # these features require building with nightly
 # the purpose is to log location/duration of locks that are held too long.
-export FEATURES="--features log-slow-write-lock,log-slow-read-lock"
+export FEATURES="--release --features log-slow-write-lock,log-slow-read-lock"
 export NIGHTLY=+nightly
 
 LOCAL_STATE_DIR=~/.local/share/neptune-integration-test-from-genesis
@@ -30,7 +30,7 @@ rm -rf $LOCAL_STATE_DIR
 
 # Build before spinning up multiple instances, as you'll otherwise get multiple processes trying
 # to build at the same time.
-cargo build
+cargo $NIGHTLY build $FEATURES
 
 RUST_BACKTRACE=1 XDG_DATA_HOME=$LOCAL_STATE_DIR/0/ nice -n 1 --  cargo $NIGHTLY run $FEATURES -- --network regtest --peer-port 29790 --rpc-port 19790 --compose --guess $EXTRA_ARGS 2>&1 | tee /tmp/integration_test_from_genesis-0.log | sed 's/(.*)/\0 \[I0\]/g'  &
 pid[0]=$!
