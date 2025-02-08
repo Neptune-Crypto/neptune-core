@@ -1038,6 +1038,12 @@ async fn main() -> Result<()> {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, network)?;
 
+            // abort early on negative fee
+            if fee.is_negative() {
+                eprintln!("Fee must be non-negative.");
+                bail!("Failed to create transaction.");
+            }
+
             let resp = client
                 .send(
                     ctx,
