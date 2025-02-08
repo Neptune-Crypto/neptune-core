@@ -523,6 +523,7 @@ pub mod neptune_arbitrary {
 
         /// Generate a strategy for a NativeCurrencyAmount anywhere between the
         /// minimum and maximum numbers (extrema included).
+        #[cfg(test)]
         pub(crate) fn arbitrary_full_range() -> BoxedStrategy<Self> {
             (-Self::MAX_NAU..=Self::MAX_NAU)
                 .prop_map(NativeCurrencyAmount::from_nau)
