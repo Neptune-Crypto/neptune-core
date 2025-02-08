@@ -528,9 +528,9 @@ mod transaction_tests {
 
         for (to_be_updated_params, mined_params) in [
             ((4, 4, 4), (3, 3, 3)),
-            ((0, 1, 0), (1, 1, 0)),
-            ((1, 1, 0), (0, 1, 0)),
-            ((0, 2, 1), (1, 1, 1)),
+            ((1, 0, 1), (1, 1, 0)),
+            ((1, 1, 0), (1, 0, 0)),
+            ((6, 2, 1), (1, 1, 1)),
             ((2, 2, 2), (2, 2, 2)),
         ] {
             println!("to_be_updated_params: {to_be_updated_params:?}");
