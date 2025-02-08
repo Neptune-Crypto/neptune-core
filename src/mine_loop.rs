@@ -482,63 +482,13 @@ pub(super) fn prepare_coinbase_transaction_stateless(
     Ok((composer_outputs, transaction_details))
 }
 
-/// Create a transaction with a coinbase for the indicated address.
+/// Enumerates origins of transactions to be merged into a block transaction.
 ///
-/// If no mempool transactions are included, a nop transaction will be merged in
-/// such that the resulting transaction is valid for block inclusion.
-pub(crate) async fn create_block_transaction_stateless(
-    predecessor_block: &Block,
-    composer_parameters: ComposerParameters,
-    timestamp: Timestamp,
-    shuffle_seed: [u8; 32],
-    vm_job_queue: &JobQueue<TritonVmJobPriority>,
-    job_options: TritonVmProofJobOptions,
-    mut selected_mempool_txs: Vec<Transaction>,
-) -> Result<(Transaction, TxOutputList)> {
-    // A coinbase transaction implies mining. So you *must*
-    // be able to create a SingleProof.
-    let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
-        predecessor_block,
-        composer_parameters,
-        timestamp,
-        TxProvingCapability::SingleProof,
-        vm_job_queue,
-        job_options.clone(),
-    )
-    .await?;
-
-    let mut block_transaction = coinbase_transaction;
-    if selected_mempool_txs.is_empty() {
-        // create the nop-tx and merge into the coinbase transaction to set the
-        // merge bit to allow the tx to be included in a block.
-        let nop =
-            TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
-        let nop = PrimitiveWitness::from_transaction_details(nop);
-        let nop_proof = SingleProof::produce(&nop, vm_job_queue, job_options.clone()).await?;
-        let nop = Transaction {
-            kernel: nop.kernel,
-            proof: TransactionProof::SingleProof(nop_proof),
-        };
-
-        selected_mempool_txs = vec![nop];
-    }
-
-    let mut rng = StdRng::from_seed(shuffle_seed);
-    let num_merges = selected_mempool_txs.len();
-    for (i, tx_to_include) in selected_mempool_txs.into_iter().enumerate() {
-        info!("Merging transaction {} / {}", i + 1, num_merges);
-        block_transaction = Transaction::merge_with(
-            block_transaction,
-            tx_to_include,
-            rng.gen(),
-            vm_job_queue,
-            job_options.clone(),
-        )
-        .await
-        .expect("Must be able to merge transactions in mining context");
-    }
-
-    Ok((block_transaction, composer_txos))
+/// In the general case, this is (just) the mempool.
+pub(crate) enum TxMergeOrigin {
+    Mempool,
+    #[cfg(test)]
+    ExplicitList(Vec<Transaction>),
 }
 
 /// Create the transaction that goes into the block template. The transaction is
@@ -549,6 +499,23 @@ pub(crate) async fn create_block_transaction(
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
+) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+    create_block_transaction_from(
+        predecessor_block,
+        global_state_lock,
+        timestamp,
+        job_options,
+        TxMergeOrigin::Mempool,
+    )
+    .await
+}
+
+pub(crate) async fn create_block_transaction_from(
+    predecessor_block: &Block,
+    global_state_lock: &GlobalStateLock,
+    timestamp: Timestamp,
+    job_options: TritonVmProofJobOptions,
+    tx_merge_origin: TxMergeOrigin,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
@@ -561,20 +528,6 @@ pub(crate) async fn create_block_transaction(
     let mut rng: StdRng =
         SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
 
-    // Get most valuable transactions from mempool.
-    // TODO: Change this const to be defined through CLI arguments.
-    const MAX_NUM_TXS_TO_MERGE: usize = 7;
-    let only_merge_single_proofs = true;
-    let mempool_txs_to_mine = global_state_lock
-        .lock_guard()
-        .await
-        .mempool
-        .get_transactions_for_block(
-            block_capacity_for_transactions,
-            Some(MAX_NUM_TXS_TO_MERGE),
-            only_merge_single_proofs,
-        );
-
     let coinbase_recipient_spending_key = global_state_lock
         .lock_guard()
         .await
@@ -586,17 +539,66 @@ pub(crate) async fn create_block_transaction(
         .await
         .composer_parameters(coinbase_recipient_spending_key.to_address().into());
 
+    // A coinbase transaction implies mining. So you *must*
+    // be able to create a SingleProof.
     let vm_job_queue = global_state_lock.vm_job_queue();
-    let (transaction, composer_txos) = create_block_transaction_stateless(
+    let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters,
         timestamp,
-        rng.gen(),
+        TxProvingCapability::SingleProof,
         vm_job_queue,
-        job_options,
-        mempool_txs_to_mine,
+        job_options.clone(),
     )
     .await?;
+
+    // Get most valuable transactions from mempool.
+    // TODO: Change this const to be defined through CLI arguments.
+    const MAX_NUM_TXS_TO_MERGE: usize = 7;
+    let only_merge_single_proofs = true;
+    let mut transactions_to_merge = match tx_merge_origin {
+        #[cfg(test)]
+        TxMergeOrigin::ExplicitList(transactions) => transactions,
+        TxMergeOrigin::Mempool => global_state_lock
+            .lock_guard()
+            .await
+            .mempool
+            .get_transactions_for_block(
+                block_capacity_for_transactions,
+                Some(MAX_NUM_TXS_TO_MERGE),
+                only_merge_single_proofs,
+            ),
+    };
+
+    // If necessary, populate list with nop-tx.
+    // Guarantees that some merge happens in below loop, which sets merge-bit.
+    if transactions_to_merge.is_empty() {
+        let nop =
+            TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
+        let nop = PrimitiveWitness::from_transaction_details(nop);
+        let nop_proof = SingleProof::produce(&nop, vm_job_queue, job_options.clone()).await?;
+        let nop = Transaction {
+            kernel: nop.kernel,
+            proof: TransactionProof::SingleProof(nop_proof),
+        };
+
+        transactions_to_merge = vec![nop];
+    }
+
+    let num_merges = transactions_to_merge.len();
+    let mut block_transaction = coinbase_transaction;
+    for (i, tx_to_include) in transactions_to_merge.into_iter().enumerate() {
+        info!("Merging transaction {} / {}", i + 1, num_merges);
+        block_transaction = Transaction::merge_with(
+            block_transaction,
+            tx_to_include,
+            rng.gen(),
+            vm_job_queue,
+            job_options.clone(),
+        )
+        .await
+        .expect("Must be able to merge transactions in mining context");
+    }
 
     let own_expected_utxos = composer_txos
         .iter()
@@ -610,7 +612,7 @@ pub(crate) async fn create_block_transaction(
         })
         .collect();
 
-    Ok((transaction, own_expected_utxos))
+    Ok((block_transaction, own_expected_utxos))
 }
 
 ///

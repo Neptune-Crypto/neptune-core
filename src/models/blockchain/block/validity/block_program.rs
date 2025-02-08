@@ -315,8 +315,8 @@ pub(crate) mod test {
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::mine_loop::composer_parameters::ComposerParameters;
-    use crate::mine_loop::create_block_transaction_stateless;
+    use crate::mine_loop::create_block_transaction_from;
+    use crate::mine_loop::TxMergeOrigin;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TritonVmProofJobOptions;
@@ -331,6 +331,7 @@ pub(crate) mod test {
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::GlobalStateLock;
 
     impl ConsensusProgramSpecification for BlockProgram {
         fn source(&self) {
@@ -437,20 +438,17 @@ pub(crate) mod test {
     #[tokio::test]
     async fn disallow_double_spends_across_blocks() {
         async fn mine_tx(
+            state: &GlobalStateLock,
             tx: Transaction,
             predecessor: &Block,
-            composer_parameters: ComposerParameters,
             timestamp: Timestamp,
-            rng: &mut StdRng,
         ) -> Block {
-            let (block_tx, _) = create_block_transaction_stateless(
+            let (block_tx, _) = create_block_transaction_from(
                 predecessor,
-                composer_parameters,
+                state,
                 timestamp,
-                rng.gen(),
-                &TritonVmJobQueue::dummy(),
-                (TritonVmJobPriority::Normal, None).into(),
-                vec![tx],
+                TritonVmProofJobOptions::default(),
+                TxMergeOrigin::ExplicitList(vec![tx]),
             )
             .await
             .unwrap();
@@ -503,18 +501,7 @@ pub(crate) mod test {
             )
             .await
             .unwrap();
-        let composer_parameters = alice
-            .lock_guard()
-            .await
-            .composer_parameters(alice_key.to_address().into());
-        let block1 = mine_tx(
-            tx.clone(),
-            &genesis_block,
-            composer_parameters.clone(),
-            now,
-            &mut rng,
-        )
-        .await;
+        let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
 
         // Update transaction, stick it into block 2, and verify that block 2
         // is invalid.
@@ -531,7 +518,7 @@ pub(crate) mod test {
         .await
         .unwrap();
 
-        let block2 = mine_tx(tx, &block1, composer_parameters, later, &mut rng).await;
+        let block2 = mine_tx(&alice, tx, &block1, later).await;
         assert!(
             !block2.is_valid(&block1, later).await,
             "Block doing a double-spend must be invalid."
