@@ -415,8 +415,6 @@ mod process_util {
     use tokio::io::AsyncReadExt;
     use tokio::process::Child;
 
-    // future cleanup: remove this fn.
-    //
     // This fn is a slightly modified copy of
     // tokio::process::Child::wait_with_output().
     //
@@ -430,9 +428,6 @@ mod process_util {
     //
     // The modified fn below takes `&mut Child` and has some minor mods so it
     // does not rely on internal tokio functions.
-    //
-    // The function can be removed if/when a version of tokio is released that
-    // supports this usage, or if another solution is found.
     //
     // Links:
     //   A playground demonstrating the compile error:
@@ -460,9 +455,7 @@ mod process_util {
         let stdout_fut = read_to_end(&mut stdout_pipe);
         let stderr_fut = read_to_end(&mut stderr_pipe);
 
-        let (status, stdout, stderr) = futures::try_join!(child.wait(), stdout_fut, stderr_fut)?;
-
-        // let (status, stdout, stderr) = try_join3(myself.wait(), stdout_fut, stderr_fut).await?;
+        let (status, stdout, stderr) = tokio::try_join!(child.wait(), stdout_fut, stderr_fut)?;
 
         // Drop happens after `try_join` due to <https://github.com/tokio-rs/tokio/issues/4309>
         drop(stdout_pipe);
