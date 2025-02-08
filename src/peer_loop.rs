@@ -1238,7 +1238,15 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 3. If transaction is already known, ignore.
+                // 3. If negative fee, punish.
+                if transaction.kernel.fee.is_negative() {
+                    warn!("Received negative-fee transaction.");
+                    self.punish(NegativePeerSanction::TransactionWithNegativeFee)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 4. If transaction is already known, ignore.
                 if self
                     .global_state_lock
                     .lock_guard()
@@ -1256,7 +1264,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 4 if transaction is not confirmable, punish.
+                // 5. if transaction is not confirmable, punish.
                 let mutator_set_accumulator_after = self
                     .global_state_lock
                     .lock_guard()
@@ -1275,7 +1283,7 @@ impl PeerLoopHandler {
 
                 let tx_timestamp = transaction.kernel.timestamp;
 
-                // 5. Ignore if transaction is too old
+                // 6. Ignore if transaction is too old
                 let now = self.now();
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
@@ -1283,7 +1291,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 6. Ignore if transaction is too far into the future
+                // 7. Ignore if transaction is too far into the future
                 if tx_timestamp
                     > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {
