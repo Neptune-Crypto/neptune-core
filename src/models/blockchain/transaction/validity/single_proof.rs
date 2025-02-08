@@ -681,7 +681,7 @@ mod test {
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
     use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::test::deterministic_merge_witness;
-    use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_only_additions;
+    use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_only_additions_to_mutator_set;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
@@ -984,12 +984,16 @@ mod test {
 
         #[tokio::test]
         async fn only_additions_small() {
-            positive_prop(deterministic_update_witness_only_additions(2, 2, 2).await);
+            positive_prop(
+                deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await,
+            );
         }
 
         #[tokio::test]
         async fn only_additions_medium() {
-            positive_prop(deterministic_update_witness_only_additions(4, 4, 4).await);
+            positive_prop(
+                deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await,
+            );
         }
 
         #[tokio::test]
@@ -1161,7 +1165,8 @@ mod test {
         async fn update_witness_negative_tests() {
             // It takes a long time to generate the witness, so we reuse it across
             // multiple tests
-            let good_witness = deterministic_update_witness_only_additions(2, 2, 2).await;
+            let good_witness =
+                deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await;
             positive_prop(good_witness.clone());
             new_timestamp_older_than_old(&good_witness);
             bad_new_aocl(&good_witness);
@@ -1169,6 +1174,32 @@ mod test {
             bad_absolute_index_set_value(&good_witness);
             bad_absolute_index_set_length_too_short(&good_witness);
             bad_absolute_index_set_length_too_long(&good_witness);
+        }
+
+        #[tokio::test]
+        async fn disallow_update_of_tx_with_zero_inputs() {
+            let only_new_additions_0_outputs =
+                deterministic_update_witness_only_additions_to_mutator_set(0, 0, 0).await;
+            let only_new_additions_2_outputs =
+                deterministic_update_witness_only_additions_to_mutator_set(0, 2, 2).await;
+            let new_additions_and_removals_2_outputs =
+                deterministic_update_witness_additions_and_removals(0, 2, 2).await;
+            for bad_witness in [
+                only_new_additions_0_outputs,
+                only_new_additions_2_outputs,
+                new_additions_and_removals_2_outputs,
+            ] {
+                let bad_witness = SingleProofWitness::from_update(bad_witness);
+                let claim = bad_witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = bad_witness.nondeterminism();
+                let test_result = SingleProof.test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[UpdateBranch::INPUT_SET_IS_EMPTY_ERROR],
+                );
+                test_result.unwrap();
+            }
         }
     }
 }
