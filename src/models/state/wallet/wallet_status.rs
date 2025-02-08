@@ -65,8 +65,12 @@ pub struct WalletStatus {
     /// because it was spent)
     pub synced_spent: Vec<WalletStatusElement>,
 
-    #[cfg(test)]
     /// UTXOs that do not have a synced membership proof
+    ///
+    /// note: this field is presently only used by:
+    ///  a) unit test(s)
+    ///  b) indirectly the neptune-cli `wallet-status` command when
+    ///     it json serializes `WalletStatus` to stdout.
     pub unsynced: Vec<WalletStatusElement>,
 }
 
