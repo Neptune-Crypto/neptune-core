@@ -1340,7 +1340,10 @@ impl WalletState {
         let mut synced_unspent = vec![];
         let mut synced_spent = vec![];
 
-        #[cfg(test)]
+        // note: field WalletStatus::unsynced is presently only used by:
+        //  a) unit test(s)
+        //  b) indirectly the neptune-cli `wallet-status` command when
+        //     it json serializes `WalletStatus` to stdout.
         let mut unsynced = vec![];
 
         let stream = monitored_utxos.stream().await;
@@ -1362,19 +1365,14 @@ impl WalletState {
                     ));
                 }
             } else {
-                #[cfg(test)]
-                {
-                    let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
-                    unsynced.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
-                }
+                let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
+                unsynced.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
             }
         }
 
         WalletStatus {
             synced_unspent,
             synced_spent,
-
-            #[cfg(test)]
             unsynced,
         }
     }
