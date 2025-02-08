@@ -1590,6 +1590,12 @@ impl RPC for NeptuneRPCServer {
             return Err(error::SendError::Unsupported.into());
         }
 
+        // abort early on negative fee
+        if fee.is_negative() {
+            warn!("Cannot send negative-fee transaction.");
+            return Err(error::SendError::NegativeFee.into());
+        }
+
         // The proving capability is set to the lowest possible value here,
         // since we don't want the client (CLI or dashboard) to hang. Instead,
         // we let (a task started by) main loop handle the proving.
@@ -1961,6 +1967,9 @@ pub mod error {
         // catch-all error, eg for anyhow errors
         #[error("transaction could not be sent")]
         Failed(String),
+
+        #[error("Transaction with negative fees not allowed")]
+        NegativeFee,
     }
 
     // convert anyhow::Error to a SendError::Failed.
