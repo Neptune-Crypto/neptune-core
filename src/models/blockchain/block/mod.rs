@@ -5,6 +5,7 @@ pub mod block_height;
 pub mod block_info;
 pub mod block_kernel;
 pub mod block_selector;
+mod block_validation_error;
 pub mod difficulty_control;
 pub mod mutator_set_update;
 pub mod validity;
@@ -20,6 +21,7 @@ use block_header::MINIMUM_BLOCK_TIME;
 use block_header::TARGET_BLOCK_INTERVAL;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
+use block_validation_error::BlockValidationError;
 use difficulty_control::Difficulty;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -31,7 +33,6 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use tracing::debug;
 use tracing::warn;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -679,71 +680,52 @@ impl Block {
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
     pub(crate) async fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
-        self.is_valid_internal(previous_block, now, None, None)
+        match self
+            .is_valid_internal(previous_block, now, None, None)
             .await
+        {
+            Ok(_) => true,
+            Err(e) => {
+                warn!("{e}");
+                false
+            }
+        }
     }
 
+    /// Verify a block.
+    ///
     /// Like `is_valid` but also allows specifying a custom
     /// `target_block_interval` and `minimum_block_time`. If `None` is passed,
     /// these variabes take the default values.
+    ///
+    /// Also, unlike `is_valid`, this function returns a `Result` type whose
+    /// associated error type is a [`BlockValidationError`]. This error type gives
+    /// the caller feedback about why the block is invalid.
     async fn is_valid_internal(
         &self,
         previous_block: &Block,
         now: Timestamp,
         target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
-    ) -> bool {
-        // What belongs here are the things that would otherwise
-        // be verified by the block validity proof.
-
-        // 0. `previous_block` is consistent with current block
-        //   a) Block height is previous plus one
-        //   b) Block header points to previous block
-        //   c) Block mmr updated correctly
-        //   d) Block timestamp is greater than (or equal to) timestamp of
-        //      previous block plus minimum block time
-        //   e) Target difficulty and cumulative proof-of-work were updated correctly
-        //   f) Block timestamp is less than host-time (utc) + 2 hours.
-        // 1. Block proof is valid
-        //   a) Verify appendix contains required claims
-        //   b) Block proof is valid
-        //   c) Max block size is not exceeded
-        // 2. The transaction is valid.
-        //   a) Verify that MS removal records are valid, done against previous
-        //      `mutator_set_accumulator`,
-        //   b) Verify that all removal records have unique index sets
-        //   c) Verify that the mutator set update induced by the block sends
-        //      the old mutator set accumulator to the new one.
-        //   d) transaction timestamp <= block timestamp
-        //   e) transaction coinbase <= miner reward, and not negative.
-        //   f) 0 <= transaction fee (also checked in block program).
-
-        // DO NOT add explanations to the individual steps below. *All*
-        // explanations belong in the recipe above and may not be duplicated or
-        // elaborated on below this line.
+    ) -> Result<(), BlockValidationError> {
+        // Note that there is a correspondence between the logic here and the
+        // error types in `BlockValidationError`.
 
         // 0.a)
         if previous_block.kernel.header.height.next() != self.kernel.header.height {
-            warn!(
-                "Block height ({}) does not match previous height plus one ({})",
-                self.kernel.header.height,
-                previous_block.kernel.header.height.next()
-            );
-            return false;
+            return Err(BlockValidationError::BlockHeight);
         }
 
         // 0.b)
         if previous_block.hash() != self.kernel.header.prev_block_digest {
-            warn!("Hash digest does not match previous digest");
-            return false;
+            return Err(BlockValidationError::PrevBlockDigest);
         }
 
         // 0.c)
         let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
         mmra.append(previous_block.hash());
         if mmra != self.kernel.body.block_mmr_accumulator {
-            warn!("Block MMRA was not updated correctly");
-            return false;
+            return Err(BlockValidationError::BlockMmrUpdate);
         }
 
         // 0.d)
@@ -751,16 +733,7 @@ impl Block {
         if previous_block.kernel.header.timestamp + minimum_block_time
             > self.kernel.header.timestamp
         {
-            warn!(
-                "Block's timestamp ({}) should be greater than or equal to that of previous block \
-                ({}) plus minimum block time ({}) \nprevious <= current ?? {}",
-                self.kernel.header.timestamp,
-                previous_block.kernel.header.timestamp,
-                minimum_block_time,
-                previous_block.kernel.header.timestamp + minimum_block_time
-                    <= self.kernel.header.timestamp
-            );
-            return false;
+            return Err(BlockValidationError::MinimumBlockTime);
         }
 
         // 0.e)
@@ -772,65 +745,43 @@ impl Block {
             previous_block.header().height,
         );
         if self.kernel.header.difficulty != expected_difficulty {
-            warn!(
-                "Value for new difficulty is incorrect. \
-                actual: {}, expected: {expected_difficulty}",
-                self.kernel.header.difficulty,
-            );
-            return false;
-        }
-        let expected_cumulative_proof_of_work =
-            previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
-        if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
-            warn!(
-                "Block's cumulative proof-of-work number does not match with expectation.\n\n\
-                Block's pow: {}\nexpectation: {}",
-                self.header().cumulative_proof_of_work,
-                expected_cumulative_proof_of_work
-            );
-            return false;
+            return Err(BlockValidationError::Difficulty);
         }
 
         // 0.f)
+        let expected_cumulative_proof_of_work =
+            previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
+        if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
+            return Err(BlockValidationError::CumulativeProofOfWork);
+        }
+
+        // 0.g)
         const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
         let future_limit = now + FUTUREDATING_LIMIT;
         if self.kernel.header.timestamp >= future_limit {
-            warn!(
-                "block time is too far in the future.\n\nBlock timestamp: {}\nThreshold is: {}",
-                self.kernel.header.timestamp, future_limit
-            );
-            return false;
+            return Err(BlockValidationError::FutureDating);
         }
 
         // 1.a)
         for required_claim in BlockAppendix::consensus_claims(self.body()) {
             if !self.appendix().contains(&required_claim) {
-                warn!(
-                    "Block appendix does not contain required claim.\n\
-                    Required claim: {required_claim:?}"
-                );
-                return false;
+                return Err(BlockValidationError::Appendix);
             }
         }
 
         // 1.b)
         let BlockProof::SingleProof(block_proof) = &self.proof else {
-            warn!("Can only verify block proofs, got {:?}", self.proof);
-            return false;
+            return Err(BlockValidationError::ProofQuality);
         };
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof).await {
-            warn!("Block proof invalid.");
-            return false;
-        }
 
         // 1.c)
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof).await {
+            return Err(BlockValidationError::ProofValidity);
+        }
+
+        // 1.d)
         if self.size() > MAX_BLOCK_SIZE {
-            warn!(
-                "Block size exceeds limit.\n\nBlock size: {} bfes\nLimit: {} bfes",
-                self.size(),
-                MAX_BLOCK_SIZE
-            );
-            return false;
+            return Err(BlockValidationError::MaxSize);
         }
 
         // 2.a)
@@ -839,8 +790,7 @@ impl Block {
                 .mutator_set_accumulator_after()
                 .can_remove(removal_record)
             {
-                warn!("Removal record cannot be removed from mutator set");
-                return false;
+                return Err(BlockValidationError::RemovalRecordsValid);
             }
         }
 
@@ -856,66 +806,52 @@ impl Block {
         absolute_index_sets.sort();
         absolute_index_sets.dedup();
         if absolute_index_sets.len() != self.kernel.body.transaction_kernel.inputs.len() {
-            warn!("Removal records contain duplicates");
-            return false;
+            return Err(BlockValidationError::RemovalRecordsUnique);
         }
 
-        // 2.c)
         let mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
         let mut msa = previous_block.mutator_set_accumulator_after();
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
-        if let Err(err) = ms_update_result {
-            warn!("Failed to apply mutator set update: {}", err);
-            return false;
+
+        // 2.c)
+        if ms_update_result.is_err() {
+            return Err(BlockValidationError::MutatorSetUpdatePossible);
         };
-        if msa.hash() != self.body().mutator_set_accumulator.hash() {
-            warn!("Reported mutator set does not match calculated object.");
-            debug!(
-                "From Block body\n{:?}. \n\nCalculated\n{:?}",
-                self.body().mutator_set_accumulator,
-                msa
-            );
-            return false;
-        }
 
         // 2.d)
-        if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
-            warn!(
-                "Transaction timestamp ({}) is is larger than that of block ({})",
-                self.kernel.body.transaction_kernel.timestamp, self.kernel.header.timestamp
-            );
-            return false;
+        if msa.hash() != self.body().mutator_set_accumulator.hash() {
+            return Err(BlockValidationError::MutatorSetUpdateIntegral);
         }
 
         // 2.e)
+        if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
+            return Err(BlockValidationError::TransactionTimestamp);
+        }
+
         let block_subsidy = Self::block_subsidy(self.kernel.header.height);
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
         if let Some(coinbase) = coinbase {
+            // 2.f)
             if coinbase > block_subsidy {
-                warn!(
-                    "Coinbase exceeds block subsidy. coinbase: {coinbase}; \
-                    block subsidy: {block_subsidy}."
-                );
-                return false;
+                return Err(BlockValidationError::CoinbaseTooBig);
             }
 
+            // 2.g)
             if coinbase.is_negative() {
-                warn!("Coinbase may not be negative. Got coinbase: {coinbase}.");
-                return false;
+                return Err(BlockValidationError::CoinbaseTooSmall);
             }
         }
 
-        // 2.f)
+        // 2.h)
         let fee = self.kernel.body.transaction_kernel.fee;
         if fee.is_negative() {
-            warn!("Fee may not be negative when transaction is included in block. Got fee: {fee}.");
-            return false;
+            return Err(BlockValidationError::NegativeFee);
         }
 
-        true
+        Ok(())
     }
 
     /// Determine whether the the proof-of-work puzzle was solved correctly.
