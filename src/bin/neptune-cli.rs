@@ -2,6 +2,7 @@ use std::io;
 use std::io::stdout;
 use std::io::Write;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -366,9 +367,9 @@ enum Command {
 #[derive(Debug, Clone, Parser)]
 #[clap(name = "neptune-cli", about = "An RPC client")]
 struct Config {
-    /// Sets the server address to connect to.
-    #[clap(long, default_value = "127.0.0.1:9799")]
-    server_addr: SocketAddr,
+    /// Sets the neptune-core rpc server localhost port to connect to.
+    #[clap(short, long, default_value = "9799", value_name = "port")]
+    port: u16,
 
     /// neptune-core data directory containing wallet and blockchain state
     #[clap(long)]
@@ -687,7 +688,8 @@ async fn main() -> Result<()> {
     }
 
     // all other operations need a connection to the server
-    let Ok(transport) = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default).await
+    let server_socket = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), args.port);
+    let Ok(transport) = tarpc::serde_transport::tcp::connect(server_socket, Json::default).await
     else {
         eprintln!("This command requires a connection to `neptune-core`, but that connection could not be established. Is `neptune-core` running?");
         return Ok(());

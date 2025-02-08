@@ -63,10 +63,10 @@ neptune-cli --help
 
 To get e.g. the block height of a running daemon, execute
 ```
-neptune-cli --server-addr block-height
+neptune-cli block-height
 ```
 
-If you set up `neptune-core` on a different address or port from the default (127.0.0.1:9799), then the flag `--server-addr [ip_address:port]` is your friend.
+If you set up `neptune-core` to listen for RPC requests on a different port from the default (9799), then the flag `--port <port>` is your friend.
 
 ## Setup for Development (Ubuntu)
 
