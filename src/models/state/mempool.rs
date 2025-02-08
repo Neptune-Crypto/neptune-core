@@ -93,19 +93,11 @@ pub enum MempoolEvent {
 pub(crate) enum TransactionOrigin {
     Foreign,
     Own,
-
-    /// Empty transaction intended to speed up composition. Maximum one of these
-    /// transactions can exist in the mempool.
-    NopForCoinbaseMerge,
 }
 
 impl TransactionOrigin {
     fn is_own(self) -> bool {
         self == Self::Own
-    }
-
-    fn is_nop_for_coinbase_merge(self) -> bool {
-        self == Self::NopForCoinbaseMerge
     }
 }
 
@@ -114,7 +106,6 @@ impl std::fmt::Display for TransactionOrigin {
         let output = match self {
             TransactionOrigin::Foreign => "third-party",
             TransactionOrigin::Own => "own",
-            TransactionOrigin::NopForCoinbaseMerge => "nop-for-coinbase-merge",
         };
 
         write!(f, "{output}")
@@ -133,9 +124,7 @@ pub struct Mempool {
     max_total_size: usize,
 
     /// If set, represents the maximum number of transactions allowed in the
-    /// mempool. If None, mempool is only restricted by size. If a "nop"
-    /// transaction for merging is maintained by this mempool, it will not
-    /// count towards this value.
+    /// mempool. If None, mempool is only restricted by size.
     max_length: Option<usize>,
 
     /// Contains transactions, with a mapping from transaction ID to transaction.
@@ -159,7 +148,7 @@ pub struct Mempool {
 /// Mempool updates must go through GlobalState so that it can
 /// forward mempool events to the wallet in atomic fashion.
 impl Mempool {
-    /// instantiate a new, empty `Mempool`.
+    /// instantiate a new, empty `Mempool`
     pub fn new(
         max_total_size: ByteSize,
         max_num_transactions: Option<usize>,
@@ -168,7 +157,6 @@ impl Mempool {
         let table = Default::default();
         let queue = Default::default();
         let max_total_size = max_total_size.0.try_into().unwrap();
-
         Self {
             max_total_size,
             max_length: max_num_transactions,
@@ -239,8 +227,7 @@ impl Mempool {
     }
 
     /// Return the two most dense single-proof transactions. Returns `None` if
-    /// no such pair exists in the mempool. Will never return a nop-transaction
-    /// since merging a nop-transaction would yield no benefit.
+    /// no such pair exists in the mempool.
     pub(crate) fn most_dense_single_proof_pair(
         &self,
     ) -> Option<([(&TransactionKernel, &Proof); 2], TransactionOrigin)> {
@@ -249,10 +236,8 @@ impl Mempool {
         for (txid, _fee_density) in self.get_sorted_iter() {
             let candidate = self.tx_dictionary.get(&txid).unwrap();
             if let TransactionProof::SingleProof(proof) = &candidate.transaction.proof {
-                if !candidate.origin.is_nop_for_coinbase_merge() {
-                    ret.push((&candidate.transaction.kernel, proof));
-                    own_tx = own_tx || candidate.origin.is_own();
-                }
+                ret.push((&candidate.transaction.kernel, proof));
+                own_tx = own_tx || candidate.origin.is_own();
             }
 
             let origin = match own_tx {
@@ -322,32 +307,6 @@ impl Mempool {
         }
 
         conflict_txs_in_mempool
-    }
-
-    /// Insert a (SingleProof-backed) transaction with no inputs and outputs
-    /// that can be reused over multiple blocks in order to compose faster in
-    /// case the mempool is otherwise empty. Does not count towards max number
-    /// of transactions in mempool.
-    ///
-    /// # Panics
-    ///
-    /// panics if the mempool already contains a nop-dummy transaction.
-    pub(crate) fn insert_nop_merge_target(
-        &mut self,
-        nop_kernel: TransactionKernel,
-        nop_single_proof: Proof,
-    ) {
-        assert!(
-            !self.has_single_proof_backed_nop(),
-            "Mempool already contains a nop-transaction for composing"
-        );
-
-        let nop = Transaction {
-            kernel: nop_kernel,
-            proof: TransactionProof::SingleProof(nop_single_proof),
-        };
-
-        self.insert(nop, TransactionOrigin::NopForCoinbaseMerge);
     }
 
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
@@ -461,8 +420,7 @@ impl Mempool {
         })
     }
 
-    /// Delete all transactions from the mempool. Including potential nop
-    /// transactions relied upon by the composer.
+    /// Delete all transactions from the mempool.
     ///
     /// note that this will return a MempoolEvent for every removed Tx.
     /// In the case of a full block, that could be a lot of Tx and
@@ -547,35 +505,32 @@ impl Mempool {
         transactions
     }
 
-    /// Indicates if a Single-proof backed nop transaction that can be used to
-    /// merge a coinbase-transaction is present in the mempool.
-    pub(crate) fn has_single_proof_backed_nop(&self) -> bool {
-        self.tx_dictionary.iter().any(|(_txid, tx)| {
-            tx.origin == TransactionOrigin::NopForCoinbaseMerge
-                && matches!(tx.transaction.proof, TransactionProof::SingleProof(_))
-        })
+    /// Removes the transaction with the highest [`FeeDensity`] from the mempool.
+    /// Returns the removed value.
+    ///
+    /// Computes in θ(lg N)
+    #[allow(dead_code)]
+    fn pop_max(&mut self) -> Option<(MempoolEvent, FeeDensity)> {
+        if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
+            if let Some(tx) = self.tx_dictionary.remove(&transaction_digest) {
+                debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
+
+                let event = MempoolEvent::RemoveTx(tx.transaction);
+
+                return Some((event, fee_density));
+            }
+        }
+        None
     }
 
     /// Removes the transaction with the lowest [`FeeDensity`] from the mempool.
-    /// Returns the removed value. Can never remove transactions of origin
-    /// [TransactionOrigin::NopForCoinbaseMerge].
+    /// Returns the removed value.
     ///
     /// Computes in θ(lg N)
     fn pop_min(&mut self) -> Option<(MempoolEvent, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
             if let Some(tx) = self.tx_dictionary.remove(&transaction_digest) {
                 debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
-
-                // Ensure "nop" transactions are never removed.
-                if tx.origin.is_nop_for_coinbase_merge() {
-                    let second_least_valuable = self.pop_min();
-
-                    // Put the "nop" transaction back in, then return the
-                    // transactions that was actually removed.
-
-                    self.insert(tx.transaction, tx.origin);
-                    return second_least_valuable;
-                }
 
                 let event = MempoolEvent::RemoveTx(tx.transaction);
 
@@ -686,8 +641,7 @@ impl Mempool {
 
             // A transaction should be kept in the mempool if it is true that
             // *all* of its index sets have at least one index that's not
-            // present in the mined block's transaction. This expression also
-            // ensure the nop-transaction (if present) is never deleted.
+            // present in the mined block's transaction.
             transaction_index_sets.iter().all(|index_set| {
                 index_set
                     .iter()
@@ -743,22 +697,11 @@ impl Mempool {
                 }
                 TransactionProof::SingleProof(old_proof) => {
                     if can_upgrade_single_proof {
-                        // If this is for maintaining the nop-merge, then
-                        // update the timestamp to ensure it never gets dropped
-                        // from the mempool.
-                        let is_nop_merger =
-                            matches!(tx.origin, TransactionOrigin::NopForCoinbaseMerge);
-                        let new_timestamp = if is_nop_merger {
-                            Some(Timestamp::now())
-                        } else {
-                            None
-                        };
                         let job = UpdateMutatorSetDataJob::new(
                             tx.transaction.kernel.clone(),
                             old_proof.to_owned(),
                             previous_mutator_set_accumulator.clone(),
                             mutator_set_update.clone(),
-                            new_timestamp,
                         );
                         debug!("Updating single-proof supported transaction {tx_id} to new mutator set.");
 
@@ -935,7 +878,7 @@ mod tests {
     }
 
     /// Create a mempool with n transactions.
-    fn setup_mock_mempool(
+    async fn setup_mock_mempool(
         transactions_count: usize,
         network: Network,
         origin: TransactionOrigin,
@@ -985,7 +928,7 @@ mod tests {
     async fn get_densest_transactions_no_tx_cap() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
         let num_txs = 10;
-        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign);
+        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1004,7 +947,7 @@ mod tests {
     async fn get_densest_transactions_with_tx_cap() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
         let num_txs = 12;
-        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign);
+        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1023,7 +966,7 @@ mod tests {
     #[tokio::test]
     async fn most_dense_proof_collection_test() {
         let network = Network::Main;
-        let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
+        let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
         let genesis_block = Block::genesis(network);
         let bob_wallet_secret = WalletSecret::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -1075,7 +1018,7 @@ mod tests {
     #[tokio::test]
     async fn get_sorted_iter() {
         // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
-        let mempool = setup_mock_mempool(10, Network::Main, TransactionOrigin::Foreign);
+        let mempool = setup_mock_mempool(10, Network::Main, TransactionOrigin::Foreign).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1091,7 +1034,7 @@ mod tests {
     #[tokio::test]
     async fn max_num_transactions_is_respected() {
         let num_txs = 12;
-        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign);
+        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign).await;
         for i in 0..num_txs {
             assert_eq!(
                 i,
@@ -1796,7 +1739,8 @@ mod tests {
         // Verify that the `get_size` method on mempool returns sane results
         let network = Network::Main;
         let tx_count_small = 2;
-        let mempool_small = setup_mock_mempool(tx_count_small, network, TransactionOrigin::Foreign);
+        let mempool_small =
+            setup_mock_mempool(tx_count_small, network, TransactionOrigin::Foreign).await;
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small = bincode::serialize(&mempool_small.tx_dictionary)
             .unwrap()
@@ -1812,7 +1756,8 @@ mod tests {
         );
 
         let tx_count_big = 6;
-        let mempool_big = setup_mock_mempool(tx_count_big, network, TransactionOrigin::Foreign);
+        let mempool_big =
+            setup_mock_mempool(tx_count_big, network, TransactionOrigin::Foreign).await;
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big = bincode::serialize(&mempool_big.tx_dictionary)
             .unwrap()
@@ -1826,178 +1771,6 @@ mod tests {
         println!(
             "actual size of mempool with {tx_count_big} empty txs when serialized: {size_serialized_big}",
         );
-    }
-
-    mod nop_merge_target_transactions {
-        use super::*;
-        use crate::tests::shared::invalid_empty_block;
-        use crate::tests::shared::random_nop_transaction_kernel;
-        use crate::tests::shared::random_transaction_kernel;
-
-        #[test]
-        fn txs_for_block_returns_nop_tx_if_only_tx_in_mempool() {
-            let network = Network::Main;
-            let max_num_txs_in_mempool = 2;
-            let genesis_block = Block::genesis(network);
-            let mut mempool = Mempool::new(
-                ByteSize::gb(1),
-                Some(max_num_txs_in_mempool),
-                genesis_block.hash(),
-            );
-
-            let nop_tx_kernel = random_nop_transaction_kernel();
-            let dummy_proof = Proof(vec![]);
-            mempool.insert_nop_merge_target(nop_tx_kernel.clone(), dummy_proof.clone());
-            let txs_for_block = mempool.get_transactions_for_block(usize::MAX, Some(1), true);
-            assert!(txs_for_block.len().is_one());
-            assert!(txs_for_block[0].fee_density().is_zero());
-            assert_eq!(nop_tx_kernel.txid(), txs_for_block[0].kernel.txid());
-            assert!(txs_for_block[0].kernel.inputs.len().is_zero());
-        }
-
-        #[test]
-        fn most_dense_single_proof_pair_never_returns_nop_tx() {
-            let network = Network::Main;
-            let max_num_txs_in_mempool = 3;
-            let genesis_block = Block::genesis(network);
-            let mut mempool = Mempool::new(
-                ByteSize::gb(1),
-                Some(max_num_txs_in_mempool),
-                genesis_block.hash(),
-            );
-
-            let nop_tx_kernel = random_nop_transaction_kernel();
-            let dummy_proof = Proof(vec![]);
-            mempool.insert_nop_merge_target(nop_tx_kernel.clone(), dummy_proof.clone());
-
-            mempool.insert(
-                Transaction {
-                    kernel: random_transaction_kernel(),
-                    proof: TransactionProof::SingleProof(dummy_proof.clone()),
-                },
-                TransactionOrigin::Foreign,
-            );
-
-            assert_eq!(2, mempool.len());
-            assert!(
-                mempool.most_dense_single_proof_pair().is_none(),
-                "nop-tx must never be targeted for upgrade"
-            );
-
-            // Insert another transaction, and verify that something
-            // is returned. But that it doesn't include the nop-tx
-            mempool.insert(
-                Transaction {
-                    kernel: random_transaction_kernel(),
-                    proof: TransactionProof::SingleProof(dummy_proof),
-                },
-                TransactionOrigin::Foreign,
-            );
-            assert_eq!(3, mempool.len());
-
-            let (sp_pair, _) = mempool
-                .most_dense_single_proof_pair()
-                .expect("Must return pair when two non-nops are present");
-            assert_ne!(sp_pair[0].0.txid(), nop_tx_kernel.txid());
-            assert_ne!(sp_pair[1].0.txid(), nop_tx_kernel.txid());
-        }
-
-        #[tokio::test]
-        async fn nop_transaction_not_removed_by_new_block() {
-            let network = Network::Main;
-            let max_num_txs_in_mempool = 2;
-            let genesis_block = Block::genesis(network);
-            let mut mempool = Mempool::new(
-                ByteSize::gb(1),
-                Some(max_num_txs_in_mempool),
-                genesis_block.hash(),
-            );
-
-            let nop_tx_kernel = random_nop_transaction_kernel();
-            let dummy_nop_proof = Proof(vec![]);
-            let mined_block = invalid_empty_block(&genesis_block);
-            mempool.insert_nop_merge_target(nop_tx_kernel.clone(), dummy_nop_proof);
-            assert_eq!(1, mempool.len());
-
-            let (_events, update_jobs) = mempool.update_with_block_and_predecessor(
-                &mined_block,
-                &genesis_block,
-                TxProvingCapability::SingleProof,
-                true,
-            );
-
-            assert_eq!(1, mempool.len(), "Mempool length must be unchanged");
-            assert!(mempool.contains(nop_tx_kernel.txid()));
-            assert_eq!(1, update_jobs.len());
-            assert_eq!(
-                nop_tx_kernel, update_jobs[0].old_kernel,
-                "The nop-tx must be updated"
-            );
-            assert!(
-                update_jobs[0].new_timestamp.is_some(),
-                "The nop-tx must have its timestamp updated"
-            );
-        }
-
-        #[test]
-        fn nop_transaction_not_removed_by_insertion() {
-            let network = Network::Main;
-            let genesis_block = Block::genesis(network);
-            let max_num_txs_in_mempool = 10;
-            let mut mempool = Mempool::new(
-                ByteSize::gb(1),
-                Some(max_num_txs_in_mempool),
-                genesis_block.hash(),
-            );
-            let nop_tx = random_nop_transaction_kernel();
-            assert!(nop_tx.fee.is_zero(), "Test assumes nop-tx has no fee");
-
-            let dummy_proof = Proof(vec![]);
-            mempool.insert_nop_merge_target(nop_tx.clone(), dummy_proof);
-
-            let many_transactions =
-                make_plenty_mock_transaction_with_primitive_witness(2 * max_num_txs_in_mempool);
-            for tx in many_transactions {
-                mempool.insert(tx, TransactionOrigin::Own);
-                assert!(mempool.contains(nop_tx.txid()));
-            }
-
-            assert_eq!(max_num_txs_in_mempool, mempool.len());
-        }
-
-        #[test]
-        fn nop_transaction_not_removed_by_pop_min() {
-            let network = Network::Main;
-            let mut mempool = setup_mock_mempool(3, network, TransactionOrigin::Foreign);
-            let nop_tx = random_nop_transaction_kernel();
-            assert!(nop_tx.fee.is_zero(), "Test assumes nop-tx has no fee");
-
-            let dummy_proof = Proof(vec![]);
-            mempool.insert_nop_merge_target(nop_tx.clone(), dummy_proof);
-
-            assert!(mempool.contains(nop_tx.txid()));
-            assert_eq!(4, mempool.len());
-
-            for i in 0..3 {
-                mempool.pop_min();
-                assert!(mempool.contains(nop_tx.txid()));
-                assert_eq!(3 - i, mempool.len());
-            }
-        }
-
-        #[test]
-        fn clear_removes_nop_tx() {
-            // It's important to delete nop-txs from mempool when clear is
-            // called, as that's needed in case of reorganizations.
-            let network = Network::Main;
-            let mut mempool = setup_mock_mempool(3, network, TransactionOrigin::Foreign);
-            let nop_tx = random_nop_transaction_kernel();
-            let dummy_proof = Proof(vec![]);
-            mempool.insert_nop_merge_target(nop_tx.clone(), dummy_proof);
-            assert!(mempool.contains(nop_tx.txid()));
-            mempool.clear();
-            assert!(mempool.is_empty());
-        }
     }
 
     mod proof_quality_tests {
@@ -2048,7 +1821,7 @@ mod tests {
                 NativeCurrencyAmount::coins(15),
             )
             .await;
-            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
             mempool.insert(pw_high_fee, TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
@@ -2078,7 +1851,7 @@ mod tests {
                 NativeCurrencyAmount::coins(15),
             )
             .await;
-            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
             mempool.insert(pc_high_fee, TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
@@ -2108,7 +1881,7 @@ mod tests {
                 NativeCurrencyAmount::coins(15),
             )
             .await;
-            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
             mempool.insert(pc_high_fee, TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 

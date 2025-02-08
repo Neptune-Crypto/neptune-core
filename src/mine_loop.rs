@@ -64,14 +64,15 @@ pub(crate) struct GuessingConfiguration {
 
 async fn compose_block(
     latest_block: Block,
-    mut global_state_lock: GlobalStateLock,
+    global_state_lock: GlobalStateLock,
     sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
     cancel_compose_rx: tokio::sync::watch::Receiver<()>,
     now: Timestamp,
 ) -> Result<()> {
     let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
 
-    let triton_vm_job_queue = global_state_lock.vm_job_queue().clone();
+    let triton_vm_job_queue = global_state_lock.vm_job_queue();
+
     let job_options = TritonVmProofJobOptions {
         job_priority: TritonVmJobPriority::High,
         job_settings: ProverJobSettings {
@@ -81,34 +82,6 @@ async fn compose_block(
         },
         cancel_job_rx: Some(cancel_compose_rx),
     };
-
-    let has_nop = global_state_lock
-        .lock_guard()
-        .await
-        .mempool
-        .has_single_proof_backed_nop();
-    if !has_nop && global_state_lock.cli().maintain_nop_transaction {
-        let nop = TransactionDetails::nop(latest_block.mutator_set_accumulator_after(), timestamp);
-        let nop = PrimitiveWitness::from_transaction_details(nop);
-        info!(
-            "Creating single proof for nop-merge transaction for block. If \
-         successful, this should only happen once."
-        );
-        let nop_proof =
-            SingleProof::produce(&nop, &triton_vm_job_queue, job_options.clone()).await?;
-        info!(
-            "Done: Creating single proof for nop-merge transaction for block. \
-         Now inserting into mempool."
-        );
-
-        // Insert nop-transaction into mempool, so it can be reused indefinitely
-        // to speed up block-composition.
-        global_state_lock
-            .lock_guard_mut()
-            .await
-            .mempool
-            .insert_nop_merge_target(nop.kernel, nop_proof);
-    }
 
     let (transaction, composer_utxos) = create_block_transaction(
         &latest_block,
@@ -123,7 +96,7 @@ async fn compose_block(
         transaction,
         timestamp,
         None,
-        &triton_vm_job_queue,
+        triton_vm_job_queue,
         job_options,
     )
     .await;
@@ -536,10 +509,8 @@ pub(crate) async fn create_block_transaction_stateless(
 
     let mut block_transaction = coinbase_transaction;
     if selected_mempool_txs.is_empty() {
-        // create A nop-tx and merge into the coinbase transaction to set the
+        // create the nop-tx and merge into the coinbase transaction to set the
         // merge bit to allow the tx to be included in a block.
-        info!("Creating nop-transaction to allow merge-bit to be set");
-
         let nop =
             TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
         let nop = PrimitiveWitness::from_transaction_details(nop);

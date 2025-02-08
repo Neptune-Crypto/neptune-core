@@ -426,24 +426,6 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
         .into()
 }
 
-pub(crate) fn random_nop_transaction_kernel() -> TransactionKernel {
-    let mut rng = thread_rng();
-    let timestamp: Timestamp = rng.gen();
-    let mutator_set_hash: Digest = rng.gen();
-
-    TransactionKernelProxy {
-        inputs: vec![],
-        outputs: vec![],
-        public_announcements: vec![],
-        fee: NativeCurrencyAmount::zero(),
-        coinbase: None,
-        timestamp,
-        mutator_set_hash,
-        merge_bit: false,
-    }
-    .into_kernel()
-}
-
 pub fn random_transaction_kernel() -> TransactionKernel {
     let mut rng = thread_rng();
     let num_inputs = 1 + (rng.next_u32() % 5) as usize;
