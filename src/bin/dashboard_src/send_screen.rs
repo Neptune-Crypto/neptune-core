@@ -117,7 +117,13 @@ impl SendScreen {
         };
 
         let valid_fee = match NativeCurrencyAmount::coins_from_str(&fee) {
-            Ok(a) => a,
+            Ok(a) if !a.is_negative() => a,
+            Ok(a) => {
+                *notice_arc.lock().await = format!("fee: {}", a);
+                *reset_me.lock().await = ResetType::Notice;
+                refresh_tx.send(()).await.unwrap();
+                return;
+            }
             Err(e) => {
                 *notice_arc.lock().await = format!("fee: {}", e);
                 *reset_me.lock().await = ResetType::Notice;
