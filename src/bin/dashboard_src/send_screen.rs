@@ -1,6 +1,5 @@
 use std::cmp::max;
 use std::error::Error;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -107,7 +106,7 @@ impl SendScreen {
         // TODO: Let user specify this number
         let fee = NativeCurrencyAmount::zero();
 
-        let valid_amount = match NativeCurrencyAmount::from_str(&amount) {
+        let valid_amount = match NativeCurrencyAmount::coins_from_str(&amount) {
             Ok(a) => a,
             Err(e) => {
                 *notice_arc.lock().await = format!("amount: {}", e);

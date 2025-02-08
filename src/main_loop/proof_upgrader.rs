@@ -192,7 +192,7 @@ impl UpgradeJob {
                 ..
             } => {
                 let reciprocal = 1.0 / (collection.num_proofs() as f64);
-                gobbling_fee.lossy_f64_fraction_mul(reciprocal).unwrap()
+                gobbling_fee.lossy_f64_fraction_mul(reciprocal)
             }
             UpgradeJob::Merge { gobbling_fee, .. } => {
                 let mut rate = *gobbling_fee;
@@ -610,10 +610,7 @@ pub(super) fn get_upgrade_task_from_mempool(
         .mempool
         .most_dense_proof_collection(num_proofs_threshold)
     {
-        let gobbling_fee = kernel
-            .fee
-            .lossy_f64_fraction_mul(gobbling_fraction)
-            .unwrap();
+        let gobbling_fee = kernel.fee.lossy_f64_fraction_mul(gobbling_fraction);
         let gobbling_fee =
             if gobbling_fee >= min_gobbling_fee && tx_origin == TransactionOrigin::Foreign {
                 gobbling_fee
@@ -648,9 +645,7 @@ pub(super) fn get_upgrade_task_from_mempool(
     )) = global_state.mempool.most_dense_single_proof_pair()
     {
         let gobbling_fee = left_kernel.fee + right_kernel.fee;
-        let gobbling_fee = gobbling_fee
-            .lossy_f64_fraction_mul(gobbling_fraction)
-            .unwrap();
+        let gobbling_fee = gobbling_fee.lossy_f64_fraction_mul(gobbling_fraction);
         let gobbling_fee = if gobbling_fee >= min_gobbling_fee {
             gobbling_fee
         } else {

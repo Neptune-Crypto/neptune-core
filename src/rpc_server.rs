@@ -45,7 +45,6 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -1168,7 +1167,7 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // parse string
-        if let Ok(amt) = NativeCurrencyAmount::from_str(&amount_string) {
+        if let Ok(amt) = NativeCurrencyAmount::coins_from_str(&amount_string) {
             Ok(Some(amt))
         } else {
             Ok(None)

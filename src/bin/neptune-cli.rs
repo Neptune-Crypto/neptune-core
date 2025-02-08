@@ -108,7 +108,7 @@ impl FromStr for TransactionOutput {
 
         Ok(Self {
             address: parts[0].to_string(),
-            amount: NativeCurrencyAmount::from_str(parts[1])?,
+            amount: NativeCurrencyAmount::coins_from_str(parts[1])?,
         })
     }
 }
@@ -287,9 +287,11 @@ enum Command {
         address: String,
 
         /// amount to send
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         amount: NativeCurrencyAmount,
 
         /// transaction fee
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
 
         /// local tag for identifying a receiver
@@ -303,6 +305,7 @@ enum Command {
         /// format: address:amount address:amount ...
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
         outputs: Vec<TransactionOutput>,
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
     },
 
