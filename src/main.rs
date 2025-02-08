@@ -18,7 +18,12 @@ pub fn main() -> Result<()> {
         let args: cli_args::Args = cli_args::Args::parse();
 
         if args.tokio_console {
+            #[cfg(feature = "tokio-console")]
             console_subscriber::init();
+
+            #[cfg(not(feature = "tokio-console"))]
+            anyhow::bail!("tokio-console support not included in this build.  try building with tokio-console feature-flag.");
+
         } else {
             // Set up logger.
             // Configure logger to use ISO-8601, of which rfc3339 is a subset.
