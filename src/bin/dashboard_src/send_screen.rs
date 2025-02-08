@@ -13,7 +13,6 @@ use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
-use num_traits::Zero;
 use ratatui::layout::Alignment;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -39,6 +38,7 @@ use super::screen::Screen;
 pub enum SendScreenWidget {
     Address,
     Amount,
+    Fee,
     Ok,
     Notice,
 }
@@ -61,6 +61,7 @@ pub struct SendScreen {
     rpc_client: Arc<RPCClient>,
     focus: Arc<Mutex<SendScreenWidget>>,
     amount: String,
+    fee: String,
     notice: Arc<Mutex<String>>,
     reset_me: Arc<Mutex<ResetType>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
@@ -79,6 +80,7 @@ impl SendScreen {
             rpc_client: rpc_server,
             focus: Arc::new(Mutex::new(SendScreenWidget::Address)),
             amount: "".to_string(),
+            fee: "".to_string(),
             notice: Arc::new(Mutex::new("".to_string())),
             reset_me: Arc::new(Mutex::new(Default::default())),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
@@ -93,6 +95,7 @@ impl SendScreen {
         token: rpc_auth::Token,
         address: String,
         amount: String,
+        fee: String,
         notice_arc: Arc<Mutex<String>>,
         reset_me: Arc<Mutex<ResetType>>,
         network: Network,
@@ -103,13 +106,20 @@ impl SendScreen {
         *notice_arc.lock().await = "sending ...".to_string();
         refresh_tx.send(()).await.unwrap();
 
-        // TODO: Let user specify this number
-        let fee = NativeCurrencyAmount::zero();
-
         let valid_amount = match NativeCurrencyAmount::coins_from_str(&amount) {
             Ok(a) => a,
             Err(e) => {
                 *notice_arc.lock().await = format!("amount: {}", e);
+                *reset_me.lock().await = ResetType::Notice;
+                refresh_tx.send(()).await.unwrap();
+                return;
+            }
+        };
+
+        let valid_fee = match NativeCurrencyAmount::coins_from_str(&fee) {
+            Ok(a) => a,
+            Err(e) => {
+                *notice_arc.lock().await = format!("fee: {}", e);
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
@@ -138,7 +148,7 @@ impl SendScreen {
                 valid_address,
                 UtxoNotificationMedium::OnChain,
                 UtxoNotificationMedium::OnChain,
-                fee,
+                valid_fee,
             )
             .await
             .unwrap();
@@ -166,6 +176,7 @@ impl SendScreen {
             match *reset_me_mutex_guard {
                 ResetType::Form => {
                     self.amount = "".to_string();
+                    self.fee = "".to_string();
                     self.address = "".to_string();
                     if let Ok(mut n) = self.notice.try_lock() {
                         *n = "".to_string();
@@ -197,6 +208,10 @@ impl SendScreen {
                                         )));
                                     }
                                     SendScreenWidget::Amount => {
+                                        *own_focus = SendScreenWidget::Fee;
+                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                    }
+                                    SendScreenWidget::Fee => {
                                         *own_focus = SendScreenWidget::Ok;
                                         escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
@@ -205,14 +220,15 @@ impl SendScreen {
                                         let rpc_client = self.rpc_client.clone();
                                         let address = self.address.clone();
                                         let amount = self.amount.clone();
+                                        let fee = self.fee.clone();
                                         let notice = self.notice.clone();
                                         let reset_me = self.reset_me.clone();
                                         let network = self.network;
                                         let token = self.token;
 
                                         tokio::spawn(Self::check_and_pay_sequence(
-                                            rpc_client, token, address, amount, notice, reset_me,
-                                            network, refresh_tx,
+                                            rpc_client, token, address, amount, fee, notice,
+                                            reset_me, network, refresh_tx,
                                         ));
                                         //                                        escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
@@ -227,7 +243,8 @@ impl SendScreen {
                                 *own_focus = match own_focus.to_owned() {
                                     SendScreenWidget::Address => SendScreenWidget::Ok,
                                     SendScreenWidget::Amount => SendScreenWidget::Address,
-                                    SendScreenWidget::Ok => SendScreenWidget::Amount,
+                                    SendScreenWidget::Fee => SendScreenWidget::Amount,
+                                    SendScreenWidget::Ok => SendScreenWidget::Fee,
                                     SendScreenWidget::Notice => SendScreenWidget::Notice,
                                 };
                                 escalate_event = Some(DashboardEvent::RefreshScreen);
@@ -239,7 +256,8 @@ impl SendScreen {
                             if let Ok(mut own_focus) = self.focus.try_lock() {
                                 *own_focus = match own_focus.to_owned() {
                                     SendScreenWidget::Address => SendScreenWidget::Amount,
-                                    SendScreenWidget::Amount => SendScreenWidget::Ok,
+                                    SendScreenWidget::Amount => SendScreenWidget::Fee,
+                                    SendScreenWidget::Fee => SendScreenWidget::Ok,
                                     SendScreenWidget::Ok => SendScreenWidget::Address,
                                     SendScreenWidget::Notice => SendScreenWidget::Notice,
                                 };
@@ -253,6 +271,9 @@ impl SendScreen {
                                 if own_focus.to_owned() == SendScreenWidget::Amount {
                                     self.amount = format!("{}{}", self.amount, c);
                                     escalate_event = Some(DashboardEvent::RefreshScreen);
+                                } else if own_focus.to_owned() == SendScreenWidget::Fee {
+                                    self.fee = format!("{}{}", self.fee, c);
+                                    escalate_event = Some(DashboardEvent::RefreshScreen);
                                 } else {
                                     escalate_event = Some(event);
                                 }
@@ -265,6 +286,12 @@ impl SendScreen {
                                 if own_focus.to_owned() == SendScreenWidget::Amount {
                                     if !self.amount.is_empty() {
                                         self.amount.drain(self.amount.len() - 1..);
+                                    }
+                                    escalate_event = Some(DashboardEvent::RefreshScreen);
+                                }
+                                if own_focus.to_owned() == SendScreenWidget::Fee {
+                                    if !self.fee.is_empty() {
+                                        self.fee.drain(self.fee.len() - 1..);
                                     }
                                     escalate_event = Some(DashboardEvent::RefreshScreen);
                                 }
@@ -430,6 +457,38 @@ impl Widget for SendScreen {
                     }),
             );
             amount_widget.render(amount_rect, buf);
+
+            // display fee widget
+            let fee = self.fee;
+            let fee_rect = vrecter.next(3);
+            let fee_widget = Paragraph::new(Line::from(vec![
+                Span::from(fee),
+                if own_focus == SendScreenWidget::Fee {
+                    Span::styled(
+                        "|",
+                        if self.in_focus {
+                            Style::default().add_modifier(Modifier::RAPID_BLINK)
+                        } else {
+                            style
+                        },
+                    )
+                } else {
+                    Span::from(" ")
+                },
+            ]))
+            .style(if own_focus == SendScreenWidget::Fee && self.in_focus {
+                focus_style
+            } else {
+                style
+            })
+            .block(Block::default().borders(Borders::ALL).title("Fee").style(
+                if own_focus == SendScreenWidget::Fee && self.in_focus {
+                    focus_style
+                } else {
+                    style
+                },
+            ));
+            fee_widget.render(fee_rect, buf);
 
             // send button
             let mut button_rect = vrecter.next(3);
