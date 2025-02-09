@@ -1,4 +1,84 @@
 
+## [0.0.12](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.11..v0.0.12) - 2025-02-09
+
+### ✨ Features
+
+- Lossless Display for `NativeCurrencyAmount` ([#373](https://github.com/Neptune-Crypto/neptune-core/issues/373)) ([520adf0d](https://github.com/Neptune-Crypto/neptune-core/commit/520adf0d))
+- Add fee field to dashboard send screen ([8e223a22](https://github.com/Neptune-Crypto/neptune-core/commit/8e223a22))
+
+### 🐛 Bug Fixes
+
+- Catch panics and flush databases ([c5b0b82e](https://github.com/Neptune-Crypto/neptune-core/commit/c5b0b82e))
+- Enable n-out-of-n Shamir secret sharing ([24c3d431](https://github.com/Neptune-Crypto/neptune-core/commit/24c3d431))
+- Debug_assert_fails test, release build ([d5ae197b](https://github.com/Neptune-Crypto/neptune-core/commit/d5ae197b))
+- Get_panics_when_out_of_bounds test, release build ([920df503](https://github.com/Neptune-Crypto/neptune-core/commit/920df503))
+- Fixes clippy dead-code warning ([f64263be](https://github.com/Neptune-Crypto/neptune-core/commit/f64263be))
+- Remove dashboard balance discrepancy ([065ea4a5](https://github.com/Neptune-Crypto/neptune-core/commit/065ea4a5))
+- *(`NativeCurrencyAmount`)* Propagate rounding carry ([bd2e0a84](https://github.com/Neptune-Crypto/neptune-core/commit/bd2e0a84))
+- *(wallet)* Don't create transaction using UTXOs present in mempool ([d9428673](https://github.com/Neptune-Crypto/neptune-core/commit/d9428673))
+
+### 🚀 Performance
+
+- Add option to maintain empty tx in mempool ([554b5b12](https://github.com/Neptune-Crypto/neptune-core/commit/554b5b12))
+
+### 📚 Documentation
+
+- Add user guides ([9df047f4](https://github.com/Neptune-Crypto/neptune-core/commit/9df047f4))
+- Update tokio-console instructions ([df0fa623](https://github.com/Neptune-Crypto/neptune-core/commit/df0fa623))
+
+### ♻️ Refactor
+
+- *(rpc_server)* Exclude 1st mined block from intervals list ([c29822b6](https://github.com/Neptune-Crypto/neptune-core/commit/c29822b6))
+- *(peer)* Reduce message size to 500MB ([49bc9e7c](https://github.com/Neptune-Crypto/neptune-core/commit/49bc9e7c))
+- (!) Make trait `ConsensusProgram` private ([b62e26f2](https://github.com/Neptune-Crypto/neptune-core/commit/b62e26f2))
+- (!) *(ConsensusProgram)* Create test trait ([f1999e5e](https://github.com/Neptune-Crypto/neptune-core/commit/f1999e5e))
+- (!) *(ConsensusProgram)* Make trait private ([287c29a1](https://github.com/Neptune-Crypto/neptune-core/commit/287c29a1))
+- *(`mutator_set`)* Drop unused `Result` wrapper ([cfebce80](https://github.com/Neptune-Crypto/neptune-core/commit/cfebce80))
+- *(`wallet`)* Change determination of "spent" UTXOs ([6dd28b20](https://github.com/Neptune-Crypto/neptune-core/commit/6dd28b20))
+- *(wallet)* Use MSMP validity for compiling balance history ([0500af9d](https://github.com/Neptune-Crypto/neptune-core/commit/0500af9d))
+- *(RPC)* Filter out spent UTXOs smarter ([7493d58c](https://github.com/Neptune-Crypto/neptune-core/commit/7493d58c))
+- (!) Increase target block interval back to 9.8 minutes ([51d3dc95](https://github.com/Neptune-Crypto/neptune-core/commit/51d3dc95))
+- *(`mine_loop`)* Inspect mempool after creating coinbase transaction ([a63af7d0](https://github.com/Neptune-Crypto/neptune-core/commit/a63af7d0))
+- *(RPC)* Disallow sending negative-fee transactions ([aee78c84](https://github.com/Neptune-Crypto/neptune-core/commit/aee78c84))
+- *(`peer_loop`)* Punish peers who send negative-fee transactions ([c30496e9](https://github.com/Neptune-Crypto/neptune-core/commit/c30496e9))
+- *(`Block`)* Return dedicated error type from block validation ([e92eaaea](https://github.com/Neptune-Crypto/neptune-core/commit/e92eaaea))
+
+### ✅ Testing
+
+- De-duplicate testing functionality ([fa81df30](https://github.com/Neptune-Crypto/neptune-core/commit/fa81df30))
+- Fix tests invalidated by disallowing update of 0-input txs ([f1375125](https://github.com/Neptune-Crypto/neptune-core/commit/f1375125))
+- Fix amounts related to increased block time ([d8d8a8a8](https://github.com/Neptune-Crypto/neptune-core/commit/d8d8a8a8))
+- Allow spending of UTXOs spent in orphaned block ([cbf1020b](https://github.com/Neptune-Crypto/neptune-core/commit/cbf1020b))
+
+### 🎨 Styling
+
+- Happify clippy ([fe3f60a1](https://github.com/Neptune-Crypto/neptune-core/commit/fe3f60a1))
+- *(intialize)* Improve declaration ordering ([94255bc6](https://github.com/Neptune-Crypto/neptune-core/commit/94255bc6))
+- Make async fn sync ([ac1373c7](https://github.com/Neptune-Crypto/neptune-core/commit/ac1373c7))
+- Use tokio::try_join instead of futures ([865f70e4](https://github.com/Neptune-Crypto/neptune-core/commit/865f70e4))
+
+### 🛠 Build
+
+- Add tokio-console feature flag. ([d5cd1842](https://github.com/Neptune-Crypto/neptune-core/commit/d5cd1842))
+
+### ⚙️ Miscellaneous
+
+- Improve run-multiple script ([f630e27e](https://github.com/Neptune-Crypto/neptune-core/commit/f630e27e))
+- Improve run-multiple-instances.sh ([9381f9e6](https://github.com/Neptune-Crypto/neptune-core/commit/9381f9e6))
+- Normalize --port arg between rpc clients ([#378](https://github.com/Neptune-Crypto/neptune-core/issues/378)) ([99bedc7f](https://github.com/Neptune-Crypto/neptune-core/commit/99bedc7f))
+- Update scripts to use --port ([f70b159d](https://github.com/Neptune-Crypto/neptune-core/commit/f70b159d))
+- Update release workflow files ([401f4c29](https://github.com/Neptune-Crypto/neptune-core/commit/401f4c29))
+
+### UI
+
+- Disallow sending negative-fee transactions ([b694b125](https://github.com/Neptune-Crypto/neptune-core/commit/b694b125))
+
+### Trace
+
+- *(ProverJob)* More info about job complexity ([#366](https://github.com/Neptune-Crypto/neptune-core/issues/366)) ([557688e1](https://github.com/Neptune-Crypto/neptune-core/commit/557688e1))
+
+Note: (!) indicates a breaking change.
+
 ## [0.0.11](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.10..v0.0.11) - 2025-01-31
 
 ### ✨ Features
