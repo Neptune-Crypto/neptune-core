@@ -31,7 +31,7 @@ use super::MutatorSetError;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Hash)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 

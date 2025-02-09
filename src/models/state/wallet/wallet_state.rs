@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -586,6 +587,8 @@ impl WalletState {
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction
+    ///
+    /// Returns a list of tuples (utxo, absolute-index-set, index-into-database).
     async fn scan_for_spent_utxos(
         &self,
         transaction_kernel: &TransactionKernel,
@@ -1395,17 +1398,31 @@ impl WalletState {
             .await;
 
         // First check that we have enough. Otherwise return an error.
-        let available = wallet_status.synced_unspent_available_amount(timestamp);
-        if available < total_spend {
+        let confirmed_available_amount_without_mempool_spends = self
+            .confirmed_available_balance(&wallet_status, timestamp)
+            .checked_sub(
+                &self
+                    .mempool_spent_utxos_iter()
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .expect("balance must never be negative");
+        if confirmed_available_amount_without_mempool_spends < total_spend {
             bail!(
                 "Insufficient funds. Requested: {}, Available: {}",
                 total_spend,
-                available,
+                confirmed_available_amount_without_mempool_spends,
             );
         }
 
         let mut input_funds = vec![];
         let mut allocated_amount = NativeCurrencyAmount::zero();
+        let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
+            .mempool_spent_utxos
+            .iter()
+            .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
+            .map(|(_, absi, _)| *absi)
+            .collect();
         for (wallet_status_element, membership_proof) in wallet_status.synced_unspent.iter() {
             // Don't allocate more than needed
             if allocated_amount >= total_spend {
@@ -1414,6 +1431,13 @@ impl WalletState {
 
             // Don't attempt to use UTXOs that are still timelocked.
             if !wallet_status_element.utxo.can_spend_at(timestamp) {
+                continue;
+            }
+
+            // Don't use inputs that are already spent by txs in mempool.
+            let absolute_index_set =
+                membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
+            if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
                 continue;
             }
 
@@ -1436,6 +1460,15 @@ impl WalletState {
             allocated_amount =
                 allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
         }
+
+        // Sanity check. Shouldn't be possible to hit because of above balance
+        // check that also takes mempool into account.
+        assert!(
+            allocated_amount >= total_spend,
+            "UTXO allocation failed. This should not be possible. Requested: {}, Available: {}",
+            total_spend,
+            confirmed_available_amount_without_mempool_spends,
+        );
 
         Ok(input_funds)
     }
@@ -2704,6 +2737,7 @@ mod tests {
         use crate::config_models::cli_args;
         use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::block::block_height::BlockHeight;
+        use crate::models::blockchain::transaction::Transaction;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -2845,6 +2879,153 @@ mod tests {
             }
 
             Ok(())
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs() {
+            async fn outgoing_transaction(
+                alice_global_lock: &GlobalStateLock,
+                amount: NativeCurrencyAmount,
+                fee: NativeCurrencyAmount,
+                timestamp: Timestamp,
+                change_key: SpendingKey,
+            ) -> Result<Transaction> {
+                let mut rng = thread_rng();
+                let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
+                let tx_output =
+                    TxOutput::onchain_native_currency(amount, rng.gen(), an_address.into(), false);
+                alice_global_lock
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .create_transaction_with_prover_capability(
+                        vec![tx_output].into(),
+                        change_key,
+                        UtxoNotificationMedium::OffChain,
+                        fee,
+                        timestamp,
+                        TxProvingCapability::PrimitiveWitness,
+                        &TritonVmJobQueue::dummy(),
+                    )
+                    .await
+                    .map(|x| x.0)
+            }
+
+            let network = Network::Main;
+            let mut rng = thread_rng();
+            let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
+            let mut alice = mock_genesis_global_state(
+                network,
+                0,
+                alice_wallet.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+
+            let genesis = Block::genesis(network);
+            let guesser_preimage = rng.gen();
+            let change_key = alice_wallet.nth_generation_spending_key(0).into();
+            let guesser_fraction = 0.5f64;
+
+            // Alice mines a block
+            let (block, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
+                &genesis,
+                None,
+                alice_wallet.nth_generation_spending_key(0),
+                rng.gen(),
+                guesser_fraction,
+                guesser_preimage,
+            )
+            .await;
+
+            // Alice gets all mining rewards
+            let guesser_utxos = block.guesser_fee_expected_utxos(guesser_preimage);
+            let all_mine_rewards = [composer_utxos, guesser_utxos].concat();
+            alice
+                .lock_guard_mut()
+                .await
+                .set_new_self_mined_tip(block.clone(), all_mine_rewards)
+                .await
+                .unwrap();
+
+            // Alice now has four UTXOs: two composer, two guesser; of each
+            // category one is immediately liquid.
+            // So generate two transactions and verify that the inputs are not
+            // in conflict.
+
+            // Check assumption made below: Alice has 2 non-timelocked UTXOs.
+            let now = block.header().timestamp + Timestamp::seconds(1);
+            let wallet_status_1 = alice
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .get_wallet_status(block.hash(), &block.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(
+                2,
+                wallet_status_1
+                    .synced_unspent
+                    .iter()
+                    .filter(|(elem, _)| elem.utxo.can_spend_at(now))
+                    .count()
+            );
+
+            // generate one transaction
+            let tx1 = outgoing_transaction(
+                &alice,
+                NativeCurrencyAmount::coins(1),
+                NativeCurrencyAmount::coins(1),
+                now,
+                change_key,
+            )
+            .await
+            .unwrap();
+
+            // insert into mempool
+            alice
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx1, TransactionOrigin::Own)
+                .await;
+
+            // generate a second transaction
+            let tx2 = outgoing_transaction(
+                &alice,
+                NativeCurrencyAmount::coins(1),
+                NativeCurrencyAmount::coins(1),
+                now,
+                change_key,
+            )
+            .await
+            .unwrap();
+
+            // insert that one into the mempool too
+            alice
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx2, TransactionOrigin::Own)
+                .await;
+
+            // verify that the mempool contains two transactions
+            // ==> did not kick anything out
+            assert_eq!(2, alice.lock_guard().await.mempool.len());
+
+            // Verify that one more transaction *cannot* be made, as all the
+            // monitored UTXOs now have a transaction that spends them in the
+            // mempool.
+            assert!(
+                outgoing_transaction(
+                    &alice,
+                    NativeCurrencyAmount::coins(1),
+                    NativeCurrencyAmount::coins(1),
+                    now,
+                    change_key,
+                )
+                .await
+                .is_err(),
+                "Must fail to generate a 3rd tx when wallet only has 2 spendable UTXOs"
+            );
         }
     }
 
