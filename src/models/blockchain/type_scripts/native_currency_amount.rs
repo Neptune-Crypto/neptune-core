@@ -265,7 +265,17 @@ impl NativeCurrencyAmount {
             decimals.push(digit);
         }
         if (remainder * 10) / conversion_factor > 5 {
-            *decimals.last_mut().unwrap() += 1;
+            let mut i = decimals.len() - 1;
+            decimals[i] += 1;
+            while decimals[i] == 10 {
+                decimals[i] = 0;
+                decimals[i - 1] += 1;
+                if i - 1 == 0 {
+                    break;
+                } else {
+                    i -= 1;
+                }
+            }
         }
 
         format!(
@@ -534,6 +544,8 @@ pub mod neptune_arbitrary {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use std::cmp::max;
+
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use get_size2::GetSize;
@@ -976,5 +988,36 @@ pub(crate) mod test {
         #[strategy(NativeCurrencyAmount::arbitrary_full_range())] amount: NativeCurrencyAmount,
     ) {
         prop_assert_eq!(format!("{}", amount), amount.display_n_decimals(8))
+    }
+
+    #[proptest]
+    fn display_large_integer_minus_epsilon_rounds_up(
+        #[strategy(1_u32..42_000_000)] integer_amount: u32,
+    ) {
+        // Catches issue #383 [1]
+        // [1]: https://github.com/Neptune-Crypto/neptune-core/issues/383
+
+        let amount = NativeCurrencyAmount::coins(integer_amount)
+            .checked_sub(&NativeCurrencyAmount::from_nau(1))
+            .unwrap();
+        for num_decimal_places in 0..34 {
+            // note that the range 0..34 contains 8, which corresponds to
+            // `amount.display()`
+
+            let amount_as_string = amount.display_n_decimals(num_decimal_places);
+            let expected_num_characters = integer_amount.to_string().len() + 1 + num_decimal_places;
+            prop_assert_eq!(expected_num_characters, amount_as_string.len());
+
+            let amount_again = NativeCurrencyAmount::coins_from_str(&amount_as_string).unwrap();
+            let difference = amount
+                .checked_sub(&amount_again)
+                .unwrap_or_else(|| amount_again.checked_sub(&amount).unwrap());
+            let mut difference_threshold = NativeCurrencyAmount::coins(1u32);
+            for _ in 0..num_decimal_places {
+                difference_threshold = difference_threshold.lossy_f64_fraction_mul(0.1);
+            }
+            difference_threshold = max(difference_threshold, NativeCurrencyAmount::from_nau(1));
+            prop_assert!(difference < difference_threshold);
+        }
     }
 }
