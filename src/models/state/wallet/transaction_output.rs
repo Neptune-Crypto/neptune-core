@@ -33,7 +33,7 @@ pub struct TxOutput {
     receiver_digest: Digest,
     notification_method: UtxoNotifyMethod,
 
-    // Indicates if this client can unlock the UTXO
+    /// Indicates if this client can unlock the UTXO
     owned: bool,
 }
 

@@ -3195,4 +3195,238 @@ mod tests {
             }
         }
     }
+
+    /// Test wallet state's handling of UTXOs abandoned due to reorganization.
+    mod abandoned_mutxos {
+        use super::*;
+        use crate::models::blockchain::transaction::Transaction;
+        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::tests::shared::invalid_empty_block;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn mutxos_spent_in_orphaned_blocks_are_still_spendable() {
+            /// Crate an outgoing transaction. Panics on insufficient balance.
+            async fn outgoing_transaction(
+                alice_global_lock: &GlobalStateLock,
+                amount: NativeCurrencyAmount,
+                fee: NativeCurrencyAmount,
+                timestamp: Timestamp,
+                change_key: SpendingKey,
+            ) -> Transaction {
+                let mut rng = thread_rng();
+                let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
+                let tx_output =
+                    TxOutput::onchain_native_currency(amount, rng.gen(), an_address.into(), false);
+                let (spending_tx, _) = alice_global_lock
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .create_transaction_with_prover_capability(
+                        vec![tx_output].into(),
+                        change_key,
+                        UtxoNotificationMedium::OffChain,
+                        fee,
+                        timestamp,
+                        TxProvingCapability::PrimitiveWitness,
+                        &TritonVmJobQueue::dummy(),
+                    )
+                    .await
+                    .unwrap();
+
+                spending_tx
+            }
+
+            // Verify that monitored UTXOs spent in blocks that do not belong
+            // to the canonical chain are spendable and count towards positive
+            // balance.
+            // Cf. #328, https://github.com/Neptune-Crypto/neptune-core/issues/328
+
+            // 1. create a genesis state for Alice, who is premine receiver
+            // 2. create block_1a where Alice spends her premine
+            // 3. Verify zero balance.
+            // 4. Reorganize onto a new chain, blocks 1b and 2b.
+            // 5. Verify no abandoned/unsynced MUTXOs
+            // 6. Verify that Alice can, again, create a transaction spending premine.
+            let network = Network::Main;
+            let alice_wallet = WalletSecret::devnet_wallet();
+            let mut alice_global_lock = mock_genesis_global_state(
+                network,
+                0,
+                alice_wallet.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let genesis = Block::genesis(network);
+            let init_balance = NativeCurrencyAmount::coins(20);
+            assert_eq!(
+                init_balance,
+                alice_global_lock
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .get_wallet_status(genesis.hash(), &genesis.mutator_set_accumulator_after())
+                    .await
+                    .synced_unspent_total_amount(),
+                "Alice assumed to be premine recipient"
+            );
+
+            // Create a transaction that spends all of Alice's balance.
+            let timestamp = network.launch_date() + Timestamp::months(14);
+            let change_key = alice_wallet.nth_symmetric_key(0).into();
+            let spending_tx_1a = outgoing_transaction(
+                &alice_global_lock,
+                NativeCurrencyAmount::coins(19),
+                NativeCurrencyAmount::coins(1),
+                timestamp,
+                change_key,
+            )
+            .await;
+
+            let block_1a = invalid_block_with_transaction(&genesis, spending_tx_1a);
+            let block_1b = invalid_empty_block(&genesis);
+            let block_2b = invalid_empty_block(&block_1b);
+            alice_global_lock
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_1a.clone())
+                .await
+                .unwrap();
+            let wallet_status_1a = alice_global_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .get_wallet_status(block_1a.hash(), &block_1a.mutator_set_accumulator_after())
+                .await;
+            assert!(wallet_status_1a.synced_unspent_total_amount().is_zero());
+
+            // Simulate reorganization.
+            alice_global_lock
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_1b.clone())
+                .await
+                .unwrap();
+            alice_global_lock
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_2b.clone())
+                .await
+                .unwrap();
+            let wallet_status_2b = alice_global_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(block_2b.hash(), &block_2b.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(
+                init_balance,
+                wallet_status_2b.synced_unspent_total_amount(),
+                "Initial balance must be restored when spending-tx was reorganized away."
+            );
+
+            // Verify that MUTXOs can be used to create a similar transaction to the one
+            // that was reorganized away.
+            let _ = outgoing_transaction(
+                &alice_global_lock,
+                NativeCurrencyAmount::coins(19),
+                NativeCurrencyAmount::coins(1),
+                timestamp,
+                change_key,
+            )
+            .await;
+
+            // Go back to a-chain and verify that MUTXOs are considered spent again.
+            let block_2a = invalid_empty_block(&block_1a);
+            alice_global_lock
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_2a.clone())
+                .await
+                .unwrap();
+            assert!(alice_global_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(block_2a.hash(), &block_2a.mutator_set_accumulator_after())
+                .await
+                .synced_unspent_total_amount()
+                .is_zero());
+        }
+
+        #[tokio::test]
+        async fn abandoned_utxo_is_unsynced() {
+            // 1. create a genesis state for Alice
+            // 2. create block_1a where Alice gets a guesser-fee UTXO, set as tip
+            // 3. Verify expected balance
+            // 4. Verify no abandoned/unsynced MUTXOs
+            // 5. create block_1b where Alice doesn't get anything, set as tip
+            // 6. Verify presence of abandoned/unsynced MUTXOs.
+            let network = Network::Main;
+            let mut rng = thread_rng();
+            let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
+            let mut alice_global_lock = mock_genesis_global_state(
+                network,
+                0,
+                alice_wallet.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let genesis = Block::genesis(network);
+            let guesser_preimage = rng.gen();
+
+            let guesser_fraction = 0.6f64;
+            let (block_1a, composer_utxos_1a) =
+                make_mock_block_guesser_preimage_and_guesser_fraction(
+                    &genesis,
+                    None,
+                    alice_wallet.nth_generation_spending_key(14),
+                    rng.gen(),
+                    guesser_fraction,
+                    guesser_preimage,
+                )
+                .await;
+            let guesser_fee_utxos_1a = block_1a.guesser_fee_expected_utxos(guesser_preimage);
+            let all_mine_rewards_1a = [composer_utxos_1a, guesser_fee_utxos_1a].concat();
+
+            alice_global_lock
+                .lock_guard_mut()
+                .await
+                .set_new_self_mined_tip(block_1a.clone(), all_mine_rewards_1a)
+                .await
+                .unwrap();
+            let wallet_status_1a = alice_global_lock
+                .global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(block_1a.hash(), &block_1a.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(
+                Block::block_subsidy(1u64.into()),
+                wallet_status_1a.synced_unspent_total_amount()
+            );
+
+            assert!(wallet_status_1a.unsynced.is_empty());
+
+            // Set tip to competing block with no reward for Alice.
+            let block_1b = invalid_empty_block(&genesis);
+            alice_global_lock
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_1b.clone())
+                .await
+                .unwrap();
+            let wallet_status_1b = alice_global_lock
+                .global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(block_1b.hash(), &block_1b.mutator_set_accumulator_after())
+                .await;
+            assert!(wallet_status_1b.synced_unspent_total_amount().is_zero());
+            assert!(!wallet_status_1b.unsynced.is_empty());
+        }
+    }
 }
