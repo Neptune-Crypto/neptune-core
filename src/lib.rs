@@ -578,7 +578,7 @@ impl Drop for ScopeDurationLogger<'_> {
                     self.description, duration, threshold, self.location,
                 );
 
-                tracing::warn!("{}", msg);
+                tracing::debug!("{}", msg);
             }
         } else {
             let msg = format!(
