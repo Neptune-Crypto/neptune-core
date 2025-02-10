@@ -36,6 +36,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Build benches
+        run: cargo build --benches
+
       - name: Run tests without benches
         run: >
           cargo test
