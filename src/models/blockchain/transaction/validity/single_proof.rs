@@ -43,6 +43,7 @@ pub(crate) const DISCRIMINANT_FOR_MERGE: u64 = 2;
 
 const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_050;
 const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
+const MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR: i128 = 1_000_052;
 
 #[derive(Debug, Clone, BFieldCodec)]
 pub(crate) enum SingleProofWitness {
@@ -404,8 +405,9 @@ impl ConsensusProgram for SingleProof {
                 call {audit_witness_of_proof_collection}
                 // _ [txk_digest] *spw disc *proof_collection proof_collection_size
 
-                pop 1
-                // _ [txk_digest] *spw disc *proof_collection
+                place 8
+                // _ pc_size [txk_digest] *spw disc *proof_collection
+                // _ [txk_digest] *spw disc *proof_collection <-- rename
 
 
                 /* check kernel MAST hash */
@@ -580,6 +582,18 @@ impl ConsensusProgram for SingleProof {
                 pop 5 pop 4
                 addi {-(DISCRIMINANT_FOR_PROOF_COLLECTION as isize) - 1}
                 // [txk_digest] *spw -1
+
+                dup 1 addi 2
+                // _ [txk_digest] *spw -1 *proof_collection
+                // _ pc_size_init [txk_digest] *spw -1 *proof_collection <-- rename
+
+                call {audit_witness_of_proof_collection}
+                // _ pc_size_init [txk_digest] *spw -1 pc_size_end
+
+                pick 8
+                eq
+                assert error_id {MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR}
+                // _ [txk_digest] *spw -1
 
                 return
         };
