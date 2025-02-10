@@ -1465,7 +1465,7 @@ pub trait RPC {
     /// // owned utxo notify method
     /// let notify_self : UtxoNotificationMedium = UtxoNotificationMedium::OnChain;
     /// #
-    /// // unwowned utxo notify method  
+    /// // unwowned utxo notify method
     /// let notify_other : UtxoNotificationMedium = UtxoNotificationMedium::OnChain;
     /// #
     /// // Max fee
@@ -1554,7 +1554,7 @@ pub trait RPC {
     /// // owned utxo notify method
     /// let notify_self : UtxoNotificationMedium = UtxoNotificationMedium::OnChain;
     /// #
-    /// // unwowned utxo notify method  
+    /// // unwowned utxo notify method
     /// let notify_other : UtxoNotificationMedium = UtxoNotificationMedium::OnChain;
     /// #
     /// // Max fee
@@ -1719,7 +1719,7 @@ pub trait RPC {
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
-    ///  // marks mutxos as abandonned  
+    ///  // marks mutxos as abandonned
     /// let abandonned_monitored_utxos = client.prune_abandoned_monitored_utxos(context::current(), token).await??;
     /// # Ok(())
     /// # }
@@ -3269,7 +3269,7 @@ pub mod error {
         NotBroadcast,
 
         // catch-all error, eg for anyhow errors
-        #[error("transaction could not be sent")]
+        #[error("transaction could not be sent.  reason: {0}")]
         Failed(String),
 
         #[error("Transaction with negative fees not allowed")]
