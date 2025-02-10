@@ -512,7 +512,7 @@ pub(crate) mod test {
 
         let genesis_block = Block::genesis(network);
         let now = genesis_block.header().timestamp + Timestamp::months(12);
-        let (tx, _) = alice
+        let (tx, _, _) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(

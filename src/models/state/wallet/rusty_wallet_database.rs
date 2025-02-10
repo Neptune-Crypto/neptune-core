@@ -2,6 +2,7 @@ use twenty_first::math::tip5::Digest;
 
 use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
+use super::sent_transaction::SentTransaction;
 use crate::database::storage::storage_schema::traits::*;
 use crate::database::storage::storage_schema::DbtSingleton;
 use crate::database::storage::storage_schema::DbtVec;
@@ -37,6 +38,9 @@ pub struct RustyWalletDatabase {
     /// list of pre-images to guesser digests in blocks we found. Allows wallet
     /// to spend guesser-fee UTXOs.
     guesser_preimages: DbtVec<Digest>,
+
+    /// list of transactions sent by this wallet.
+    sent_transactions: DbtVec<SentTransaction>,
 }
 
 impl RustyWalletDatabase {
@@ -57,6 +61,11 @@ impl RustyWalletDatabase {
             .new_vec::<ExpectedUtxo>("expected_utxos")
             .await;
 
+        let sent_transactions = storage
+            .schema
+            .new_vec::<SentTransaction>("sent_transactions")
+            .await;
+
         let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
         let counter = storage.schema.new_singleton::<u64>("counter").await;
 
@@ -75,6 +84,7 @@ impl RustyWalletDatabase {
             storage,
             monitored_utxos,
             expected_utxos,
+            sent_transactions,
             sync_label,
             counter,
             generation_key_counter,
@@ -101,6 +111,16 @@ impl RustyWalletDatabase {
     /// get mutable expected_utxos.
     pub fn expected_utxos_mut(&mut self) -> &mut DbtVec<ExpectedUtxo> {
         &mut self.expected_utxos
+    }
+
+    /// get sent transactions
+    pub fn sent_transactions(&self) -> &DbtVec<SentTransaction> {
+        &self.sent_transactions
+    }
+
+    /// get mutable sent transactions
+    pub fn sent_transactions_mut(&mut self) -> &mut DbtVec<SentTransaction> {
+        &mut self.sent_transactions
     }
 
     pub fn guesser_preimages(&self) -> &DbtVec<Digest> {

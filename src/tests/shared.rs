@@ -894,7 +894,7 @@ pub(crate) async fn fake_valid_block_from_tx_for_tests(
 async fn fake_create_transaction_from_details_for_tests(
     transaction_details: TransactionDetails,
 ) -> Transaction {
-    let kernel = PrimitiveWitness::from_transaction_details(transaction_details).kernel;
+    let kernel = PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
 
     let claim = SingleProof::claim(kernel.mast_hash());
     cache_true_claim(claim).await;

@@ -3200,7 +3200,7 @@ mod peer_loop_tests {
             .nth_symmetric_key_for_tests(0);
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
-        let (transaction_1, _change_output) = state_lock
+        let (transaction_1, _, _change_output) = state_lock
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -3283,7 +3283,7 @@ mod peer_loop_tests {
 
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
-        let (transaction_1, _change_output) = state_lock
+        let (transaction_1, _, _change_output) = state_lock
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(

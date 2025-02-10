@@ -1487,6 +1487,9 @@ pub trait RPC {
 
     /// Send coins to multiple recipients
     ///
+    /// note: sending is rate-limited to 2 sends per block until block
+    /// 25000 is reached.
+    ///
     /// `outputs` is a list of transaction outputs in the format
     /// `[(address:amount)]`.  The address may be any type supported by
     /// [ReceivingAddress].
@@ -1829,6 +1832,39 @@ impl NeptuneRPCServer {
         let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
             utxo_notification_media;
 
+        // check if this send would exceed the send rate-limit (per block)
+        {
+            // send rate limiting only applies below height 25000
+            // which is approx 5.6 months after launch.
+            // after that, the training wheel come off.
+            const RATE_LIMIT_UNTIL_HEIGHT: u64 = 25000;
+            let state = self.state.lock_guard().await;
+
+            if state.chain.light_state().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {
+                const RATE_LIMIT: usize = 2;
+                let tip_digest = state.chain.light_state().hash();
+                let send_count_at_tip = state
+                    .wallet_state
+                    .count_sent_transactions_at_block(tip_digest)
+                    .await;
+                tracing::debug!(
+                    "send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}",
+                    send_count_at_tip,
+                    RATE_LIMIT
+                );
+                if send_count_at_tip >= RATE_LIMIT {
+                    let height = state.chain.light_state().header().height;
+                    let e = error::SendError::RateLimit {
+                        height,
+                        tip_digest,
+                        max: RATE_LIMIT,
+                    };
+                    tracing::warn!("{}", e.to_string());
+                    return Err(e);
+                }
+            }
+        }
+
         tracing::debug!("stmi: step 1. get change key. need write-lock");
 
         // obtain next unused symmetric key for change utxo
@@ -1864,7 +1900,7 @@ impl NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let (mut transaction, maybe_change_output) = match state
+        let (mut transaction, transaction_details, maybe_change_output) = match state
             .create_transaction_with_prover_capability(
                 tx_outputs.clone(),
                 change_key,
@@ -1923,17 +1959,29 @@ impl NeptuneRPCServer {
             gsm.persist_wallet().await.expect("flushed wallet");
         }
 
-        tracing::debug!("stmi: step 6. send messges. no lock needed");
+        // write-lock block.
+        {
+            tracing::debug!("stmi: step 6. add sent-transaction to wallet. with write-lock");
+
+            let mut gsm = self.state.lock_guard_mut().await;
+            // inform wallet about the details of this sent transaction, so it can
+            // group inputs and outputs together, eg for history purposes.
+            let tip_digest = gsm.chain.light_state().hash();
+            gsm.wallet_state
+                .add_sent_transaction((transaction_details, tip_digest).into())
+                .await;
+
+            tracing::debug!("stmi: step 7. flush dbs.  with write-lock");
+            gsm.flush_databases().await.expect("flushed DBs");
+        }
+
+        tracing::debug!("stmi: step 8. send messges. no lock needed");
 
         // Send transaction message to main
         let response = self
             .rpc_server_to_main_tx
             .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
             .await;
-
-        tracing::debug!("stmi: step 7. flush dbs.  need write-lock");
-
-        self.state.flush_databases().await.expect("flushed DBs");
 
         if let Err(e) = response {
             tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
@@ -3286,6 +3334,13 @@ pub mod error {
 
         #[error("machine too weak to initiate transactions")]
         TooWeak,
+
+        #[error("Send rate limit reached for block height {height} ({digest}). A maximum of {max} tx may be sent per block.", digest = tip_digest.to_hex())]
+        RateLimit {
+            height: BlockHeight,
+            tip_digest: Digest,
+            max: usize,
+        },
     }
 
     // convert anyhow::Error to a SendError::Failed.
@@ -4520,7 +4575,8 @@ mod rpc_server_tests {
             let outputs = std::iter::repeat(elem);
             let fee = NativeCurrencyAmount::zero();
 
-            for i in 0..5 {
+            // note: we can only perform 2 iters, else we bump into send rate-limit (per block)
+            for i in 5..7 {
                 let result = rpc_server
                     .clone()
                     .send_to_many_inner(
@@ -4548,6 +4604,59 @@ mod rpc_server_tests {
             for recipient_key_type in KeyType::all_types_for_receiving() {
                 worker::send_to_many(recipient_key_type).await?;
             }
+            Ok(())
+        }
+
+        /// checks that the sending rate limit kicks in after 2 tx are sent.
+        /// note: rate-limit only applies below block 25000
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn send_rate_limit() -> Result<()> {
+            let mut rng = StdRng::seed_from_u64(1815);
+            let network = Network::Main;
+            let rpc_server = test_rpc_server(
+                network,
+                WalletSecret::devnet_wallet(),
+                2,
+                cli_args::Args::default(),
+            )
+            .await;
+
+            let ctx = context::current();
+            let timestamp = network.launch_date() + Timestamp::months(7);
+
+            let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.gen())
+                .to_address()
+                .into();
+            let amount = NativeCurrencyAmount::coins(rng.gen_range(0..10));
+            let fee = NativeCurrencyAmount::coins(1);
+
+            let outputs = vec![(address, amount)];
+
+            for i in 0..10 {
+                let result = rpc_server
+                    .clone()
+                    .send_to_many_inner(
+                        ctx,
+                        outputs.clone(),
+                        (
+                            UtxoNotificationMedium::OnChain,
+                            UtxoNotificationMedium::OnChain,
+                        ),
+                        fee,
+                        timestamp,
+                        TxProvingCapability::PrimitiveWitness,
+                    )
+                    .await;
+
+                // any attempts after the 2nd send should result in RateLimit error.
+                match i {
+                    0..2 => assert!(result.is_ok()),
+                    _ => assert!(matches!(result, Err(error::SendError::RateLimit { .. }))),
+                }
+            }
+
             Ok(())
         }
 

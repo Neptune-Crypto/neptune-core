@@ -4,6 +4,8 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 use itertools::Itertools;
+use serde::Deserialize;
+use serde::Serialize;
 
 use super::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
@@ -26,7 +28,7 @@ use crate::util_types::mutator_set::commit;
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
 /// and claim a given UTXO.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxOutput {
     utxo: Utxo,
     sender_randomness: Digest,
@@ -212,7 +214,7 @@ impl TxOutput {
 }
 
 /// Represents a list of [TxOutput]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TxOutputList(Vec<TxOutput>);
 
 impl Deref for TxOutputList {
