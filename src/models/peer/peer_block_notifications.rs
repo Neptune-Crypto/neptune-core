@@ -8,7 +8,7 @@ use crate::models::blockchain::block::Block;
 
 /// Used to tell peers that a new block has been found without having to
 /// send the entire block
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerBlockNotification {
     pub hash: Digest,
     pub height: BlockHeight,

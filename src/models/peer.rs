@@ -566,6 +566,11 @@ pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,
     pub fork_reconciliation_blocks: Vec<Block>,
     pub(crate) sync_challenge: Option<IssuedSyncChallenge>,
+
+    /// Timestamp for the last successful sync challenge response.
+    ///
+    /// Used to prevent issuing multiple sync challenges in short succession.
+    pub(crate) successful_sync_challenge_response_time: Option<Timestamp>,
 }
 
 impl MutablePeerState {
@@ -574,6 +579,7 @@ impl MutablePeerState {
             highest_shared_block_height: block_height,
             fork_reconciliation_blocks: vec![],
             sync_challenge: None,
+            successful_sync_challenge_response_time: None,
         }
     }
 }

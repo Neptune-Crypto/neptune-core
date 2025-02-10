@@ -654,12 +654,20 @@ impl PeerLoopHandler {
                 );
 
                 let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
-                if GlobalState::sync_mode_threshold_stateless(
+                let now = self.now();
+                let time_since_latest_successful_challenge = peer_state_info
+                    .successful_sync_challenge_response_time
+                    .map(|then| now - then);
+                const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
+                let cooldown_expired = time_since_latest_successful_challenge
+                    .is_none_or(|time_passed| time_passed > SYNC_CHALLENGE_COOLDOWN);
+                let exceeds_sync_mode_threshold = GlobalState::sync_mode_threshold_stateless(
                     &tip_header,
                     block_notification.height,
                     block_notification.cumulative_proof_of_work,
                     sync_mode_threshold,
-                ) {
+                );
+                if cooldown_expired && exceeds_sync_mode_threshold {
                     debug!("sync mode criterion satisfied.");
 
                     if peer_state_info.sync_challenge.is_some() {
@@ -696,6 +704,7 @@ impl PeerLoopHandler {
                 if block_is_new
                     && peer_state_info.fork_reconciliation_blocks.is_empty()
                     && !sync_anchor_is_set
+                    && !exceeds_sync_mode_threshold
                 {
                     debug!(
                         "sending BlockRequestByHeight to peer for block with height {}",
@@ -825,6 +834,7 @@ impl PeerLoopHandler {
                 }
 
                 info!("Successful sync challenge response; relaying peer tip info to main loop.");
+                peer_state_info.successful_sync_challenge_response_time = Some(now);
 
                 let mut sync_mmra_anchor = challenge_response.tip.body.block_mmr_accumulator;
                 sync_mmra_anchor.append(issued_challenge.challenge.tip_digest);
@@ -3821,6 +3831,10 @@ mod peer_loop_tests {
                 Action::Read(PeerMessage::SyncChallengeResponse(Box::new(
                     sync_challenge_response_from_bob,
                 ))),
+                Action::Read(PeerMessage::BlockNotification(block_notification_from_bob)),
+                // Ensure no 2nd sync challenge is sent, as timeout has not yet passed.
+                // The absence of a Write here checks that a 2nd challenge isn't sent
+                // when a successful was just received.
                 Action::Read(PeerMessage::Bye),
             ]);
 
