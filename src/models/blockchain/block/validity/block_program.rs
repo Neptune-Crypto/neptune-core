@@ -39,6 +39,7 @@ pub(crate) struct BlockProgram;
 
 impl BlockProgram {
     const ILLEGAL_FEE: i128 = 1_000_210;
+    const PROOF_SIZE_INDICATOR_TOO_BIG: i128 = 1_000_211;
 
     pub(crate) fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
         Claim::new(Self.hash())
@@ -189,6 +190,9 @@ impl ConsensusProgram for BlockProgram {
 
         let verify_all_claims_loop = "verify_all_claims_loop".to_string();
 
+        // restrict proof size to avoid jumping backwards or to arbitrary
+        // place in memory.
+        const MAX_PROOF_SIZE: u64 = 4_000_000;
         let verify_all_claims_function = triton_asm! {
             // INVARIANT: _ *claim[i]_si *proof[i]_si N i
             {verify_all_claims_loop}:
@@ -233,6 +237,11 @@ impl ConsensusProgram for BlockProgram {
                 swap 3
                 read_mem 1
                 // _ *claim[i+1]_si N i proof[i]_si (*proof[i] - 2)
+
+                push {MAX_PROOF_SIZE}
+                dup 2
+                lt
+                assert error_id {Self::PROOF_SIZE_INDICATOR_TOO_BIG}
 
                 addi 2
                 add
