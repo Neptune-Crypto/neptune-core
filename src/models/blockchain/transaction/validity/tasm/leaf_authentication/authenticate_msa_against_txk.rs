@@ -138,7 +138,7 @@ impl BasicSnippet for AuthenticateMsaAgainstTxk {
                 // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest
 
                 pop 3
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest
+                // _
 
                 return
         )

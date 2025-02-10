@@ -17,8 +17,9 @@ const UNEQUAL_DISCRIMINANT_ERROR: i128 = 1_000_020;
 const UNEQUAL_VALUE_ERROR: i128 = 1_000_021;
 const BOTH_INPUT_COINBASES_ERROR: i128 = 1_000_022;
 
-/// Authenticate that both coinbase and fee fields match the tx-kernel mast
-/// hash. And authenticate that the no-inflation rule for merge is followed.
+/// Authenticate coinbase fields of left, right, and new kernels. Verify that
+/// at most one from (left, right) is set. Verify that the one that is set (if
+/// any) matches new.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AuthenticateCoinbaseFields {
     left_txk_mast_hash_alloc: StaticAllocation,
@@ -72,7 +73,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
         const DISCRIMINANT_SIZE: usize = 1;
         let some_coinbase_field_size =
             NativeCurrencyAmount::static_length().unwrap() + DISCRIMINANT_SIZE;
-        let compare_coinbases = DataType::compare_elem_of_stack_size(some_coinbase_field_size);
+        let compare_some_coinbases = DataType::compare_elem_of_stack_size(some_coinbase_field_size);
 
         let assert_coinbase_equality_label = format!("{entrypoint}_assert_eq");
         let assert_coinbase_equality = triton_asm!(
@@ -120,7 +121,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
                 pop 1
                 // _  *coinbase_a *coinbase_b [coinbase_a; 5] [coinbase_b; 5]
 
-                {&compare_coinbases}
+                {&compare_some_coinbases}
                 // _ *coinbase_a *coinbase_b (coinbase_a == coinbase_b)
 
                 assert error_id {UNEQUAL_VALUE_ERROR}
@@ -180,7 +181,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
                 // _ *new_txk *left_coinbase *right_coinbase
 
 
-                /* Assert that either left or right coinbase is *not* set */
+                /* 3. */
                 dup 1
                 read_mem 1
                 pop 1

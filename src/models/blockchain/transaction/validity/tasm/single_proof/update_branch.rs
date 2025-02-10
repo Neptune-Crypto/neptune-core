@@ -173,7 +173,7 @@ impl BasicSnippet for UpdateBranch {
         vec![
             (DataType::Digest, "single_proof_program_digest".to_owned()),
             (DataType::Digest, "new_tx_kernel_digest".to_owned()),
-            (DataType::Bfe, "single_proof_witness".to_owned()),
+            (DataType::VoidPointer, "single_proof_witness".to_owned()),
             (DataType::Bfe, "discriminant".to_owned()),
         ]
     }
@@ -182,7 +182,7 @@ impl BasicSnippet for UpdateBranch {
         vec![
             (DataType::Digest, "single_proof_program_digest".to_owned()),
             (DataType::Digest, "new_tx_kernel_digest".to_owned()),
-            (DataType::Bfe, "single_proof_witness".to_owned()),
+            (DataType::VoidPointer, "single_proof_witness".to_owned()),
             (DataType::Bfe, "minus_1".to_owned()),
         ]
     }
@@ -219,7 +219,7 @@ impl BasicSnippet for UpdateBranch {
             pop 1
         );
 
-        let old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
+        let field_old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
 
         let audit_preloaded_data =
@@ -349,7 +349,7 @@ impl BasicSnippet for UpdateBranch {
                 // _ witness_size [program_digest] [new_txk_digest] *update_witness
 
                 dup 0
-                {&old_txk_mh}
+                {&field_old_txk_mh}
                 // _ witness_size [program_digest] [new_txk_digest] *update_witness *old_txk_mhash
 
                 {&load_digest}
@@ -384,6 +384,7 @@ impl BasicSnippet for UpdateBranch {
                 call {stark_verify}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash]
 
+
                 /* Verify AOCL-related witness data */
                 /* 1: Verify new AOCL-related witness data */
                 dup 10
@@ -413,6 +414,8 @@ impl BasicSnippet for UpdateBranch {
                 dup 10
                 call {authenticate_msa}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
+                /* Now, all new mutator set-related values on stack are authenticated */
+
 
                 /* Verify old AOCL-related witness data */
                 dup 13
@@ -429,20 +432,27 @@ impl BasicSnippet for UpdateBranch {
 
                 dup 2
                 {&peaks_field}
+                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl_peaks
 
                 dup 2
                 dup 2
+                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest
+
                 push {old_txk_digest_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
+                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest [old_txk_mast_hash]
+
                 call {authenticate_msa}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *old_aocl *old_swbfi_bagged *old_swbfa_digest
+                /* Now, all old mutator set-related values on stack are authenticated */
 
                 pop 2
                 swap 2
                 pop 2
                 swap 1
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_aocl *new_aocl
+
 
                 /* Verify that new AOCL is a successor of old AOCL */
                 call {verify_mmr_successor_proof}
@@ -495,6 +505,7 @@ impl BasicSnippet for UpdateBranch {
                 pop 1
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs
 
+
                 /* Verify that tx has a non-zero number of inputs */
                 dup 0
                 read_mem 1
@@ -535,6 +546,7 @@ impl BasicSnippet for UpdateBranch {
                 {&authenticate_field_twice_with_no_change(&fee_field_with_size, TransactionKernelField::Fee)}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
 
+
                 /* Authenticate coinbase and verify None in old and new tx */
                 push {old_txk_digest_alloc.read_address()}
                 read_mem {Digest::LEN}
@@ -549,6 +561,7 @@ impl BasicSnippet for UpdateBranch {
                 dup 6
                 {&verify_coinbase_is_none}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
+
 
                 /* Authenticate timestamps and verify gte */
                 {&field_timestamp}
