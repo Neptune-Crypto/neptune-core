@@ -2900,9 +2900,18 @@ impl RPC for NeptuneRPCServer {
             return Err(error::SendError::NegativeFee.into());
         }
 
+        match self.state.cli().proving_capability() {
+            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness => {
+                warn!("Cannot initiate transaction because transaction proving capability is too weak.");
+                return Err(error::SendError::TooWeak.into());
+            }
+            TxProvingCapability::ProofCollection | TxProvingCapability::SingleProof => (),
+        };
+
         // The proving capability is set to the lowest possible value here,
-        // since we don't want the client (CLI or dashboard) to hang. Instead,
-        // we let (a task started by) main loop handle the proving.
+        // since we don't want the client (CLI or dashboard) to hang while
+        // producing proofs. Instead, we let (a task started by) main loop
+        // handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
         Ok(self
             .send_to_many_inner(
@@ -3274,6 +3283,9 @@ pub mod error {
 
         #[error("Transaction with negative fees not allowed")]
         NegativeFee,
+
+        #[error("machine too weak to initiate transactions")]
+        TooWeak,
     }
 
     // convert anyhow::Error to a SendError::Failed.
