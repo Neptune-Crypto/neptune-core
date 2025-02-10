@@ -153,7 +153,7 @@ impl PrimitiveWitness {
     /// # Panics
     /// Panics if transaction validity cannot be satisfied.
     fn generate_primitive_witness(
-        unlocked_utxos: Vec<UnlockedUtxo>,
+        unlocked_utxos: &[UnlockedUtxo],
         output_utxos: Vec<Utxo>,
         sender_randomnesses: Vec<Digest>,
         receiver_digests: Vec<Digest>,
@@ -231,7 +231,7 @@ impl PrimitiveWitness {
     }
 
     /// Create a [`PrimitiveWitness`] from [`TransactionDetails`].
-    pub(crate) fn from_transaction_details(transaction_details: TransactionDetails) -> Self {
+    pub(crate) fn from_transaction_details(transaction_details: &TransactionDetails) -> Self {
         let TransactionDetails {
             tx_inputs,
             tx_outputs,
@@ -244,15 +244,15 @@ impl PrimitiveWitness {
         // complete transaction kernel
         let removal_records = tx_inputs
             .iter()
-            .map(|txi| txi.removal_record(&mutator_set_accumulator))
+            .map(|txi| txi.removal_record(mutator_set_accumulator))
             .collect_vec();
         let kernel = TransactionKernelProxy {
             inputs: removal_records,
             outputs: tx_outputs.addition_records(),
             public_announcements: tx_outputs.public_announcements(),
-            fee,
-            timestamp,
-            coinbase,
+            fee: *fee,
+            timestamp: *timestamp,
+            coinbase: *coinbase,
             mutator_set_hash: mutator_set_accumulator.hash(),
             merge_bit: false,
         }
@@ -269,7 +269,7 @@ impl PrimitiveWitness {
             sender_randomnesses,
             receiver_digests,
             kernel.clone(),
-            mutator_set_accumulator,
+            mutator_set_accumulator.clone(),
         )
     }
 

@@ -754,6 +754,7 @@ impl GlobalState {
             triton_vm_job_queue,
         )
         .await
+        .map(|(tx, _tx_details, output)| (tx, output))
     }
 
     /// Variant of [Self::create_transaction] that allows caller to specify
@@ -769,7 +770,7 @@ impl GlobalState {
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<(Transaction, Option<TxOutput>)> {
+    ) -> Result<(Transaction, TransactionDetails, Option<TxOutput>)> {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
         let tip = self.chain.light_state();
@@ -822,7 +823,7 @@ impl GlobalState {
 
         // 2. Create the transaction
         let transaction = Self::create_raw_transaction(
-            transaction_details,
+            &transaction_details,
             prover_capability,
             triton_vm_job_queue,
             (
@@ -833,7 +834,7 @@ impl GlobalState {
         )
         .await?;
 
-        Ok((transaction, maybe_change_output))
+        Ok((transaction, transaction_details, maybe_change_output))
     }
 
     /// creates a Transaction.
@@ -864,7 +865,7 @@ impl GlobalState {
     ///
     /// See the implementation of [Self::create_transaction()].
     pub(crate) async fn create_raw_transaction(
-        transaction_details: TransactionDetails,
+        transaction_details: &TransactionDetails,
         proving_power: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
@@ -887,7 +888,7 @@ impl GlobalState {
     //       Use create_transaction_from_data() instead.
     //
     async fn create_transaction_from_data_worker(
-        transaction_details: TransactionDetails,
+        transaction_details: &TransactionDetails,
         proving_power: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
@@ -1893,7 +1894,7 @@ mod global_state_tests {
             .is_err());
 
         // one month after though, we should be
-        let (tx, _change_output) = bob
+        let (tx, _, _change_output) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1933,7 +1934,7 @@ mod global_state_tests {
             output_utxos.push(output_utxo);
         }
 
-        let (new_tx, _change) = bob
+        let (new_tx, _, _change) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2577,7 +2578,7 @@ mod global_state_tests {
             .next_unused_spending_key(KeyType::Generation)
             .await
             .unwrap();
-        let (tx_to_alice_and_bob, maybe_change_output) = premine_receiver
+        let (tx_to_alice_and_bob, _, maybe_change_output) = premine_receiver
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2757,7 +2758,7 @@ mod global_state_tests {
         // state is being updated correctly with new blocks; not the
         // use-`ProofCollection`-instead-of-`SingleProof` functionality.
         // Weaker machines need to use the proof server.
-        let (tx_from_alice, maybe_change_for_alice) = alice
+        let (tx_from_alice, _, maybe_change_for_alice) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2800,7 +2801,7 @@ mod global_state_tests {
                 false,
             ),
         ];
-        let (tx_from_bob, maybe_change_for_bob) = bob
+        let (tx_from_bob, _, maybe_change_for_bob) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -3709,7 +3710,7 @@ mod global_state_tests {
                 );
 
                 // create tx.  utxo_notify_method is a test param.
-                let (alice_to_bob_tx, maybe_change_utxo) = alice_state_lock
+                let (alice_to_bob_tx, _, maybe_change_utxo) = alice_state_lock
                     .lock_guard()
                     .await
                     .create_transaction_with_prover_capability(

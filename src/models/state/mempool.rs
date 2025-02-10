@@ -979,7 +979,7 @@ mod tests {
         .await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let high_fee = NativeCurrencyAmount::coins(15);
-        let (tx_by_bob, _maybe_change_output) = bob
+        let (tx_by_bob, _, _maybe_change_output) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1133,7 +1133,7 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_months = now + Timestamp::months(7);
         let in_eight_months = now + Timestamp::months(8);
-        let (tx_by_bob, maybe_change_output) = bob
+        let (tx_by_bob, _, maybe_change_output) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1174,7 +1174,7 @@ mod tests {
             alice_address.into(),
             true,
         )];
-        let (tx_from_alice_original, _maybe_change_output) = alice
+        let (tx_from_alice_original, _, _maybe_change_output) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1467,7 +1467,7 @@ mod tests {
             .to_owned();
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_years = now + Timestamp::months(7 * 12);
-        let (unmined_tx, _maybe_change_output) = alice
+        let (unmined_tx, _, _maybe_change_output) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1595,7 +1595,7 @@ mod tests {
                     false,
                 );
                 let tx_outputs: TxOutputList = vec![receiver_data.clone()].into();
-                let (tx, _maybe_change_output) = preminer_clone
+                let (tx, _, _maybe_change_output) = preminer_clone
                     .clone()
                     .lock_guard()
                     .await
@@ -1799,7 +1799,7 @@ mod tests {
             )
             .await;
             let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-            let (tx_by_bob, _maybe_change_output) = bob
+            let (tx_by_bob, _, _maybe_change_output) = bob
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(

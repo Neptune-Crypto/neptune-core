@@ -453,7 +453,7 @@ impl UpgradeJob {
                     )
                 })
                 .collect_vec();
-            let gobbler = PrimitiveWitness::from_transaction_details(gobbler);
+            let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
             let gobbler_proof =
                 SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())
                     .await?;

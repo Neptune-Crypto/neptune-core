@@ -5,6 +5,7 @@ pub(crate) mod incoming_utxo;
 pub(crate) mod monitored_utxo;
 pub(crate) mod rusty_wallet_database;
 pub mod secret_key_material;
+pub mod sent_transaction;
 pub(crate) mod transaction_output;
 pub(crate) mod unlocked_utxo;
 pub mod utxo_notification;
@@ -955,7 +956,7 @@ mod wallet_tests {
 
         let receiver_data_to_alice: TxOutputList =
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
-        let (tx, _change_output) = bob
+        let (tx, _, _change_output) = bob
             .create_transaction_with_prover_capability(
                 receiver_data_to_alice.clone(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
@@ -1192,7 +1193,7 @@ mod wallet_tests {
             false,
         );
 
-        let (tx_from_bob, _maybe_change_output) = bob
+        let (tx_from_bob, _, _maybe_change_output) = bob
             .create_transaction_with_prover_capability(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
@@ -1404,7 +1405,7 @@ mod wallet_tests {
         let tx_output =
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
-        let (sender_tx, _change_output) = bob
+        let (sender_tx, _, _change_output) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
