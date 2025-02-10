@@ -46,11 +46,17 @@ impl BlockProofWitness {
         }
     }
 
+    /// Add a claim to the appendix, along with a proof.
     fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
         self.claims.push(claim);
         self.proofs.push(proof);
 
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_claim_test(self, claim: Claim, proof: Proof) -> Self {
+        self.with_claim(claim, proof)
     }
 
     pub(crate) fn claims(&self) -> Vec<Claim> {

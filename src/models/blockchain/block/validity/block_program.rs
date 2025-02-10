@@ -2,7 +2,6 @@ use std::sync::OnceLock;
 
 use itertools::Itertools;
 use tasm_lib::field;
-use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::hash_from_stack::HashFromStack;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
@@ -79,10 +78,10 @@ impl ConsensusProgram for BlockProgram {
 
         let merkle_verify = library.import(Box::new(MerkleVerify));
         let coin_size = NativeCurrencyAmount::static_length().unwrap();
-        let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
         let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
         let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
         let hash_from_stack_digest = library.import(Box::new(HashFromStack::new(DataType::Digest)));
+        let hash_from_stack_amount = library.import(Box::new(HashFromStack::new(DataType::I128)));
         let verify_fee_legality = triton_asm!(
             // _ *w [txkmh]
 
@@ -100,18 +99,25 @@ impl ConsensusProgram for BlockProgram {
             dup 12 {&block_body_field} {&body_field_kernel} {&kernel_field_fee}
             // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
 
-            dup 0 addi {coin_size - 1} read_mem {coin_size} pop 1
-            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee [fee]
+            addi {coin_size - 1} read_mem {coin_size} pop 1
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee]
 
+            /* Using u128-lt here, guarantees fee is both positive and less
+               than max allowed amount.
+            */
+            dup 3
+            dup 3
+            dup 3
+            dup 3
             {&push_max_amount}
             call {u128_lt}
             push 0 eq
-            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee (max >= fee)
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee] (max >= fee)
 
             assert error_id {Self::ILLEGAL_FEE}
-            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee]
 
-            call {hash_fee} pop 1
+            call {hash_from_stack_amount}
             // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee_hash]
 
             call {merkle_verify}
@@ -180,56 +186,63 @@ impl ConsensusProgram for BlockProgram {
         );
 
         let hash_varlen = library.import(Box::new(HashVarlen));
-        let print_claim_hash = triton_asm!(
-            // _ *claim[i]_si
-
-            read_mem 1
-            addi 2
-            // _ claim[i]_si *claim[i]
-
-            dup 0
-            place 2
-            place 1
-            // _ *claim[i] *claim[i] claim[i]_si
-
-            call {hash_varlen}
-            // _ *claim[i] [hash(claim)]
-
-            write_io {Digest::LEN}
-            // _ *claim[i]
-        );
 
         let verify_all_claims_loop = "verify_all_claims_loop".to_string();
 
         let verify_all_claims_function = triton_asm! {
-            // INVARIANT: _ [bbd] *claim[i]_si *proof[i]_si N i
+            // INVARIANT: _ *claim[i]_si *proof[i]_si N i
             {verify_all_claims_loop}:
 
                 // terminate if done
                 dup 1 dup 1 eq skiz return
 
-                dup 3
-                // _ [bbd] *claim[i]_si *proof[i]_si N i *claim[i]_si
+                pick 3
+                // _ *proof[i]_si N i *claim[i]_si
 
-                {&print_claim_hash}
-                // _ [bbd] *claim[i]_si *proof[i]_si N i *claim[i]
 
-                dup 3 addi 1
-                // _ [bbd] *claim[i]_si *proof[i]_si N i *claim[i] *proof[i]
+                /* print claim hash */
+                // _ *proof[i]_si N i *claim[i]_si
+
+                read_mem 1
+                addi 2
+                // _ *proof[i]_si N i claim[i]_si *claim[i]
+
+                dup 0
+                dup 2
+                call {hash_varlen}
+                // _ *proof[i]_si N i claim[i]_si *claim[i] [hash(claim)]
+
+                write_io {Digest::LEN}
+                // _ *proof[i]_si N i claim[i]_si *claim[i]
+
+
+                /* verify claim */
+                dup 0
+                dup 5
+                addi 1
+                // _ *proof[i]_si N i claim[i]_si *claim[i] *claim[i] *proof[i]
 
                 call {stark_verify}
-                // _ [bbd] *claim[i]_si *proof[i]_si N i
+                // _ *proof[i]_si N i claim[i]_si *claim[i]
 
-                // update pointers and counter
-                pick 3 read_mem 1 addi 1 add
-                // _ [bbd] *proof[i]_si N i *claim[i+1]_si
 
-                pick 3 read_mem 1 addi 1 add
-                // _ [bbd] N i *claim[i+1]_si *proof[i+1]_si
+                /* Update pointers and counter */
+                add
+                // _ *proof[i]_si N i *claim[i+1]_si
 
-                pick 3
-                pick 3 addi 1
-                // _ [bbd] *claim[i+1]_si *proof[i+1]_si N (i+1)
+                swap 3
+                read_mem 1
+                // _ *claim[i+1]_si N i proof[i]_si (*proof[i] - 2)
+
+                addi 2
+                add
+                // _ *claim[i+1]_si N i *proof[i+1]_si
+
+                place 2
+                // _ *claim[i+1]_si *proof[i+1]_si N i
+
+                addi 1
+                // _ *claim[i+1]_si *proof[i+1]_si N (i + 1)
 
                 recurse
         };
@@ -306,7 +319,10 @@ pub(crate) mod test {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::triton_vm::prelude::Program;
+    use tasm_lib::triton_vm::vm::NonDeterminism;
     use tasm_lib::triton_vm::vm::PublicInput;
     use tracing_test::traced_test;
 
@@ -522,6 +538,64 @@ pub(crate) mod test {
         assert!(
             !block2.is_valid(&block1, later).await,
             "Block doing a double-spend must be invalid."
+        );
+    }
+
+    #[test]
+    fn can_verify_block_program_with_two_claims() {
+        let block_primitive_witness = deterministic_block_primitive_witness();
+        let block_body_mast_hash_as_input = PublicInput::new(
+            block_primitive_witness
+                .body()
+                .mast_hash()
+                .reversed()
+                .values()
+                .to_vec(),
+        );
+
+        let halt_program = Program::new(&triton_asm!(halt));
+        let halt_claim = Claim::new(halt_program.hash());
+        let halt_nondeterminism = NonDeterminism::default();
+        let halt_proof = triton_vm::prove(
+            Stark::default(),
+            &halt_claim,
+            halt_program,
+            halt_nondeterminism,
+        )
+        .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+
+        let block_proof_witness = rt
+            .block_on(BlockProofWitness::produce(block_primitive_witness))
+            .unwrap()
+            .with_claim_test(halt_claim, halt_proof);
+
+        let block_program_nondeterminism = block_proof_witness.nondeterminism();
+        let rust_output = BlockProgram
+            .run_rust(
+                &block_body_mast_hash_as_input,
+                block_program_nondeterminism.clone(),
+            )
+            .unwrap();
+        let tasm_output = match BlockProgram
+            .run_tasm(&block_body_mast_hash_as_input, block_program_nondeterminism)
+        {
+            Ok(std_out) => std_out,
+            Err(err) => panic!("{err:?}"),
+        };
+
+        assert_eq!(rust_output, tasm_output);
+
+        let expected_output = block_proof_witness
+            .claims()
+            .iter()
+            .flat_map(|appendix_claim| Tip5::hash(appendix_claim).values().to_vec())
+            .collect_vec();
+        assert_eq!(
+            expected_output, tasm_output,
+            "tasm output must equal rust output"
         );
     }
 }
