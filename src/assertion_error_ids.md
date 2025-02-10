@@ -25,3 +25,4 @@ often.
 |  120..140 | [`Update`](models/blockchain/transaction/validity/update.rs)                                                             |
 |  200..210 | [`CoinbaseAmount`](models/blockchain/transaction/validity/tasm/coinbase_amount.rs)                                       |
 |  210..250 | [`BlockProgram`](models/blockchain/block/validity/block_program.rs)                                                      |
+|  250..260 | [`HashRemovalRecordIndexSets`](models/blockchain/transaction/validity/tasm/hash_removal_record_index_sets.rs)            |

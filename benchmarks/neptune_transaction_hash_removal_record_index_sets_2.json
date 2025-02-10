@@ -2,10 +2,10 @@
   {
     "name": "neptune_transaction_hash_removal_record_index_sets_2",
     "benchmark_result": {
-      "clock_cycle_count": 1244,
-      "hash_table_height": 682,
-      "u32_table_height": 306,
-      "op_stack_table_height": 925,
+      "clock_cycle_count": 1276,
+      "hash_table_height": 688,
+      "u32_table_height": 366,
+      "op_stack_table_height": 949,
       "ram_table_height": 761
     },
     "case": "CommonCase"
@@ -13,10 +13,10 @@
   {
     "name": "neptune_transaction_hash_removal_record_index_sets_2",
     "benchmark_result": {
-      "clock_cycle_count": 11756,
-      "hash_table_height": 5038,
-      "u32_table_height": 1559,
-      "op_stack_table_height": 8845,
+      "clock_cycle_count": 12076,
+      "hash_table_height": 5044,
+      "u32_table_height": 1634,
+      "op_stack_table_height": 9085,
       "ram_table_height": 7565
     },
     "case": "WorstCase"

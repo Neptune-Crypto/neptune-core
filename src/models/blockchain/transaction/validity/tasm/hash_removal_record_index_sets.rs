@@ -15,6 +15,10 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HashRemovalRecordIndexSets<const NUM_INPUT_LISTS: usize>;
 
+impl<const NUM_INPUT_LISTS: usize> HashRemovalRecordIndexSets<NUM_INPUT_LISTS> {
+    pub const OUT_OF_ELEMENT_POINTER_ERROR_ID: i128 = 1_000_250;
+}
+
 impl<const NUM_INPUT_LISTS: usize> BasicSnippet for HashRemovalRecordIndexSets<NUM_INPUT_LISTS> {
     fn inputs(&self) -> Vec<(DataType, String)> {
         // Type of all "inputs" argument is Vec<RemovalRecord>
@@ -31,16 +35,27 @@ impl<const NUM_INPUT_LISTS: usize> BasicSnippet for HashRemovalRecordIndexSets<N
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let entrypoint = self.entrypoint();
-
         let hash_varlen = library.import(Box::new(HashVarlen));
 
         let hash_one_index_set = triton_asm! {
-            // BEFORE: _ *removal_record len
-            // AFTER:  _ [index_set_digest; 5]
+            // BEFORE: _ *removal_record rr_len
+            // AFTER:  _ [index_set_digest: Digest]
             hash_one_index_set:
-                pop 1
+                dup 1
                 {&field_with_size!(RemovalRecord::absolute_indices)}
+                            // _ *removal_record rr_len *ai ai_len
+
+                /* check that *ai points into this removal record */
+                pick 2      // _ *removal_record *ai ai_len rr_len
+                dup 2       // _ *removal_record *ai ai_len rr_len *ai
+                pick 4      // _ *ai ai_len rr_len *ai *removal_record
+                push -1
+                mul
+                add         // _ *ai ai_len rr_len (*ai-*removal_record)
+                lt          // _ *ai ai_len (*ai-*removal_record < rr_len)
+                assert error_id {Self::OUT_OF_ELEMENT_POINTER_ERROR_ID}
+                            // _ *ai ai_len
+
                 call {hash_varlen}
                 return
         };
@@ -55,7 +70,7 @@ impl<const NUM_INPUT_LISTS: usize> BasicSnippet for HashRemovalRecordIndexSets<N
         triton_asm! {
             // BEFORE: _ [*rrs; N]
             // AFTER:  _ *digests
-            {entrypoint}: call {map} return
+            {self.entrypoint()}: call {map} return
         }
     }
 }
