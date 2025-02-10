@@ -13,6 +13,7 @@ pub mod validity;
 use std::sync::OnceLock;
 
 use block_appendix::BlockAppendix;
+use block_appendix::MAX_NUM_CLAIMS;
 use block_body::BlockBody;
 use block_header::BlockHeader;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
@@ -765,21 +766,26 @@ impl Block {
         // 1.a)
         for required_claim in BlockAppendix::consensus_claims(self.body()) {
             if !self.appendix().contains(&required_claim) {
-                return Err(BlockValidationError::Appendix);
+                return Err(BlockValidationError::AppendixMissingClaim);
             }
         }
 
         // 1.b)
+        if self.appendix().len() > MAX_NUM_CLAIMS {
+            return Err(BlockValidationError::AppendixTooLarge);
+        }
+
+        // 1.c)
         let BlockProof::SingleProof(block_proof) = &self.proof else {
             return Err(BlockValidationError::ProofQuality);
         };
 
-        // 1.c)
+        // 1.d)
         if !BlockProgram::verify(self.body(), self.appendix(), block_proof).await {
             return Err(BlockValidationError::ProofValidity);
         }
 
-        // 1.d)
+        // 1.e)
         if self.size() > MAX_BLOCK_SIZE {
             return Err(BlockValidationError::MaxSize);
         }

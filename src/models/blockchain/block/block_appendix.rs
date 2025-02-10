@@ -15,6 +15,8 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 
+pub(crate) const MAX_NUM_CLAIMS: usize = 500;
+
 /// Encapsulates the claims proven by the block proof.
 ///
 /// Every appendix claim has an identical input: the block body's hash; and an

@@ -30,14 +30,17 @@ pub(super) enum BlockValidationError {
     // 1. Block proof is valid
     ///   1.a) Verify appendix contains required claims
     #[error("block appendix must contain expected claims")]
-    Appendix,
-    ///   1.b) Block proof must be SingleProof
+    AppendixMissingClaim,
+    ///   1.b) Disallow appendices with too many claims
+    #[error("block appendix cannot contain too many claims")]
+    AppendixTooLarge,
+    ///   1.c) Block proof must be SingleProof
     #[error("block proof must be SingleProof")]
     ProofQuality,
-    ///   1.c) Block proof is valid
+    ///   1.d) Block proof is valid
     #[error("block proof must be valid")]
     ProofValidity,
-    ///   1.d) Max block size is not exceeded
+    ///   1.e) Max block size is not exceeded
     #[error("block must not exceed max size")]
     MaxSize,
 
