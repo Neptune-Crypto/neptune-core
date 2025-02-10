@@ -497,22 +497,20 @@ impl WalletState {
         wallet_status: &WalletStatus,
         timestamp: Timestamp,
     ) -> NativeCurrencyAmount {
+        let amount_spent_by_mempool_transactions = self
+            .mempool_spent_utxos_iter()
+            .map(|u| u.get_native_currency_amount())
+            .sum();
+        let amount_received_from_mempool_transactions = self
+            .mempool_unspent_utxos_iter()
+            .filter(|utxo| utxo.can_spend_at(timestamp))
+            .map(|u| u.get_native_currency_amount())
+            .sum();
         self.confirmed_available_balance(wallet_status, timestamp)
-            .checked_sub(
-                &self
-                    .mempool_spent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
-                    .sum(),
-            )
-            .expect("balance must never be negative")
-            .checked_add(
-                &self
-                    .mempool_unspent_utxos_iter()
-                    .filter(|utxo| utxo.can_spend_at(timestamp))
-                    .map(|u| u.get_native_currency_amount())
-                    .sum(),
-            )
+            .checked_add(&amount_received_from_mempool_transactions)
             .expect("balance must never overflow")
+            .checked_sub(&amount_spent_by_mempool_transactions)
+            .unwrap_or(NativeCurrencyAmount::zero())
     }
 
     /// returns unconfirmed, total balance (includes timelocked utxos)
