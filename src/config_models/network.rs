@@ -12,7 +12,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {
-    /// Main net. Feature-complete. Fixed launch date. Not ready yet.
+    /// Main net. Feature-complete. Fixed launch date.
     Main,
 
     /// First iteration of testnet. Not feature-complete. Soon to be deprecated.
@@ -50,9 +50,9 @@ impl Network {
                 let now_rounded = (now / SEVEN_DAYS) * SEVEN_DAYS;
                 Timestamp(BFieldElement::new(now_rounded))
             }
-            // 1 July 2024 (might be revised though)
+            // 11 Feb 2025, noon UTC
             Network::Alpha | Network::Testnet | Network::Beta | Network::Main => {
-                Timestamp(BFieldElement::new(1719792000000u64))
+                Timestamp(BFieldElement::new(1739275200000u64))
             }
         }
     }

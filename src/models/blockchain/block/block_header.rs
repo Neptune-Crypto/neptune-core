@@ -117,8 +117,8 @@ impl BlockHeader {
             // TODO: to be set to something difficult to predict ahead of time
             nonce: Digest::new(bfe_array![0, 0, 0, 0, 0]),
             cumulative_proof_of_work: ProofOfWork::zero(),
-            difficulty: Difficulty::MINIMUM,
-            guesser_digest: Digest::default(),
+            difficulty: Difficulty::new([1_000_000_000, 0, 0, 0, 0]),
+            guesser_digest: Digest::new(bfe_array![0, 0, 0, 0, 0]),
         }
     }
 
