@@ -21,7 +21,10 @@ pub enum ConsensusError {
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.
-pub(crate) trait ConsensusProgram
+///
+/// This trait is required for benchmarks, but is not part of the public API.
+#[doc(hidden)]
+pub trait ConsensusProgram
 where
     Self: RefUnwindSafe + std::fmt::Debug,
 {
@@ -51,6 +54,12 @@ where
     ///
     /// This method is a thin wrapper around [`prove_consensus_program`], which
     /// does the same but for arbitrary programs.
+    //
+    // The entire trait is only `pub` to facilitate benchmarks; it is not part of
+    // the public API. The suppressed lints below are not nice, but I don't know
+    // how else to make it work.
+    #[allow(async_fn_in_trait)]
+    #[allow(private_interfaces)]
     async fn prove(
         &self,
         claim: Claim,
