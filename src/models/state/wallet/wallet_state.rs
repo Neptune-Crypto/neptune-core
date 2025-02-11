@@ -1511,7 +1511,6 @@ impl WalletState {
 mod tests {
     use generation_address::GenerationSpendingKey;
     use rand::random;
-    use rand::thread_rng;
     use rand::Rng;
     use tracing_test::traced_test;
 
@@ -1706,7 +1705,7 @@ mod tests {
     async fn bob_mines_one_block(
         network: Network,
     ) -> (Block, GlobalStateLock, GenerationSpendingKey) {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let cli = cli_args::Args::default();
 
         let bob_wallet_secret = WalletSecret::new_random();
@@ -1716,7 +1715,7 @@ mod tests {
 
         // `bob` both composes and guesses the PoW solution of this block.
         let (block1, composer_fee_eutxos) =
-            make_mock_block(&Block::genesis(network), None, bob_key, rng.gen()).await;
+            make_mock_block(&Block::genesis(network), None, bob_key, rng.random()).await;
 
         bob_global_lock
             .lock_guard_mut()
@@ -2037,7 +2036,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn never_store_same_utxo_twice_different_blocks() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let network = Network::Main;
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -2046,8 +2045,8 @@ mod tests {
                 .await;
 
         let genesis_block = Block::genesis(network);
-        let guesser_preimage_1a: Digest = rng.gen();
-        let mock_block_seed = rng.gen();
+        let guesser_preimage_1a: Digest = rng.random();
+        let mock_block_seed = rng.random();
         let guesser_fraction = 0.5f64;
 
         // `bob` both composes and guesses the PoW solution of this block.
@@ -2087,7 +2086,7 @@ mod tests {
 
         // Add a new block to state as tip, which *only* differs in its PoW
         // solution. `bob` did *not* find the PoW-solution for this block.
-        let guesser_preimage_1b: Digest = rng.gen();
+        let guesser_preimage_1b: Digest = rng.random();
         let (block_1b, expected_utxos_block_1b) =
             make_mock_block_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
@@ -2142,7 +2141,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn never_store_same_utxo_twice_same_block() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let network = Network::Main;
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -2153,7 +2152,7 @@ mod tests {
 
         let genesis_block = Block::genesis(network);
         let (block1, composer_utxos) =
-            make_mock_block(&genesis_block, None, bob_key, rng.gen()).await;
+            make_mock_block(&genesis_block, None, bob_key, rng.random()).await;
 
         bob.wallet_state.add_expected_utxos(composer_utxos).await;
         assert!(
@@ -2231,7 +2230,7 @@ mod tests {
         // Prune
         // Verify that MUTXO *is* marked as abandoned
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let network = Network::RegTest;
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -2255,7 +2254,7 @@ mod tests {
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo) =
-                make_mock_block(&latest_block, None, alice_key, rng.gen()).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random()).await;
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.mutator_set_accumulator_after(),
@@ -2288,7 +2287,7 @@ mod tests {
 
         // Add block 3a with a coinbase UTXO for us
         let (block_3a, expected_3a) =
-            make_mock_block(&latest_block.clone(), None, bob_spending_key, rng.gen()).await;
+            make_mock_block(&latest_block.clone(), None, bob_spending_key, rng.random()).await;
         bob.set_new_self_mined_tip(block_3a, expected_3a)
             .await
             .unwrap();
@@ -2316,7 +2315,7 @@ mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_exp) =
-            make_mock_block(&latest_block, None, alice_key, rng.gen()).await;
+            make_mock_block(&latest_block, None, alice_key, rng.random()).await;
         bob.set_new_tip(block_3b.clone()).await.unwrap();
 
         assert!(
@@ -2340,7 +2339,7 @@ mod tests {
         latest_block = block_3b;
         for _ in 4..=11 {
             let (new_block, _new_block_exp) =
-                make_mock_block(&latest_block, None, alice_key, rng.gen()).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random()).await;
             bob.set_new_tip(new_block.clone()).await.unwrap();
 
             latest_block = new_block;
@@ -2364,7 +2363,7 @@ mod tests {
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
-        let (block_12, _) = make_mock_block(&latest_block, None, alice_key, rng.gen()).await;
+        let (block_12, _) = make_mock_block(&latest_block, None, alice_key, rng.random()).await;
         bob.set_new_tip(block_12.clone()).await.unwrap();
 
         assert!(
@@ -2472,11 +2471,11 @@ mod tests {
             let block1_timestamp = network.launch_date() + Timestamp::minutes(2);
 
             // Create a random block proposal.
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let block1_proposal = fake_valid_block_proposal_successor_for_test(
                 &genesis_block,
                 block1_timestamp,
-                rng.gen(),
+                rng.random(),
             )
             .await;
 
@@ -2667,7 +2666,7 @@ mod tests {
             // Can make tx with PoW-loot.
             let block2_timestamp = block1.header().timestamp + Timestamp::minutes(2);
             let fee = NativeCurrencyAmount::coins(1);
-            let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
+            let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
             let (mut tx_spending_guesser_fee, _) = bob
                 .global_state_lock
                 .lock_guard()
@@ -2693,12 +2692,12 @@ mod tests {
             tx_spending_guesser_fee.proof = TransactionProof::invalid();
 
             let composer_parameters =
-                ComposerParameters::new(a_key.to_address().into(), rng.gen(), 0.5f64);
+                ComposerParameters::new(a_key.to_address().into(), rng.random(), 0.5f64);
             let (block2_tx, _) = fake_create_block_transaction_for_tests(
                 &block1,
                 composer_parameters,
                 block2_timestamp,
-                rng.gen(),
+                rng.random(),
                 vec![tx_spending_guesser_fee],
             )
             .await
@@ -2759,7 +2758,7 @@ mod tests {
             let mut global_state_lock = mock_genesis_global_state(
                 network,
                 0,
-                WalletSecret::new_pseudorandom(rng.gen()),
+                WalletSecret::new_pseudorandom(rng.random()),
                 cli_args::Args::default(),
             )
             .await;
@@ -2803,7 +2802,9 @@ mod tests {
 
                 // generate an output that our wallet cannot claim.
                 let outputs = vec![(
-                    ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
+                    ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(
+                        rng.random(),
+                    )),
                     send_amt,
                 )];
 
@@ -2889,10 +2890,14 @@ mod tests {
                 timestamp: Timestamp,
                 change_key: SpendingKey,
             ) -> Result<Transaction> {
-                let mut rng = thread_rng();
-                let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
-                let tx_output =
-                    TxOutput::onchain_native_currency(amount, rng.gen(), an_address.into(), false);
+                let mut rng = rand::rng();
+                let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+                let tx_output = TxOutput::onchain_native_currency(
+                    amount,
+                    rng.random(),
+                    an_address.into(),
+                    false,
+                );
                 alice_global_lock
                     .global_state_lock
                     .lock_guard()
@@ -2911,8 +2916,8 @@ mod tests {
             }
 
             let network = Network::Main;
-            let mut rng = thread_rng();
-            let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
+            let mut rng = rand::rng();
+            let alice_wallet = WalletSecret::new_pseudorandom(rng.random());
             let mut alice = mock_genesis_global_state(
                 network,
                 0,
@@ -2922,7 +2927,7 @@ mod tests {
             .await;
 
             let genesis = Block::genesis(network);
-            let guesser_preimage = rng.gen();
+            let guesser_preimage = rng.random();
             let change_key = alice_wallet.nth_generation_spending_key(0).into();
             let guesser_fraction = 0.5f64;
 
@@ -2931,7 +2936,7 @@ mod tests {
                 &genesis,
                 None,
                 alice_wallet.nth_generation_spending_key(0),
-                rng.gen(),
+                rng.random(),
                 guesser_fraction,
                 guesser_preimage,
             )
@@ -3393,10 +3398,14 @@ mod tests {
                 timestamp: Timestamp,
                 change_key: SpendingKey,
             ) -> Transaction {
-                let mut rng = thread_rng();
-                let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
-                let tx_output =
-                    TxOutput::onchain_native_currency(amount, rng.gen(), an_address.into(), false);
+                let mut rng = rand::rng();
+                let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+                let tx_output = TxOutput::onchain_native_currency(
+                    amount,
+                    rng.random(),
+                    an_address.into(),
+                    false,
+                );
                 let (spending_tx, _) = alice_global_lock
                     .global_state_lock
                     .lock_guard()
@@ -3543,8 +3552,8 @@ mod tests {
             // 5. create block_1b where Alice doesn't get anything, set as tip
             // 6. Verify presence of abandoned/unsynced MUTXOs.
             let network = Network::Main;
-            let mut rng = thread_rng();
-            let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
+            let mut rng = rand::rng();
+            let alice_wallet = WalletSecret::new_pseudorandom(rng.random());
             let mut alice_global_lock = mock_genesis_global_state(
                 network,
                 0,
@@ -3553,7 +3562,7 @@ mod tests {
             )
             .await;
             let genesis = Block::genesis(network);
-            let guesser_preimage = rng.gen();
+            let guesser_preimage = rng.random();
 
             let guesser_fraction = 0.6f64;
             let (block_1a, composer_utxos_1a) =
@@ -3561,7 +3570,7 @@ mod tests {
                     &genesis,
                     None,
                     alice_wallet.nth_generation_spending_key(14),
-                    rng.gen(),
+                    rng.random(),
                     guesser_fraction,
                     guesser_preimage,
                 )

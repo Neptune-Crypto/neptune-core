@@ -108,7 +108,7 @@ mod test {
         let [block1] = fake_valid_sequence_of_blocks_for_tests(
             &genesis,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
 

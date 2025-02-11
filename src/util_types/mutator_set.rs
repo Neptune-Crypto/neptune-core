@@ -85,7 +85,6 @@ pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) 
 
 #[cfg(test)]
 mod test {
-    use rand::prelude::*;
     use rand::Rng;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use test::ms_membership_proof::MsMembershipProof;
@@ -320,11 +319,11 @@ mod test {
 
     #[test]
     fn membership_proof_updating_from_add_pbt() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let mut mutator_set = MutatorSetAccumulator::default();
 
-        let num_additions = rng.gen_range(0..=100i32);
+        let num_additions = rng.random_range(0..=100i32);
         println!(
             "running multiple additions test for {} additions",
             num_additions

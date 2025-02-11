@@ -178,7 +178,6 @@ impl ActiveWindow {
 
 #[cfg(test)]
 mod active_window_tests {
-    use rand::thread_rng;
     use rand::RngCore;
 
     use super::*;
@@ -217,7 +216,7 @@ mod active_window_tests {
             assert!(!aw.contains(i as u32));
         }
 
-        let mut prng = thread_rng();
+        let mut prng = rand::rng();
         for _ in 0..100 {
             let index = prng.next_u32() % WINDOW_SIZE;
             aw.insert(index);
@@ -240,7 +239,7 @@ mod active_window_tests {
         let mut aw = ActiveWindow::new();
 
         let num_insertions = 100;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..num_insertions {
             aw.insert(rng.next_u32() % WINDOW_SIZE);
         }
@@ -255,7 +254,7 @@ mod active_window_tests {
     fn test_slide_window_back() {
         let mut active_window = ActiveWindow::new();
         let num_insertions = 1000;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..num_insertions {
             active_window.insert((rng.next_u32()) % WINDOW_SIZE);
         }
@@ -273,7 +272,7 @@ mod active_window_tests {
     fn test_slide_window_and_back() {
         let mut active_window = ActiveWindow::new();
         let num_insertions = 1000;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..num_insertions {
             active_window.insert((rng.next_u32()) % WINDOW_SIZE);
         }
@@ -320,7 +319,7 @@ mod active_window_tests {
 
     #[test]
     fn test_active_window_decode() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let mut aw0 = ActiveWindow::new();
         for _ in 0..37 {

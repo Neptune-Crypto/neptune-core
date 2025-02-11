@@ -39,7 +39,7 @@ mod tests {
         let mut persisted_vec: OrdinaryVec<u64> = Default::default();
         let mut regular_vec = vec![];
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..length {
             let value = rng.next_u64();
             persisted_vec.push(value).await;
@@ -254,9 +254,9 @@ mod tests {
         let (mut persisted_vector, mut normal_vector) =
             get_persisted_vec_with_length(10000, "vec 1").await;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..10000 {
-            match rng.gen_range(0..=4) {
+            match rng.random_range(0..=4) {
                 0 => {
                     // `push`
                     let push_val = rng.next_u64();
@@ -271,7 +271,7 @@ mod tests {
                 }
                 2 => {
                     // `get_many`
-                    let index = rng.gen_range(0..normal_vector.len());
+                    let index = rng.random_range(0..normal_vector.len());
                     assert_eq!(Vec::<u64>::default(), persisted_vector.get_many(&[]).await);
                     assert_eq!(
                         normal_vector[index],
@@ -291,14 +291,14 @@ mod tests {
                 3 => {
                     // `set`
                     let value = rng.next_u64();
-                    let index = rng.gen_range(0..normal_vector.len());
+                    let index = rng.random_range(0..normal_vector.len());
                     normal_vector[index] = value;
                     persisted_vector.set(index as u64, value).await;
                 }
                 4 => {
                     // `set_many`
-                    let indices: Vec<u64> = (0..rng.gen_range(0..10))
-                        .map(|_| rng.gen_range(0..normal_vector.len() as u64))
+                    let indices: Vec<u64> = (0..rng.random_range(0..10))
+                        .map(|_| rng.random_range(0..normal_vector.len() as u64))
                         .unique()
                         .collect();
                     let values: Vec<u64> = (0..indices.len()).map(|_| rng.next_u64()).collect_vec();

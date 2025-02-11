@@ -3326,7 +3326,6 @@ mod rpc_server_tests {
     use num_traits::One;
     use num_traits::Zero;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
@@ -3412,7 +3411,7 @@ mod rpc_server_tests {
 
         let rpc_server = test_rpc_server(
             network,
-            WalletSecret::new_pseudorandom(rng.gen()),
+            WalletSecret::new_pseudorandom(rng.random()),
             2,
             cli_args::Args::default(),
         )
@@ -4089,9 +4088,9 @@ mod rpc_server_tests {
     async fn cannot_initiate_transaction_if_notx_flag_is_set() {
         let network = Network::Main;
         let ctx = context::current();
-        let mut rng = thread_rng();
-        let address = GenerationSpendingKey::derive_from_seed(rng.gen()).to_address();
-        let amount = NativeCurrencyAmount::coins(rng.gen_range(0..10));
+        let mut rng = rand::rng();
+        let address = GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
+        let amount = NativeCurrencyAmount::coins(rng.random_range(0..10));
 
         // set flag on, verify non-initiation
         let cli_on = cli_args::Args {
@@ -4502,7 +4501,7 @@ mod rpc_server_tests {
             let network = Network::Main;
             let rpc_server = test_rpc_server(
                 network,
-                WalletSecret::new_pseudorandom(rng.gen()),
+                WalletSecret::new_pseudorandom(rng.random()),
                 2,
                 cli_args::Args::default(),
             )
@@ -4582,7 +4581,7 @@ mod rpc_server_tests {
                 let network = Network::Main;
                 let mut rpc_server = test_rpc_server(
                     network,
-                    WalletSecret::new_pseudorandom(rng.gen()),
+                    WalletSecret::new_pseudorandom(rng.random()),
                     2,
                     cli_args::Args::default(),
                 )
@@ -4610,7 +4609,7 @@ mod rpc_server_tests {
                     &genesis_block,
                     Some(timestamp),
                     wallet_spending_key,
-                    rng.gen(),
+                    rng.random(),
                 )
                 .await;
 
@@ -4646,9 +4645,9 @@ mod rpc_server_tests {
                 // --- Setup. generate an output that our wallet cannot claim. ---
                 let external_receiving_address: ReceivingAddress = match recipient_key_type {
                     KeyType::Generation => {
-                        GenerationReceivingAddress::derive_from_seed(rng.gen()).into()
+                        GenerationReceivingAddress::derive_from_seed(rng.random()).into()
                     }
-                    KeyType::Symmetric => SymmetricKey::from_seed(rng.gen()).into(),
+                    KeyType::Symmetric => SymmetricKey::from_seed(rng.random()).into(),
                     KeyType::RawHashLock => panic!("hash lock key not supported"),
                 };
                 let output1 = (

@@ -18,8 +18,8 @@ use num_traits::Zero;
 use proptest::strategy::BoxedStrategy;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use proptest::strategy::Strategy;
-use rand::distributions::Distribution;
-use rand::distributions::Standard;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -185,9 +185,9 @@ impl Display for Timestamp {
     }
 }
 
-impl Distribution<Timestamp> for Standard {
+impl Distribution<Timestamp> for StandardUniform {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Timestamp {
-        Timestamp(rng.gen::<BFieldElement>())
+        Timestamp(rng.random::<BFieldElement>())
     }
 }
 

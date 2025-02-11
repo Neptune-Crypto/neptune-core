@@ -148,17 +148,16 @@ pub fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8
 
 #[cfg(test)]
 pub(super) mod test {
-    use rand::thread_rng;
     use rand::Rng;
-    use rand::RngCore;
+    use rand::TryRngCore;
 
     use super::*;
 
     #[test]
     fn test_conversion_fixed_length() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         const N: usize = 23;
-        let byte_array: [u8; N] = rng.gen();
+        let byte_array: [u8; N] = rng.random();
         let byte_vec = byte_array.to_vec();
         let bfes = bytes_to_bfes(&byte_vec);
         let bytes_again = bfes_to_bytes(&bfes).unwrap();
@@ -168,9 +167,9 @@ pub(super) mod test {
 
     #[test]
     fn test_conversion_variable_length() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..1000 {
-            let n: usize = rng.gen_range(0..101);
+            let n: usize = rng.random_range(0..101);
             let mut byte_vec: Vec<u8> = vec![0; n];
             rng.try_fill_bytes(&mut byte_vec).unwrap();
             let bfes = bytes_to_bfes(&byte_vec);

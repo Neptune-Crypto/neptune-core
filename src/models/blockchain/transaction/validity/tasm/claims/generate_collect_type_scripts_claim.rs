@@ -168,12 +168,12 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
+    use proptest::prelude::Rng;
+    use proptest::prelude::RngCore;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use rand::Rng;
-    use rand::RngCore;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;

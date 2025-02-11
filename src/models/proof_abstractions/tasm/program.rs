@@ -192,7 +192,6 @@ pub mod test {
 
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use rand::thread_rng;
     use reqwest::header::HeaderMap;
     use reqwest::header::HeaderValue;
     use reqwest::Url;
@@ -484,7 +483,7 @@ pub mod test {
         }
 
         let mut servers = load_servers();
-        servers.shuffle(&mut thread_rng());
+        servers.shuffle(&mut rand::rng());
 
         // Add test name to request allow server to see which test requires a proof
         let mut headers = HeaderMap::new();

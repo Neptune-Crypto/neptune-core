@@ -24,11 +24,10 @@ use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
 use proptest_arbitrary_interop::arb;
-use rand::distributions::Alphanumeric;
-use rand::distributions::DistString;
+use rand::distr::Alphanumeric;
+use rand::distr::SampleString;
 use rand::random;
 use rand::rngs::StdRng;
-use rand::thread_rng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
@@ -299,7 +298,7 @@ pub(crate) async fn add_block_to_archival_state(
 ///
 /// For now we use databases on disk. In-memory databases would be nicer.
 pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
     let tmp_root: PathBuf = env::temp_dir()
         .join(format!("neptune-unit-tests-{}", user))
@@ -413,47 +412,52 @@ pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
 
 pub fn pseudorandom_amount(seed: [u8; 32]) -> NativeCurrencyAmount {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let number: u128 = rng.gen::<u128>() >> 10;
+    let number: u128 = rng.random::<u128>() >> 10;
     NativeCurrencyAmount::from_nau(number.try_into().unwrap())
 }
 
 pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     (
-        rng.gen(),
-        NativeCurrencyAmount::coins(rng.gen_range(0..42000000)).to_native_coins(),
+        rng.random(),
+        NativeCurrencyAmount::coins(rng.random_range(0..42000000)).to_native_coins(),
     )
         .into()
 }
 
 pub fn random_transaction_kernel() -> TransactionKernel {
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     let num_inputs = 1 + (rng.next_u32() % 5) as usize;
     let num_outputs = 1 + (rng.next_u32() % 6) as usize;
     let num_public_announcements = (rng.next_u32() % 5) as usize;
-    pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_public_announcements)
+    pseudorandom_transaction_kernel(
+        rng.random(),
+        num_inputs,
+        num_outputs,
+        num_public_announcements,
+    )
 }
 
 pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let len = 10 + (rng.next_u32() % 50) as usize;
-    let message = (0..len).map(|_| rng.gen()).collect_vec();
+    let message = (0..len).map(|_| rng.random()).collect_vec();
     PublicAnnouncement { message }
 }
 
 pub fn random_public_announcement() -> PublicAnnouncement {
-    let mut rng = thread_rng();
-    pseudorandom_public_announcement(rng.gen::<[u8; 32]>())
+    let mut rng = rand::rng();
+    pseudorandom_public_announcement(rng.random::<[u8; 32]>())
 }
 
 pub fn random_amount() -> NativeCurrencyAmount {
-    let mut rng = thread_rng();
-    pseudorandom_amount(rng.gen::<[u8; 32]>())
+    let mut rng = rand::rng();
+    pseudorandom_amount(rng.random::<[u8; 32]>())
 }
 
 pub fn random_option<T>(thing: T) -> Option<T> {
-    let mut rng = thread_rng();
-    pseudorandom_option(rng.gen::<[u8; 32]>(), thing)
+    let mut rng = rand::rng();
+    pseudorandom_option(rng.random::<[u8; 32]>(), thing)
 }
 
 pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
@@ -550,10 +554,10 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
 }
 
 pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
-    let mut rng = rand::thread_rng();
-    let item: Digest = rng.gen();
-    let sender_randomness: Digest = rng.gen();
-    let receiver_preimage: Digest = rng.gen();
+    let mut rng = rand::rng();
+    let item: Digest = rng.random();
+    let sender_randomness: Digest = rng.random();
+    let receiver_preimage: Digest = rng.random();
     (item, sender_randomness, receiver_preimage)
 }
 
@@ -684,7 +688,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         None => previous_block.kernel.header.timestamp + TARGET_BLOCK_INTERVAL,
     };
 
-    let coinbase_sender_randomness: Digest = rng.gen();
+    let coinbase_sender_randomness: Digest = rng.random();
     let composer_parameters = ComposerParameters::new(
         composer_key.to_address().into(),
         coinbase_sender_randomness,
@@ -955,7 +959,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     let mut rng = StdRng::from_seed(shuffle_seed);
     for tx_to_include in selected_mempool_txs.into_iter() {
         block_transaction =
-            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.gen())
+            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
                 .await
                 .expect("Must be able to merge transactions in mining context");
     }
@@ -972,22 +976,22 @@ async fn fake_block_successor(
     let mut rng = StdRng::from_seed(seed);
 
     let composer_parameters = ComposerParameters::new(
-        GenerationReceivingAddress::derive_from_seed(rng.gen()).into(),
-        rng.gen(),
+        GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
+        rng.random(),
         0.5f64,
     );
     let (block_tx, _) = fake_create_block_transaction_for_tests(
         predecessor,
         composer_parameters,
         timestamp,
-        rng.gen(),
+        rng.random(),
         vec![],
     )
     .await
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
+        fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.random()).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }
@@ -1062,7 +1066,7 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
         let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
-            rng.gen(),
+            rng.random(),
         )
         .await;
         blocks.push(block);

@@ -246,7 +246,7 @@ fn guess_worker(
         .unwrap();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
-            .map_init(rand::thread_rng, |rng, _i| {
+            .map_init(rand::rng, |rng, _i| {
                 guess_nonce_iteration(
                     kernel_auth_path,
                     threshold,
@@ -360,7 +360,7 @@ fn guess_nonce_iteration(
 
     // Modify the nonce in the block header. In order to collect the guesser
     // fee, this nonce must be the post-image of a known pre-image under Tip5.
-    let nonce: Digest = rng.gen();
+    let nonce: Digest = rng.random();
 
     // Check every N guesses if task has been cancelled.
     if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
@@ -589,7 +589,7 @@ pub(crate) async fn create_block_transaction_from(
         block_transaction = Transaction::merge_with(
             block_transaction,
             tx_to_include,
-            rng.gen(),
+            rng.random(),
             vm_job_queue,
             job_options.clone(),
         )
@@ -937,7 +937,6 @@ pub(crate) mod mine_loop_tests {
     use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
-    use rand::thread_rng;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1038,7 +1037,7 @@ pub(crate) mod mine_loop_tests {
     /// update the difficulty field, as this applies to the next block and only
     /// changes as a result of the timestamp of this block.
     pub(crate) fn mine_iteration_for_tests(block: &mut Block, rng: &mut StdRng) {
-        let nonce = rng.gen();
+        let nonce = rng.random();
         block.set_header_nonce(nonce);
     }
 
@@ -1048,7 +1047,7 @@ pub(crate) mod mine_loop_tests {
         sleepy_guessing: bool,
         num_outputs: usize,
     ) -> f64 {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let network = Network::RegTest;
         let global_state_lock = mock_genesis_global_state(
             network,
@@ -1067,7 +1066,7 @@ pub(crate) mod mine_loop_tests {
 
         let (transaction, _coinbase_utxo_info) = {
             let outputs = (0..num_outputs)
-                .map(|_| pseudorandom_addition_record(rng.gen()))
+                .map(|_| pseudorandom_addition_record(rng.random()))
                 .collect_vec();
             (
                 make_mock_transaction_with_mutator_set_hash(
@@ -1093,7 +1092,7 @@ pub(crate) mod mine_loop_tests {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
-                .map_init(rand::thread_rng, |prng, _i| {
+                .map_init(rand::rng, |prng, _i| {
                     guess_nonce_iteration(
                         kernel_auth_path,
                         threshold,
@@ -1179,7 +1178,7 @@ pub(crate) mod mine_loop_tests {
             .nth_generation_spending_key_for_tests(0);
         let output_to_alice = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(4),
-            rng.gen(),
+            rng.random(),
             alice_key.to_address().into(),
             false,
         );
@@ -1861,7 +1860,7 @@ pub(crate) mod mine_loop_tests {
             random_mmra(),
         );
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut counter = 0;
         let mut successor_block = Block::new(
             successor_header,
@@ -1870,7 +1869,7 @@ pub(crate) mod mine_loop_tests {
             BlockProof::Invalid,
         );
         loop {
-            successor_block.set_header_nonce(rng.gen());
+            successor_block.set_header_nonce(rng.random());
 
             if successor_block.has_proof_of_work(predecessor_block.header()) {
                 break;

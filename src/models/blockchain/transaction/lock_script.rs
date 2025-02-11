@@ -3,7 +3,6 @@ use std::collections::HashMap;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
-use rand::thread_rng;
 use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
@@ -130,7 +129,7 @@ impl LockScriptAndWitness {
         if self.program.hash() != utxo.lock_script_hash() {
             return false;
         }
-        let any_digest = thread_rng().gen::<Digest>();
+        let any_digest = rand::rng().random::<Digest>();
         self.halts_gracefully(any_digest.values().into())
     }
 

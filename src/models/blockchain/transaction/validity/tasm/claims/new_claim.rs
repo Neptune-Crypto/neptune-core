@@ -168,8 +168,8 @@ mod test {
         ) -> FunctionInitialState {
             let mut rng: StdRng = SeedableRng::from_seed(seed);
 
-            let input_length = rng.gen_range(0..10);
-            let output_length = rng.gen_range(0..10);
+            let input_length = rng.random_range(0..10);
+            let output_length = rng.random_range(0..10);
 
             FunctionInitialState {
                 stack: [

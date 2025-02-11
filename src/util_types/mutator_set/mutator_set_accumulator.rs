@@ -502,7 +502,6 @@ mod ms_accumulator_tests {
     use itertools::izip;
     use itertools::Itertools;
     use proptest::prop_assert_eq;
-    use rand::thread_rng;
     use rand::Rng;
     use test_strategy::proptest;
 
@@ -584,11 +583,11 @@ mod ms_accumulator_tests {
         }
 
         // Now build removal records for about half of the elements
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut skipped_removes: Vec<bool> = vec![];
         let mut removal_records: Vec<RemovalRecord> = vec![];
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
-            let skipped = rng.gen_range(0.0..1.0) < 0.5;
+            let skipped = rng.random_range(0.0..1.0) < 0.5;
             skipped_removes.push(skipped);
             if !skipped {
                 removal_records.push(accumulator.drop(item, mp));
@@ -633,7 +632,7 @@ mod ms_accumulator_tests {
         let mut rms_before = empty_rusty_mutator_set().await;
         let archival_before_remove = rms_before.ams_mut();
         let number_of_interactions = 100;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // The outer loop runs two times:
         // 1. insert `number_of_interactions / 2` items, then randomly insert and remove `number_of_interactions / 2` times
@@ -662,7 +661,7 @@ mod ms_accumulator_tests {
                 };
                 last_ms_commitment = Some(new_commitment);
 
-                if rng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
+                if rng.random_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
                     let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
@@ -739,7 +738,7 @@ mod ms_accumulator_tests {
                         continue;
                     }
 
-                    let item_index = rng.gen_range(0..membership_proofs_batch.len());
+                    let item_index = rng.random_range(0..membership_proofs_batch.len());
                     let removal_item = items.remove(item_index);
                     let removal_mp = membership_proofs_batch.remove(item_index);
                     let _removal_mp_seq = membership_proofs_sequential.remove(item_index);
@@ -874,7 +873,7 @@ mod ms_accumulator_tests {
     fn profile() {
         // populate a mutator set with items according to some target profile,
         // and then print the size of the mutator set accumulator, in bytes
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         println!(
             "profiling Mutator Set (w, b, s, k) = ({}, {}, {}, {}) ...",
             WINDOW_SIZE, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS
@@ -891,15 +890,15 @@ mod ms_accumulator_tests {
             let operation = if items_and_membership_proofs.len()
                 > (1.25 * target_set_size as f64) as usize
             {
-                rng.gen_range(0..10) >= 3
+                rng.random_range(0..10) >= 3
             } else if items_and_membership_proofs.len() < (0.8 * target_set_size as f64) as usize {
-                rng.gen_range(0..10) < 3
+                rng.random_range(0..10) < 3
             } else {
-                rng.gen_range(0..10) < 5
+                rng.random_range(0..10) < 5
             };
             if operation && !items_and_membership_proofs.is_empty() {
                 // removal
-                let index = rng.gen_range(0..items_and_membership_proofs.len());
+                let index = rng.random_range(0..items_and_membership_proofs.len());
                 let (item, membership_proof) = items_and_membership_proofs.swap_remove(index);
                 let removal_record = msa.drop(item, &membership_proof);
                 for (_it, mp) in items_and_membership_proofs.iter_mut() {
@@ -908,9 +907,9 @@ mod ms_accumulator_tests {
                 msa.remove(&removal_record);
             } else {
                 // addition
-                let item = rng.gen::<Digest>();
-                let sender_randomness = rng.gen::<Digest>();
-                let receiver_preimage = rng.gen::<Digest>();
+                let item = rng.random::<Digest>();
+                let sender_randomness = rng.random::<Digest>();
+                let receiver_preimage = rng.random::<Digest>();
                 let addition_record = commit(item, sender_randomness, receiver_preimage);
                 for (it, mp) in items_and_membership_proofs.iter_mut() {
                     mp.update_from_addition(*it, &msa, &addition_record)

@@ -4,7 +4,6 @@ use std::fmt::Display;
 use get_size2::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
 use serde::Deserialize;
@@ -62,14 +61,14 @@ impl SaltedUtxos {
     pub fn new(utxos: Vec<Utxo>) -> Self {
         Self {
             utxos,
-            salt: thread_rng().gen(),
+            salt: rand::rng().random(),
         }
     }
 
     pub fn new_with_rng(utxos: Vec<Utxo>, rng: &mut StdRng) -> Self {
         Self {
             utxos,
-            salt: rng.gen(),
+            salt: rng.random(),
         }
     }
 
@@ -78,7 +77,7 @@ impl SaltedUtxos {
     pub fn empty() -> Self {
         Self {
             utxos: vec![],
-            salt: thread_rng().gen(),
+            salt: rand::rng().random(),
         }
     }
 

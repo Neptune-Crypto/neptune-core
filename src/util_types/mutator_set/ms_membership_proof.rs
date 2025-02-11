@@ -562,10 +562,11 @@ impl MsMembershipProof {
 /// purposes.
 pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembershipProof {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let sender_randomness: Digest = rng.gen();
-    let receiver_preimage: Digest = rng.gen();
-    let (auth_path_aocl, aocl_leaf_index) = pseudorandom_mmr_membership_proof_with_index(rng.gen());
-    let target_chunks: ChunkDictionary = pseudorandom_chunk_dictionary(rng.gen());
+    let sender_randomness: Digest = rng.random();
+    let receiver_preimage: Digest = rng.random();
+    let (auth_path_aocl, aocl_leaf_index) =
+        pseudorandom_mmr_membership_proof_with_index(rng.random());
+    let target_chunks: ChunkDictionary = pseudorandom_chunk_dictionary(rng.random());
     MsMembershipProof {
         sender_randomness,
         receiver_preimage,
@@ -579,9 +580,10 @@ pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembership
 /// for testing purposes.
 pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembershipProof, u64) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let leaf_index: u64 = rng.gen();
-    let authentication_path: Vec<Digest> =
-        (0..rng.gen_range(0..15)).map(|_| rng.gen()).collect_vec();
+    let leaf_index: u64 = rng.random();
+    let authentication_path: Vec<Digest> = (0..rng.random_range(0..15))
+        .map(|_| rng.random())
+        .collect_vec();
     (
         MmrMembershipProof {
             authentication_path,
@@ -596,7 +598,6 @@ mod ms_proof_tests {
     use itertools::Itertools;
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
@@ -613,7 +614,7 @@ mod ms_proof_tests {
 
     #[test]
     fn mp_equality_test() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let (_item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
@@ -634,7 +635,7 @@ mod ms_proof_tests {
         };
 
         let mp_with_different_sender_randomness = MsMembershipProof {
-            sender_randomness: rng.gen(),
+            sender_randomness: rng.random(),
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::new(vec![]),
             aocl_leaf_index: 0,
@@ -642,7 +643,7 @@ mod ms_proof_tests {
         };
 
         let mp_with_different_receiver_preimage = MsMembershipProof {
-            receiver_preimage: rng.gen(),
+            receiver_preimage: rng.random(),
             sender_randomness,
             auth_path_aocl: MmrMembershipProof::new(vec![]),
             aocl_leaf_index: 0,
@@ -700,7 +701,7 @@ mod ms_proof_tests {
     #[tokio::test]
     async fn revert_update_from_remove_test() {
         let n = 100;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let own_index = rng.next_u32() as usize % n;
         let mut own_membership_proof = None;
@@ -965,11 +966,11 @@ mod ms_proof_tests {
     async fn revert_update_from_addition_batches_test() {
         let mut msa: MutatorSetAccumulator = MutatorSetAccumulator::default();
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..10 {
-            let init_size = rng.gen_range(0..200);
-            let first_batch_size = rng.gen_range(0..200);
-            let last_batch_size = rng.gen_range(0..200);
+            let init_size = rng.random_range(0..200);
+            let first_batch_size = rng.random_range(0..200);
+            let last_batch_size = rng.random_range(0..200);
 
             // Add `init_size` items to MSA
             for _ in 0..init_size {
@@ -1039,7 +1040,7 @@ mod ms_proof_tests {
 
     #[tokio::test]
     async fn revert_update_from_addition_test() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let n = rng.next_u32() as usize % 100 + 1;
         // let n = 55;
 
@@ -1133,7 +1134,7 @@ mod ms_proof_tests {
 
     #[tokio::test]
     async fn revert_updates_mixed_test() {
-        let mut rng_seeder = thread_rng();
+        let mut rng_seeder = rand::rng();
         // let seed_integer = rng.next_u32();
         let error_tuple: (usize, u32) = (
             10 + rng_seeder.next_u32() as usize % 100,
@@ -1168,7 +1169,7 @@ mod ms_proof_tests {
         let mut records: Vec<Either<AdditionRecord, RemovalRecord>> = vec![];
 
         for i in 0..2000 {
-            let sample: f64 = rng.gen();
+            let sample: f64 = rng.random();
 
             // addition
             if sample <= rates["additions"] || i == own_index {
@@ -1178,9 +1179,9 @@ mod ms_proof_tests {
                 );
 
                 // generate item and randomness
-                let item: Digest = rng.gen();
-                let sender_randomness: Digest = rng.gen();
-                let receiver_preimage: Digest = rng.gen();
+                let item: Digest = rng.random();
+                let sender_randomness: Digest = rng.random();
+                let receiver_preimage: Digest = rng.random();
 
                 // generate addition record
                 let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
@@ -1407,14 +1408,14 @@ mod ms_proof_tests {
     #[test]
     #[should_panic(expected = "corrupt mutator set accumulator")]
     fn update_from_addition_fails_for_inconsistent_mutator_set_accumulator() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let aocl_leaf_count = 42966841942012423_u64;
         let aocl_peaks = (0..aocl_leaf_count.count_ones())
-            .map(|_| rng.gen::<Digest>())
+            .map(|_| rng.random::<Digest>())
             .collect_vec();
         let swbfi_leaf_count = (aocl_leaf_count / (BATCH_SIZE as u64)) + 1;
         let swbfi_peaks = (0..swbfi_leaf_count.count_ones())
-            .map(|_| rng.gen::<Digest>())
+            .map(|_| rng.random::<Digest>())
             .collect_vec();
         let swbf_active = ActiveWindow::new();
 
@@ -1427,7 +1428,7 @@ mod ms_proof_tests {
         };
 
         let (own_item, sender_randomness, receiver_preimage) =
-            rng.gen::<(Digest, Digest, Digest)>();
+            rng.random::<(Digest, Digest, Digest)>();
         let own_addition_record = commit(own_item, sender_randomness, receiver_preimage.hash());
         let mut msmp =
             mutator_set_accumulator.prove(own_item, sender_randomness, receiver_preimage);
@@ -1435,7 +1436,7 @@ mod ms_proof_tests {
 
         // aocl leaf count is now 42966841942012424_u64
 
-        let other_addition_record = AdditionRecord::new(rng.gen::<Digest>());
+        let other_addition_record = AdditionRecord::new(rng.random::<Digest>());
 
         msmp.update_from_addition(own_item, &mutator_set_accumulator, &other_addition_record)
             .expect("update from add should always work");

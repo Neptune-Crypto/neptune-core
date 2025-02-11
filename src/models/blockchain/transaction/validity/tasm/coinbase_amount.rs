@@ -196,14 +196,14 @@ mod test {
             _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut rng: StdRng = SeedableRng::from_seed(seed);
-            let new_seed: [u8; 32] = rng.gen();
+            let new_seed: [u8; 32] = rng.random();
 
             let mut u = Unstructured::new(&new_seed);
             let coinbase: Option<NativeCurrencyAmount> = u
                 .arbitrary::<Option<NativeCurrencyAmount>>()
                 .unwrap()
                 .map(|c| c.abs());
-            let coinbase_ptr: BFieldElement = rng.gen();
+            let coinbase_ptr: BFieldElement = rng.random();
 
             let mut memory = HashMap::default();
             encode_to_memory(&mut memory, coinbase_ptr, &coinbase);

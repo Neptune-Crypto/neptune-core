@@ -505,7 +505,7 @@ pub(crate) mod test {
         let fee = NativeCurrencyAmount::coins(1);
         let tx_output = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(1),
-            rng.gen(),
+            rng.random(),
             alice_key.to_address().into(),
             false,
         );

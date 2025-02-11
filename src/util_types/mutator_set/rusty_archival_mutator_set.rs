@@ -107,7 +107,6 @@ impl StorageWriter for RustyArchivalMutatorSet {
 mod tests {
     use itertools::Itertools;
     use rand::random;
-    use rand::thread_rng;
     use rand::RngCore;
 
     use super::*;
@@ -120,7 +119,7 @@ mod tests {
     async fn persist_test() {
         let num_additions = 150 + 2 * BATCH_SIZE as usize;
         let num_removals = 50usize;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let db = NeptuneLevelDb::open_new_test_database(false, None, None, None)
             .await

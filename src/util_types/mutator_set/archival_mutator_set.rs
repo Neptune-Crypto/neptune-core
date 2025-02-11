@@ -990,11 +990,11 @@ mod archival_mutator_set_tests {
                 items.push(item);
             }
 
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let mut skipped_removes: Vec<bool> = vec![];
             let mut removal_records: Vec<RemovalRecord> = vec![];
             for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
-                let skipped = rng.gen_range(0.0..1.0) < remove_factor;
+                let skipped = rng.random_range(0.0..1.0) < remove_factor;
                 skipped_removes.push(skipped);
                 if !skipped {
                     removal_records.push(archival_mutator_set.drop(item, mp).await);
@@ -1043,9 +1043,9 @@ mod archival_mutator_set_tests {
         archival_mutator_set: &mut ArchivalMutatorSet<MmrStorage, ChunkStorage>,
         rng: &mut StdRng,
     ) -> (Digest, AdditionRecord, MsMembershipProof) {
-        let item: Digest = rng.gen();
-        let sender_randomness: Digest = rng.gen();
-        let receiver_preimage: Digest = rng.gen();
+        let item: Digest = rng.random();
+        let sender_randomness: Digest = rng.random();
+        let receiver_preimage: Digest = rng.random();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
         let membership_proof = archival_mutator_set
             .prove(item, sender_randomness, receiver_preimage)

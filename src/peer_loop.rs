@@ -13,7 +13,6 @@ use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -100,8 +99,7 @@ impl PeerLoopHandler {
             peer_handshake_data,
             inbound_connection,
             distance,
-            rng: StdRng::from_rng(thread_rng())
-                .expect("should be able to seed new StdRng from thread_rng"),
+            rng: StdRng::from_rng(&mut rand::rng()),
             #[cfg(test)]
             mock_now: None,
         }
@@ -126,8 +124,7 @@ impl PeerLoopHandler {
             inbound_connection,
             distance,
             mock_now: Some(mocked_time),
-            rng: StdRng::from_rng(thread_rng())
-                .expect("should be able to seed new StdRng from thread_rng"),
+            rng: StdRng::from_rng(&mut rand::rng()),
         }
     }
 
@@ -681,7 +678,7 @@ impl PeerLoopHandler {
                     let challenge = SyncChallenge::generate(
                         &block_notification,
                         tip_header.height,
-                        self.rng.gen(),
+                        self.rng.random(),
                     );
                     peer_state_info.sync_challenge = Some(IssuedSyncChallenge::new(
                         challenge,
@@ -1936,11 +1933,11 @@ mod peer_loop_tests {
             .get_tip()
             .await;
 
-        different_genesis_block.set_header_nonce(StdRng::seed_from_u64(5550001).gen());
+        different_genesis_block.set_header_nonce(StdRng::seed_from_u64(5550001).random());
         let [block_1_with_different_genesis] = fake_valid_sequence_of_blocks_for_tests(
             &different_genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
@@ -2016,7 +2013,7 @@ mod peer_loop_tests {
         let [mut block_without_valid_pow] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
 
@@ -2099,7 +2096,7 @@ mod peer_loop_tests {
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
         let block_1 =
-            fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).gen()).await;
+            fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).random()).await;
         assert!(
             block_1.is_valid(&genesis_block, now).await,
             "Block must be valid for this test to make sense"
@@ -2162,7 +2159,7 @@ mod peer_loop_tests {
             fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
-                StdRng::seed_from_u64(5550001).gen(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
         let blocks = vec![
@@ -2234,13 +2231,13 @@ mod peer_loop_tests {
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550002).gen(),
+            StdRng::seed_from_u64(5550002).random(),
         )
         .await;
         assert_ne!(block_2_b.hash(), block_2_a.hash());
@@ -2350,13 +2347,13 @@ mod peer_loop_tests {
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550002).gen(),
+            StdRng::seed_from_u64(5550002).random(),
         )
         .await;
         assert_ne!(block_2_a.hash(), block_2_b.hash());
@@ -2483,13 +2480,13 @@ mod peer_loop_tests {
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550002).gen(),
+            StdRng::seed_from_u64(5550002).random(),
         )
         .await;
         assert_ne!(block_2_a.hash(), block_2_b.hash());
@@ -2540,7 +2537,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
                 .unwrap();
-        let block_1 = fake_valid_block_for_tests(&state_lock, rng.gen()).await;
+        let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
         let notification_height1 = (&block_1).into();
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockNotification(notification_height1)),
@@ -2578,9 +2575,12 @@ mod peer_loop_tests {
                 .await
                 .unwrap();
         let genesis_block = Block::genesis(network);
-        let blocks: [Block; 7] =
-            fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
-                .await;
+        let blocks: [Block; 7] = fake_valid_sequence_of_blocks_for_tests(
+            &genesis_block,
+            Timestamp::hours(1),
+            rng.random(),
+        )
+        .await;
         let block7 = blocks.last().unwrap().to_owned();
         let tip_height: u64 = block7.header().height.into();
         assert_eq!(7, tip_height);
@@ -2624,7 +2624,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
 
-        let block_1 = fake_valid_block_for_tests(&state_lock, rng.gen()).await;
+        let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
@@ -2683,7 +2683,7 @@ mod peer_loop_tests {
         let [block_1, block_2] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
 
@@ -2759,9 +2759,12 @@ mod peer_loop_tests {
         state_lock.set_cli(cli).await;
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
-        let [block_1, _block_2, block_3, block_4] =
-            fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
-                .await;
+        let [block_1, _block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
+            &genesis_block,
+            Timestamp::hours(1),
+            rng.random(),
+        )
+        .await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -2836,7 +2839,7 @@ mod peer_loop_tests {
         let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await.unwrap();
@@ -2910,7 +2913,7 @@ mod peer_loop_tests {
         let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
 
@@ -2998,7 +3001,7 @@ mod peer_loop_tests {
             fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
-                StdRng::seed_from_u64(5550001).gen(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -3102,7 +3105,7 @@ mod peer_loop_tests {
         let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -3401,7 +3404,7 @@ mod peer_loop_tests {
             } = genesis_setup(Network::Main).await;
             let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
-                StdRng::seed_from_u64(5550001).gen(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
 
@@ -3442,7 +3445,7 @@ mod peer_loop_tests {
             } = genesis_setup(Network::Main).await;
             let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
-                StdRng::seed_from_u64(5550001).gen(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
 
@@ -3746,7 +3749,7 @@ mod peer_loop_tests {
             // criterion. Alice issues a challenge. Bob responds. Alice enters into
             // sync mode.
 
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let network = Network::Main;
             let genesis_block: Block = Block::genesis(network);
 
@@ -3776,7 +3779,7 @@ mod peer_loop_tests {
             let bob_socket_address = get_dummy_socket_address(0);
 
             let now = genesis_block.header().timestamp + Timestamp::hours(1);
-            let block_1 = fake_valid_block_for_tests(&alice, rng.gen()).await;
+            let block_1 = fake_valid_block_for_tests(&alice, rng.random()).await;
             assert!(
                 block_1.is_valid(&genesis_block, now).await,
                 "Block must be valid for this test to make sense"
@@ -3790,8 +3793,8 @@ mod peer_loop_tests {
             let blocks = fake_valid_sequence_of_blocks_for_tests_dyn(
                 &block_1,
                 TARGET_BLOCK_INTERVAL,
-                rng.gen(),
-                rng.gen_range(ALICE_SYNC_MODE_THRESHOLD + 1..20),
+                rng.random(),
+                rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20),
             )
             .await;
             for block in &blocks {
@@ -3805,12 +3808,12 @@ mod peer_loop_tests {
                 cumulative_proof_of_work: bob_tip.header().cumulative_proof_of_work,
             };
 
-            let alice_rng_seed = rng.gen::<[u8; 32]>();
+            let alice_rng_seed = rng.random::<[u8; 32]>();
             let mut alice_rng_clone = StdRng::from_seed(alice_rng_seed);
             let sync_challenge_from_alice = SyncChallenge::generate(
                 &block_notification_from_bob,
                 alice_tip.header().height,
-                alice_rng_clone.gen(),
+                alice_rng_clone.random(),
             );
 
             println!(

@@ -411,8 +411,8 @@ mod tests {
         let block_height = state.chain.light_state().header().height;
 
         // generate a new receiving address that is not from our wallet.
-        let mut rng = rand::thread_rng();
-        let seed: Digest = rng.gen();
+        let mut rng = rand::rng();
+        let seed: Digest = rng.random();
         let address = GenerationReceivingAddress::derive_from_seed(seed);
 
         let amount = NativeCurrencyAmount::one();

@@ -10,8 +10,8 @@
 //! future, more types will likely be added.
 use std::path::PathBuf;
 
-use rand::distributions::Alphanumeric;
-use rand::distributions::DistString;
+use rand::distr::Alphanumeric;
+use rand::distr::SampleString;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
@@ -137,7 +137,7 @@ impl Cookie {
 
         let mut path_tmp = path.clone();
 
-        let extension = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+        let extension = Alphanumeric.sample_string(&mut rand::rng(), 16);
         path_tmp.set_extension(extension);
 
         if let Some(parent_dir) = path.parent() {

@@ -109,7 +109,6 @@ impl CoinWithPossibleTimeLock {
 mod test {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::RngCore;
 
@@ -119,23 +118,25 @@ mod test {
 
     #[test]
     fn sample_report() {
-        let mut rng = thread_rng();
-        let num_coins = rng.gen_range(0..20);
+        let mut rng = rand::rng();
+        let num_coins = rng.random_range(0..20);
         let mut coins = vec![];
         for _ in 0..num_coins {
             let coin = CoinWithPossibleTimeLock {
-                amount: if rng.gen::<bool>() {
+                amount: if rng.random::<bool>() {
                     NativeCurrencyAmount::coins(rng.next_u32() % 100000)
                 } else {
-                    NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>()))
-                        .unwrap()
+                    NativeCurrencyAmount::arbitrary(&mut Unstructured::new(
+                        &rng.random::<[u8; 32]>(),
+                    ))
+                    .unwrap()
                 },
-                release_date: if rng.gen::<bool>() {
-                    Some(rng.gen::<Timestamp>())
+                release_date: if rng.random::<bool>() {
+                    Some(rng.random::<Timestamp>())
                 } else {
                     None
                 },
-                confirmed: rng.gen::<Timestamp>(),
+                confirmed: rng.random::<Timestamp>(),
             };
             coins.push(coin);
         }

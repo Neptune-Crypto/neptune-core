@@ -11,8 +11,7 @@ use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpdateMutatorSetDataJob;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
-use rand::prelude::SliceRandom;
-use rand::thread_rng;
+use rand::seq::IndexedRandom;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::signal;
@@ -274,7 +273,7 @@ impl PotentialPeersState {
         if self.potential_peers.len()
             > max_peers * POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS
         {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let random_potential_peer = self
                 .potential_peers
                 .keys()
@@ -345,7 +344,7 @@ impl PotentialPeersState {
         let max_distance_candidates = candidates.iter().max_by_key(|pp| pp.1.distance);
 
         // Pick a random candidate from the appropriate candidates
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         max_distance_candidates
             .iter()
             .choose(&mut rng)
@@ -903,7 +902,7 @@ impl MainLoopHandler {
                 connected_peers.len(),
                 self.global_state_lock.cli().max_num_peers
             );
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             // pick a peer that was not specified in the CLI arguments to disconnect from
             let peer_to_disconnect = connected_peers
@@ -1161,7 +1160,7 @@ impl MainLoopHandler {
         let candidate_peers = main_loop_state
             .sync_state
             .get_potential_peers_for_sync_request(own_cumulative_pow);
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let chosen_peer = candidate_peers.choose(&mut rng);
         assert!(
             chosen_peer.is_some(),
@@ -2301,7 +2300,7 @@ mod test {
             );
 
             // randomize "connection established" timestamps
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let now = SystemTime::now();
             let now_as_unix_timestamp = now.duration_since(UNIX_EPOCH).unwrap();
             main_loop_handler
@@ -2315,7 +2314,7 @@ mod test {
                     peer_info.set_connection_established(
                         UNIX_EPOCH
                             + Duration::from_millis(
-                                rng.gen_range(0..(now_as_unix_timestamp.as_millis() as u64)),
+                                rng.random_range(0..(now_as_unix_timestamp.as_millis() as u64)),
                             ),
                     );
                 });

@@ -32,7 +32,6 @@ use neptune_cash::models::state::wallet::WalletSecret;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
-use rand::thread_rng;
 use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;
@@ -664,8 +663,8 @@ async fn main() -> Result<()> {
             println!("Wallet for {}.", network);
             println!("Read from file `{}`.\n", wallet_file.display());
 
-            let mut rng = thread_rng();
-            let shamir_shares = match wallet_secret.share_shamir(*t, *n, rng.gen()) {
+            let mut rng = rand::rng();
+            let shamir_shares = match wallet_secret.share_shamir(*t, *n, rng.random()) {
                 Ok(shares) => shares,
                 Err(e) => {
                     println!("Could not Shamir secret share wallet secret.");

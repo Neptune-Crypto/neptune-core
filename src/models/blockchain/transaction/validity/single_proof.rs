@@ -1156,7 +1156,7 @@ mod test {
             let mut bad_witness = good_witness.clone();
 
             let mut new_inputs = bad_witness.new_kernel.inputs.clone();
-            new_inputs.push(pseudorandom_removal_record(rng.gen()));
+            new_inputs.push(pseudorandom_removal_record(rng.random()));
 
             bad_witness.new_kernel = TransactionKernelModifier::default()
                 .inputs(new_inputs)

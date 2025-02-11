@@ -558,7 +558,6 @@ pub(crate) mod test {
     use proptest::prop_assert_eq;
     use proptest::prop_assume;
     use proptest_arbitrary_interop::arb;
-    use rand::thread_rng;
     use rand::Rng;
     use test_strategy::proptest;
 
@@ -579,10 +578,10 @@ pub(crate) mod test {
 
     #[test]
     fn test_string_conversion() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         for _ in 0..100 {
-            let number = rng.gen_range(0..42000000);
+            let number = rng.random_range(0..42000000);
             let amount = NativeCurrencyAmount::coins(number);
             let string = amount.to_string();
             let reconstructed_amount = NativeCurrencyAmount::coins_from_str(&string)
@@ -594,11 +593,11 @@ pub(crate) mod test {
 
     #[test]
     fn test_bfe_conversion() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         for _ in 0..5 {
             let amount =
-                NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>()))
+                NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.random::<[u8; 32]>()))
                     .unwrap();
             let bfes = amount.encode();
             let reconstructed_amount = *NativeCurrencyAmount::decode(&bfes).unwrap();
@@ -609,11 +608,11 @@ pub(crate) mod test {
 
     #[test]
     fn test_bfe_conversion_with_option_amount() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         for _ in 0..10 {
             let amount =
-                NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>()))
+                NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.random::<[u8; 32]>()))
                     .unwrap();
             let bfes = Some(amount).encode();
             let reconstructed_amount = *Option::<NativeCurrencyAmount>::decode(&bfes).unwrap();
@@ -638,9 +637,9 @@ pub(crate) mod test {
 
     #[test]
     fn from_nau_conversion_pbt() {
-        let mut rng = thread_rng();
-        let a: u64 = rng.gen_range(0..(1 << 63));
-        let b: u64 = rng.gen_range(0..(1 << 63));
+        let mut rng = rand::rng();
+        let a: u64 = rng.random_range(0..(1 << 63));
+        let b: u64 = rng.random_range(0..(1 << 63));
         let a_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(a.into());
         let b_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(b.into());
         assert_eq!(
@@ -685,12 +684,12 @@ pub(crate) mod test {
 
     #[test]
     fn amount_scalar_mul_pbt() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut a = 6481;
         let mut b = 6481;
         while (a as u64) * (b as u64) > 42000000 {
-            a = rng.gen_range(0..42000000);
-            b = rng.gen_range(0..42000000);
+            a = rng.random_range(0..42000000);
+            b = rng.random_range(0..42000000);
         }
 
         let prod_checked: NativeCurrencyAmount = NativeCurrencyAmount::coins(a * b);

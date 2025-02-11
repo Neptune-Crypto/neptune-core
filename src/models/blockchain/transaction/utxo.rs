@@ -253,7 +253,7 @@ impl StdHash for Utxo {
 pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     Utxo::from((
-        rng.gen(),
+        rng.random(),
         NativeCurrencyAmount::coins(rng.next_u32() % 42000000).to_native_coins(),
     ))
 }
@@ -282,7 +282,6 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::thread_rng;
     use rand::Rng;
     use test_strategy::proptest;
     use tracing_test::traced_test;
@@ -291,14 +290,14 @@ mod test {
     use crate::triton_vm::prelude::*;
 
     fn make_random_utxo() -> Utxo {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let lock_script = LockScript::anyone_can_spend();
         let lock_script_hash = lock_script.hash();
-        let num_coins = rng.gen_range(0..10);
+        let num_coins = rng.random_range(0..10);
         let mut coins = vec![];
         for _i in 0..num_coins {
             let amount = NativeCurrencyAmount::from_raw_i128(
-                rng.gen_range(0i128..=NativeCurrencyAmount::MAX_NAU),
+                rng.random_range(0i128..=NativeCurrencyAmount::MAX_NAU),
             );
             coins.push(Coin::new_native_currency(amount));
         }

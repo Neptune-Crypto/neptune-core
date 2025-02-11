@@ -137,7 +137,6 @@ mod mutate {
 
     mod mutate_100_of_10000 {
         use itertools::Itertools;
-        use rand::thread_rng;
         use rand::Rng;
         use tasm_lib::twenty_first::math::other::random_elements;
 
@@ -149,10 +148,10 @@ mod mutate {
         fn leaf_mutation_impl(bencher: Bencher, persist: bool) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let (mut storage, mut ammr) = rt.block_on(new_ammr(AMMR_LEAF_COUNT));
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let digests = random_elements(NUM_MUTATIONS);
             let leaf_index_of_mutated_leafs = (0..NUM_MUTATIONS as u64)
-                .map(|_| rng.gen_range(0..AMMR_LEAF_COUNT))
+                .map(|_| rng.random_range(0..AMMR_LEAF_COUNT))
                 .collect_vec();
 
             bencher.bench_local(|| {
@@ -186,7 +185,6 @@ mod batch_mutate_leaf_and_update_mps {
 
     mod mutate_100_of_10000 {
         use itertools::Itertools;
-        use rand::thread_rng;
         use rand::Rng;
         use tasm_lib::twenty_first::math::other::random_elements;
 
@@ -198,10 +196,10 @@ mod batch_mutate_leaf_and_update_mps {
         fn batch_leaf_mutation_impl(bencher: Bencher, persist: bool) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let (mut storage, mut ammr) = rt.block_on(new_ammr(AMMR_LEAF_COUNT));
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let new_digests = random_elements(NUM_MUTATIONS_IN_BATCH);
             let mut leaf_index_of_mutated_leafs = (0..NUM_MUTATIONS_IN_BATCH as u64)
-                .map(|_| rng.gen_range(0..AMMR_LEAF_COUNT))
+                .map(|_| rng.random_range(0..AMMR_LEAF_COUNT))
                 .collect_vec();
             leaf_index_of_mutated_leafs.sort();
             leaf_index_of_mutated_leafs.dedup();
@@ -212,7 +210,7 @@ mod batch_mutate_leaf_and_update_mps {
                 .collect_vec();
 
             let mut leaf_indices_for_mps_to_preserve = (0..NUM_MUTATIONS_IN_BATCH as u64)
-                .map(|_| rng.gen_range(0..AMMR_LEAF_COUNT))
+                .map(|_| rng.random_range(0..AMMR_LEAF_COUNT))
                 .collect_vec();
             leaf_indices_for_mps_to_preserve.sort();
             leaf_indices_for_mps_to_preserve.dedup();

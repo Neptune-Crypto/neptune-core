@@ -614,7 +614,7 @@ mod tests {
         let mut persisted_vector = rusty_storage.schema.new_vec::<u64>("test-vector").await;
 
         // Insert 1000 elements
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut normal_vector = vec![];
         for _ in 0..1000 {
             let value = random();
@@ -626,7 +626,7 @@ mod tests {
         for _i in 0..1000 {
             assert_eq!(normal_vector.len() as u64, persisted_vector.len().await);
 
-            match rng.gen_range(0..=5) {
+            match rng.random_range(0..=5) {
                 0 => {
                     // `push`
                     let push_val = rng.next_u64();
@@ -643,7 +643,7 @@ mod tests {
                     // `get_many`
                     assert_eq!(normal_vector.len(), persisted_vector.len().await as usize);
 
-                    let index = rng.gen_range(0..normal_vector.len());
+                    let index = rng.random_range(0..normal_vector.len());
                     assert_eq!(Vec::<u64>::default(), persisted_vector.get_many(&[]).await);
                     assert_eq!(
                         normal_vector[index],
@@ -663,14 +663,14 @@ mod tests {
                 3 => {
                     // `set`
                     let value = rng.next_u64();
-                    let index = rng.gen_range(0..normal_vector.len());
+                    let index = rng.random_range(0..normal_vector.len());
                     normal_vector[index] = value;
                     persisted_vector.set(index as u64, value).await;
                 }
                 4 => {
                     // `set_many`
-                    let indices: Vec<u64> = (0..rng.gen_range(0..10))
-                        .map(|_| rng.gen_range(0..normal_vector.len() as u64))
+                    let indices: Vec<u64> = (0..rng.random_range(0..10))
+                        .map(|_| rng.random_range(0..normal_vector.len() as u64))
                         .unique()
                         .collect();
                     let values: Vec<u64> = (0..indices.len()).map(|_| rng.next_u64()).collect_vec();

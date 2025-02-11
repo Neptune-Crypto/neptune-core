@@ -1031,7 +1031,6 @@ impl Block {
 pub(crate) mod block_tests {
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
@@ -1091,13 +1090,13 @@ pub(crate) mod block_tests {
         for multiplier in [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000] {
             let mut block_prev = Block::genesis(network);
             let mut now = block_prev.kernel.header.timestamp;
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             for i in (0..30).step_by(1) {
                 let duration = i as u64 * multiplier;
                 now += Timestamp::millis(duration);
 
-                let (block, _) = make_mock_block(&block_prev, Some(now), a_key, rng.gen()).await;
+                let (block, _) = make_mock_block(&block_prev, Some(now), a_key, rng.random()).await;
 
                 let control = difficulty_control(
                     block.kernel.header.timestamp,
@@ -1150,7 +1149,7 @@ pub(crate) mod block_tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-        let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
+        let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
 
         let timestamp = block1.kernel.header.timestamp;
         assert!(block1.is_valid(&genesis_block, timestamp).await);
@@ -1176,7 +1175,7 @@ pub(crate) mod block_tests {
 
     #[tokio::test]
     async fn can_prove_block_ancestry() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let network = Network::RegTest;
         let genesis_block = Block::genesis(network);
         let mut blocks = vec![];
@@ -1194,7 +1193,7 @@ pub(crate) mod block_tests {
             let wallet_secret = WalletSecret::new_random();
             let key = wallet_secret.nth_generation_spending_key_for_tests(0);
             let (new_block, _) =
-                make_mock_block(blocks.last().unwrap(), None, key, rng.gen()).await;
+                make_mock_block(blocks.last().unwrap(), None, key, rng.random()).await;
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
@@ -1209,7 +1208,7 @@ pub(crate) mod block_tests {
         let last_block_mmra = blocks.last().unwrap().body().block_mmr_accumulator.clone();
         assert_eq!(mmra, last_block_mmra);
 
-        let index = thread_rng().gen_range(0..blocks.len() - 1);
+        let index = rand::rng().random_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
 
         let leaf_index = index as u64;
@@ -1279,7 +1278,8 @@ pub(crate) mod block_tests {
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
             let block1 =
-                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.gen()).await;
+                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
+                    .await;
 
             let alice_wallet = WalletSecret::devnet_wallet();
             let mut alice = mock_genesis_global_state(
@@ -1298,7 +1298,7 @@ pub(crate) mod block_tests {
                 .unwrap();
             let output_to_self = TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
-                rng.gen(),
+                rng.random(),
                 alice_key.to_address().unwrap(),
                 true,
             );
@@ -1345,7 +1345,7 @@ pub(crate) mod block_tests {
                     .clone()
                     .merge_with(
                         tx2,
-                        rng.gen(),
+                        rng.random(),
                         &TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
@@ -1401,7 +1401,7 @@ pub(crate) mod block_tests {
                     .clone()
                     .merge_with(
                         tx3,
-                        rng.gen(),
+                        rng.random(),
                         &TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
@@ -1439,7 +1439,8 @@ pub(crate) mod block_tests {
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-            let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
+            let mut block1 =
+                fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
 
             // Set block timestamp 4 minutes in the future.  (is valid)
             let future_time1 = now + Timestamp::minutes(4);
@@ -1516,10 +1517,10 @@ pub(crate) mod block_tests {
         #[test]
         fn set_header_nonce() {
             let gblock = Block::genesis(Network::RegTest);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             let mut new_block = gblock.clone();
-            new_block.set_header_nonce(rng.gen());
+            new_block.set_header_nonce(rng.random());
             assert_ne!(gblock.hash(), new_block.hash());
         }
 
@@ -1527,10 +1528,10 @@ pub(crate) mod block_tests {
         #[test]
         fn set_block() {
             let gblock = Block::genesis(Network::RegTest);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             let mut unique_block = gblock.clone();
-            unique_block.set_header_nonce(rng.gen());
+            unique_block.set_header_nonce(rng.random());
 
             let mut block = gblock.clone();
             block.set_block(unique_block.clone());
@@ -1574,15 +1575,15 @@ pub(crate) mod block_tests {
             // Ensure that multiple ways of deriving guesser-fee addition
             // records are consistent.
 
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let genesis_block = Block::genesis(Network::Main);
-            let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
-            let guesser_preimage = rng.gen();
+            let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
+            let guesser_preimage = rng.random();
             let (block1, _) = make_mock_block_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
                 None,
                 a_key,
-                rng.gen(),
+                rng.random(),
                 0.4,
                 guesser_preimage,
             )
@@ -1616,7 +1617,7 @@ pub(crate) mod block_tests {
 
             let mut block = invalid_block_with_transaction(&genesis_block, transaction);
 
-            let preimage = thread_rng().gen::<Digest>();
+            let preimage = rand::rng().random::<Digest>();
             block.set_header_guesser_digest(preimage.hash());
 
             let guesser_fee_utxos = block.guesser_fee_utxos();
@@ -1638,7 +1639,7 @@ pub(crate) mod block_tests {
             // This test must live in block/mod.rs because it relies on access to
             // private fields on `BlockBody`.
 
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             assert!(
@@ -1658,7 +1659,7 @@ pub(crate) mod block_tests {
 
             let output = TxOutput::offchain_native_currency(
                 NativeCurrencyAmount::coins(4),
-                rng.gen(),
+                rng.random(),
                 alice_address.into(),
                 true,
             );

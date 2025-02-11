@@ -98,7 +98,7 @@ impl SecretKeyMaterial {
         let mut rng = StdRng::from_seed(seed);
 
         let polynomial_coefficients = (0..t)
-            .map(|i| if i == 0 { self.0 } else { rng.gen() })
+            .map(|i| if i == 0 { self.0 } else { rng.random() })
             .collect_vec();
 
         let evaluation_indices = (1..=n).collect_vec();
@@ -203,10 +203,10 @@ mod test {
             let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
             let mut shares = secret_key
-                .share_shamir(t, n, rng.gen())
+                .share_shamir(t, n, rng.random())
                 .expect("sharing on happy path should succeed");
             let selected_shares = (0..t)
-                .map(|_| shares.swap_remove(rng.gen_range(0..shares.len())))
+                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
                 .collect_vec();
             let recombination = SecretKeyMaterial::combine_shamir(t, selected_shares)
                 .expect("recombining on happy path should succeed");
@@ -266,10 +266,10 @@ mod test {
             let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
             let mut shares = secret_key
-                .share_shamir(t, n, rng.gen())
+                .share_shamir(t, n, rng.random())
                 .expect("sharing on happy path should succeed");
             let selected_shares = (0..t - 1)
-                .map(|_| shares.swap_remove(rng.gen_range(0..shares.len())))
+                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
                 .collect_vec();
             prop_assert_eq!(
                 SecretKeyMaterial::combine_shamir(t, selected_shares),
@@ -287,10 +287,10 @@ mod test {
             let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
             let mut shares = secret_key
-                .share_shamir(t, n, rng.gen())
+                .share_shamir(t, n, rng.random())
                 .expect("sharing on happy path should succeed");
             let mut selected_shares = (0..t - 1)
-                .map(|_| shares.swap_remove(rng.gen_range(0..shares.len())))
+                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
                 .collect_vec();
             let invalid_share = (0, secret_key);
             selected_shares.push(invalid_share);
@@ -310,12 +310,13 @@ mod test {
             let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
             let mut shares = secret_key
-                .share_shamir(t, n, rng.gen())
+                .share_shamir(t, n, rng.random())
                 .expect("sharing on happy path should succeed");
             let mut selected_shares = (0..t - 1)
-                .map(|_| shares.swap_remove(rng.gen_range(0..shares.len())))
+                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
                 .collect_vec();
-            let duplicate_share = selected_shares[rng.gen_range(0..selected_shares.len())].clone();
+            let duplicate_share =
+                selected_shares[rng.random_range(0..selected_shares.len())].clone();
             selected_shares.push(duplicate_share);
             println!("selected shares: {:?}", selected_shares);
             prop_assert_eq!(
@@ -334,10 +335,10 @@ mod test {
             let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
             let mut shares_a = secret_key
-                .share_shamir(t, n, rng.gen())
+                .share_shamir(t, n, rng.random())
                 .expect("sharing on happy path should succeed");
             let mut shares_b = secret_key
-                .share_shamir(t, n, rng.gen())
+                .share_shamir(t, n, rng.random())
                 .expect("sharing on happy path should succeed");
 
             // Make a random selection of t+1 shares such that both sharings are
@@ -356,14 +357,14 @@ mod test {
             // add one share a, randomly selected
             insert_unique_index(
                 &mut selected_shares,
-                shares_a.swap_remove(rng.gen_range(0..shares_a.len())),
+                shares_a.swap_remove(rng.random_range(0..shares_a.len())),
             );
 
             // add one from b, randomly selected, and make sure it gets added
             // even if we get an index collision on the first guess
             while insert_unique_index(
                 &mut selected_shares,
-                shares_b.swap_remove(rng.gen_range(0..shares_b.len())),
+                shares_b.swap_remove(rng.random_range(0..shares_b.len())),
             ) {}
 
             // complete the collection by drawing randomly from a or b when
@@ -372,13 +373,13 @@ mod test {
                 let next_share = if shares_a.is_empty() && shares_b.is_empty() {
                     panic!("cannot happen: both were populated with more than 2 elements");
                 } else if !shares_a.is_empty() && shares_b.is_empty() {
-                    shares_a.swap_remove(rng.gen_range(0..shares_a.len()))
+                    shares_a.swap_remove(rng.random_range(0..shares_a.len()))
                 } else if shares_a.is_empty() && !shares_b.is_empty() {
-                    shares_b.swap_remove(rng.gen_range(0..shares_b.len()))
-                } else if rng.gen() {
-                    shares_a.swap_remove(rng.gen_range(0..shares_a.len()))
+                    shares_b.swap_remove(rng.random_range(0..shares_b.len()))
+                } else if rng.random() {
+                    shares_a.swap_remove(rng.random_range(0..shares_a.len()))
                 } else {
-                    shares_b.swap_remove(rng.gen_range(0..shares_b.len()))
+                    shares_b.swap_remove(rng.random_range(0..shares_b.len()))
                 };
                 insert_unique_index(&mut selected_shares, next_share);
             }

@@ -81,11 +81,11 @@ mod tests {
 
     use itertools::Itertools;
     use num_traits::ConstZero;
+    use proptest::prelude::Rng;
     use proptest::prelude::Strategy;
     use proptest::test_runner::RngAlgorithm;
     use proptest::test_runner::TestRng;
     use proptest::test_runner::TestRunner;
-    use rand::Rng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;

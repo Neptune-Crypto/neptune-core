@@ -126,8 +126,8 @@ mod tests {
             _: Option<BenchmarkCase>,
         ) -> AlgorithmInitialState {
             let mut rng: StdRng = rand::prelude::SeedableRng::from_seed(seed);
-            let mast_hash = rng.gen::<Digest>();
-            let single_proof_digest = rng.gen::<Digest>();
+            let mast_hash = rng.random::<Digest>();
+            let single_proof_digest = rng.random::<Digest>();
 
             let mut stack = self.init_stack_for_isolated_run();
             stack.extend(mast_hash.reversed().values());

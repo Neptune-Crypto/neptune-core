@@ -244,23 +244,24 @@ impl BlockHeaderWithBlockHashWitness {
 
 #[cfg(test)]
 pub(crate) mod block_header_tests {
-    use rand::thread_rng;
     use rand::Rng;
 
     use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
 
     pub fn random_block_header() -> BlockHeader {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         BlockHeader {
-            version: rng.gen(),
-            height: BlockHeight::from(rng.gen::<u64>()),
-            prev_block_digest: rng.gen(),
-            timestamp: rng.gen(),
-            nonce: rng.gen(),
-            cumulative_proof_of_work: rng.gen(),
-            difficulty: rng.gen(),
-            guesser_digest: rng.gen(),
+            version: rng.random(),
+            height: BlockHeight::from(rng.random::<u64>()),
+            prev_block_digest: rng.random(),
+            timestamp: rng.random(),
+            nonce: rng.random(),
+            cumulative_proof_of_work: ProofOfWork::new(
+                rng.random::<[u32; ProofOfWork::NUM_LIMBS]>(),
+            ),
+            difficulty: Difficulty::new(rng.random::<[u32; Difficulty::NUM_LIMBS]>()),
+            guesser_digest: rng.random(),
         }
     }
     #[test]

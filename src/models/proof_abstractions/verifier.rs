@@ -44,7 +44,6 @@ pub(crate) async fn cache_true_claim(claim: Claim) {
 #[cfg(test)]
 pub(crate) mod test {
     use itertools::Itertools;
-    use rand::thread_rng;
     use rand::Rng;
     use tasm_lib::prelude::Tip5;
     use triton_vm::prelude::BFieldCodec;
@@ -58,10 +57,10 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_claims_cache() {
         // generate random claim and bogus proof
-        let mut rng = thread_rng();
-        let some_claim = Claim::new(rng.gen())
-            .with_input((0..10).map(|_| rng.gen()).collect_vec())
-            .with_output((0..10).map(|_| rng.gen()).collect_vec());
+        let mut rng = rand::rng();
+        let some_claim = Claim::new(rng.random())
+            .with_input((0..10).map(|_| rng.random()).collect_vec())
+            .with_output((0..10).map(|_| rng.random()).collect_vec());
         let some_proof = bogus_proof(&some_claim);
 
         // verification must fail

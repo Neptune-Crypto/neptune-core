@@ -354,8 +354,7 @@ impl RemovalRecord {
 #[cfg(test)]
 mod removal_record_tests {
     use itertools::Itertools;
-    use rand::seq::SliceRandom;
-    use rand::thread_rng;
+    use rand::prelude::IndexedRandom;
     use rand::Rng;
     use rand::RngCore;
     use test_strategy::proptest;
@@ -605,7 +604,7 @@ mod removal_record_tests {
         let to_remove = **inactive
             .keys()
             .collect_vec()
-            .choose(&mut thread_rng())
+            .choose(&mut rand::rng())
             .unwrap();
         rr.target_chunks.remove(&to_remove);
         assert!(!rr.validate(&accumulator));
@@ -675,7 +674,7 @@ mod removal_record_tests {
             // updating the remaining removal records from removal, and that's not what we want to test in
             // this function, so we only test one of the removal records here.
             let (chosen_index, random_removal_record) =
-                removal_records.choose(&mut rand::thread_rng()).unwrap();
+                removal_records.choose(&mut rand::rng()).unwrap();
             assert!(accumulator.verify(items[*chosen_index], &mps[*chosen_index]));
             assert!(
                 accumulator.can_remove(random_removal_record),
@@ -755,7 +754,7 @@ mod removal_record_tests {
 
         // Now apply all removal records one at a time and batch update the remaining removal records
         for i in 0..12 * BATCH_SIZE + 4 {
-            let remove_idx = rand::thread_rng().gen_range(0..removal_records.len());
+            let remove_idx = rand::rng().random_range(0..removal_records.len());
             let random_removal_record = removal_records.remove(remove_idx).1;
             RemovalRecord::batch_update_from_remove(
                 &mut removal_records
@@ -782,7 +781,7 @@ mod removal_record_tests {
 
     #[test]
     fn test_index_set_serialization() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let original_indexset = AbsoluteIndexSet::new(
             &(0..NUM_TRIALS)
                 .map(|_| ((rng.next_u64() as u128) << 64) | (rng.next_u64() as u128))
@@ -809,9 +808,9 @@ mod removal_record_tests {
 
     #[test]
     fn test_removal_record_vec_decode() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..10 {
-            let length = rng.gen_range(0..10);
+            let length = rng.random_range(0..10);
             let removal_records = vec![random_removal_record(); length];
             let encoded = removal_records.encode();
             let decoded = *Vec::<RemovalRecord>::decode(&encoded).unwrap();

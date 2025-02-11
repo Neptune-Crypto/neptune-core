@@ -334,7 +334,6 @@ pub mod transaction_kernel_tests {
     use itertools::Itertools;
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
@@ -358,19 +357,20 @@ pub mod transaction_kernel_tests {
     ) -> TransactionKernel {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let inputs = (0..num_inputs)
-            .map(|_| pseudorandom_removal_record(rng.gen::<[u8; 32]>()))
+            .map(|_| pseudorandom_removal_record(rng.random::<[u8; 32]>()))
             .collect_vec();
         let outputs = (0..num_outputs)
-            .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
+            .map(|_| pseudorandom_addition_record(rng.random::<[u8; 32]>()))
             .collect_vec();
         let public_announcements = (0..num_public_announcements)
-            .map(|_| pseudorandom_public_announcement(rng.gen::<[u8; 32]>()))
+            .map(|_| pseudorandom_public_announcement(rng.random::<[u8; 32]>()))
             .collect_vec();
-        let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
-        let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
-        let timestamp: Timestamp = rng.gen();
-        let mutator_set_hash: Digest = rng.gen();
-        let merge_bit: bool = rng.gen();
+        let fee = pseudorandom_amount(rng.random::<[u8; 32]>());
+        let coinbase =
+            pseudorandom_option(rng.random(), pseudorandom_amount(rng.random::<[u8; 32]>()));
+        let timestamp: Timestamp = rng.random();
+        let mutator_set_hash: Digest = rng.random();
+        let merge_bit: bool = rng.random();
 
         TransactionKernelProxy {
             inputs,
@@ -433,7 +433,7 @@ pub mod transaction_kernel_tests {
 
     #[test]
     pub fn test_decode_transaction_kernel_small() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let absolute_indices = AbsoluteIndexSet::new(
             &(0..NUM_TRIALS as usize)
                 .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
@@ -454,7 +454,7 @@ pub mod transaction_kernel_tests {
             fee: NativeCurrencyAmount::one(),
             coinbase: None,
             timestamp: Default::default(),
-            mutator_set_hash: rng.gen::<Digest>(),
+            mutator_set_hash: rng.random::<Digest>(),
             merge_bit: true,
         }
         .into_kernel();

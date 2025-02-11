@@ -25,7 +25,6 @@ use anyhow::Result;
 use bip39::Mnemonic;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
 use secret_key_material::SecretKeyMaterial;
@@ -94,9 +93,9 @@ impl WalletSecret {
     }
 
     /// Create a new `Wallet` and populate it with a new secret seed, with entropy
-    /// obtained via `thread_rng()` from the operating system.
+    /// obtained via `rand::rng()` from the operating system.
     pub fn new_random() -> Self {
-        Self::new_pseudorandom(thread_rng().gen())
+        Self::new_pseudorandom(rand::rng().random())
     }
 
     /// Create a new `Wallet` and populate it by expanding a given seed.
@@ -104,7 +103,7 @@ impl WalletSecret {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed: SecretKeyMaterial(rng.gen()),
+            secret_seed: SecretKeyMaterial(rng.random()),
             version: STANDARD_WALLET_VERSION,
         }
     }
@@ -485,7 +484,7 @@ mod wallet_tests {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization. For all networks.
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for network in Network::iter() {
             let mut alice = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
             let alice_wallet = get_monitored_utxos(&alice).await;
@@ -501,7 +500,7 @@ mod wallet_tests {
                 "Devnet wallet's monitored UTXO must match that from genesis block at initialization"
             );
 
-            let bob_wallet = WalletSecret::new_pseudorandom(rng.gen());
+            let bob_wallet = WalletSecret::new_pseudorandom(rng.random());
             let bob_wallet = mock_genesis_wallet_state(bob_wallet, network).await;
             let bob_mutxos = get_monitored_utxos(&bob_wallet).await;
             assert!(
@@ -512,11 +511,12 @@ mod wallet_tests {
             // Add 12 blocks and verify that membership proofs are still valid
             let genesis_block = Block::genesis(network);
             let mut next_block = genesis_block.clone();
-            let charlie_wallet = WalletSecret::new_pseudorandom(rng.gen());
+            let charlie_wallet = WalletSecret::new_pseudorandom(rng.random());
             let charlie_key = charlie_wallet.nth_generation_spending_key_for_tests(0);
             for _ in 0..12 {
                 let previous_block = next_block;
-                let (nb, _) = make_mock_block(&previous_block, None, charlie_key, rng.gen()).await;
+                let (nb, _) =
+                    make_mock_block(&previous_block, None, charlie_key, rng.random()).await;
                 next_block = nb;
                 alice
                     .update_wallet_state_with_new_block(
@@ -549,7 +549,7 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let network = Network::RegTest;
         let alice_wallet = WalletSecret::new_random();
         let mut alice_wallet = mock_genesis_wallet_state(alice_wallet.clone(), network).await;
@@ -566,7 +566,7 @@ mod wallet_tests {
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
         let (block_1, block1_composer_expected) =
-            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
 
         alice_wallet
             .add_expected_utxos(block1_composer_expected.clone())
@@ -622,8 +622,8 @@ mod wallet_tests {
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let (block_2, _) = make_mock_block(&block_1, None, bob_key, rng.gen()).await;
-        let (block_3, _) = make_mock_block(&block_2, None, bob_key, rng.gen()).await;
+        let (block_2, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
+        let (block_3, _) = make_mock_block(&block_2, None, bob_key, rng.random()).await;
 
         // TODO: Is this assertion correct? Do we need to check if an auth path
         // is empty?
@@ -683,9 +683,9 @@ mod wallet_tests {
             .nth_generation_spending_key_for_tests(0);
         let genesis_block = Block::genesis(network);
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let (block_1, expected_utxos) =
-            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
         let liquid_expected_utxo = &expected_utxos[0];
         assert!(
             liquid_expected_utxo.utxo.release_date().is_none(),
@@ -775,7 +775,7 @@ mod wallet_tests {
             for _ in 0..21 {
                 let previous_block = next_block;
                 let (next_block_prime, expected) =
-                    make_mock_block(&previous_block, None, alice_key, rng.gen()).await;
+                    make_mock_block(&previous_block, None, alice_key, rng.random()).await;
                 alice.wallet_state.add_expected_utxos(expected).await;
                 alice.set_new_tip(next_block_prime.clone()).await.unwrap();
                 next_block = next_block_prime;
@@ -906,7 +906,7 @@ mod wallet_tests {
 
         let network = Network::Main;
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
-        let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
+        let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.random());
         let mut alice =
             mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args::Args::default())
                 .await;
@@ -1038,7 +1038,7 @@ mod wallet_tests {
                 &previous_block,
                 Some(in_seven_months + MINIMUM_BLOCK_TIME * i),
                 alice_key,
-                rng.gen(),
+                rng.random(),
             )
             .await;
             next_block = block;
@@ -1112,7 +1112,7 @@ mod wallet_tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.gen()).await;
+        let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
         bob.set_new_tip(block_2_b.clone()).await.unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =
@@ -1143,7 +1143,7 @@ mod wallet_tests {
         // Fork back again to the long chain and verify that the membership proofs
         // all work again
         let (first_block_continuing_spree, _) =
-            make_mock_block(&first_block_after_spree, None, bob_key, rng.gen()).await;
+            make_mock_block(&first_block_after_spree, None, bob_key, rng.random()).await;
         alice
             .lock_guard_mut()
             .await
@@ -1187,7 +1187,7 @@ mod wallet_tests {
         // for Alice, two composer UTXOs and one other UTXO.
         let receiver_data_1_to_alice_new = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(1),
-            rng.gen(),
+            rng.random(),
             alice_address.into(),
             false,
         );
@@ -1323,7 +1323,7 @@ mod wallet_tests {
 
         // Then fork back to A-chain
         let (second_block_continuing_spree, _) =
-            make_mock_block(&first_block_continuing_spree, None, bob_key, rng.gen()).await;
+            make_mock_block(&first_block_continuing_spree, None, bob_key, rng.random()).await;
         alice
             .lock_guard_mut()
             .await
@@ -1402,7 +1402,7 @@ mod wallet_tests {
         let anyone_can_spend_utxo =
             Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
         let tx_output =
-            TxOutput::no_notification(anyone_can_spend_utxo, rng.gen(), rng.gen(), false);
+            TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
         let (sender_tx, _change_output) = bob
             .lock_guard()
@@ -1457,7 +1457,7 @@ mod wallet_tests {
 
     #[test]
     fn master_seed_is_not_sender_randomness() {
-        let secret = thread_rng().gen::<XFieldElement>();
+        let secret = rand::rng().random::<XFieldElement>();
         let secret_as_digest = Digest::new(
             [
                 secret.coefficients.to_vec(),

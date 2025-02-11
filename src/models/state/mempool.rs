@@ -1096,7 +1096,7 @@ mod tests {
 
         let bob_address = bob_spending_key.to_address();
 
-        let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
+        let alice_wallet = WalletSecret::new_pseudorandom(rng.random());
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let mut alice =
@@ -1106,7 +1106,7 @@ mod tests {
         // mine a block.
         let genesis_block = Block::genesis(network);
         let (block_1, expected_1) =
-            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
 
         // Update both states with block 1
         alice
@@ -1124,7 +1124,7 @@ mod tests {
             let amount: NativeCurrencyAmount = NativeCurrencyAmount::coins(i);
             utxos_from_bob.push(TxOutput::onchain_native_currency(
                 amount,
-                rng.gen(),
+                rng.random(),
                 bob_address.into(),
                 true,
             ));
@@ -1170,7 +1170,7 @@ mod tests {
         // manager must keep mutator set data updated.
         let utxos_from_alice = vec![TxOutput::onchain_native_currency(
             NativeCurrencyAmount::coins(30),
-            rng.gen(),
+            rng.random(),
             alice_address.into(),
             true,
         )];
@@ -1264,7 +1264,7 @@ mod tests {
         let mut previous_block = block_2;
         for _ in 0..2 {
             let (next_block, _) =
-                make_mock_block(&previous_block, None, alice_key, rng.gen()).await;
+                make_mock_block(&previous_block, None, alice_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
             let (_, update_jobs_n) = mempool.update_with_block_and_predecessor(
@@ -1447,13 +1447,13 @@ mod tests {
             mock_genesis_global_state(network, 2, alice_wallet, cli_with_proof_capability).await;
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
-        let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
+        let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.random());
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let bob_address = bob_key.to_address();
 
         let tx_receiver_data = TxOutput::onchain_native_currency(
             NativeCurrencyAmount::coins(1),
-            rng.gen(),
+            rng.random(),
             bob_address.into(),
             false,
         );
@@ -1503,7 +1503,7 @@ mod tests {
             );
 
             let (next_block, _) =
-                make_mock_block(&current_block, Some(in_seven_years), bob_key, rng.gen()).await;
+                make_mock_block(&current_block, Some(in_seven_years), bob_key, rng.random()).await;
             let update_jobs = alice.set_new_tip(next_block.clone()).await.unwrap();
             assert!(update_jobs.len().is_one(), "Must return exactly update-job");
             mocked_mempool_update_handler(update_jobs, &mut alice.lock_guard_mut().await.mempool)
@@ -1538,7 +1538,7 @@ mod tests {
 
         // Now make a deep reorganization and verify that nothing crashes
         let (block_1b, _) =
-            make_mock_block(&genesis_block, Some(in_seven_years), bob_key, rng.gen()).await;
+            make_mock_block(&genesis_block, Some(in_seven_years), bob_key, rng.random()).await;
         assert!(
             block_1b.header().height.previous().unwrap().is_genesis(),
             "Sanity check that new tip has height 1"
@@ -1616,9 +1616,12 @@ mod tests {
         assert_eq!(0, preminer.lock_guard().await.mempool.len());
 
         // Insert transaction into mempool
-        let tx_low_fee =
-            make_transaction_with_fee(NativeCurrencyAmount::coins(1), preminer.clone(), rng.gen())
-                .await;
+        let tx_low_fee = make_transaction_with_fee(
+            NativeCurrencyAmount::coins(1),
+            preminer.clone(),
+            rng.random(),
+        )
+        .await;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_low_fee.clone(), TransactionOrigin::Foreign);
@@ -1628,9 +1631,12 @@ mod tests {
 
         // Insert a transaction that spends the same UTXO and has a higher fee.
         // Verify that this replaces the previous transaction.
-        let tx_high_fee =
-            make_transaction_with_fee(NativeCurrencyAmount::coins(10), preminer.clone(), rng.gen())
-                .await;
+        let tx_high_fee = make_transaction_with_fee(
+            NativeCurrencyAmount::coins(10),
+            preminer.clone(),
+            rng.random(),
+        )
+        .await;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_high_fee.clone(), TransactionOrigin::Foreign);
@@ -1647,7 +1653,7 @@ mod tests {
             let tx_medium_fee = make_transaction_with_fee(
                 NativeCurrencyAmount::coins(4),
                 preminer.clone(),
-                rng.gen(),
+                rng.random(),
             )
             .await;
             let mempool = &mut preminer.lock_guard_mut().await.mempool;

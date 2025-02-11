@@ -561,7 +561,6 @@ mod test {
     use generation_address::GenerationSpendingKey;
     use proptest_arbitrary_interop::arb;
     use rand::random;
-    use rand::thread_rng;
     use rand::Rng;
     use symmetric_key::SymmetricKey;
     use test_strategy::proptest;
@@ -697,10 +696,10 @@ mod test {
 
         /// This tests encrypting and decrypting with a [SpendingKey]
         pub fn test_encrypt_decrypt(key: SpendingKey) {
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             // 1. create utxo with random amount
-            let amount = NativeCurrencyAmount::coins(rng.gen_range(0..42000000));
+            let amount = NativeCurrencyAmount::coins(rng.random_range(0..42000000));
             let utxo = Utxo::new_native_currency(key.to_address().unwrap().lock_script(), amount);
 
             // 2. generate sender randomness

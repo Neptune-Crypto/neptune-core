@@ -24,8 +24,8 @@ use leveldb::options::ReadOptions;
 use leveldb::options::WriteOptions;
 use leveldb::snapshots::Snapshot;
 use leveldb::snapshots::Snapshots;
-use rand::distributions::Alphanumeric;
-use rand::distributions::DistString;
+use rand::distr::Alphanumeric;
+use rand::distr::SampleString;
 
 /// `DbIntMut` provides thread-safe access to LevelDB API with `&self` setters
 ///
@@ -133,7 +133,7 @@ impl DbIntMut {
     ) -> Result<Self, DbError> {
         let path = std::env::temp_dir().join(format!(
             "test-db-{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 10)
+            Alphanumeric.sample_string(&mut rand::rng(), 10)
         ));
         Self::open_test_database(
             &path,

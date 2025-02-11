@@ -215,9 +215,13 @@ impl RemovalRecordsIntegrityWitness {
             working_indices.dedup();
             for wi in working_indices {
                 let wi_odd = wi | 1;
-                nodes.entry(wi_odd).or_insert_with(|| rng.gen::<Digest>());
+                nodes
+                    .entry(wi_odd)
+                    .or_insert_with(|| rng.random::<Digest>());
                 let wi_even = wi_odd ^ 1;
-                nodes.entry(wi_even).or_insert_with(|| rng.gen::<Digest>());
+                nodes
+                    .entry(wi_even)
+                    .or_insert_with(|| rng.random::<Digest>());
                 let hash = Hash::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
                 nodes.insert(wi >> 1, hash);
             }
@@ -225,7 +229,7 @@ impl RemovalRecordsIntegrityWitness {
         }
 
         // read out root
-        let root = *nodes.get(&1).unwrap_or(&rng.gen());
+        let root = *nodes.get(&1).unwrap_or(&rng.random());
 
         // read out paths
         let paths = leafs_and_indices
@@ -289,7 +293,7 @@ impl RemovalRecordsIntegrityWitness {
                 )
                 .collect_vec();
             if leafs_and_mt_indices.is_empty() {
-                peaks.push(rng.gen());
+                peaks.push(rng.random());
                 continue;
             }
 
@@ -298,7 +302,7 @@ impl RemovalRecordsIntegrityWitness {
                 .ilog2() as usize;
             let (root, authentication_paths) =
                 Self::pseudorandom_merkle_root_with_authentication_paths(
-                    rng.gen(),
+                    rng.random(),
                     tree_height,
                     &leafs_and_mt_indices
                         .iter()
@@ -331,7 +335,7 @@ impl RemovalRecordsIntegrityWitness {
 
             // sanity check: test if membership proofs agree with peaks list (up until now)
             let dummy_remainder: Vec<Digest> = (peaks.len()..num_peaks as usize)
-                .map(|_| rng.gen())
+                .map(|_| rng.random())
                 .collect_vec();
             let dummy_peaks = [peaks.clone(), dummy_remainder].concat();
             for (&(leaf, _mt_index, _original_index), (mmr_leaf_index, mp)) in
@@ -434,13 +438,13 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             dup 10 {&field_swbfi}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] *swbfi
 
-            {&field_peaks} call {bag_peaks}
+            call {bag_peaks}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] [swbfi_hash]
 
             dup 15 {&field_aocl}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] [swbfi_hash] *aocl
 
-            {&field_peaks} call {bag_peaks}
+            call {bag_peaks}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] [swbfi_hash] [aocl_hash]
 
             hash

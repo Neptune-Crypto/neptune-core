@@ -186,8 +186,12 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
     let mut dictionary = vec![];
     for _ in 0..37 {
         let key = rng.next_u64();
-        let authpath: Vec<Digest> = (0..rng.gen_range(0..6)).map(|_| rng.gen()).collect_vec();
-        let chunk: Vec<u32> = (0..rng.gen_range(0..17)).map(|_| rng.gen()).collect_vec();
+        let authpath: Vec<Digest> = (0..rng.random_range(0..6))
+            .map(|_| rng.random())
+            .collect_vec();
+        let chunk: Vec<u32> = (0..rng.random_range(0..17))
+            .map(|_| rng.random())
+            .collect_vec();
 
         dictionary.push((
             key,

@@ -228,7 +228,7 @@ mod tests {
                 stack: [
                     self.init_stack_for_isolated_run(),
                     txk_digest_on_stack,
-                    vec![rng.gen(), rng.gen(), pw_pointer],
+                    vec![rng.random(), rng.random(), pw_pointer],
                 ]
                 .concat(),
                 memory,

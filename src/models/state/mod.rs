@@ -1745,7 +1745,6 @@ mod global_state_tests {
     use num_traits::Zero;
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
@@ -1837,7 +1836,7 @@ mod global_state_tests {
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(u64::from_str_radix("3014221", 6).unwrap());
 
-        let alice = WalletSecret::new_pseudorandom(rng.gen());
+        let alice = WalletSecret::new_pseudorandom(rng.random());
         let bob = mock_genesis_global_state(
             network,
             2,
@@ -1868,7 +1867,7 @@ mod global_state_tests {
         let alice_address = alice.nth_generation_spending_key_for_tests(0).to_address();
         let nine_money_output = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(9),
-            rng.gen(),
+            rng.random(),
             alice_address.into(),
             false,
         );
@@ -1927,7 +1926,7 @@ mod global_state_tests {
             let that_much_money: NativeCurrencyAmount = NativeCurrencyAmount::coins(i);
             let output_utxo = TxOutput::offchain_native_currency(
                 that_much_money,
-                rng.gen(),
+                rng.random(),
                 alice_address.into(),
                 false,
             );
@@ -1965,18 +1964,18 @@ mod global_state_tests {
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Main;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let wallet = WalletSecret::devnet_wallet();
         let own_key = wallet.nth_generation_spending_key_for_tests(0);
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
         let genesis_block = Block::genesis(network);
-        let guesser_preimage = rng.gen();
+        let guesser_preimage = rng.random();
         let (block1, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
             &genesis_block,
             None,
             own_key,
-            rng.gen(),
+            rng.random(),
             0.5,
             guesser_preimage,
         )
@@ -2136,7 +2135,7 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let network = Network::RegTest;
         let mut alice_state_lock = mock_genesis_global_state(
             network,
@@ -2154,7 +2153,7 @@ mod global_state_tests {
         let genesis_block = Block::genesis(network);
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-        let (mock_block_1a, _) = make_mock_block(&genesis_block, None, bob_key, rng.gen()).await;
+        let (mock_block_1a, _) = make_mock_block(&genesis_block, None, bob_key, rng.random()).await;
         {
             alice
                 .chain
@@ -2194,7 +2193,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
         let network = Network::Main;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let mut alice = mock_genesis_global_state(
             network,
@@ -2212,7 +2211,7 @@ mod global_state_tests {
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = alice.chain.archival_state().get_tip().await;
         let (mock_block_1a, expected_utxos_1a) =
-            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
         alice
             .set_new_self_mined_tip(mock_block_1a.clone(), expected_utxos_1a)
             .await
@@ -2240,7 +2239,7 @@ mod global_state_tests {
         let bob_key = bob_wallet_secret.nth_generation_spending_key(0);
         let mut parent_block = genesis_block;
         for _ in 0..5 {
-            let (next_block, _) = make_mock_block(&parent_block, None, bob_key, rng.gen()).await;
+            let (next_block, _) = make_mock_block(&parent_block, None, bob_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             parent_block = next_block;
         }
@@ -2299,7 +2298,7 @@ mod global_state_tests {
         ) -> [Vec<Block>; 3] {
             let mut final_ret = Vec::with_capacity(3);
             for i in 0..3 {
-                let mut rng = thread_rng();
+                let mut rng = rand::rng();
                 let mut ret = Vec::with_capacity(num_blocks_per_branch);
 
                 let mut block = if i < 2 {
@@ -2309,7 +2308,7 @@ mod global_state_tests {
                 };
                 for _ in 0..num_blocks_per_branch {
                     let (next_block, _) =
-                        make_mock_block(&block, None, cb_recipient.to_owned(), rng.gen()).await;
+                        make_mock_block(&block, None, cb_recipient.to_owned(), rng.random()).await;
                     ret.push(next_block.clone());
                     block = next_block;
                 }
@@ -2321,7 +2320,7 @@ mod global_state_tests {
         }
 
         let network = Network::Main;
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut alice = mock_genesis_global_state(
             network,
             2,
@@ -2340,7 +2339,7 @@ mod global_state_tests {
         // 1. Create new block 1 where Alice receives two composer UTXOs, store it.
         let genesis_block = alice.chain.archival_state().get_tip().await;
         let (block_1, alice_composer_expected_1) =
-            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
         {
             alice
                 .set_new_self_mined_tip(block_1.clone(), alice_composer_expected_1)
@@ -2505,13 +2504,13 @@ mod global_state_tests {
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
 
-        let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
+        let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.random());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
         let mut alice =
             mock_genesis_global_state(network, 3, wallet_secret_alice, cli_args::Args::default())
                 .await;
 
-        let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
+        let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.random());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
         let mut bob =
             mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
@@ -2538,7 +2537,7 @@ mod global_state_tests {
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
 
         // Send two outputs each to Alice and Bob, from genesis receiver
-        let sender_randomness: Digest = rng.gen();
+        let sender_randomness: Digest = rng.random();
         let tx_outputs_for_alice = vec![
             TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
@@ -2742,13 +2741,13 @@ mod global_state_tests {
         let tx_outputs_from_alice = vec![
             TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
-                rng.gen(),
+                rng.random(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
-                rng.gen(),
+                rng.random(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
@@ -2784,19 +2783,19 @@ mod global_state_tests {
         let tx_outputs_from_bob = vec![
             TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(2),
-                rng.gen(),
+                rng.random(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(2),
-                rng.gen(),
+                rng.random(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(2),
-                rng.gen(),
+                rng.random(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
@@ -3151,7 +3150,7 @@ mod global_state_tests {
             // Mine 60 blocks, then switch to a new chain branching off from
             // genesis block. Verify that state is integral after each block.
             let network = Network::Main;
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let genesis_block = Block::genesis(network);
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
@@ -3168,7 +3167,7 @@ mod global_state_tests {
             let mut previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.gen()).await;
+                    make_mock_block(&previous_block, None, spending_key, rng.random()).await;
                 global_state_lock
                     .set_new_self_mined_tip(next_block.clone(), expected)
                     .await
@@ -3189,7 +3188,7 @@ mod global_state_tests {
             previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.gen()).await;
+                    make_mock_block(&previous_block, None, spending_key, rng.random()).await;
                 global_state_lock
                     .set_new_self_mined_tip(next_block.clone(), expected)
                     .await
@@ -3222,7 +3221,7 @@ mod global_state_tests {
             // correctly, and that [GlobalState::set_new_tip] can be used to
             // build upon blocks stored through the former method.
             let network = Network::Main;
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let genesis_block = Block::genesis(network);
             let wallet_secret = WalletSecret::new_random();
 
@@ -3238,7 +3237,7 @@ mod global_state_tests {
             assert_eq!(genesis_block.hash(), alice.chain.light_state().hash());
 
             let cb_key = WalletSecret::new_random().nth_generation_spending_key(0);
-            let (block_1, _) = make_mock_block(&genesis_block, None, cb_key, rng.gen()).await;
+            let (block_1, _) = make_mock_block(&genesis_block, None, cb_key, rng.random()).await;
 
             alice.store_block_not_tip(block_1.clone()).await.unwrap();
             assert_eq!(
@@ -3261,12 +3260,12 @@ mod global_state_tests {
             network: Network,
             length: usize,
         ) -> Vec<(Block, Block)> {
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let cb_key = WalletSecret::new_random().nth_generation_spending_key(0);
             let mut parent = Block::genesis(network);
             let mut chain = vec![];
             for _ in 0..length {
-                let (block, _) = make_mock_block(&parent, None, cb_key, rng.gen()).await;
+                let (block, _) = make_mock_block(&parent, None, cb_key, rng.random()).await;
                 chain.push((block.clone(), parent.clone()));
                 parent = block;
             }
@@ -3390,17 +3389,17 @@ mod global_state_tests {
             // Verify that [GlobalState::set_new_tip] works for rolling back the
             // blockchain to a previous block.
             let network = Network::Main;
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let genesis_block = Block::genesis(network);
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1a, expected_1a) =
-                make_mock_block(&genesis_block, None, spending_key, rng.gen()).await;
+                make_mock_block(&genesis_block, None, spending_key, rng.random()).await;
             let (block_2a, expected_2a) =
-                make_mock_block(&block_1a, None, spending_key, rng.gen()).await;
+                make_mock_block(&block_1a, None, spending_key, rng.random()).await;
             let (block_3a, expected_3a) =
-                make_mock_block(&block_2a, None, spending_key, rng.gen()).await;
+                make_mock_block(&block_2a, None, spending_key, rng.random()).await;
 
             for claim_composer_fees in [false, true] {
                 let mut global_state_lock = mock_genesis_global_state(
@@ -3465,7 +3464,7 @@ mod global_state_tests {
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
                     let (next_block, expected) =
-                        make_mock_block(&previous_block, None, spending_key, rng.gen()).await;
+                        make_mock_block(&previous_block, None, spending_key, rng.random()).await;
                     global_state
                         .set_new_self_mined_tip(next_block.clone(), expected.clone())
                         .await
@@ -3490,14 +3489,14 @@ mod global_state_tests {
         #[traced_test]
         #[tokio::test]
         async fn setting_same_tip_twice_is_allowed() {
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let network = Network::Main;
             let wallet_secret = WalletSecret::devnet_wallet();
             let genesis_block = Block::genesis(network);
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1, expected1) =
-                make_mock_block(&genesis_block, None, spend_key, rng.gen()).await;
+                make_mock_block(&genesis_block, None, spend_key, rng.random()).await;
 
             for claim_cb in [false, true] {
                 let expected_num_mutxos = if claim_cb { 3 } else { 1 };
@@ -3660,7 +3659,7 @@ mod global_state_tests {
             let mut bob_state_lock = mock_genesis_global_state(
                 network,
                 3,
-                WalletSecret::new_pseudorandom(rng.gen()),
+                WalletSecret::new_pseudorandom(rng.random()),
                 cli_args::Args::default(),
             )
             .await;

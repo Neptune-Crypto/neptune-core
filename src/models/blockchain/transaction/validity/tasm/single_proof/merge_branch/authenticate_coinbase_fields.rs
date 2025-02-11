@@ -577,7 +577,7 @@ mod tests {
             let left_kernel = &primitive_witness_left.kernel;
             let right_kernel = &primitive_witness_right.kernel;
 
-            let new_kernel = if left_kernel.coinbase.is_some() || StdRng::from_seed(seed).gen() {
+            let new_kernel = if left_kernel.coinbase.is_some() || StdRng::from_seed(seed).random() {
                 left_kernel
             } else {
                 right_kernel

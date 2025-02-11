@@ -469,7 +469,7 @@ impl UpgradeJob {
 
         let mut rng: StdRng =
             SeedableRng::from_seed(own_wallet_secret.shuffle_seed(current_block_height.next()));
-        let gobble_shuffle_seed: [u8; 32] = rng.gen();
+        let gobble_shuffle_seed: [u8; 32] = rng.random();
 
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
@@ -657,7 +657,7 @@ pub(super) fn get_upgrade_task_from_mempool(
             single_proof_left: left_single_proof.to_owned(),
             right_kernel: right_kernel.to_owned(),
             single_proof_right: right_single_proof.to_owned(),
-            shuffle_seed: rng.gen(),
+            shuffle_seed: rng.random(),
             mutator_set: tip.mutator_set_accumulator_after().to_owned(),
             gobbling_fee,
         };

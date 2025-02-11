@@ -664,7 +664,7 @@ impl SyncChallenge {
         // height and peer's claimed tip height
         let interval = u64::from(own_tip_height)..u64::from(block_notification.height);
         while heights.len() < 10 {
-            let height = rng.gen_range(interval.clone()).into();
+            let height = rng.random_range(interval.clone()).into();
 
             // Don't require peer to send genesis block, as that's impossible.
             if height <= 1.into() {
@@ -911,7 +911,6 @@ impl SyncChallengeResponse {
 #[cfg(test)]
 mod tests {
     use rand::random;
-    use rand::thread_rng;
 
     use super::*;
     use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
@@ -921,9 +920,9 @@ mod tests {
     #[tokio::test]
     async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
         let genesis = Block::genesis(Network::Main);
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let ten_blocks: [Block; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
-            fake_valid_sequence_of_blocks_for_tests(&genesis, Timestamp::minutes(20), rng.gen())
+            fake_valid_sequence_of_blocks_for_tests(&genesis, Timestamp::minutes(20), rng.random())
                 .await;
 
         let to_pow_witness = |block: &Block| {

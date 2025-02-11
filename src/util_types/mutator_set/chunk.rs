@@ -134,7 +134,6 @@ mod chunk_tests {
     use std::collections::HashSet;
 
     use num_traits::Zero;
-    use rand::thread_rng;
     use rand::RngCore;
     use twenty_first::math::b_field_element::BFieldElement;
 
@@ -168,7 +167,7 @@ mod chunk_tests {
             assert!(!aw.contains(i));
         }
 
-        let mut prng = thread_rng();
+        let mut prng = rand::rng();
         for _ in 0..CHUNK_SIZE {
             let index = prng.next_u32() % CHUNK_SIZE;
             let set = prng.next_u32() % 2 == 0;
@@ -282,7 +281,7 @@ mod chunk_tests {
     #[test]
     fn test_indices() {
         let mut chunk = Chunk::empty_chunk();
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let num_insertions = 100;
         for _ in 0..num_insertions {
             let index = rng.next_u32() % (CHUNK_SIZE);
@@ -299,7 +298,7 @@ mod chunk_tests {
     #[test]
     fn test_chunk_decode() {
         let mut chunk = Chunk::empty_chunk();
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let num_insertions = 100;
         for _ in 0..num_insertions {
             let index = rng.next_u32() % (CHUNK_SIZE);

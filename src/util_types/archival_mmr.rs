@@ -11,7 +11,6 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_advanced;
-use twenty_first::util_types::shared::bag_peaks;
 
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
@@ -33,7 +32,8 @@ where
     /// Calculate the root for the entire MMR
     pub async fn bag_peaks(&self) -> Digest {
         let peaks: Vec<Digest> = self.peaks().await;
-        bag_peaks(&peaks)
+        let num_leafs = self.num_leafs().await;
+        MmrAccumulator::init(peaks, num_leafs).bag_peaks()
     }
 
     /// Return the digests of the peaks of the MMR
@@ -356,14 +356,11 @@ pub(crate) mod mmr_test {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use rand::random;
-    use rand::thread_rng;
     use test_strategy::proptest;
     use twenty_first::math::b_field_element::BFieldElement;
     use twenty_first::math::other::*;
     use twenty_first::math::tip5::Tip5;
-    use twenty_first::util_types::merkle_tree::*;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-    use twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 
     use super::*;
     use crate::database::storage::storage_schema::traits::*;
@@ -395,54 +392,11 @@ pub(crate) mod mmr_test {
         }
     }
 
-    mod test_tree {
-        use proptest_arbitrary_interop::arb;
-
-        use super::*;
-
-        /// Test helper to deduplicate generation of Merkle trees.
-        #[derive(Debug, Clone, test_strategy::Arbitrary)]
-        pub(crate) struct MerkleTreeToTest {
-            #[strategy(arb())]
-            pub tree: MerkleTree,
-        }
-    }
-
     impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         /// Return the number of nodes in all the trees in the MMR
         async fn count_nodes(&mut self) -> u64 {
             self.digests.len().await - 1
         }
-    }
-
-    /// Calculate a Merkle root from a list of digests of arbitrary length.
-    pub fn root_from_arbitrary_number_of_digests(digests: &[Digest]) -> Digest {
-        let mut trees = vec![];
-        let mut num_processed_digests = 0;
-        for tree_height in get_peak_heights(digests.len() as u64) {
-            let num_leaves_in_tree = 1 << tree_height;
-            let leaf_digests =
-                &digests[num_processed_digests..num_processed_digests + num_leaves_in_tree];
-            let tree: MerkleTree = MerkleTree::par_new(leaf_digests).unwrap();
-            num_processed_digests += num_leaves_in_tree;
-            trees.push(tree);
-        }
-        let roots = trees.iter().map(|t| t.root()).collect_vec();
-        bag_peaks(&roots)
-    }
-
-    /// A block can contain an empty list of addition or removal records.
-    #[test]
-    fn computing_mmr_root_for_no_leaves_produces_some_digest() {
-        root_from_arbitrary_number_of_digests(&[]);
-    }
-
-    #[proptest(cases = 30)]
-    fn mmr_root_of_arbitrary_number_of_leaves_is_merkle_root_when_number_of_leaves_is_a_power_of_two(
-        test_tree: test_tree::MerkleTreeToTest,
-    ) {
-        let root = root_from_arbitrary_number_of_digests(test_tree.tree.leafs());
-        assert_eq!(test_tree.tree.root(), root);
     }
 
     #[tokio::test]
@@ -490,11 +444,6 @@ pub(crate) mod mmr_test {
         assert_eq!(archival_mmr.peaks().await, accumulator_mmr.peaks());
         assert_eq!(Vec::<Digest>::new(), accumulator_mmr.peaks());
         assert_eq!(archival_mmr.bag_peaks().await, accumulator_mmr.bag_peaks());
-        assert_eq!(
-            archival_mmr.bag_peaks().await,
-            root_from_arbitrary_number_of_digests(&[]),
-            "Bagged peaks for empty MMR must agree with MT root finder"
-        );
         assert_eq!(0, archival_mmr.count_nodes().await);
         assert!(accumulator_mmr.is_empty());
         assert!(archival_mmr.is_empty().await);
@@ -689,10 +638,6 @@ pub(crate) mod mmr_test {
             archival_mmr_small.bag_peaks().await,
             accumulator_mmr_small.bag_peaks()
         );
-        assert_eq!(
-            archival_mmr_small.bag_peaks().await,
-            bag_peaks(&accumulator_mmr_small.peaks())
-        );
         assert!(!accumulator_mmr_small
             .peaks()
             .iter()
@@ -706,9 +651,9 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn compare_batch_and_individual_leaf_mutation() {
-        use rand::seq::SliceRandom;
+        use rand::prelude::IndexedRandom;
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for size in 0..25 {
             let init_digests = random_elements(size);
             let mut archival_batch_mut: ArchivalMmr<Storage> =
@@ -1063,13 +1008,9 @@ pub(crate) mod mmr_test {
             assert_eq!(peak_count, actual_peak_count);
 
             // Verify that MMR root from odd number of digests and MMR bagged peaks agree
-            let mmra_root = mmr.bag_peaks().await;
-            let mt_root = root_from_arbitrary_number_of_digests(&input_hashes);
-
-            assert_eq!(
-                mmra_root, mt_root,
-                "MMRA bagged peaks and MT root must agree"
-            );
+            let ammr_root = mmr.bag_peaks().await;
+            let mmra_root = MmrAccumulator::new_from_leafs(input_hashes.clone()).bag_peaks();
+            assert_eq!(ammr_root, mmra_root);
 
             // Get an authentication path for **all** values in MMR,
             // verify that it is valid
@@ -1187,12 +1128,9 @@ pub(crate) mod mmr_test {
             assert_eq!(peak_count, original_peaks.len() as u64);
 
             // Verify that MMR root from odd number of digests and MMR bagged peaks agree
-            let mmra_root = mmr.bag_peaks().await;
-            let mt_root = root_from_arbitrary_number_of_digests(&input_digests);
-            assert_eq!(
-                mmra_root, mt_root,
-                "MMRA bagged peaks and MT root must agree"
-            );
+            let ammr_root = mmr.bag_peaks().await;
+            let mmra_root = MmrAccumulator::new_from_leafs(input_digests.clone()).bag_peaks();
+            assert_eq!(ammr_root, mmra_root);
 
             // Get an authentication path for **all** values in MMR,
             // verify that it is valid

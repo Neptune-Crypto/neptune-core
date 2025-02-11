@@ -13,9 +13,6 @@ use num_bigint::BigUint;
 use num_traits::FromPrimitive;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
-use rand::Rng;
-use rand_distr::Distribution;
-use rand_distr::Standard;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -190,12 +187,6 @@ impl Display for Difficulty {
     }
 }
 
-impl Distribution<Difficulty> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Difficulty {
-        Difficulty(rng.gen::<[u32; Difficulty::NUM_LIMBS]>())
-    }
-}
-
 impl<T> From<T> for Difficulty
 where
     T: Into<u32>,
@@ -336,12 +327,6 @@ impl Ord for ProofOfWork {
 impl Display for ProofOfWork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", BigUint::from(*self))
-    }
-}
-
-impl Distribution<ProofOfWork> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ProofOfWork {
-        ProofOfWork(rng.gen::<[u32; ProofOfWork::NUM_LIMBS]>())
     }
 }
 
@@ -510,10 +495,9 @@ mod test {
     use num_traits::Zero;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
+    use proptest::test_runner::TestRng;
     use proptest_arbitrary_interop::arb;
-    use rand::rngs::StdRng;
-    use rand::thread_rng;
-    use rand::SeedableRng;
+    use rand::Rng;
     use rand_distr::Bernoulli;
     use rand_distr::Distribution;
     use rand_distr::Geometric;
@@ -558,8 +542,9 @@ mod test {
         mut difficulty: Difficulty,
         proving_time: f64,
         target_block_time: f64,
-        rng: &mut StdRng,
+        seed: [u8; 32],
     ) -> f64 {
+        let mut rng = TestRng::from_seed(proptest::test_runner::RngAlgorithm::ChaCha, &seed);
         let mut block_time_so_far = proving_time;
         let window_duration = target_block_time * (ADVANCE_DIFFICULTY_CORRECTION_WAIT as f64);
         let num_hashes_calculated_per_window = hash_rate * window_duration;
@@ -576,7 +561,9 @@ mod test {
             let log_prob_collective_failure = log_prob_failure * num_hashes_calculated_per_window;
             let prob_collective_success = -log_prob_collective_failure.exp_m1(); // 1-e^x
 
-            let success = Bernoulli::new(prob_collective_success).unwrap().sample(rng);
+            let success = Bernoulli::new(prob_collective_success)
+                .unwrap()
+                .sample(&mut rng);
 
             // if not, advance-correct difficulty
             if !success {
@@ -597,10 +584,10 @@ mod test {
             // else, determine time spent hashing
             // reject samples that exceed window bounds
             let distribution = Geometric::new(p).unwrap();
-            let mut num_hashes = 1u64 + distribution.sample(rng);
+            let mut num_hashes = 1u64 + distribution.sample(&mut rng);
             let mut time_spent_guessing = (num_hashes as f64) / hash_rate;
             while time_spent_guessing > window_duration {
-                num_hashes = 1u64 + distribution.sample(rng);
+                num_hashes = 1u64 + distribution.sample(&mut rng);
                 time_spent_guessing = (num_hashes as f64) / hash_rate;
             }
             block_time_so_far += time_spent_guessing;
@@ -649,7 +636,7 @@ mod test {
         ];
 
         // run simulation
-        let mut rng: StdRng = SeedableRng::from_rng(thread_rng()).unwrap();
+        let mut rng = rand::rng();
         let mut block_times = vec![];
         let mut difficulty = Difficulty::MINIMUM;
         let target_block_time = 600f64;
@@ -669,7 +656,7 @@ mod test {
                     difficulty,
                     proving_time,
                     target_block_time,
-                    &mut rng,
+                    rng.random(),
                 );
                 block_times.push(block_time);
                 let old_timestamp = new_timestamp;

@@ -19,10 +19,7 @@ pub struct AuthenticateMsaAgainstTxk;
 impl BasicSnippet for AuthenticateMsaAgainstTxk {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
-            (
-                DataType::List(Box::new(DataType::Digest)),
-                "aocl_mmr_peaks".to_owned(),
-            ),
+            (DataType::VoidPointer, "aocl_mmr".to_owned()),
             (DataType::VoidPointer, "swbfi_bagged_ptr".to_owned()),
             (DataType::VoidPointer, "swbfa_digest_ptr".to_owned()),
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
@@ -71,52 +68,52 @@ impl BasicSnippet for AuthenticateMsaAgainstTxk {
         let bag_mmr_peaks = library.import(Box::new(BagPeaks));
         triton_asm!(
             {entrypoint}:
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash]
 
                 push {TransactionKernel::MAST_HEIGHT}
                 push {TransactionKernelField::MutatorSetHash as u32}
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i
 
                 dup 8
                 {&load_digest}
                 hint swbfi_bagged: Digest = stack[0..5]
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [swbfi_bagged]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [swbfi_bagged]
 
                 dup 14
                 call {bag_mmr_peaks}
                 hint aocl_bagged: Digest = stack[0..5]
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [swbfi_bagged] [aocl_mmr_bagged]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [swbfi_bagged] [aocl_mmr_bagged]
 
                 hash
                 hint left: Digest = stack[0..5]
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left]
 
                 push 0
                 push 0
                 push 0
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] 0 0 0
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] 0 0 0
 
                 dup 15
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] 0 0 0 *swbfa_digest
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] 0 0 0 *swbfa_digest
 
                 push 0
                 push 0
                 swap 2
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [0; digest] *swbfa_digest
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [default_digest] *swbfa_digest
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [0; digest] *swbfa_digest
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [default_digest] *swbfa_digest
 
                 {&load_digest}
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [default_digest] [swbfa_digest]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [default_digest] [swbfa_digest]
 
                 hash
                 hint right: Digest = stack[0..5]
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [right]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [left] [right]
 
                 {&swap_top_two_digests}
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [right] [left]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [right] [left]
 
                 hash
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [msah]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [msah]
 
                 push 0
                 push 0
@@ -132,10 +129,10 @@ impl BasicSnippet for AuthenticateMsaAgainstTxk {
                 swap 5 pop 1
                 swap 5 pop 1
                 swap 5 pop 1
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [msah_digest]
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [msah_digest]
 
                 call {merkle_verify}
-                // _ *aocl_mmr_peaks *swbfi_bagged *swbfa_digest
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest
 
                 pop 3
                 // _
@@ -165,10 +162,10 @@ mod tests {
     use tasm_lib::traits::mem_preserver::MemPreserverInitialState;
     use tasm_lib::traits::mem_preserver::ShadowedMemPreserver;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::prelude::MerkleTreeInclusionProof;
     use twenty_first::prelude::Mmr;
     use twenty_first::prelude::Sponge;
-    use twenty_first::util_types::shared::bag_peaks;
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -192,13 +189,12 @@ mod tests {
             ]);
             let swbfa_digest_ptr = stack.pop().unwrap();
             let swbfi_bagged_ptr = stack.pop().unwrap();
-            let aocl_mmr_peaks_ptr = stack.pop().unwrap();
+            let aocl_mmr_ptr = stack.pop().unwrap();
 
             let swbfa_digest = *Digest::decode_from_memory(memory, swbfa_digest_ptr).unwrap();
             let swbfi_bagged = *Digest::decode_from_memory(memory, swbfi_bagged_ptr).unwrap();
-            let aocl_mmr_peaks =
-                *Vec::<Digest>::decode_from_memory(memory, aocl_mmr_peaks_ptr).unwrap();
-            let aocl_mmr_bagged = bag_peaks(&aocl_mmr_peaks);
+            let aocl_mmr = *MmrAccumulator::decode_from_memory(memory, aocl_mmr_ptr).unwrap();
+            let aocl_mmr_bagged = aocl_mmr.bag_peaks();
 
             let left: Digest = Tip5::hash_pair(aocl_mmr_bagged, swbfi_bagged);
             let right: Digest = Tip5::hash_pair(swbfa_digest, Digest::default());
@@ -249,7 +245,7 @@ mod tests {
                     .current()
             };
 
-            let aocl_mmr_peaks = primitive_witness.mutator_set_accumulator.aocl.peaks();
+            let aocl_mmr = &primitive_witness.mutator_set_accumulator.aocl;
             let swbfa_digest = Tip5::hash(&primitive_witness.mutator_set_accumulator.swbf_active);
             let swbfi_digest = primitive_witness
                 .mutator_set_accumulator
@@ -259,7 +255,7 @@ mod tests {
             let aocl_mmr_address = bfe!(aocl_mmr_address as u64);
 
             let mut memory = HashMap::default();
-            encode_to_memory(&mut memory, aocl_mmr_address, &aocl_mmr_peaks);
+            encode_to_memory(&mut memory, aocl_mmr_address, aocl_mmr);
             encode_to_memory(&mut memory, swbfi_digest_ptr, &swbfi_digest);
             encode_to_memory(&mut memory, swbfa_digest_ptr, &swbfa_digest);
 
