@@ -117,7 +117,15 @@ impl BlockHeader {
             // TODO: to be set to something difficult to predict ahead of time
             nonce: Digest::new(bfe_array![0, 0, 0, 0, 0]),
             cumulative_proof_of_work: ProofOfWork::zero(),
+
+            #[cfg(not(test))]
             difficulty: Difficulty::new([1_000_000_000, 0, 0, 0, 0]),
+
+            // Avoid setting this too high when running tests, otherwise CI
+            // fails and tests take forever.
+            #[cfg(test)]
+            difficulty: Difficulty::MINIMUM,
+
             guesser_digest: Digest::new(bfe_array![0, 0, 0, 0, 0]),
         }
     }
