@@ -72,6 +72,10 @@ impl SecretWitness for CollectLockScriptsWitness {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectLockScripts;
 
+impl CollectLockScripts {
+    const JUMP_OUT_OF_BOUNDS: i128 = 1_000_260;
+}
+
 impl ConsensusProgram for CollectLockScripts {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
@@ -89,6 +93,7 @@ impl ConsensusProgram for CollectLockScripts {
             CollectLockScriptsWitness,
         >::default()));
 
+        const MAX_JUMP_LENGTH: usize = 2_000_000;
         let payload = triton_asm! {
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -119,7 +124,7 @@ impl ConsensusProgram for CollectLockScripts {
             {&field_utxos}
             // _ *clsw witness_size *utxos_li
 
-            read_mem 1 push 2 add
+            read_mem 1 addi 2
             // _ *clsw witness_size N *utxos[0]_si
 
             push 0 swap 1
@@ -141,16 +146,22 @@ impl ConsensusProgram for CollectLockScripts {
                 skiz return
                 // _ N i *utxos[i]_si
 
-                dup 0 push 1 add {&field_lock_script_hash}
+                dup 0 addi 1 {&field_lock_script_hash}
                 // _ N i *utxos[i]_si *lock_script_hash
 
-                push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
+                addi {Digest::LEN-1} read_mem {Digest::LEN} pop 1
                 // _ N i *utxos[i]_si [lock_script_hash]
 
                 write_io 5
                 // _ N i *utxos[i]_si
 
-                read_mem 1 push 2 add
+                read_mem 1 addi 2
+                // _ N i size *utxos[i]
+
+                push {MAX_JUMP_LENGTH}
+                dup 2
+                lt
+                assert error_id {Self::JUMP_OUT_OF_BOUNDS}
                 // _ N i size *utxos[i]
 
                 add
@@ -257,7 +268,7 @@ mod test {
     #[test]
     fn collect_lock_script_unit() {
         let mut test_runner = TestRunner::deterministic();
-        for num_inputs in 0..5 {
+        for num_inputs in 0..10 {
             let primitive_witness =
                 PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)
                     .new_tree(&mut test_runner)
