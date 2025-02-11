@@ -48,6 +48,9 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 const COINBASE_HAS_INPUTS_ERROR: i128 = 1_000_000;
 const COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR: i128 = 1_000_001;
+const INPUT_UTXO_AND_REMOVAL_RECORDS_LENGTH_MISMATCH: i128 = 1_000_002;
+const JUMP_OUT_OF_BOUNDS: i128 = 1_000_003;
+const INPUT_UTXOS_SIZE_MANIPILATION: i128 = 1_000_004;
 
 #[derive(
     Clone,
@@ -389,6 +392,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let field_peaks = field!(MmrAccumulatorTip5::peaks);
         let field_input_utxos = field!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
+        let field_utxos_with_size = field_with_size!(SaltedUtxos::utxos);
         let field_with_size_removal_records =
             field_with_size!(RemovalRecordsIntegrityWitnessMemory::removal_records);
         let field_with_size_input_utxos =
@@ -420,7 +424,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             push 0
             push 0
             push 1
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default]
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding]
 
             push 0
             push 0
@@ -602,10 +606,24 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             dup 1 {&field_input_utxos} {&field_utxos}
             // _ [txk_mast_hash] *witness *aocl *utxos
 
-            read_mem 1 push 2 add push 0 swap 1
+            read_mem 1 addi 2
+            // _ [txk_mast_hash] *witness *aocl num_utxos *utxos[0]_si
+
+            push 0 swap 1
             // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si
 
-            dup 4 {&field_removal_records} push 1 add
+            dup 4 {&field_removal_records}
+            // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si *removal_records
+
+            read_mem 1 addi 2
+            // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si removal_records_len *removal_records[0]_si
+
+            swap 1
+            dup 4
+            eq
+            // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si *removal_records[0]_si (removal_records_len == num_utxos)
+
+            assert error_id {INPUT_UTXO_AND_REMOVAL_RECORDS_LENGTH_MISMATCH}
             // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si *removal_records[0]_si
 
             swap 4
@@ -620,15 +638,32 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             call {for_all_utxos}
             // _ [txk_mast_hash] *witness *removal_records[num_utxos]_si num_utxos num_utxos *utxos[num_utxos]_si *aocl
 
-            pop 5
-            // _ [txk_mast_hash] *witness
+            pick 1 place 4
+            // _ [txk_mast_hash] *witness *utxos[num_utxos]_si *removal_records[num_utxos]_si num_utxos num_utxos *aocl
+
+            pop 4
+            // _ [txk_mast_hash] *witness *utxos[num_utxos]_si
 
             /* compute and output hash of salted input UTXOs */
-            dup 0
-            place 6
-            // _ *witness [txk_mast_hash] *witness
+            dup 1
+            // _ [txk_mast_hash] *witness *utxos[num_utxos]_si *witness
+
+            place 7
+            // _ *witness [txk_mast_hash] *witness *utxos[num_utxos]_si
+
+            swap 1
+            // _ *witness [txk_mast_hash] *utxos[num_utxos]_si *witness
 
             {&field_with_size_input_utxos}
+            // _ *witness [txk_mast_hash] *utxos[num_utxos]_si *salted_input_utxos size
+
+            dup 1 {&field_utxos_with_size}
+            // _ *witness [txk_mast_hash] *utxos[num_utxos]_si *salted_input_utxos size *utxos size
+
+            add
+            // _ *witness [txk_mast_hash] *utxos[num_utxos]_si *salted_input_utxos size *utxos[num_utxos]_si
+
+            pick 3 eq assert error_id {INPUT_UTXOS_SIZE_MANIPILATION}
             // _ *witness [txk_mast_hash] *salted_input_utxos size
 
             call {hash_varlen}
@@ -656,6 +691,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let receiver_preimage_alloc = library.kmalloc(digest_stack_size);
         let sender_randomness_alloc = library.kmalloc(digest_stack_size);
         let utxo_hash_alloc = library.kmalloc(digest_stack_size);
+
+        const MAX_JUMP_LENGTH: usize = 2_000_000;
 
         let for_all_utxos_loop = triton_asm! {
             // INVARIANT: _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
@@ -685,8 +722,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 /* 2. */
                 dup 1
                 read_mem 1
-                push 2
-                add
+                addi 2
                 swap 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *utxos[i] utxos[i]_size
 
@@ -765,7 +801,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 dup 6 {&field_mmr_num_leafs}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] *num_leafs
 
-                push 1 add read_mem {u64_stack_size} pop 1
+                addi 1 read_mem {u64_stack_size} pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
                 push {aocl_leaf_index_alloc.read_address()}
@@ -800,7 +836,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 call {swbf_indices}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *computed_bloom_indices
 
-                push 1 add
+                addi 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl (*computed_bloom_indices as array)
 
                 call {hash_index_array}
@@ -809,8 +845,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 /* 9. */
                 dup 9
-                push 1
-                add
+                addi 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *rrs[i]
 
                 {&field_indices}
@@ -829,20 +864,50 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 /* 10. */
                 swap 1
                 read_mem 1
-                push 2 add
+                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1)
+
+                push {MAX_JUMP_LENGTH}
+                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1) MAX_JUMP_LEN
+
+                dup 2
+                lt
+                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1) (utxos[i]_si < MAX_JUMP_LEN)
+                assert error_id {JUMP_OUT_OF_BOUNDS}
+
+                addi 2
+                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si *utxos[i]
+
                 add
+                // _ *witness *rrs[i]_si num_utxos i *aocl *utxos[i+1]_si
+
                 swap 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i + 1]_si *aocl
 
                 swap 2
-                push 1 add
+                addi 1
                 swap 2
                 // _ *witness *rrs[i]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
 
                 swap 4
                 read_mem 1
-                push 2 add
+                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1)
+
+                push {MAX_JUMP_LENGTH}
+                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1) MAX_JUMP_LENGTH
+
+                dup 2
+                lt
+                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1) (rrs[i]_si < MAX_JUMP_LENGTH)
+
+                assert error_id {JUMP_OUT_OF_BOUNDS}
+                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1)
+
+                addi 2
+                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si *rrs[i]
+
                 add
+                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si *rrs[i+1]_si
+
                 swap 4
                 // _ *witness *rrs[i + 1]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
 
@@ -1137,8 +1202,28 @@ mod tests {
     }
 
     #[proptest(cases = 5)]
-    fn removal_records_integrity_proptest(
+    fn removal_records_integrity_proptest_bigger(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(7), 6, 2))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        prop_positive(removal_records_integrity_witness)?;
+    }
+
+    #[proptest(cases = 5)]
+    fn removal_records_integrity_proptest_smaller(
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        prop_positive(removal_records_integrity_witness)?;
+    }
+
+    #[proptest(cases = 5)]
+    fn removal_records_integrity_proptest_empty(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, 2))]
         primitive_witness: PrimitiveWitness,
     ) {
         let removal_records_integrity_witness =
