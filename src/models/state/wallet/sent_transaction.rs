@@ -8,6 +8,8 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 
+type AoclLeafIndex = u64;
+
 /// represents a user-level tx that has been sent by this wallet.
 ///
 /// this type is intended for storing in the wallet-db in order to
@@ -15,7 +17,7 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 /// of wallet history display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SentTransaction {
-    pub tx_inputs: Vec<Utxo>,
+    pub tx_inputs: Vec<(AoclLeafIndex, Utxo)>,
     pub tx_outputs: TxOutputList,
     pub fee: NativeCurrencyAmount,
     pub timestamp: Timestamp,
@@ -32,7 +34,11 @@ impl From<(TransactionDetails, Digest)> for SentTransaction {
 impl SentTransaction {
     pub(crate) fn new(td: TransactionDetails, tip_when_sent: Digest) -> Self {
         Self {
-            tx_inputs: td.tx_inputs.into_iter().map(|u| u.utxo).collect(),
+            tx_inputs: td
+                .tx_inputs
+                .into_iter()
+                .map(|u| (u.mutator_set_mp().aocl_leaf_index, u.utxo))
+                .collect(),
             tx_outputs: td.tx_outputs,
             fee: td.fee,
             timestamp: td.timestamp,
