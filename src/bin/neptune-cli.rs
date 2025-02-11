@@ -429,15 +429,23 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::ImportSeedPhrase { network } => {
-            let wallet_dir =
-                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
-            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            let data_directory = DataDirectory::get(args.data_dir.clone(), *network)?;
+            let wallet_dir = data_directory.wallet_directory_path();
+            let wallet_db_dir = data_directory.wallet_database_dir_path();
+            let wallet_secret_path = WalletSecret::wallet_secret_path(&wallet_dir);
 
-            // if the wallet file already exists,
-            if wallet_file.exists() {
+            // if the wallet dir already exists,
+            if wallet_dir.exists() {
                 bail!(
-                    "Cannot import seed phrase; wallet file {} already exists. Move it to another location (or remove it) to import a seed phrase.",
-                    wallet_file.display()
+                    "Cannot import seed phrase; wallet directory {} already exists. Move it to another location to import a seed phrase.",
+                    wallet_dir.display()
+                );
+            }
+
+            if wallet_db_dir.exists() {
+                bail!(
+                    "Cannot import seed phrase; wallet database directory {} already exists. Move it to another location to import a seed phrase.",
+                    wallet_db_dir.display()
                 );
             }
 
@@ -454,9 +462,12 @@ async fn main() -> Result<()> {
             let wallet_secret = WalletSecret::new(secret_key);
 
             // wallet file does not exist yet, so create it and save
-            println!("Saving wallet to disk at {} ...", wallet_file.display());
+            println!(
+                "Saving wallet to disk at {} ...",
+                wallet_secret_path.display()
+            );
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-            match wallet_secret.save_to_disk(&wallet_file) {
+            match wallet_secret.save_to_disk(&wallet_secret_path) {
                 Err(e) => {
                     bail!("Could not save imported wallet to disk. {e}");
                 }
