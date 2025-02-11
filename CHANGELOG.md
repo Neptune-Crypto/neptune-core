@@ -1,4 +1,12 @@
 
+## [0.1.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.11..v0.1.0) - 2025-02-11
+
+### ⚙️ Miscellaneous
+
+- Set default CLI parameter network to "main" ([c551251f](https://github.com/Neptune-Crypto/neptune-core/commit/c551251f))
+
+Note: (!) indicates a breaking change.
+
 ## [0.1.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.12..v0.1.0) - 2025-02-11
 
 ### ✨ Features
