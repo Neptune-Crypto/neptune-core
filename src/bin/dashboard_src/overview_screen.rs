@@ -365,7 +365,7 @@ impl Widget for OverviewScreen {
 
         lines.push(format!("network: {}", data.network));
 
-        lines.push(format!("synchronizing: {}", data.syncing));
+        lines.push(format!("synchronized: {}", data.syncing));
 
         lines.push(format!(
             "mining status: {}",
