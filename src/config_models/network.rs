@@ -13,14 +13,14 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {
     /// Main net. Feature-complete. Fixed launch date.
+    #[default]
     Main,
 
-    /// First iteration of testnet. Not feature-complete. Soon to be deprecated.
+    /// First iteration of testnet. Not feature-complete.
     Alpha,
 
     /// 2nd iteration of integration testing. Not feature-complete either but
-    /// moreso than Alpha. Soon to be set as default.
-    #[default]
+    /// moreso than Alpha.
     Beta,
 
     /// Feature-complete (or as feature-complete as possible) test network separate

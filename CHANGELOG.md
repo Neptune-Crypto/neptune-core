@@ -1,4 +1,58 @@
 
+## [0.1.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.12..v0.1.0) - 2025-02-11
+
+### ✨ Features
+
+- Assert field pointer points into element ([171affda](https://github.com/Neptune-Crypto/neptune-core/commit/171affda))
+- Record sent tx details in wallet ([96dd1f8d](https://github.com/Neptune-Crypto/neptune-core/commit/96dd1f8d))
+
+### 🐛 Bug Fixes
+
+- Descriptive error messages from send() rpc ([ac2597fc](https://github.com/Neptune-Crypto/neptune-core/commit/ac2597fc))
+- Make trait `pub` to compile benchmarks again ([5b89d879](https://github.com/Neptune-Crypto/neptune-core/commit/5b89d879))
+- *(`WalletState`)* Avoid unwrapping `None` ([c20b22f1](https://github.com/Neptune-Crypto/neptune-core/commit/c20b22f1))
+- *(peer_loop)* Don't spam sync challenges ([e189f215](https://github.com/Neptune-Crypto/neptune-core/commit/e189f215))
+- Import-seed-phrase check if wallet db exists ([09c3a2ca](https://github.com/Neptune-Crypto/neptune-core/commit/09c3a2ca))
+- *(Update)* Fix update branch after interface change ([e584d0ea](https://github.com/Neptune-Crypto/neptune-core/commit/e584d0ea))
+
+### ♻️ Refactor
+
+- Set genesis header nonce to hash of Bitcoin block 883345
+- *(`BlockProgram`)* Avoid reading same value from memory twice ([68687e17](https://github.com/Neptune-Crypto/neptune-core/commit/68687e17))
+- *(RPC)* Abort send if machine too weak ([abec5e27](https://github.com/Neptune-Crypto/neptune-core/commit/abec5e27))
+- *(BlockProgram)* Restrict size indicator of proofs ([35426fbc](https://github.com/Neptune-Crypto/neptune-core/commit/35426fbc))
+- *(`Block`)* Cap number of claims in appendix ([f1adbb30](https://github.com/Neptune-Crypto/neptune-core/commit/f1adbb30))
+- *(SingleProof)* Audit PC witness at end of program ([90a5f83a](https://github.com/Neptune-Crypto/neptune-core/commit/90a5f83a))
+- Adjust some genesis parameters ([cae5e5d9](https://github.com/Neptune-Crypto/neptune-core/commit/cae5e5d9))
+- *(`RemovalRecordsIntegrity`)* Harden security ([b886b66e](https://github.com/Neptune-Crypto/neptune-core/commit/b886b66e))
+- *(CollectLockScripts)* Harden program ([786b5693](https://github.com/Neptune-Crypto/neptune-core/commit/786b5693))
+- *(KernelToOutputs)* Harden program ([bad7e47e](https://github.com/Neptune-Crypto/neptune-core/commit/bad7e47e))
+
+### ✅ Testing
+
+- Reduce initial difficulty for tests ([83eb8e17](https://github.com/Neptune-Crypto/neptune-core/commit/83eb8e17))
+
+### 🎨 Styling
+
+- Fix comments in SingleProof ([c883bba8](https://github.com/Neptune-Crypto/neptune-core/commit/c883bba8))
+
+### ⚙️ Miscellaneous
+
+- Update release workflow files ([f7a5779d](https://github.com/Neptune-Crypto/neptune-core/commit/f7a5779d))
+- Build benchmarks ([a955bc9b](https://github.com/Neptune-Crypto/neptune-core/commit/a955bc9b))
+- Change premine addresses ([dc8c3192](https://github.com/Neptune-Crypto/neptune-core/commit/dc8c3192))
+- Update `tasm-lib` dependency to 0.47.0 ([1f9fe03b](https://github.com/Neptune-Crypto/neptune-core/commit/1f9fe03b))
+- Upgrade dependencies ([8d2b2c79](https://github.com/Neptune-Crypto/neptune-core/commit/8d2b2c79))
+- Store Utxo instead of UnlockedUtxo ([b39eea3d](https://github.com/Neptune-Crypto/neptune-core/commit/b39eea3d))
+- Include aocl_leaf_index in SentTransaction ([484c15a2](https://github.com/Neptune-Crypto/neptune-core/commit/484c15a2))
+- Fix clippy warning after rebase ([ad3eadbb](https://github.com/Neptune-Crypto/neptune-core/commit/ad3eadbb))
+
+### Log
+
+- Reduce severity of duration-check log message ([86076b02](https://github.com/Neptune-Crypto/neptune-core/commit/86076b02))
+
+Note: (!) indicates a breaking change.
+
 ## [0.0.12](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.11..v0.0.12) - 2025-02-09
 
 ### ✨ Features

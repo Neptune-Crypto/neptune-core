@@ -114,8 +114,13 @@ impl BlockHeader {
             prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
 
-            // TODO: to be set to something difficult to predict ahead of time
-            nonce: Digest::new(bfe_array![0, 0, 0, 0, 0]),
+            nonce: Digest::new(bfe_array![
+                0x0000000000000000u64,
+                0x0001db42f3edf187u64,
+                0xf91d2dd95e6975deu64,
+                0x272fa07267136a84u64,
+                0
+            ]),
             cumulative_proof_of_work: ProofOfWork::zero(),
 
             #[cfg(not(test))]
@@ -126,7 +131,13 @@ impl BlockHeader {
             #[cfg(test)]
             difficulty: Difficulty::MINIMUM,
 
-            guesser_digest: Digest::new(bfe_array![0, 0, 0, 0, 0]),
+            guesser_digest: Digest::new(bfe_array![
+                0x49742773206E6F6Fu64,
+                0x6E20736F6D657768u64,
+                0x6572652E0Au64,
+                0,
+                0
+            ]),
         }
     }
 

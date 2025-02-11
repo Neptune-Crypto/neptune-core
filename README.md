@@ -1,6 +1,12 @@
 # Neptune Core
 
-Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The implementation is not complete yet, but already supports many integral components. In particular, beta-net is live.
+Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The implementation is not complete yet, but already supports many integral components and mainnet is live.
+
+## Disclaimer
+
+Warning. This software uses novel and untested cryptography. Use at own risk, and invest only that which you can afford to lose.
+
+If a catastrophic vulnerability is discovered in the protocol, it will restart from genesis.
 
 ## Installing
 
