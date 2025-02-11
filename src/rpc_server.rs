@@ -4626,10 +4626,10 @@ mod rpc_server_tests {
             let ctx = context::current();
             let timestamp = network.launch_date() + Timestamp::months(7);
 
-            let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.gen())
+            let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
                 .to_address()
                 .into();
-            let amount = NativeCurrencyAmount::coins(rng.gen_range(0..10));
+            let amount = NativeCurrencyAmount::coins(rng.random_range(0..10));
             let fee = NativeCurrencyAmount::coins(1);
 
             let outputs = vec![(address, amount)];
