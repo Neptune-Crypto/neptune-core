@@ -178,8 +178,8 @@ pub struct Args {
     #[structopt(long)]
     pub(crate) peers: Vec<SocketAddr>,
 
-    /// Specify network, `alpha`, `beta`, `testnet`, or `regtest`
-    #[structopt(long, default_value = "beta", short)]
+    /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
+    #[structopt(long, default_value = "main", short)]
     pub(crate) network: Network,
 
     /// Max number of membership proofs stored per owned UTXO
