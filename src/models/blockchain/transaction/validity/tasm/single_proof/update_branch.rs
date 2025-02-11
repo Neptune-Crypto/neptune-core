@@ -291,7 +291,6 @@ impl BasicSnippet for UpdateBranch {
         let old_aocl_mmr_field = field!(UpdateWitness::old_aocl);
         let old_swbfi_bagged = field!(UpdateWitness::old_swbfi_bagged);
         let old_swbfa_hash = field!(UpdateWitness::old_swbfa_hash);
-        let peaks_field = field!(MmrAccumulator::peaks);
 
         let new_kernel = field!(UpdateWitness::new_kernel);
 
@@ -400,12 +399,11 @@ impl BasicSnippet for UpdateBranch {
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
 
                 dup 2
-                {&peaks_field}
-                // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *new_peaks
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *new_aocl
 
                 dup 2
                 dup 2
-                // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *new_peaks *new_swbfi_bagged *new_swbfa_digest
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *new_aocl *new_swbfi_bagged *new_swbfa_digest
 
                 dup 10
                 dup 10
@@ -431,17 +429,16 @@ impl BasicSnippet for UpdateBranch {
                 // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest
 
                 dup 2
-                {&peaks_field}
-                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl_peaks
+                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl
 
                 dup 2
                 dup 2
-                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest
+                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl *old_swbfi_bagged *old_swbfa_digest
 
                 push {old_txk_digest_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest [old_txk_mast_hash]
+                // _ witness_size *update_witness [...; 13] *old_aocl *old_swbfi_bagged *old_swbfa_digest *old_aocl *old_swbfi_bagged *old_swbfa_digest [old_txk_mast_hash]
 
                 call {authenticate_msa}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *old_aocl *old_swbfi_bagged *old_swbfa_digest
