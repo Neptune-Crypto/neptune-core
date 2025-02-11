@@ -46,6 +46,34 @@ fn get_codec_rules() -> LengthDelimitedCodec {
     codec_rules
 }
 
+/// Returns true iff version numbers are compatible. Returns false otherwise.
+///
+/// # Panics
+///
+/// panics if own version could not be parsed.
+fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
+    let own_version = semver::Version::parse(own_version)
+        .unwrap_or_else(|_| panic!("Must be able to parse own version string. Got: {own_version}"));
+    let other_version = match semver::Version::parse(other_version) {
+        Ok(version) => version,
+        Err(err) => {
+            warn!("Peer version is not a valid semver version. Got error: {err}",);
+            return false;
+        }
+    };
+
+    // All alphanet and betanet versions are incompatible with each other.
+    // Alpha and betanet have versions "0.0.n". Alpha and betanet are
+    // incompatible with all other versions.
+    if own_version.major == 0 && own_version.minor == 0
+        || other_version.major == 0 && other_version.minor == 0
+    {
+        return own_version == other_version;
+    }
+
+    true
+}
+
 /// Check if connection is allowed. Used for both ingoing and outgoing connections.
 ///
 /// Locking:
@@ -58,29 +86,6 @@ async fn check_if_connection_is_allowed(
 ) -> InternalConnectionStatus {
     let cli_arguments = global_state_lock.cli();
     let global_state = global_state_lock.lock_guard().await;
-    fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
-        let own_version = semver::Version::parse(own_version).unwrap_or_else(|_| {
-            panic!("Must be able to parse own version string. Got: {own_version}")
-        });
-        let other_version = match semver::Version::parse(other_version) {
-            Ok(version) => version,
-            Err(err) => {
-                warn!("Peer version is not a valid semver version. Got error: {err}",);
-                return false;
-            }
-        };
-
-        // All alphanet and betanet versions are incompatible with each other.
-        // Alpha and betanet have versions "0.0.n". Alpha and betanet are
-        // incompatible with all other versions.
-        if own_version.major == 0 && own_version.minor == 0
-            || other_version.major == 0 && other_version.minor == 0
-        {
-            return own_version == other_version;
-        }
-
-        true
-    }
 
     // Disallow connection if peer is banned via CLI arguments
     if cli_arguments.ban.contains(&peer_address.ip()) {
@@ -612,6 +617,33 @@ mod connect_tests {
         };
 
         Ok(())
+    }
+
+    #[test]
+    fn malformed_version_from_peer_doesnt_crash() {
+        let version_numbers = ["potato", "&&&&"];
+        for b in version_numbers.iter() {
+            assert!(!versions_are_compatible("0.1.0", b));
+        }
+    }
+
+    #[test]
+    fn versions_are_compatible_for_all_versions_above_0_1_0() {
+        let version_numbers = [
+            "0.1.0",
+            "0.1.1",
+            "0.1.99",
+            "0.2.0",
+            "1.2.0",
+            "2.2.0",
+            "3.2.0",
+            "9999.99999.9999",
+        ];
+        for a in version_numbers.iter() {
+            for b in version_numbers.iter() {
+                assert!(versions_are_compatible(a, b));
+            }
+        }
     }
 
     #[traced_test]
