@@ -27,3 +27,4 @@ often.
 |  210..250 | [`BlockProgram`](models/blockchain/block/validity/block_program.rs)                                                      |
 |  250..260 | [`HashRemovalRecordIndexSets`](models/blockchain/transaction/validity/tasm/hash_removal_record_index_sets.rs)            |
 |  260..270 | [`CollectLockScripts`](models/blockchain/transaction/validity/collect_lock_scripts.rs)                                   |
+|  270..280 | [`KernelToOutputs`](models/blockchain/transaction/validity/kernel_to_outputs.rs)                                         |

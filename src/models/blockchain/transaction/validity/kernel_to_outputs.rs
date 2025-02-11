@@ -108,6 +108,11 @@ impl SecretWitness for KernelToOutputsWitness {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct KernelToOutputs;
 
+impl KernelToOutputs {
+    const JUMP_OUT_OF_BOUNDS_ERROR: i128 = 1_000_270;
+    const INCONSISTENT_INDICATED_SALTED_OUTPUT_UTXOS_SIZE: i128 = 1_000_271;
+}
+
 impl ConsensusProgram for KernelToOutputs {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
@@ -133,6 +138,11 @@ impl ConsensusProgram for KernelToOutputs {
             KernelToOutputsWitnessMemory,
         >::default()));
 
+        const MAX_JUMP_LENGTH: usize = 2_000_000;
+
+        const SIZE_OF_SALT: usize = 3;
+        const SIZE_INDICATOR_SIZE: usize = 1;
+        const LENGTH_INDICATOR_SIZE: usize = 1;
         let tasm = triton_asm! {
             read_io 5       // _ [txkmh]
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -147,7 +157,7 @@ impl ConsensusProgram for KernelToOutputs {
             {&field_salted_output_utxos}    // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos
             dup 0
             {&field_utxos}                  // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos
-            push 1 add                      // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len
+            addi 1                          // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len
 
             dup 2
             {&field_sender_randomnesses}    // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses
@@ -161,53 +171,87 @@ impl ConsensusProgram for KernelToOutputs {
             dup 0
             // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N
 
-            call {new_list}                 // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N *canonical_commitments
+            call {new_list}
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N *canonical_commitments
 
-            write_mem 1                     // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N *canonical_commitments[0]
+            write_mem 1
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N *canonical_commitments[0]
 
-            swap 1                          // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N
+            swap 1
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N
 
-            push 0                          // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N 0
+            push 0
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N 0
+
+            dup 5
+            place 6
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N 0
+
 
             call {calculate_canonical_commitments}
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[0] N N
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[0] N N
 
             pop 1
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N
 
-            push {-(Digest::LEN as isize)} mul push -1 add add
-                                            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments
+            push {-(Digest::LEN as isize)} mul addi -1 add
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments
 
-            dup 0 read_mem 1 pop 1          // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments N
-            push {Digest::LEN} mul push 1 add
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments (5*N+1)
+            dup 0 read_mem 1 pop 1
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments N
+
+            push {Digest::LEN} mul addi 1
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments (5*N+1)
 
             call {hash_varlen}
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest]
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] [cc_digest]
 
             // r h i l
-            dup 14 dup 14 dup 14 dup 14 dup 14
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh]
+            dup 15 dup 15 dup 15 dup 15 dup 15
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh]
 
             push {TransactionKernel::MAST_HEIGHT}
             push {TransactionKernelField::Outputs as u32}
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i
+
             dup 11 dup 11 dup 11 dup 11 dup 11
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i [cc_digest]
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i [cc_digest]
 
             call {merkle_verify}
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest]
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] [cc_digest]
 
-            pop 5 pop 3
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos
 
-            push -1 add
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos_size
+            pop 5 pop 2
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len
+
+            swap 1
+            push -1 mul
+            add
+            addi {SIZE_OF_SALT + SIZE_INDICATOR_SIZE + LENGTH_INDICATOR_SIZE}
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos (*utxos[N]_len - *utxos[0]_len + 5)
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos calculated_salted_utxos_len
+
+            swap 1
+            // _ [txkmh] *kernel_to_outputs_witness calculated_salted_utxos_len *salted_output_utxos
+
+            addi -1
+            // _ [txkmh] *kernel_to_outputs_witness calculated_salted_utxos_len *salted_output_utxos_size
 
             read_mem 1
-            // _ [txkmh] *kernel_to_outputs_witness size (*salted_output_utxos_size-1)
+            // _ [txkmh] *kernel_to_outputs_witness calculated_salted_utxos_len size (*salted_output_utxos_size-1)
 
-            push 2 add
+            place 2
+            // _ [txkmh] *kernel_to_outputs_witness  (*salted_output_utxos_size-1) calculated_salted_utxos_len size
+
+            dup 1
+            eq
+            assert error_id {Self::INCONSISTENT_INDICATED_SALTED_OUTPUT_UTXOS_SIZE}
+            // _ [txkmh] *kernel_to_outputs_witness  (*salted_output_utxos_size-1) size
+
+            swap 1
+             // _ [txkmh] *kernel_to_outputs_witness size (*salted_output_utxos_size-1)
+
+            addi 2
             // _ [txkmh] *kernel_to_outputs_witness size *salted_output_utxos
 
             swap 1
@@ -266,7 +310,12 @@ impl ConsensusProgram for KernelToOutputs {
                 read_mem 1
                 // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i utxos[i]_len (*utxos[i]_len-1)
 
-                push 2 add add
+                push {MAX_JUMP_LENGTH}
+                dup 2
+                lt
+                assert error_id {Self::JUMP_OUT_OF_BOUNDS_ERROR}
+
+                addi 2 add
                 // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i utxos[i+1]_len
 
                 swap 6 pop 1
@@ -355,9 +404,9 @@ mod test {
         }
     }
 
-    #[proptest(cases = 12)]
+    #[proptest(cases = 30)]
     fn kernel_to_outputs_proptest(
-        #[strategy(0usize..5)] _num_outputs: usize,
+        #[strategy(0usize..7)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
         #[strategy(0usize..5)] _num_pub_announcements: usize,
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs),#_num_outputs,#_num_pub_announcements))]
