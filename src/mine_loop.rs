@@ -262,7 +262,7 @@ fn guess_worker(
 
     let nonce = match guess_result {
         GuessNonceResult::Cancelled => {
-            info!("Cancelling guessing task",);
+            info!("Restarting guessing task",);
             return;
         }
         GuessNonceResult::NonceFound { nonce } => nonce,
