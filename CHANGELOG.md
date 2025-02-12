@@ -1,4 +1,16 @@
 
+## [0.1.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.1.1..v0.1.2) - 2025-02-12
+
+### 🐛 Bug Fixes
+
+- *(mempool)* Don't attempt to update tx with no inputs ([7601f08b](https://github.com/Neptune-Crypto/neptune-core/commit/7601f08b))
+
+### ✅ Testing
+
+- Verify that only 0.0.x versions are incompatible ([3fcc82ad](https://github.com/Neptune-Crypto/neptune-core/commit/3fcc82ad))
+
+Note: (!) indicates a breaking change.
+
 ## [0.1.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.11..v0.1.0) - 2025-02-11
 
 ### ⚙️ Miscellaneous
