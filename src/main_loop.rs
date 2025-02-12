@@ -508,6 +508,14 @@ impl MainLoopHandler {
                     );
                 }
 
+                // Share block with peers firs thing.
+                info!("broadcasting new block to peers");
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::Block(new_block.clone()))
+                    .expect(
+                        "Peer handler broadcast channel prematurely closed. This should never happen.",
+                    );
+
                 let update_jobs = global_state_mut
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
@@ -522,13 +530,6 @@ impl MainLoopHandler {
 
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
                     .await;
-
-                // Share block with peers
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Block(new_block.clone()))
-                    .expect(
-                        "Peer handler broadcast channel prematurely closed. This should never happen.",
-                    );
             }
             MinerToMain::BlockProposal(boxed_proposal) => {
                 let (block, expected_utxos) = *boxed_proposal;
