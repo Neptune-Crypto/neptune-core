@@ -676,6 +676,13 @@ impl Mempool {
                 continue;
             }
 
+            if tx.transaction.kernel.inputs.is_empty() {
+                debug!("Not updating transaction since empty transactions cannot be updated.");
+                kick_outs.push(*tx_id);
+                events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
+                continue;
+            }
+
             let can_upgrade_single_proof =
                 TxProvingCapability::SingleProof == tx_proving_capability;
             let (update_job, can_update) = match &tx.transaction.proof {
