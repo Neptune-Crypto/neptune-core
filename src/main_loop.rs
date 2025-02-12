@@ -508,7 +508,7 @@ impl MainLoopHandler {
                     );
                 }
 
-                // Share block with peers firs thing.
+                // Share block with peers first thing.
                 info!("broadcasting new block to peers");
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::Block(new_block.clone()))
