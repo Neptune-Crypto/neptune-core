@@ -53,6 +53,7 @@ use crate::models::peer::PositivePeerSanction;
 use crate::models::peer::SyncChallenge;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::block_proposal::BlockProposalRejectError;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalState;
@@ -1439,9 +1440,23 @@ impl PeerLoopHandler {
                         block.total_guesser_reward(),
                     );
                 if let Err(rejection_reason) = verdict {
-                    warn!("Rejecting new block proposal:\n{rejection_reason}");
-                    self.punish(NegativePeerSanction::NonFavorableBlockProposal)
-                        .await?;
+                    let should_punish = match rejection_reason {
+                        // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
+                        BlockProposalRejectError::InsufficientFee { current, received }
+                            if Some(received) == current =>
+                        {
+                            false
+                        }
+                        _ => true,
+                    };
+
+                    if should_punish {
+                        warn!("Rejecting new block proposal:\n{rejection_reason}");
+                        self.punish(NegativePeerSanction::NonFavorableBlockProposal)
+                            .await?;
+                    } else {
+                        debug!("ignoring new block proposal because the fee is equal to the present one");
+                    }
 
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
