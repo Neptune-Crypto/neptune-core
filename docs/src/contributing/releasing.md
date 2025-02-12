@@ -163,9 +163,8 @@ Once CI gives the green light, fast-forward the master branch to the tip of the 
 In a previous step, `cargo-release` automatically created one or multiple git tags.
 Edit them until you are happy, then push the tag(s) to GitHub.
 
-```sh
-cargo release --execute push
-```
+ - To show tags: `git tag --list`
+ - To push a tag: `git push origin [tag_name]`
 
 ### Set Branch `release`
 
