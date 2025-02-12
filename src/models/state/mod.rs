@@ -190,24 +190,24 @@ impl GlobalStateLock {
     }
 
     pub async fn set_mining_status_to_inactive(&mut self) {
-        self.lock_mut(|s| s.mining_status = MiningStatus::Inactive)
-            .await
+        self.lock_guard_mut().await.mining_status = MiningStatus::Inactive;
+        tracing::debug!("set mining status: inactive");
     }
 
     /// Indicate if we are guessing
     pub async fn set_mining_status_to_guessing(&mut self, block: &Block) {
         let now = SystemTime::now();
         let block_info = GuessingWorkInfo::new(now, block);
-        self.lock_mut(|s| s.mining_status = MiningStatus::Guessing(block_info))
-            .await
+        self.lock_guard_mut().await.mining_status = MiningStatus::Guessing(block_info);
+        tracing::debug!("set mining status: guessing");
     }
 
     /// Indicate if we are composing
     pub async fn set_mining_status_to_composing(&mut self) {
         let now = SystemTime::now();
         let work_info = ComposingWorkInfo::new(now);
-        self.lock_mut(|s| s.mining_status = MiningStatus::Composing(work_info))
-            .await
+        self.lock_guard_mut().await.mining_status = MiningStatus::Composing(work_info);
+        tracing::debug!("set mining status: composing");
     }
 
     // persist wallet state to disk
