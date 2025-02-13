@@ -899,13 +899,14 @@ impl MainLoopHandler {
             // we unfortunately cannot exclude. So we just disconnect from a peer that the user
             // didn't request a connection to.
             warn!(
-                "Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.",
+                "Max peer parameter is exceeded. max is {} but we are connected to {}. \
+                Attempting to fix.",
+                self.global_state_lock.cli().max_num_peers,
                 connected_peers.len(),
-                self.global_state_lock.cli().max_num_peers
             );
-            let mut rng = rand::rng();
 
             // pick a peer that was not specified in the CLI arguments to disconnect from
+            let mut rng = rand::rng();
             let peer_to_disconnect = connected_peers
                 .iter()
                 .filter(|peer| {

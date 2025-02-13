@@ -408,39 +408,28 @@ where
         own_handshake.to_owned(),
     ))))
     .await?;
-    debug!("Awaiting connection status response from {}", peer_address);
+    debug!("Awaiting connection status response from {peer_address}");
 
-    let other_handshake: HandshakeData = match peer.try_next().await? {
-        Some(PeerMessage::Handshake(payload)) => {
-            let (v, hsd) = *payload;
-            if v != MAGIC_STRING_RESPONSE {
-                bail!("Didn't get expected magic value for handshake from {peer_address}");
-            }
-            if hsd.network != own_handshake.network {
-                bail!(
-                    "Cannot connect with {}: Peer runs {}, this client runs {}.",
-                    peer_address,
-                    hsd.network,
-                    own_handshake.network,
-                );
-            }
-            debug!("Got correct magic value response from {peer_address}!");
-            hsd
-        }
-        _ => {
-            bail!("Didn't get handshake response from {peer_address}");
-        }
+    let Some(PeerMessage::Handshake(handshake_payload)) = peer.try_next().await? else {
+        bail!("Didn't get handshake response from {peer_address}");
     };
+    let (magic_string_response, other_handshake) = *handshake_payload;
+    if magic_string_response != MAGIC_STRING_RESPONSE {
+        bail!("Didn't get expected magic value for handshake from {peer_address}");
+    }
+    debug!("Got correct magic value response from {peer_address}!");
+    if other_handshake.network != own_handshake.network {
+        let other = other_handshake.network;
+        let own = own_handshake.network;
+        bail!("Cannot connect with {peer_address}: Peer runs {other}, this client runs {own}.");
+    }
 
     match peer.try_next().await? {
         Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Accepted)) => {
             info!("Outgoing connection accepted by {peer_address}");
         }
         Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Refused(reason))) => {
-            bail!(
-                "Outgoing connection attempt to {peer_address} refused. Reason: {:?}",
-                reason
-            );
+            bail!("Outgoing connection attempt to {peer_address} refused. Reason: {reason:?}");
         }
         _ => {
             bail!(

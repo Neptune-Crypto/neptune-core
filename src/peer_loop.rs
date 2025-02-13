@@ -1625,69 +1625,75 @@ impl PeerLoopHandler {
             select! {
                 // Handle peer messages
                 peer_message = peer.try_next() => {
-                    match peer_message {
-                        Ok(peer_message) => {
-                            match peer_message {
-                                None => {
-                                    info!("Peer closed connection.");
-                                    break;
-                                }
-                                Some(peer_msg) => {
-                                    let syncing = self.global_state_lock.lock(|s| s.net.sync_anchor.is_some()).await;
-                                    if peer_msg.ignore_during_sync() && syncing {
-                                        debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
-                                        continue;
-                                    }
-                                    if peer_msg.ignore_when_not_sync() && !syncing {
-                                        debug!("Ignoring {} message because we are not syncing, from {}", peer_msg.get_type(), self.peer_address);
-                                        continue;
-                                    }
+                    let peer_address = self.peer_address;
+                    let peer_message = match peer_message {
+                        Ok(message) => message,
+                        Err(err) => {
+                            let msg = format!("Error when receiving from peer: {peer_address}");
+                            error!("{msg}. Error: {err}");
+                            bail!("{msg}. Closing connection.");
+                        }
+                    };
+                    let Some(peer_message) = peer_message else {
+                        info!("Peer {peer_address} closed connection.");
+                        break;
+                    };
 
-                                    let close_connection: bool = match self.handle_peer_message(peer_msg, &mut peer, peer_state_info).await {
-                                        Ok(close) => close,
-                                        Err(err) => {
-                                            warn!("{}. Closing connection.", err);
-                                            bail!("{}", err);
-                                        }
-                                    };
+                    let syncing =
+                        self.global_state_lock.lock(|s| s.net.sync_anchor.is_some()).await;
+                    let message_type = peer_message.get_type();
+                    if peer_message.ignore_during_sync() && syncing {
+                        debug!(
+                            "Ignoring {message_type} message when syncing, from {peer_address}",
+                        );
+                        continue;
+                    }
+                    if peer_message.ignore_when_not_sync() && !syncing {
+                        debug!(
+                            "Ignoring {message_type} message when not syncing, from {peer_address}",
+                        );
+                        continue;
+                    }
 
-                                    if close_connection {
-                                        info!("Closing connection to {}", self.peer_address);
-                                        break;
-                                    }
-                                }
-                            }
+                    match self
+                        .handle_peer_message(peer_message, &mut peer, peer_state_info)
+                        .await
+                    {
+                        Ok(false) => {}
+                        Ok(true) => {
+                            info!("Closing connection to {peer_address}");
+                            break;
                         }
                         Err(err) => {
-                            error!("Error when receiving from peer: {}. Error: {err}", self.peer_address);
-                            bail!("Error when receiving from peer: {}. Closing connection:", err);
+                            warn!("Closing connection to {peer_address} because of error {err}.");
+                            bail!("{err}");
                         }
-                    }
+                    };
                 }
 
                 // Handle messages from main task
                 main_msg_res = from_main_rx.recv() => {
-                    let close_connection = match main_msg_res {
-                        Ok(main_msg) => match self.handle_main_task_message(main_msg, &mut peer, peer_state_info).await {
-                            Ok(close) => close,
-
-                            // If the handler of main-task messages returns error, the connection is closed.
-                            // This might indicate that the peer got banned.
-                            Err(err) => {
-                                warn!("handle_main_task_message returned an eror: {}", err);
-                                true
-                            },
-                        }
-                        Err(e) => panic!("Failed to read from main loop: {}", e),
-                    };
+                    let main_msg = main_msg_res
+                        .unwrap_or_else(|e| panic!("Failed to read from main loop: {e}"));
+                    let close_connection = self
+                        .handle_main_task_message(main_msg, &mut peer, peer_state_info)
+                        .await
+                        .unwrap_or_else(|err| {
+                            warn!("handle_main_task_message returned an error: {err}");
+                            true
+                        });
 
                     if close_connection {
-                        info!("handle_main_task_message is closing the connection to {}", self.peer_address);
+                        info!(
+                            "handle_main_task_message is closing the connection to {}",
+                            self.peer_address
+                        );
                         break;
                     }
                 }
             }
         }
+
         Ok(())
     }
 
