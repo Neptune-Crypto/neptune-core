@@ -125,7 +125,7 @@ pub(crate) enum MainToPeerTask {
     TransactionNotification(TransactionNotification),
 
     /// Disconnect from a specific peer
-    Disconnect(SocketAddr),
+    Disconnect(SocketAddr, InternalDisconnectReason),
 
     /// Disconnect from all peers
     DisconnectAll(),
@@ -142,12 +142,17 @@ impl MainToPeerTask {
                 "make specific peer discovery req"
             }
             MainToPeerTask::TransactionNotification(_) => "transaction notification",
-            MainToPeerTask::Disconnect(_) => "disconnect",
+            MainToPeerTask::Disconnect(..) => "disconnect",
             MainToPeerTask::DisconnectAll() => "disconnect all",
             MainToPeerTask::BlockProposalNotification(_) => "block proposal notification",
         }
         .to_string()
     }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub(crate) enum InternalDisconnectReason {
+    OutOfConnectionCapacity,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,7 +174,7 @@ pub(crate) enum PeerTaskToMain {
 
     Transaction(Box<PeerTaskToMainTransaction>),
     BlockProposal(Box<Block>),
-    DisconnectFromLongestLivedPeer,
+    DisconnectFromLongestLivedPeer(InternalDisconnectReason),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -187,7 +192,9 @@ impl PeerTaskToMain {
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
-            PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
+            PeerTaskToMain::DisconnectFromLongestLivedPeer(..) => {
+                "disconnect from longest lived peer"
+            }
         }
         .to_string()
     }

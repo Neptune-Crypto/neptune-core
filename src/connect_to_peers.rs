@@ -20,6 +20,7 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
+use crate::models::channel::InternalDisconnectReason;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
@@ -282,9 +283,10 @@ where
     // If necessary, disconnect from another, existing peer.
     if acceptance_code == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
-            .await?;
+        let message = PeerTaskToMain::DisconnectFromLongestLivedPeer(
+            InternalDisconnectReason::OutOfConnectionCapacity,
+        );
+        peer_task_to_main_tx.send(message).await?;
     }
 
     let peer_distance = 1; // All incoming connections have distance 1
@@ -450,11 +452,14 @@ where
     .await;
     if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
         warn!(
-            "Outgoing connection to {peer_address} refused. Reason: {:?}\nNow hanging up.",
-            refused_reason
+            "Outgoing connection to {peer_address} refused. \
+            Reason: {refused_reason:?}\nNow hanging up.",
         );
-        peer.send(PeerMessage::Bye).await?;
-        bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
+        peer.send(PeerMessage::Disconnect(None)).await?;
+        bail!(
+            "Attempted to connect to peer ({peer_address}) that was not allowed. \
+             This connection attempt should not have been made."
+        );
     }
 
     // By default, start by asking the peer for its peers. In an adversarial
@@ -570,7 +575,7 @@ mod connect_tests {
                 TransferConnectionStatus::Accepted,
             ))?)
             .write(&to_bytes(&PeerMessage::PeerListRequest)?)
-            .read(&to_bytes(&PeerMessage::Bye)?)
+            .read(&to_bytes(&PeerMessage::Disconnect(None))?)
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
@@ -794,7 +799,7 @@ mod connect_tests {
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
             ))?)
-            .read(&to_bytes(&PeerMessage::Bye)?)
+            .read(&to_bytes(&PeerMessage::Disconnect(None))?)
             .build();
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;

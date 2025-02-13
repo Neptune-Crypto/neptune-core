@@ -565,10 +565,10 @@ impl PeerLoopHandler {
             self.peer_address
         );
         match msg {
-            PeerMessage::Bye => {
+            PeerMessage::Disconnect(reason) => {
                 // Note that the current peer is not removed from the global_state.peer_map here
                 // but that this is done by the caller.
-                info!("Got bye. Closing connection to peer");
+                info!("Got disconnected (reason: {reason:?}). Closing connection to peer");
                 Ok(DISCONNECT_CONNECTION)
             }
             PeerMessage::PeerListRequest => {
@@ -1563,7 +1563,7 @@ impl PeerLoopHandler {
                 peer.send(PeerMessage::PeerListRequest).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::Disconnect(target_socket_addr) => {
+            MainToPeerTask::Disconnect(target_socket_addr, _reason) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
 
                 // Disconnect from this peer if its address matches that which the main
@@ -1574,8 +1574,7 @@ impl PeerLoopHandler {
             MainToPeerTask::DisconnectAll() => Ok(true),
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
                 log_slow_scope!(
-                    (crate::macros::fn_name!()
-                        + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
+                    (fn_name!() + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
                 );
 
                 if target_socket_addr == self.peer_address {
@@ -1855,7 +1854,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_bye() -> Result<()> {
-        let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
+        let mock = Mock::new(vec![Action::Read(PeerMessage::Disconnect(None))]);
 
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(Network::Alpha, 2, cli_args::Args::default()).await?;
@@ -1912,7 +1911,7 @@ mod peer_loop_tests {
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::PeerListRequest),
             Action::Write(PeerMessage::PeerListResponse(expected_response)),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
@@ -2048,7 +2047,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_without_valid_pow.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
@@ -2128,7 +2127,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
@@ -2219,7 +2218,7 @@ mod peer_loop_tests {
                     anchor: mmra.clone(),
                 })),
                 Action::Write(PeerMessage::BlockResponseBatch(expected_response)),
-                Action::Read(PeerMessage::Bye),
+                Action::Read(PeerMessage::Disconnect(None)),
             ]);
             let mut peer_loop_handler = PeerLoopHandler::new(
                 to_main_tx.clone(),
@@ -2296,7 +2295,7 @@ mod peer_loop_tests {
                 anchor: anchor.clone(),
             })),
             Action::Write(PeerMessage::BlockResponseBatch(response_1)),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler_1 = PeerLoopHandler::with_mocked_time(
@@ -2331,7 +2330,7 @@ mod peer_loop_tests {
                 anchor,
             })),
             Action::Write(PeerMessage::BlockResponseBatch(response_2)),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler_2 = PeerLoopHandler::with_mocked_time(
@@ -2421,7 +2420,7 @@ mod peer_loop_tests {
             // Since genesis block is the 1st known in the list of known blocks,
             // it's immediate descendent, block_1, is the first one returned.
             Action::Write(PeerMessage::BlockResponseBatch(response)),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler_2 = PeerLoopHandler::with_mocked_time(
@@ -2454,7 +2453,7 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::new(
@@ -2525,7 +2524,7 @@ mod peer_loop_tests {
             Action::Write(PeerMessage::Block(Box::new(
                 block_3_a.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -2563,7 +2562,7 @@ mod peer_loop_tests {
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockNotification(notification_height1)),
             Action::Write(PeerMessage::BlockRequestByHeight(1u64.into())),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let peer_address = get_dummy_socket_address(0);
@@ -2614,7 +2613,7 @@ mod peer_loop_tests {
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestByHeight(7u64.into())),
             Action::Write(block7_response),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let peer_address = get_dummy_socket_address(0);
@@ -2650,7 +2649,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -2716,7 +2715,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -2796,7 +2795,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_3.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -2877,7 +2876,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_2.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -2950,7 +2949,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -3054,7 +3053,7 @@ mod peer_loop_tests {
             Action::Write(PeerMessage::BlockRequestByHeight(
                 block_5.kernel.header.height,
             )),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -3160,7 +3159,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Block(Box::new(
                 block_2.clone().try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -3244,7 +3243,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Transaction(Box::new(
                 (&transaction_1).try_into().unwrap(),
             ))),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
@@ -3350,7 +3349,7 @@ mod peer_loop_tests {
         let tx_notification: TransactionNotification = (&transaction_1).try_into().unwrap();
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-            Action::Read(PeerMessage::Bye),
+            Action::Read(PeerMessage::Disconnect(None)),
         ]);
         peer_loop_handler
             .run(mock, from_main_rx_clone, &mut peer_state)
@@ -3431,7 +3430,7 @@ mod peer_loop_tests {
 
             let mock = Mock::new(vec![
                 Action::Read(PeerMessage::BlockProposal(Box::new(block1))),
-                Action::Read(PeerMessage::Bye),
+                Action::Read(PeerMessage::Disconnect(None)),
             ]);
             peer_loop_handler
                 .run(mock, from_main_rx, &mut peer_state)
@@ -3475,7 +3474,7 @@ mod peer_loop_tests {
                 Action::Write(PeerMessage::BlockProposalRequest(
                     BlockProposalRequest::new(block1.body().mast_hash()),
                 )),
-                Action::Read(PeerMessage::Bye),
+                Action::Read(PeerMessage::Disconnect(None)),
             ]);
             peer_loop_handler
                 .run(mock, from_main_rx, &mut peer_state)
@@ -3576,7 +3575,7 @@ mod peer_loop_tests {
                 let mock = if own_proof_is_supreme {
                     Mock::new(vec![
                         Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-                        Action::Read(PeerMessage::Bye),
+                        Action::Read(PeerMessage::Disconnect(None)),
                     ])
                 } else {
                     Mock::new(vec![
@@ -3585,7 +3584,7 @@ mod peer_loop_tests {
                         Action::Read(PeerMessage::Transaction(Box::new(
                             new_tx.try_into().unwrap(),
                         ))),
-                        Action::Read(PeerMessage::Bye),
+                        Action::Read(PeerMessage::Disconnect(None)),
                     ])
                 };
 
@@ -3667,7 +3666,7 @@ mod peer_loop_tests {
             };
             let alice_p2p_messages = Mock::new(vec![
                 Action::Read(PeerMessage::SyncChallenge(sync_challenge)),
-                Action::Read(PeerMessage::Bye),
+                Action::Read(PeerMessage::Disconnect(None)),
             ]);
 
             let peer_address = get_dummy_socket_address(0);
@@ -3728,7 +3727,7 @@ mod peer_loop_tests {
 
             let alice_p2p_messages = Mock::new(vec![
                 Action::Read(PeerMessage::SyncChallenge(sync_challenge)),
-                Action::Read(PeerMessage::Bye),
+                Action::Read(PeerMessage::Disconnect(None)),
             ]);
 
             let peer_address = get_dummy_socket_address(0);
@@ -3859,7 +3858,7 @@ mod peer_loop_tests {
                 // Ensure no 2nd sync challenge is sent, as timeout has not yet passed.
                 // The absence of a Write here checks that a 2nd challenge isn't sent
                 // when a successful was just received.
-                Action::Read(PeerMessage::Bye),
+                Action::Read(PeerMessage::Disconnect(None)),
             ]);
 
             let mut alice_peer_loop_handler = PeerLoopHandler::with_mocked_time(

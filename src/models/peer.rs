@@ -393,6 +393,14 @@ pub enum ConnectionRefusedReason {
     SelfConnect,
 }
 
+/// The reason the connection was terminated.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum TransferDisconnectReason {
+    /// The node terminating the connection has too many other open connections.
+    /// It is terminating some connections to allow new peers to connect to it.
+    OutOfConnectionCapacity,
+}
+
 impl From<InternalConnectionStatus> for TransferConnectionStatus {
     fn from(value: InternalConnectionStatus) -> Self {
         match value {
@@ -462,18 +470,24 @@ pub(crate) enum PeerMessage {
 
     /// Send a full transaction object to a peer.
     Transaction(Box<TransferTransaction>),
+
     /// Send a notification to a peer, informing it that this node stores the
     /// transaction with digest and timestamp specified in
     /// `TransactionNotification`.
     TransactionNotification(TransactionNotification),
+
     /// Send a request that this node would like a copy of the transaction with
     /// digest as specified by the argument.
     TransactionRequest(TransactionKernelId),
+
     PeerListRequest,
+
     /// (socket address, instance_id)
     PeerListResponse(Vec<(SocketAddr, u128)>),
+
     /// Inform peer that we are disconnecting them.
-    Bye,
+    Disconnect(Option<TransferDisconnectReason>),
+
     ConnectionStatus(TransferConnectionStatus),
 }
 
@@ -493,7 +507,7 @@ impl PeerMessage {
             PeerMessage::TransactionRequest(_) => "transaction request",
             PeerMessage::PeerListRequest => "peer list req",
             PeerMessage::PeerListResponse(_) => "peer list resp",
-            PeerMessage::Bye => "bye",
+            PeerMessage::Disconnect(..) => "disconnect",
             PeerMessage::ConnectionStatus(_) => "connection status",
             PeerMessage::BlockProposalNotification(_) => "block proposal notification",
             PeerMessage::BlockProposalRequest(_) => "block proposal request",
@@ -520,7 +534,7 @@ impl PeerMessage {
             PeerMessage::TransactionRequest(_) => false,
             PeerMessage::PeerListRequest => false,
             PeerMessage::PeerListResponse(_) => false,
-            PeerMessage::Bye => false,
+            PeerMessage::Disconnect(..) => false,
             PeerMessage::ConnectionStatus(_) => false,
             PeerMessage::BlockProposalNotification(_) => false,
             PeerMessage::BlockProposalRequest(_) => false,
@@ -547,7 +561,7 @@ impl PeerMessage {
             PeerMessage::TransactionRequest(_) => false,
             PeerMessage::PeerListRequest => false,
             PeerMessage::PeerListResponse(_) => false,
-            PeerMessage::Bye => false,
+            PeerMessage::Disconnect(..) => false,
             PeerMessage::ConnectionStatus(_) => false,
             PeerMessage::BlockProposalNotification(_) => true,
             PeerMessage::BlockProposalRequest(_) => true,
