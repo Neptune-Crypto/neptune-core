@@ -335,7 +335,9 @@ impl Args {
 
     fn estimate_proving_capability() -> TxProvingCapability {
         const SINGLE_PROOF_CORE_REQ: usize = 19;
-        const SINGLE_PROOF_MEMORY_USAGE: u64 = (1u64 << 30) * 128;
+        // see https://github.com/Neptune-Crypto/neptune-core/issues/426
+        const SINGLE_PROOF_MEMORY_USAGE: u64 = (1u64 << 30) * 120;
+
         const PROOF_COLLECTION_CORE_REQ: usize = 2;
         const PROOF_COLLECTION_MEMORY_USAGE: u64 = (1u64 << 30) * 16;
 
