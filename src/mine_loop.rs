@@ -43,6 +43,7 @@ use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
+use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
@@ -646,10 +647,17 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        global_state_lock.set_mining_status_to_inactive().await;
-
-        let is_connected = global_state_lock.lock(|s| !s.net.peer_map.is_empty()).await;
+        let (is_connected, is_syncing, mining_status) = global_state_lock
+            .lock(|s| {
+                (
+                    !s.net.peer_map.is_empty(),
+                    s.net.sync_anchor.is_some(),
+                    s.mining_status.clone(),
+                )
+            })
+            .await;
         if !is_connected {
+            global_state_lock.set_mining_status_to_inactive().await;
             warn!("Not mining because client has no connections");
             const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
@@ -658,19 +666,40 @@ pub(crate) async fn mine(
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
-        let is_syncing = global_state_lock
-            .lock(|s| s.net.sync_anchor.is_some())
-            .await;
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         let guess = cli_args.guess;
-        let guesser_task: Option<JoinHandle<()>> = if !wait_for_confirmation
+
+        let should_guess = !wait_for_confirmation
             && guess
             && maybe_proposal.is_some()
             && !is_syncing
             && !pause_mine
-            && is_connected
-        {
+            && is_connected;
+
+        // if start_guessing is true, then we are in a state change from
+        // a non-guessing state to a guessing state.
+        //
+        // if start_guessing is false and should_guess is true then we
+        // have already been guessing and are restarting with new params.
+        let start_guessing = match (mining_status, should_guess) {
+            (MiningStatus::Inactive, true) => true,
+            (MiningStatus::Composing(_), true) => {
+                // shouldn't ever happen, warn if so.
+                warn!("guessing while mining_status is composing.");
+                true
+            }
+            _ => false,
+        };
+
+        if start_guessing {
+            let proposal = maybe_proposal.unwrap(); // is_some() verified above
+            global_state_lock
+                .set_mining_status_to_guessing(proposal)
+                .await;
+        }
+
+        let guesser_task: Option<JoinHandle<()>> = if should_guess {
             let composer_utxos = maybe_proposal.composer_utxos();
 
             // safe because above `is_some`
@@ -681,10 +710,6 @@ pub(crate) async fn mine(
                 .wallet_state
                 .wallet_secret
                 .guesser_spending_key(proposal.header().prev_block_digest);
-
-            global_state_lock
-                .set_mining_status_to_guessing(proposal)
-                .await;
 
             let latest_block_header = global_state_lock
                 .lock(|s| s.chain.light_state().header().to_owned())
@@ -751,18 +776,20 @@ pub(crate) async fn mine(
             tokio::spawn(async { Ok(()) })
         };
 
+        let mut restart_guessing = false;
+        let mut stop_guessing = false;
+        let mut stop_composing = false;
+        let mut stop_looping = false;
+
         // Await a message from either the worker task or from the main loop,
         // or the restart of the guesser-task.
         select! {
             _ = &mut guess_restart_timer => {
-                if let Some(guesser_task) = guesser_task {
-                    guesser_task.abort();
-                    debug!("Restarting guesser task with new parameters");
-                    continue;
-                }
-
+                restart_guessing = true;
             }
             Ok(Err(e)) = &mut composer_task => {
+                stop_composing = true;
+
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
                         pause_mine = true;
@@ -786,50 +813,25 @@ pub(crate) async fn mine(
                     MainToMiner::Shutdown => {
                         debug!("Miner shutting down.");
 
-                        if let Some(gt) = guesser_task {
-                            gt.abort();
-                            debug!("Abort-signal sent to guesser worker.");
-                        }
-                        if !composer_task.is_finished() {
-                            cancel_compose_tx.send(())?;
-                            debug!("Cancel signal sent to composer worker.");
-                        }
-
-                        break;
+                        stop_guessing = true;
+                        stop_composing = true;
+                        stop_looping = true;
                     }
                     MainToMiner::NewBlock => {
-                        if let Some(gt) = guesser_task {
-                            gt.abort();
-                            debug!("Abort-signal sent to guesser worker.");
-                        }
-                        if !composer_task.is_finished() {
-                            cancel_compose_tx.send(())?;
-                            debug!("Cancel signal sent to composer worker.");
-                        }
+                        stop_guessing = true;
+                        stop_composing = true;
 
                         info!("Miner task received notification about new block");
                     }
                     MainToMiner::NewBlockProposal => {
-                        if let Some(gt) = guesser_task {
-                            gt.abort();
-                            debug!("Abort-signal sent to guesser worker.");
-                        }
-                        if !composer_task.is_finished() {
-                            cancel_compose_tx.send(())?;
-                            debug!("Cancel signal sent to composer worker.");
-                        }
+                        stop_guessing = true;
+                        stop_composing = true;
 
                         info!("Miner received message about new block proposal for guessing.");
                     }
                     MainToMiner::WaitForContinue => {
-                        if let Some(gt) = guesser_task {
-                            gt.abort();
-                            debug!("Abort-signal sent to guesser worker.");
-                        }
-                        if !composer_task.is_finished() {
-                            cancel_compose_tx.send(())?;
-                            debug!("Cancel signal sent to composer worker.");
-                        }
+                        stop_guessing = true;
+                        stop_composing = true;
 
                         wait_for_confirmation = true;
                     }
@@ -839,14 +841,8 @@ pub(crate) async fn mine(
                     MainToMiner::StopMining => {
                         pause_mine = true;
 
-                        if let Some(gt) = guesser_task {
-                            gt.abort();
-                            debug!("Abort-signal sent to guesser worker.");
-                        }
-                        if !composer_task.is_finished() {
-                            cancel_compose_tx.send(())?;
-                            debug!("Cancel signal sent to composer worker.");
-                        }
+                        stop_guessing = true;
+                        stop_composing = true;
                     }
                     MainToMiner::StartMining => {
                         pause_mine = false;
@@ -862,62 +858,85 @@ pub(crate) async fn mine(
                         // variable, because it reflects the logical on/off
                         // of mining, which syncing can temporarily override
                         // but not alter the setting.
-                        if let Some(gt) = guesser_task {
-                            gt.abort();
-                            debug!("Abort-signal sent to guesser worker.");
-                        }
-                        if !composer_task.is_finished() {
-                            cancel_compose_tx.send(())?;
-                            debug!("Cancel signal sent to composer worker.");
-                        }
+                        stop_guessing = true;
+                        stop_composing = true;
                     }
                 }
             }
             new_composition = composer_rx => {
-                let (new_block_proposal, composer_utxos) = match new_composition {
-                    Ok(k) => k,
-                    Err(e) => {warn!("composing task was cancelled prematurely. Got: {}", e);
-                    continue;}
-                };
-                to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
+                stop_composing = true;
 
-                wait_for_confirmation = true;
+                match new_composition {
+                    Ok((new_block_proposal, composer_utxos)) => {
+                        to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
+                        wait_for_confirmation = true;
+                    },
+                    Err(e) => warn!("composing task was cancelled prematurely. Got: {}", e),
+                };
             }
             new_block = guesser_rx => {
-                let new_block_found = match new_block {
-                    Ok(res) => res,
+                stop_guessing = true;
+
+                match new_block {
                     Err(err) => {
                         warn!("Mining task was cancelled prematurely. Got: {}", err);
-                        continue;
                     }
+                    Ok(new_block_found) => {
+                        debug!("Worker task reports new block of height {}", new_block_found.block.kernel.header.height);
+
+                        // Sanity check, remove for more efficient mining.
+                        // The below PoW check could fail due to race conditions. So we don't panic,
+                        // we only ignore what the worker task sent us.
+                        let latest_block = global_state_lock
+                            .lock(|s| s.chain.light_state().to_owned())
+                            .await;
+
+                        if !new_block_found.block.has_proof_of_work(latest_block.header()) {
+                            error!("Own mined block did not have valid PoW Discarding.");
+                        } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now()).await {
+                                // Block could be invalid if for instance the proof and proof-of-work
+                                // took less time than the minimum block time.
+                                error!("Found block with valid proof-of-work but block is invalid.");
+                        } else {
+
+                            info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
+
+                            to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
+
+                            wait_for_confirmation = true;
+                        }
+                    },
                 };
-
-                debug!("Worker task reports new block of height {}", new_block_found.block.kernel.header.height);
-
-                // Sanity check, remove for more efficient mining.
-                // The below PoW check could fail due to race conditions. So we don't panic,
-                // we only ignore what the worker task sent us.
-                let latest_block = global_state_lock
-                    .lock(|s| s.chain.light_state().to_owned())
-                    .await;
-                if !new_block_found.block.has_proof_of_work(latest_block.header()) {
-                    error!("Own mined block did not have valid PoW Discarding.");
-                    continue;
-                }
-
-                if !new_block_found.block.is_valid(&latest_block, Timestamp::now()).await {
-                    // Block could be invalid if for instance the proof and proof-of-work
-                    // took less time than the minimum block time.
-                    error!("Found block with valid proof-of-work but block is invalid.");
-                    continue;
-                }
-
-                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
-
-                to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
-
-                wait_for_confirmation = true;
             }
+        }
+
+        if restart_guessing {
+            if let Some(gt) = &guesser_task {
+                gt.abort();
+                debug!("Abort-signal sent to guesser worker.");
+                debug!("Restarting guesser task with new parameters");
+            }
+        }
+        if stop_guessing {
+            if let Some(gt) = &guesser_task {
+                gt.abort();
+                debug!("Abort-signal sent to guesser worker.");
+            }
+            global_state_lock.set_mining_status_to_inactive().await;
+        }
+        if stop_composing {
+            if !composer_task.is_finished() {
+                cancel_compose_tx.send(())?;
+                debug!("Cancel signal sent to composer worker.");
+            }
+            // avoid duplicate call if stop_guessing is also true.
+            if !stop_guessing {
+                global_state_lock.set_mining_status_to_inactive().await;
+            }
+        }
+
+        if stop_looping {
+            break;
         }
     }
     debug!("Miner shut down gracefully.");
