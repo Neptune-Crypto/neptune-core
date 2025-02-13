@@ -111,12 +111,24 @@ pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
     BlockProposalNotification(BlockProposalNotification),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
-    PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
-    MakePeerDiscoveryRequest,               // Request peer list from connected peers
-    MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
-    TransactionNotification(TransactionNotification), // Publish knowledge of a transaction
-    Disconnect(SocketAddr),                       // Disconnect from a specific peer
-    DisconnectAll(),                              // Disconnect from all peers
+
+    /// sanction a peer for failing to respond to sync request
+    PeerSynchronizationTimeout(SocketAddr),
+
+    /// Request peer list from connected peers
+    MakePeerDiscoveryRequest,
+
+    /// Request peers from a specific peer to get peers further away
+    MakeSpecificPeerDiscoveryRequest(SocketAddr),
+
+    /// Publish knowledge of a transaction
+    TransactionNotification(TransactionNotification),
+
+    /// Disconnect from a specific peer
+    Disconnect(SocketAddr),
+
+    /// Disconnect from all peers
+    DisconnectAll(),
 }
 
 impl MainToPeerTask {
@@ -151,7 +163,10 @@ pub(crate) enum PeerTaskToMain {
         claimed_block_mmra: MmrAccumulator,
     },
     RemovePeerMaxBlockHeight(SocketAddr),
-    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
+
+    /// (\[(peer_listen_address)\], reported_by, distance)
+    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
+
     Transaction(Box<PeerTaskToMainTransaction>),
     BlockProposal(Box<Block>),
     DisconnectFromLongestLivedPeer,
