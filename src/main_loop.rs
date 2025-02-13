@@ -1165,7 +1165,8 @@ impl MainLoopHandler {
         let chosen_peer = candidate_peers.choose(&mut rng);
         assert!(
             chosen_peer.is_some(),
-            "A synchronization candidate must be available for a request. Otherwise the data structure is in an invalid state and syncing should not be active"
+            "A synchronization candidate must be available for a request. \
+            Otherwise, the data structure is in an invalid state and syncing should not be active"
         );
 
         let ordered_preferred_block_digests = match anchor.champion {
@@ -1628,7 +1629,7 @@ impl MainLoopHandler {
                     self.main_to_peer_broadcast_tx
                         .send(MainToPeerTask::TransactionNotification(notification))?;
                 } else {
-                    // Otherwise upgrade its proof quality, and share it by
+                    // Otherwise, upgrade its proof quality, and share it by
                     // spinning up the proof upgrader.
                     let TransactionProof::Witness(primitive_witness) = transaction.proof else {
                         panic!("Expected Primitive witness. Got: {:?}", transaction.proof);

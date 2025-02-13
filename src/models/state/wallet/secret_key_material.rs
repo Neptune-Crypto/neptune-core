@@ -53,7 +53,7 @@ pub enum ShamirSecretSharingError {
 
     /// When trying to reconstruct the original secret from a list of >=t
     /// shares, it is important to guarantee that all shares have distinct
-    /// indices. Otherwise there is either a duplicate share (both coordinates
+    /// indices. Otherwise, there is either a duplicate share (both coordinates
     /// are the same) and redundant information is provided, or else there is
     /// a pair of inconsistent shares (having the same x-coordinate and
     /// different y-coordinates).

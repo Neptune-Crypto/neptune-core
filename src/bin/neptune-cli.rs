@@ -1129,7 +1129,7 @@ async fn main() -> Result<()> {
 //
 // We use the data-dir provided by user if present.
 //
-// Otherwise we call cookie_hint() RPC to obtain data-dir.
+// Otherwise, we call cookie_hint() RPC to obtain data-dir.
 // But the API might be disabled, which we detect and fallback to the default data-dir.
 async fn get_cookie_hint(
     client: &RPCClient,

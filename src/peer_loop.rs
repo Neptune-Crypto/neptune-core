@@ -542,7 +542,7 @@ impl PeerLoopHandler {
 
     /// Handle peer messages and returns Ok(true) if connection should be closed.
     /// Connection should also be closed if an error is returned.
-    /// Otherwise returns OK(false).
+    /// Otherwise, returns OK(false).
     ///
     /// Locking:
     ///   * Acquires `global_state_lock` for read.
@@ -1308,7 +1308,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // Otherwise relay to main
+                // Otherwise, relay to main
                 let pt2m_transaction = PeerTaskToMainTransaction {
                     transaction,
                     confirmable_for_block: self

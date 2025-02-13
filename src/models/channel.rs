@@ -69,7 +69,7 @@ pub(crate) enum MinerToMain {
     NewBlockFound(NewBlockFound),
     BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
 
-    /// Request main loop to shutdown entire application and return the
+    /// Request main loop to shut down entire application and return the
     /// indicated exit code.
     Shutdown(i32),
 }
@@ -80,7 +80,7 @@ pub struct MainToPeerTaskBatchBlockRequest {
     pub(crate) peer_addr_target: SocketAddr,
 
     /// Sorted list of most preferred blocks. The first digest is the block
-    /// that the we would prefer to build on top off, if it belongs to the
+    /// that we would prefer to build on top off, if it belongs to the
     /// canonical chain.
     pub(crate) known_blocks: Vec<Digest>,
 
@@ -195,7 +195,7 @@ impl PeerTaskToMain {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ClaimUtxoData {
-    /// Some(mutxo) if UTXO has already been mined. Otherwise None.
+    /// Some(mutxo) if UTXO has already been mined. Otherwise, None.
     pub(crate) prepared_monitored_utxo: Option<MonitoredUtxo>,
 
     /// Indicates if wallet already expects this UTXO.

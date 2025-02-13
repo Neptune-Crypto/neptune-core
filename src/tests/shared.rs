@@ -394,7 +394,7 @@ impl<Item> stream::Stream for Mock<Item> {
             Poll::Ready(Some(Ok(a)))
         } else {
             // Returning `Poll::Ready(None)` here would probably simulate better
-            // a peer closing the connection. Otherwise we have to close with a
+            // a peer closing the connection. Otherwise, we have to close with a
             // `Bye` in all tests.
             Poll::Ready(Some(Err(MockError::UnexpectedRead)))
         }

@@ -1440,7 +1440,7 @@ impl WalletState {
             .get_wallet_status(tip_digest, mutator_set_accumulator)
             .await;
 
-        // First check that we have enough. Otherwise return an error.
+        // First check that we have enough. Otherwise, return an error.
         let confirmed_available_amount_without_mempool_spends = self
             .confirmed_available_balance(&wallet_status, timestamp)
             .checked_sub(

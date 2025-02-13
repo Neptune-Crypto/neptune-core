@@ -203,7 +203,7 @@ impl Mempool {
     }
 
     /// Return the proof collection-supported transaction with highest
-    /// fee-density if mempool contains any such transactions. Otherwise None.
+    /// fee-density if mempool contains any such transactions. Otherwise, None.
     pub(crate) fn most_dense_proof_collection(
         &self,
         num_proofs_threshold: usize,
