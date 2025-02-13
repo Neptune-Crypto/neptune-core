@@ -89,10 +89,8 @@ async fn check_if_connection_is_allowed(
 
     // Disallow connection if peer is banned via CLI arguments
     if cli_arguments.ban.contains(&peer_address.ip()) {
-        warn!(
-            "Peer {}, banned via CLI argument, attempted to connect. Disallowing.",
-            peer_address.ip()
-        );
+        let ip = peer_address.ip();
+        warn!("Peer {ip}, banned via CLI argument, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
@@ -103,43 +101,32 @@ async fn check_if_connection_is_allowed(
         .await;
 
     if standing.is_some() && standing.unwrap().standing <= -(cli_arguments.peer_tolerance as i32) {
-        warn!(
-            "Peer {}, banned because of bad standing, attempted to connect. Disallowing.",
-            peer_address.ip()
-        );
+        let ip = peer_address.ip();
+        warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
-    if let Some(status) = {
-        // Disallow connection if max number of peers has been reached or
-        // exceeded. There is another test in `answer_peer_inner` that precedes
-        // this one; however this test is still necessary to resolve potential
-        // race conditions.
-        // Note that if we are bootstrapping, then we *do* want to accept the
-        // connection and temporarily exceed the maximum. In this case a
-        // `DisconnectFromLongestLivedPeer` message should have been sent to
-        // the main loop already but that mesage need not have been processed by
-        // the time we get here.
-        if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len()
-            && !cli_arguments.bootstrap
-        {
-            Some(InternalConnectionStatus::Refused(
-                ConnectionRefusedReason::MaxPeerNumberExceeded,
-            ))
-        }
-        // Disallow connection to already connected peer.
-        else if global_state.net.peer_map.values().any(|peer| {
-            peer.instance_id() == other_handshake.instance_id
-                || *peer_address == peer.connected_address()
-        }) {
-            Some(InternalConnectionStatus::Refused(
-                ConnectionRefusedReason::AlreadyConnected,
-            ))
-        } else {
-            None
-        }
-    } {
-        return status;
+    // Disallow connection if max number of peers has been reached or
+    // exceeded. There is another test in `answer_peer_inner` that precedes
+    // this one; however this test is still necessary to resolve potential
+    // race conditions.
+    // Note that if we are bootstrapping, then we *do* want to accept the
+    // connection and temporarily exceed the maximum. In this case a
+    // `DisconnectFromLongestLivedPeer` message should have been sent to
+    // the main loop already but that message need not have been processed by
+    // the time we get here.
+    if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len()
+        && !cli_arguments.bootstrap
+    {
+        return InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
+    }
+
+    // Disallow connection to already connected peer.
+    if global_state.net.peer_map.values().any(|peer| {
+        peer.instance_id() == other_handshake.instance_id
+            || *peer_address == peer.connected_address()
+    }) {
+        return InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
 
     // Disallow connection to self
