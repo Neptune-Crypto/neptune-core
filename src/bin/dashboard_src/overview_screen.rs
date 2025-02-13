@@ -285,6 +285,17 @@ impl VerticalRectifier {
         self.inner_y += clamp_height;
         rect
     }
+
+    pub fn remaining(&mut self) -> Rect {
+        let mut rect = self.container;
+        rect.y = self.inner_y;
+        self.inner_y = self.container.height;
+        rect
+    }
+
+    pub fn set_width(&mut self, width: u16) {
+        self.container.width = width;
+    }
 }
 
 impl Widget for OverviewScreen {

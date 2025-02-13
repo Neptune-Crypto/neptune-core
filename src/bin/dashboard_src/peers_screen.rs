@@ -12,9 +12,12 @@ use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
 use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Cell;
+use ratatui::widgets::Paragraph;
 use ratatui::widgets::Row;
 use ratatui::widgets::Table;
 use ratatui::widgets::Widget;
@@ -25,6 +28,7 @@ use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
 
 use super::dashboard_app::DashboardEvent;
+use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
 
 #[derive(Debug, Clone)]
@@ -171,10 +175,19 @@ impl Widget for PeersScreen {
             .style(style)
             .render(area, buf);
 
-        let mut inner = area.inner(Margin {
+        let inner = area.inner(Margin {
             vertical: 2,
             horizontal: 2,
         });
+
+        let mut vrecter = VerticalRectifier::new(inner);
+        let peer_count_rect = vrecter.next((5).try_into().unwrap());
+
+        let num_peers = self.data.lock().unwrap().len();
+
+        let peer_count = Line::from(vec![Span::from(format!("Peers connected: {}", num_peers))]);
+        let peer_count_widget = Paragraph::new(peer_count).style(style);
+        peer_count_widget.render(peer_count_rect, buf);
 
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);
@@ -323,10 +336,11 @@ impl Widget for PeersScreen {
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
         let table = Table::new(rows, width_constraints).style(style);
-        inner.width = min(
+        vrecter.set_width(min(
             inner.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
-        );
-        table.render(inner, buf);
+        ));
+        let table_rect = vrecter.remaining();
+        table.render(table_rect, buf);
     }
 }
