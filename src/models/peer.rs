@@ -385,12 +385,14 @@ pub enum InternalConnectionStatus {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConnectionRefusedReason {
     AlreadyConnected,
     BadStanding,
     IncompatibleVersion,
     MaxPeerNumberExceeded,
     SelfConnect,
+    RecentlyDisconnected,
 }
 
 /// The reason the connection was terminated.
