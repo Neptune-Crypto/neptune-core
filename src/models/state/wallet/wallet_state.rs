@@ -399,7 +399,7 @@ impl WalletState {
     pub(in crate::models::state) async fn handle_mempool_event(&mut self, event: MempoolEvent) {
         match event {
             MempoolEvent::AddTx(tx) => {
-                trace!("handling mempool AddTx event.");
+                debug!(r"handling mempool AddTx event.  details:\n{}", tx.kernel);
 
                 let spent_utxos = self.scan_for_spent_utxos(&tx.kernel).await;
 
@@ -421,8 +421,8 @@ impl WalletState {
                 self.mempool_unspent_utxos.insert(tx_id, own_utxos);
             }
             MempoolEvent::RemoveTx(tx) => {
-                trace!("handling mempool RemoveTx event.");
                 let tx_id = tx.kernel.txid();
+                debug!("handling mempool RemoveTx event.  tx: {}", tx_id);
                 self.mempool_spent_utxos.remove(&tx_id);
                 self.mempool_unspent_utxos.remove(&tx_id);
             }

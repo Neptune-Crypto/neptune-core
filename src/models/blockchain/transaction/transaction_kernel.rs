@@ -47,6 +47,34 @@ pub struct TransactionKernel {
     mast_sequences: OnceLock<Vec<Vec<BFieldElement>>>,
 }
 
+impl std::fmt::Display for TransactionKernel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "
+kernel hash: {mast_hash}
+inputs: {inputs}
+outputs: {outputs}
+public_announcements: {announcements}
+coinbase: {coinbase}
+timestamp: {timestamp}
+mutator_set_hash: {ms_hash}
+merge_bit: {merge_bit}
+",
+            mast_hash = self.mast_hash().to_hex(),
+            inputs = self.inputs.len(),
+            outputs = self.outputs.len(),
+            announcements = self.public_announcements.len(),
+            coinbase = self
+                .coinbase
+                .unwrap_or_else(|| NativeCurrencyAmount::coins(0)),
+            timestamp = self.timestamp,
+            ms_hash = self.mutator_set_hash.to_hex(),
+            merge_bit = self.merge_bit,
+        )
+    }
+}
+
 // we impl PartialEq manually in order to skip mast_sequences field.
 // This could also be achieved with the `derivative` crate that has a
 // PartialEq that can skip fields, but this way we avoid an extra dep.
