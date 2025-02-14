@@ -192,9 +192,6 @@ pub mod test {
 
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use reqwest::header::HeaderMap;
-    use reqwest::header::HeaderValue;
-    use reqwest::Url;
     use tasm_lib::triton_vm;
     use tracing::debug;
     use tracing::Span;
@@ -395,7 +392,7 @@ pub mod test {
     }
 
     /// Load a list of proof-servers from test data directory
-    fn load_servers() -> Vec<Url> {
+    fn load_servers() -> Vec<String> {
         let mut server_list_path = PathBuf::new();
         server_list_path.push(TEST_DATA_DIR);
         server_list_path.push(Path::new("proof_servers").with_extension("txt"));
@@ -418,13 +415,7 @@ pub mod test {
             );
             return vec![];
         };
-        file_as_string
-            .lines()
-            .map(|s| {
-                Url::parse(s)
-                    .unwrap_or_else(|_| panic!("Must be able to parse string '{s}' as URL"))
-            })
-            .collect()
+        file_as_string.lines().map(|s| s.to_string()).collect()
     }
 
     #[test]
@@ -460,7 +451,7 @@ pub mod test {
     /// serving the proof. The caller should validate the proof. Does
     /// not store the proof to disk.
     /// TODO: Consider making this async.
-    fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, Url)> {
+    fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, String)> {
         fn get_test_name_from_tracing() -> String {
             match Span::current().metadata().map(|x| x.name()) {
                 Some(test_name) => test_name.to_owned(),
@@ -486,11 +477,10 @@ pub mod test {
         servers.shuffle(&mut rand::rng());
 
         // Add test name to request allow server to see which test requires a proof
-        let mut headers = HeaderMap::new();
+        let mut headers = clienter::HttpHeaders::default();
         headers.insert(
-            TEST_NAME_HTTP_HEADER_KEY,
-            HeaderValue::from_str(&attempt_to_get_test_name())
-                .unwrap_or_else(|_| panic!("Must be to add test name to HTTP header")),
+            TEST_NAME_HTTP_HEADER_KEY.to_string(),
+            attempt_to_get_test_name(),
         );
 
         // TODO: Use regular (non-blocking) reqwest client if this function
@@ -500,16 +490,18 @@ pub mod test {
             let filename_ = filename.clone();
             let headers_ = headers.clone();
             let handle = std::thread::spawn(move || {
-                let http_client = reqwest::blocking::Client::builder()
-                    .timeout(Duration::from_secs(10))
-                    .default_headers(headers_)
-                    .build()
-                    .expect("Must be able to build HTTP client instance");
-                let url = server_.join(&filename_).unwrap_or_else(|_| {
-                    panic!("Must be able to form URL. Got: '{server_}' and '{filename_}'.")
-                });
+                let url = format!("{}{}", server_, filename_);
+
                 debug!("requesting: <{url}>");
-                let Ok(response) = http_client.get(url).send() else {
+
+                let uri: clienter::Uri = url.into();
+
+                let mut http_client = clienter::HttpClient::new();
+                http_client.timeout = Some(Duration::from_secs(10));
+                http_client.headers = headers_;
+                let request = http_client.request(clienter::HttpMethod::GET, uri);
+
+                let Ok(mut response) = http_client.send(&request) else {
                     println!(
                         "server '{}' failed for file '{}'; trying next ...",
                         server_.clone(),
@@ -519,7 +511,9 @@ pub mod test {
                     return None;
                 };
 
-                Some((response.status(), response.bytes()))
+                let body = response.body();
+
+                Some((response.status, body))
             });
 
             let Some((status_code, body)) = handle.join().unwrap() else {
