@@ -61,8 +61,6 @@ use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::WalletSecret;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -997,21 +995,6 @@ impl Block {
             .collect_vec()
     }
 
-    /// Create a list of [`ExpectedUtxo`]s for the guesser fee.
-    pub(crate) fn guesser_fee_expected_utxos(&self, guesser_preimage: Digest) -> Vec<ExpectedUtxo> {
-        self.guesser_fee_utxos()
-            .into_iter()
-            .map(|utxo| {
-                ExpectedUtxo::new(
-                    utxo,
-                    self.hash(),
-                    guesser_preimage,
-                    UtxoNotifier::OwnMinerGuessNonce,
-                )
-            })
-            .collect_vec()
-    }
-
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
@@ -1589,12 +1572,12 @@ pub(crate) mod block_tests {
             )
             .await;
             let ars = block1.guesser_fee_addition_records();
-            let ars_from_eus = block1
-                .guesser_fee_expected_utxos(guesser_preimage)
+            let ars_from_wallet = block1
+                .guesser_fee_utxos()
                 .iter()
-                .map(|x| x.addition_record)
+                .map(|utxo| commit(Tip5::hash(utxo), block1.hash(), guesser_preimage.hash()))
                 .collect_vec();
-            assert_eq!(ars, ars_from_eus);
+            assert_eq!(ars, ars_from_wallet);
 
             let MutatorSetUpdate {
                 removals: _,

@@ -710,6 +710,35 @@ impl WalletState {
             .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
     }
 
+    /// Scan the block for guesser fee UTXOs that this wallet can unlock.
+    ///
+    /// Return an iterator over them, which is empty if the block was guessed by
+    /// some other wallet.
+    pub(crate) fn scan_for_guesser_fee_utxos<'a>(
+        &'a self,
+        block: &Block,
+    ) -> impl Iterator<Item = IncomingUtxo> + 'a {
+        let receiver_preimage = self
+            .wallet_secret
+            .guesser_preimage(block.header().prev_block_digest);
+        let receiver_digest = receiver_preimage.hash();
+        let incoming_utxos = if block.header().guesser_digest == receiver_digest {
+            let sender_randomness = block.hash();
+            block
+                .guesser_fee_utxos()
+                .into_iter()
+                .map(|utxo| IncomingUtxo {
+                    utxo,
+                    sender_randomness,
+                    receiver_preimage,
+                })
+                .collect_vec()
+        } else {
+            vec![]
+        };
+        incoming_utxos.into_iter()
+    }
+
     /// check if wallet already has the provided `expected_utxo`
     /// perf:
     ///
@@ -1071,12 +1100,15 @@ impl WalletState {
             .await
             .collect_vec();
 
+        let guesser_fee_outputs = self.scan_for_guesser_fee_utxos(new_block);
+
         let all_spendable_received_outputs = onchain_received_outputs
             .chain(offchain_received_outputs.iter().cloned())
-            .filter(|announced_utxo| announced_utxo.utxo.all_type_script_states_are_valid());
+            .filter(|announced_utxo| announced_utxo.utxo.all_type_script_states_are_valid())
+            .chain(guesser_fee_outputs);
 
         let incoming: HashMap<AdditionRecord, IncomingUtxo> = all_spendable_received_outputs
-            .map(|utxo| (utxo.addition_record(), utxo))
+            .map(|incoming_utxo| (incoming_utxo.addition_record(), incoming_utxo))
             .collect();
 
         // Derive the membership proofs for received UTXOs, and in
@@ -1105,7 +1137,7 @@ impl WalletState {
             valid_membership_proofs_and_own_utxo_count.len()
         );
 
-        // Loop over all input UTXOs, applying all addition records. In each iteration,
+        // Loop over all output UTXOs, applying all addition records. In each iteration,
         // a) Update all existing MS membership proofs
         // b) Register incoming transactions and derive their membership proofs
         let mut changed_mps = vec![];
@@ -1149,6 +1181,7 @@ impl WalletState {
             // If the output UTXO belongs to us, add it to the list of monitored
             // UTXOs and add its membership proof to the list of managed
             // membership proofs.
+            // The output UTXO belongs to us
             if let Some(incoming_utxo) = incoming.get(addition_record) {
                 let IncomingUtxo {
                     utxo,
@@ -1177,7 +1210,13 @@ impl WalletState {
                     new_block.kernel.header.height,
                 ));
 
+                // Add the membership proof to the list of managed membership
+                // proofs.
                 if let Some(mutxo_index) = all_existing_mutxos.get(&strong_key) {
+                    // There is already a monitored UTXO with that key in the
+                    // database. If this block is confirming that UTXO, then it
+                    // must be a reorg. So overwrite the existing entry's
+                    // membership proof.
                     debug!("Repeated monitored UTXO. Not adding new entry to monitored UTXOs");
                     valid_membership_proofs_and_own_utxo_count.insert(
                         strong_key,
@@ -1189,6 +1228,7 @@ impl WalletState {
                     existing_mutxo.confirmed_in_block = mutxo.confirmed_in_block;
                     monitored_utxos.set(*mutxo_index, existing_mutxo).await;
                 } else {
+                    // The monitored UTXO is new. Push it.
                     let mutxos_len = monitored_utxos.len().await;
                     valid_membership_proofs_and_own_utxo_count.insert(
                         strong_key,
@@ -1707,7 +1747,7 @@ mod tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let (block1, composer_expected) = make_mock_block(
+        let (block1, composer_expected_utxos) = make_mock_block(
             genesis,
             Some(block_1_timestamp),
             alice_key,
@@ -1716,7 +1756,7 @@ mod tests {
         .await;
 
         alice
-            .set_new_self_mined_tip(block1.clone(), composer_expected)
+            .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
             .await
             .unwrap();
 
@@ -1765,7 +1805,7 @@ mod tests {
         bob_global_lock
             .lock_guard_mut()
             .await
-            .set_new_self_mined_tip(block1.clone(), composer_fee_eutxos)
+            .set_new_self_composed_tip(block1.clone(), composer_fee_eutxos)
             .await
             .unwrap();
 
@@ -2085,12 +2125,16 @@ mod tests {
         let network = Network::Main;
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let mut bob_global_lock =
-            mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
-                .await;
+        let mut bob_global_lock = mock_genesis_global_state(
+            network,
+            0,
+            bob_wallet_secret.clone(),
+            cli_args::Args::default(),
+        )
+        .await;
 
         let genesis_block = Block::genesis(network);
-        let guesser_preimage_1a: Digest = rng.random();
+        let guesser_preimage_1a: Digest = bob_wallet_secret.guesser_preimage(genesis_block.hash());
         let mock_block_seed = rng.random();
         let guesser_fraction = 0.5f64;
 
@@ -2105,14 +2149,13 @@ mod tests {
                 guesser_preimage_1a,
             )
             .await;
-        let guesser_fee_utxo_infos0 = block_1a.guesser_fee_expected_utxos(guesser_preimage_1a);
 
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let mutxos_1a = bob.wallet_state.wallet_db.monitored_utxos().get_all().await;
         bob.wallet_state
             .add_expected_utxos(expected_utxos_block_1a.clone())
             .await;
-        bob.set_new_self_mined_tip(block_1a.clone(), guesser_fee_utxo_infos0)
+        bob.set_new_self_composed_tip(block_1a.clone(), vec![])
             .await
             .unwrap();
         assert_eq!(4, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
@@ -2331,9 +2374,9 @@ mod tests {
         );
 
         // Add block 3a with a coinbase UTXO for us
-        let (block_3a, expected_3a) =
+        let (block_3a, composer_expected_utxos_3a) =
             make_mock_block(&latest_block.clone(), None, bob_spending_key, rng.random()).await;
-        bob.set_new_self_mined_tip(block_3a, expected_3a)
+        bob.set_new_self_composed_tip(block_3a, composer_expected_utxos_3a)
             .await
             .unwrap();
 
@@ -2553,7 +2596,7 @@ mod tests {
             .await;
 
             let new_block_found = guesser_rx.await.unwrap();
-            let guesser_utxos = new_block_found.guesser_fee_utxo_infos;
+            let guesser_expected_utxos = vec![];
             let block1 = new_block_found.block;
 
             {
@@ -2570,7 +2613,7 @@ mod tests {
                     "Must show zero-balance before adding block to state"
                 );
             }
-            bob.set_new_self_mined_tip(block1.as_ref().clone(), guesser_utxos)
+            bob.set_new_self_composed_tip(block1.as_ref().clone(), guesser_expected_utxos.clone())
                 .await
                 .unwrap();
 
@@ -2649,9 +2692,14 @@ mod tests {
                 .expected_utxos()
                 .get_all()
                 .await;
-            assert_eq!(2, eus.len(), "Must expect 2 guesser-fee UTXOs");
             assert_eq!(
-                2,
+                guesser_expected_utxos.len(),
+                eus.len(),
+                "Must expect {} guesser-fee UTXOs",
+                guesser_expected_utxos.len()
+            );
+            assert_eq!(
+                guesser_expected_utxos.len(),
                 eus.iter().map(|x| x.addition_record).unique().count(),
                 "Addition records from expected UTXOs must be unique"
             );
@@ -2750,7 +2798,7 @@ mod tests {
             let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx).await;
             assert!(block2.is_valid(&block1, block2_timestamp).await);
 
-            bob.set_new_self_mined_tip(block2.clone(), vec![])
+            bob.set_new_self_composed_tip(block2.clone(), vec![])
                 .await
                 .unwrap();
             {
@@ -2820,13 +2868,17 @@ mod tests {
             half_coinbase_amt.div_two();
             let send_amt = NativeCurrencyAmount::coins(5);
 
-            let timestamp = Block::genesis(network).header().timestamp + Timestamp::hours(1);
+            let genesis_block = Block::genesis(network);
+            let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
 
             // mine a block to our wallet.  we should have 100 coins after.
-            let tip_digest =
-                mine_block_to_wallet_invalid_block_proof(&mut global_state_lock, timestamp)
-                    .await?
-                    .hash();
+            let tip_digest = mine_block_to_wallet_invalid_block_proof(
+                &mut global_state_lock,
+                genesis_block.hash(),
+                timestamp,
+            )
+            .await?
+            .hash();
 
             let tx = {
                 // verify that confirmed and unconfirmed balances.
@@ -2972,28 +3024,27 @@ mod tests {
             .await;
 
             let genesis = Block::genesis(network);
-            let guesser_preimage = rng.random();
+            let guesser_preimage = alice_wallet.guesser_preimage(genesis.hash());
             let change_key = alice_wallet.nth_generation_spending_key(0).into();
             let guesser_fraction = 0.5f64;
 
             // Alice mines a block
-            let (block, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
-                &genesis,
-                None,
-                alice_wallet.nth_generation_spending_key(0),
-                rng.random(),
-                guesser_fraction,
-                guesser_preimage,
-            )
-            .await;
+            let (block, composer_expected_utxos) =
+                make_mock_block_guesser_preimage_and_guesser_fraction(
+                    &genesis,
+                    None,
+                    alice_wallet.nth_generation_spending_key(0),
+                    rng.random(),
+                    guesser_fraction,
+                    guesser_preimage,
+                )
+                .await;
 
             // Alice gets all mining rewards
-            let guesser_utxos = block.guesser_fee_expected_utxos(guesser_preimage);
-            let all_mine_rewards = [composer_utxos, guesser_utxos].concat();
             alice
                 .lock_guard_mut()
                 .await
-                .set_new_self_mined_tip(block.clone(), all_mine_rewards)
+                .set_new_self_composed_tip(block.clone(), composer_expected_utxos)
                 .await
                 .unwrap();
 
@@ -3607,10 +3658,10 @@ mod tests {
             )
             .await;
             let genesis = Block::genesis(network);
-            let guesser_preimage = rng.random();
+            let guesser_preimage = alice_wallet.guesser_preimage(genesis.hash());
 
             let guesser_fraction = 0.6f64;
-            let (block_1a, composer_utxos_1a) =
+            let (block_1a, composer_expected_utxos_1a) =
                 make_mock_block_guesser_preimage_and_guesser_fraction(
                     &genesis,
                     None,
@@ -3620,13 +3671,11 @@ mod tests {
                     guesser_preimage,
                 )
                 .await;
-            let guesser_fee_utxos_1a = block_1a.guesser_fee_expected_utxos(guesser_preimage);
-            let all_mine_rewards_1a = [composer_utxos_1a, guesser_fee_utxos_1a].concat();
 
             alice_global_lock
                 .lock_guard_mut()
                 .await
-                .set_new_self_mined_tip(block_1a.clone(), all_mine_rewards_1a)
+                .set_new_self_composed_tip(block_1a.clone(), composer_expected_utxos_1a)
                 .await
                 .unwrap();
             let wallet_status_1a = alice_global_lock
@@ -3638,7 +3687,7 @@ mod tests {
                 .await;
             assert_eq!(
                 Block::block_subsidy(1u64.into()),
-                wallet_status_1a.synced_unspent_total_amount()
+                wallet_status_1a.synced_unspent_total_amount(),
             );
 
             assert!(wallet_status_1a.unsynced.is_empty());

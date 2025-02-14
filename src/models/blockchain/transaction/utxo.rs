@@ -204,19 +204,6 @@ impl Utxo {
         true
     }
 
-    /// Determine whether the only thing preventing the UTXO from being spendable
-    /// is the timelock whose according release date is in the future.
-    pub fn is_timelocked_but_otherwise_spendable_at(&self, timestamp: Timestamp) -> bool {
-        if !self.all_type_script_states_are_valid() {
-            return false;
-        }
-
-        self.coins
-            .iter()
-            .filter_map(Coin::release_date)
-            .any(|release_date| timestamp <= release_date)
-    }
-
     /// Adds a time-lock coin, if necessary.
     ///
     /// Does nothing if there is a time lock present already whose release date
@@ -236,6 +223,16 @@ impl Utxo {
                 coins,
             }
         }
+    }
+
+    /// Determine whether there is a time-lock, with any release date, on the
+    /// UTXO.
+    #[cfg(test)]
+    pub(crate) fn is_timelocked(&self) -> bool {
+        self.coins
+            .iter()
+            .filter_map(Coin::release_date)
+            .any(|_| true)
     }
 }
 
@@ -352,13 +349,12 @@ mod test {
         let utxo = Utxo::new(no_lock, coins);
 
         prop_assert!(!utxo.can_spend_at(release_date - delta));
-        prop_assert!(utxo.is_timelocked_but_otherwise_spendable_at(release_date - delta));
+        prop_assert!(utxo.is_timelocked());
 
         let epsilon = Timestamp::millis(1);
         prop_assert!(!utxo.can_spend_at(release_date - epsilon));
         prop_assert!(!utxo.can_spend_at(release_date));
         prop_assert!(utxo.can_spend_at(release_date + epsilon));
         prop_assert!(utxo.can_spend_at(release_date + delta));
-        prop_assert!(!utxo.is_timelocked_but_otherwise_spendable_at(release_date + delta));
     }
 }
