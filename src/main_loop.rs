@@ -36,6 +36,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::channel::InternalDisconnectReason;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::MainToPeerTaskBatchBlockRequest;
@@ -839,7 +840,7 @@ impl MainLoopHandler {
 
                 self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
             }
-            PeerTaskToMain::DisconnectFromLongestLivedPeer => {
+            PeerTaskToMain::DisconnectFromLongestLivedPeer(disconnect_reason) => {
                 let global_state = self.global_state_lock.lock_guard().await;
 
                 // get all peers
@@ -861,8 +862,9 @@ impl MainLoopHandler {
 
                 // tell to disconnect
                 if let Some((peer_socket, _peer_info)) = longest_lived_peer {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::Disconnect(peer_socket.to_owned()))?;
+                    let disconnect_message =
+                        MainToPeerTask::Disconnect(peer_socket.to_owned(), disconnect_reason);
+                    self.main_to_peer_broadcast_tx.send(disconnect_message)?;
                 }
             }
         }
@@ -917,13 +919,15 @@ impl MainLoopHandler {
                         .contains(&peer.connected_address())
                 })
                 .choose(&mut rng);
-            match peer_to_disconnect {
-                Some(peer) => {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
-                }
-                None => warn!("Unable to resolve max peer constraint due to manual override."),
-            };
+            if let Some(peer) = peer_to_disconnect {
+                let disconnect_message = MainToPeerTask::Disconnect(
+                    peer.connected_address(),
+                    InternalDisconnectReason::OutOfConnectionCapacity,
+                );
+                self.main_to_peer_broadcast_tx.send(disconnect_message)?;
+            } else {
+                warn!("Unable to resolve max peer constraint due to manual override.");
+            }
 
             return Ok(());
         }
@@ -2398,7 +2402,7 @@ mod test {
             let peer_to_main_message = peer_to_main_rx.recv().await.unwrap();
             assert!(matches!(
                 peer_to_main_message,
-                PeerTaskToMain::DisconnectFromLongestLivedPeer,
+                PeerTaskToMain::DisconnectFromLongestLivedPeer(..),
             ));
 
             // process this message
@@ -2409,26 +2413,18 @@ mod test {
 
             // main loop should send a `Disconnect` message
             let main_to_peers_message = main_to_peer_rx.recv().await.unwrap();
-            assert!(matches!(
-                main_to_peers_message,
-                MainToPeerTask::Disconnect(_)
-            ));
-            let MainToPeerTask::Disconnect(observed_drop_peer_socket_address) =
+            let MainToPeerTask::Disconnect(observed_drop_peer_socket_address, ..) =
                 main_to_peers_message
             else {
-                unreachable!()
+                panic!("Expected disconnect, got {main_to_peers_message:?}");
             };
 
             // matched observed droppee against expectation
             assert_eq!(
                 expected_drop_peer_socket_address,
-                observed_drop_peer_socket_address
+                observed_drop_peer_socket_address,
             );
-
-            println!(
-                "Dropped connection with {}.",
-                expected_drop_peer_socket_address
-            );
+            println!("Dropped connection with {expected_drop_peer_socket_address}.");
 
             // don't forget to terminate the peer task, which is still running
             incoming_peer_task_handle.abort();

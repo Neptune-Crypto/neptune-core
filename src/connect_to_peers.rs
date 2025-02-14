@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::time::SystemTime;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -20,6 +21,7 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
+use crate::models::channel::InternalDisconnectReason;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
@@ -104,6 +106,20 @@ async fn check_if_connection_is_allowed(
         let ip = peer_address.ip();
         warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+    }
+
+    if let Some(time) = global_state
+        .net
+        .last_disconnect_time_of_peer(*peer_address)
+        .await
+    {
+        if SystemTime::now()
+            .duration_since(time)
+            .is_ok_and(|d| d < cli_arguments.reconnect_cooldown)
+        {
+            let reason = ConnectionRefusedReason::RecentlyDisconnected;
+            return InternalConnectionStatus::Refused(reason);
+        }
     }
 
     // Disallow connection if max number of peers has been reached or
@@ -282,9 +298,10 @@ where
     // If necessary, disconnect from another, existing peer.
     if acceptance_code == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
-            .await?;
+        let message = PeerTaskToMain::DisconnectFromLongestLivedPeer(
+            InternalDisconnectReason::OutOfConnectionCapacity,
+        );
+        peer_task_to_main_tx.send(message).await?;
     }
 
     let peer_distance = 1; // All incoming connections have distance 1
@@ -450,11 +467,14 @@ where
     .await;
     if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
         warn!(
-            "Outgoing connection to {peer_address} refused. Reason: {:?}\nNow hanging up.",
-            refused_reason
+            "Outgoing connection to {peer_address} refused. \
+            Reason: {refused_reason:?}\nNow hanging up.",
         );
-        peer.send(PeerMessage::Bye).await?;
-        bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
+        peer.send(PeerMessage::Disconnect(None)).await?;
+        bail!(
+            "Attempted to connect to peer ({peer_address}) that was not allowed. \
+             This connection attempt should not have been made."
+        );
     }
 
     // By default, start by asking the peer for its peers. In an adversarial
@@ -530,6 +550,7 @@ mod connect_tests {
     use anyhow::bail;
     use anyhow::Result;
     use tokio_test::io::Builder;
+    use tokio_test::io::Mock;
     use tracing_test::traced_test;
     use twenty_first::math::digest::Digest;
 
@@ -570,7 +591,7 @@ mod connect_tests {
                 TransferConnectionStatus::Accepted,
             ))?)
             .write(&to_bytes(&PeerMessage::PeerListRequest)?)
-            .read(&to_bytes(&PeerMessage::Bye)?)
+            .read(&to_bytes(&PeerMessage::Disconnect(None))?)
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
@@ -770,6 +791,94 @@ mod connect_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn bootstrap_node_refuses_reconnects_within_disconnect_cooldown_period() -> Result<()> {
+        struct MockNode {
+            network: Network,
+            own_handshake: HandshakeData,
+            state_lock: GlobalStateLock,
+            peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+            to_main_tx: mpsc::Sender<PeerTaskToMain>,
+        }
+
+        impl MockNode {
+            async fn connect_to_node(&self, peer_id: u8) -> Result<()> {
+                let initiate_connection = Builder::new()
+                    .read(&to_bytes(&PeerMessage::Handshake(Box::new((
+                        MAGIC_STRING_REQUEST.to_vec(),
+                        get_dummy_handshake_data_for_genesis(self.network),
+                    ))))?)
+                    .write(&to_bytes(&PeerMessage::Handshake(Box::new((
+                        MAGIC_STRING_RESPONSE.to_vec(),
+                        self.own_handshake.clone(),
+                    ))))?)
+                    .write(&to_bytes(&PeerMessage::ConnectionStatus(
+                        TransferConnectionStatus::Accepted,
+                    ))?)
+                    .build();
+
+                self.run_peer_loop(peer_id, initiate_connection).await
+            }
+
+            async fn run_peer_loop(&self, peer_id: u8, messages: Mock) -> Result<()> {
+                answer_peer_inner(
+                    messages,
+                    self.state_lock.clone(),
+                    get_dummy_socket_address(peer_id),
+                    self.peer_broadcast_tx.subscribe(),
+                    self.to_main_tx.clone(),
+                    self.own_handshake.clone(),
+                )
+                .await
+            }
+        }
+
+        let network = Network::Main;
+        let args = cli_args::Args {
+            max_num_peers: 1,
+            bootstrap: true,
+            network,
+            ..Default::default()
+        };
+
+        let (peer_broadcast_tx, _, to_main_tx, _, state_lock, handshake) =
+            get_test_genesis_setup(network, 0, args).await?;
+        let bootstrap_node = MockNode {
+            network,
+            own_handshake: handshake.clone(),
+            state_lock,
+            peer_broadcast_tx,
+            to_main_tx,
+        };
+
+        // bring bootstrap node to max peer capacity
+        bootstrap_node.connect_to_node(0).await?;
+
+        // make bootstrap node terminate connection to node 0
+        bootstrap_node.connect_to_node(1).await?;
+
+        // assert that re-connection of node 0 within cooldown period is refused
+        let node_0_connection_attempt = Builder::new()
+            .read(&to_bytes(&PeerMessage::Handshake(Box::new((
+                MAGIC_STRING_REQUEST.to_vec(),
+                get_dummy_handshake_data_for_genesis(network),
+            ))))?)
+            .write(&to_bytes(&PeerMessage::Handshake(Box::new((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                handshake,
+            ))))?)
+            .write(&to_bytes(&PeerMessage::ConnectionStatus(
+                TransferConnectionStatus::Refused(ConnectionRefusedReason::RecentlyDisconnected),
+            ))?)
+            .build();
+        bootstrap_node
+            .run_peer_loop(0, node_0_connection_attempt)
+            .await?;
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn test_incoming_connection_succeed() -> Result<()> {
         // This builds a mock object which expects to have a certain
         // sequence of methods called on it: First it expects to have
@@ -794,7 +903,7 @@ mod connect_tests {
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
             ))?)
-            .read(&to_bytes(&PeerMessage::Bye)?)
+            .read(&to_bytes(&PeerMessage::Disconnect(None))?)
             .build();
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;

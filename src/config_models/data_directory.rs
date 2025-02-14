@@ -13,6 +13,7 @@ use crate::models::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
 use crate::models::state::archival_state::BLOCK_INDEX_DB_NAME;
 use crate::models::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
 use crate::models::state::networking_state::BANNED_IPS_DB_NAME;
+use crate::models::state::networking_state::DISCONNECTED_PEERS_DB_NAME;
 use crate::models::state::shared::BLOCK_FILENAME_EXTENSION;
 use crate::models::state::shared::BLOCK_FILENAME_PREFIX;
 use crate::models::state::shared::DIR_NAME_FOR_BLOCKS;
@@ -102,6 +103,15 @@ impl DataDirectory {
     /// This directory lives within `DataDirectory::database_dir_path()`.
     pub fn banned_ips_database_dir_path(&self) -> PathBuf {
         self.database_dir_path().join(Path::new(BANNED_IPS_DB_NAME))
+    }
+
+    /// The directory path for the database containing disconnect times of past
+    /// peers.
+    ///
+    /// This directory lives within `DataDirectory::database_dir_path()`.
+    pub fn peer_disconnect_database_dir_path(&self) -> PathBuf {
+        self.database_dir_path()
+            .join(Path::new(DISCONNECTED_PEERS_DB_NAME))
     }
 
     ///////////////////////////////////////////////////////////////////////////
