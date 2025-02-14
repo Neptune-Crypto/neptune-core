@@ -678,19 +678,14 @@ pub(crate) async fn mine(
             && is_connected;
 
         // if start_guessing is true, then we are in a state change from
-        // a non-guessing state to a guessing state.
+        // inactive state to guessing state.
         //
         // if start_guessing is false and should_guess is true then we
         // have already been guessing and are restarting with new params.
-        let start_guessing = match (mining_status, should_guess) {
-            (MiningStatus::Inactive, true) => true,
-            (MiningStatus::Composing(_), true) => {
-                // shouldn't ever happen, warn if so.
-                warn!("guessing while mining_status is composing.");
-                true
-            }
-            _ => false,
-        };
+        let start_guessing = matches!(
+            (mining_status, should_guess),
+            (MiningStatus::Inactive, true)
+        );
 
         if start_guessing {
             let proposal = maybe_proposal.unwrap(); // is_some() verified above
