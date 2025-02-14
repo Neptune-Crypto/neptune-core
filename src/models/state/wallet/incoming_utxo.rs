@@ -23,9 +23,9 @@ use crate::util_types::mutator_set::commit;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) struct IncomingUtxo {
-    pub utxo: Utxo,
-    pub sender_randomness: Digest,
-    pub receiver_preimage: Digest,
+    pub(crate) utxo: Utxo,
+    pub(crate) sender_randomness: Digest,
+    pub(crate) receiver_preimage: Digest,
 }
 
 impl From<&ExpectedUtxo> for IncomingUtxo {
