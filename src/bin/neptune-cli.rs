@@ -28,6 +28,7 @@ use neptune_cash::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use neptune_cash::models::state::wallet::utxo_notification::PrivateNotificationData;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_cash::models::state::wallet::wallet_status::WalletStatus;
+use neptune_cash::models::state::wallet::wallet_status::WalletStatusExportFormat;
 use neptune_cash::models::state::wallet::WalletSecret;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
@@ -184,8 +185,18 @@ enum Command {
     /// retrieve unconfirmed balance (includes unconfirmed transactions, excludes time-locked utxos)
     UnconfirmedAvailableBalance,
 
-    /// retrieve wallet status information
-    WalletStatus,
+    /// Export wallet status information.
+    ///
+    /// Available formats:
+    ///  - `--json`: Raw JSON (default)
+    ///  - `--table`: Table
+    ///
+    WalletStatus {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        table: bool,
+    },
 
     /// retrieves number of utxos the wallet expects to receive.
     NumExpectedUtxos,
@@ -842,9 +853,16 @@ async fn main() -> Result<()> {
             let val = client.unconfirmed_available_balance(ctx, token).await??;
             println!("{val}");
         }
-        Command::WalletStatus => {
+        Command::WalletStatus { json, table } => {
             let wallet_status: WalletStatus = client.wallet_status(ctx, token).await??;
-            println!("{}", serde_json::to_string_pretty(&wallet_status)?);
+            let exported_string = if json {
+                WalletStatusExportFormat::Json.export(&wallet_status)
+            } else if table {
+                WalletStatusExportFormat::Table.export(&wallet_status)
+            } else {
+                WalletStatusExportFormat::Json.export(&wallet_status)
+            };
+            println!("{exported_string}");
         }
         Command::NumExpectedUtxos => {
             let num = client.num_expected_utxos(ctx, token).await??;
