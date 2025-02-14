@@ -801,6 +801,7 @@ pub(crate) async fn mock_genesis_archival_state(
 /// block proof.
 pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     global_state_lock: &mut GlobalStateLock,
+    prev_block_digest: Digest,
     timestamp: Timestamp,
 ) -> Result<Block> {
     let tip_block = global_state_lock
@@ -818,7 +819,12 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     )
     .await?;
 
-    let guesser_preimage = Digest::default();
+    let guesser_preimage = global_state_lock
+        .lock_guard()
+        .await
+        .wallet_state
+        .wallet_secret
+        .guesser_preimage(prev_block_digest);
     let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
     block.set_header_guesser_digest(guesser_preimage.hash());
 
