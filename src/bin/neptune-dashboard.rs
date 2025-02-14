@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
+use crossterm::event::DisableMouseCapture;
+use crossterm::terminal::disable_raw_mode;
+use crossterm::terminal::LeaveAlternateScreen;
 use dashboard_src::dashboard_app::DashboardApp;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::rpc_auth;
@@ -29,6 +32,10 @@ pub struct Config {
 
 #[tokio::main]
 async fn main() {
+    // we set this panic hook so we can drop out of raw mode in order to
+    // display the panic message.  else there is wicked screen corruption.
+    set_panic_hook();
+
     // Create connection to RPC server
     let args: Config = Config::parse();
     let server_socket = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), args.port);
@@ -128,4 +135,37 @@ async fn get_cookie_hint(
         Err(RpcError::CookieHintDisabled) => fallback(client, args).await,
         Err(e) => Err(e.into()),
     }
+}
+
+fn set_panic_hook() {
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // get out of raw mode, and back to a happy text-mode state of affairs.
+        restore_text_mode();
+
+        // not sure how to get default panic handler back.
+        // so we just print it ourselves.  doubtless this could
+        // be improved later.
+
+        let mut msg = "Caught panic.\n".to_string();
+
+        // Print the stack trace
+        if let Some(location) = panic_info.location() {
+            msg += &format!("  location: {}\n", location);
+        }
+
+        if let Some(payload) = panic_info.payload().downcast_ref::<&str>() {
+            msg += &format!("  message: {}\n", payload);
+        }
+
+        msg += &format!("  backtrace:\n{}", std::backtrace::Backtrace::capture());
+        eprintln!("{}", msg);
+
+        std::process::exit(1);
+    }));
+}
+
+fn restore_text_mode() {
+    // restore terminal
+    disable_raw_mode().unwrap();
+    crossterm::execute!(std::io::stdout(), LeaveAlternateScreen, DisableMouseCapture).unwrap();
 }
