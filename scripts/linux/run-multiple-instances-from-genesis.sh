@@ -14,7 +14,7 @@ fi
 
 set -e # Exit on first error.
 
-export RUST_LOG=debug;
+export RUST_LOG="debug,tarpc=warn";
 
 # these features require building with nightly
 # the purpose is to log location/duration of locks that are held too long.

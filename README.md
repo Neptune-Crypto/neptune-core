@@ -91,14 +91,17 @@ Please see [documentation](https://docs.neptune.cash/contributing/git-workflow.h
 
 All logging is output to standard out.
 
-The log level can be set through the environment variable `RUST_LOG`. Valid values are: `trace`, `debug`, `info`, `warn`, and `error`. The default value is `info`. E.g.: `RUST_LOG=trace cargo run`.
+The log level can be set through the environment variable `RUST_LOG`. Valid values are: `trace`, `debug`, `info`, `warn`, and `error`. The default value is `info`. E.g.: `RUST_LOG=trace cargo run`.  More complex settings are [possible](https://docs.rs/env_logger/latest/env_logger/#enabling-logging).
+
+The default log level is: `RUST_LOG='info,tarpc=warn'`.   This prevents logging `info` level from the tarpc (RPC) module, which can spam the log.  If you wish to see those, just use `RUST_LOG='info'`
+
+To see even more detail, but without tarpc spam: `RUST_LOG='debug,tarpc=warn'`
 
 For development purposes it can sometimes be nice to get a more succint logging output by piping stdout through `sed` with the below command. This will only print the namespace of the logging event and the log text. The log output can also be stored to file by piping it to `tee`, like this: `cargo run 2>&1 | tee -a integration_test.log`.
 ```
 sed 's/.*neptune_core:\+\(.*\)/\1/g'
 ```
 
-If the RPC server is spamming your log too much, set the logging-level environment to `RUST_LOG='info,tarpc=warn'`.
 
 ## Running tokio-console
 

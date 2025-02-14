@@ -32,7 +32,7 @@ pub fn main() -> Result<()> {
             // and `error`.
 
             let info_env_filter =
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn"));
             let subscriber = FmtSubscriber::builder()
                 .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
                 .with_env_filter(info_env_filter)
