@@ -195,12 +195,10 @@ impl Widget for PeersScreen {
             "ip",
             "connection established",
             "standing",
-            "archival",
-            "authenticated",
-            "alias",
             "last punishment",
             "last reward",
         ];
+
         let matrix = self
             .data
             .lock()
@@ -224,13 +222,6 @@ impl Widget for PeersScreen {
                     neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
                     pi.standing().to_string(),
-                    if pi.is_archival_node() {
-                        "✓".to_string()
-                    } else {
-                        "".to_string()
-                    },
-                    "✕".to_string(), // no support for authentication yet
-                    "-".to_string(), // no support for aliases yes
                     latest_punishment.unwrap_or_default(),
                     latest_reward.unwrap_or_default(),
                 ]
@@ -340,7 +331,8 @@ impl Widget for PeersScreen {
             inner.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
         ));
-        let table_rect = vrecter.remaining();
+        let mut table_rect = vrecter.remaining();
+        table_rect.height -= 2; // shouldn't be necessary???
         table.render(table_rect, buf);
     }
 }
