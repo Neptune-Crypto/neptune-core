@@ -61,7 +61,6 @@ impl MainToMiner {
 pub(crate) struct NewBlockFound {
     pub block: Box<Block>,
     pub composer_utxos: Vec<ExpectedUtxo>,
-    pub guesser_fee_utxo_infos: Vec<ExpectedUtxo>,
 }
 
 #[derive(Clone, Debug)]

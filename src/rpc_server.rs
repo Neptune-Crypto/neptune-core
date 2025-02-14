@@ -4282,7 +4282,7 @@ mod rpc_server_tests {
                         .state
                         .lock_guard_mut()
                         .await
-                        .set_new_self_mined_tip(block1.clone(), composer_expected_utxos)
+                        .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
                         .await
                         .unwrap();
 
@@ -4407,13 +4407,13 @@ mod rpc_server_tests {
 
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
                 let genesis_block = Block::genesis(network);
-                let (block1, composer_expected) =
+                let (block1, composer_expected_utxos) =
                     make_mock_block(&genesis_block, None, bob_key, Default::default()).await;
 
                 bob.state
                     .lock_guard_mut()
                     .await
-                    .set_new_self_mined_tip(block1.clone(), composer_expected)
+                    .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
                     .await
                     .unwrap();
 
@@ -4734,7 +4734,7 @@ mod rpc_server_tests {
                 // --- Init.  append the block to blockchain ---
                 rpc_server
                     .state
-                    .set_new_self_mined_tip(block_1.clone(), composer_utxos)
+                    .set_new_self_composed_tip(block_1.clone(), composer_utxos)
                     .await?;
 
                 {

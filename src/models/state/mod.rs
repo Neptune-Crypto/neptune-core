@@ -220,15 +220,15 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.flush_databases().await
     }
 
-    /// store a coinbase (self-mined) block
-    pub async fn set_new_self_mined_tip(
+    /// Set tip to a block that we composed.
+    pub async fn set_new_self_composed_tip(
         &mut self,
         new_block: Block,
-        miner_reward_utxo_infos: Vec<ExpectedUtxo>,
+        composer_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         self.lock_guard_mut()
             .await
-            .set_new_self_mined_tip(new_block, miner_reward_utxo_infos)
+            .set_new_self_composed_tip(new_block, composer_reward_utxo_infos)
             .await
     }
 
@@ -1412,18 +1412,20 @@ impl GlobalState {
         self.set_new_tip_internal(new_block, vec![]).await
     }
 
-    /// Update client's state with a new block that was mined locally. Block is
-    /// assumed to be valid, also wrt. to PoW. The received block will be set as
-    /// the new tip, regardless of its accumulated PoW.
+    /// Update client's state with a new block that was composed locally.
+    ///
+    /// The block is assumed to be valid, also with regards to to proof-of-work.
+    /// The given block will be set as the new tip, regardless of its
+    /// accumulated proof-of-work number.
     ///
     /// Returns a list of update-jobs that should be
     /// performed by this client.
-    pub(crate) async fn set_new_self_mined_tip(
+    pub(crate) async fn set_new_self_composed_tip(
         &mut self,
         new_block: Block,
-        miner_reward_utxo_infos: Vec<ExpectedUtxo>,
+        composer_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
-        self.set_new_tip_internal(new_block, miner_reward_utxo_infos)
+        self.set_new_tip_internal(new_block, composer_reward_utxo_infos)
             .await
     }
 
@@ -1456,7 +1458,7 @@ impl GlobalState {
     async fn set_new_tip_internal(
         &mut self,
         new_block: Block,
-        miner_reward_utxo_infos: Vec<ExpectedUtxo>,
+        composer_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         crate::macros::log_scope_duration!();
 
@@ -1478,10 +1480,11 @@ impl GlobalState {
             .await
             .expect("Updating mutator set must succeed");
 
-        for miner_reward_utxo_info in miner_reward_utxo_infos {
-            // Notify wallet to expect the coinbase UTXO, as we mined this block
+        // If this block is our own composition, notify wallet to expect
+        // coinbase (or more generally, composer reward) UTXOs.
+        for composer_reward_utxo_info in composer_reward_utxo_infos {
             self.wallet_state
-                .add_expected_utxo(miner_reward_utxo_info)
+                .add_expected_utxo(composer_reward_utxo_info)
                 .await;
         }
 
@@ -1969,9 +1972,9 @@ mod global_state_tests {
         let wallet = WalletSecret::devnet_wallet();
         let own_key = wallet.nth_generation_spending_key_for_tests(0);
         let mut global_state_lock =
-            mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
+            mock_genesis_global_state(network, 2, wallet.clone(), cli_args::Args::default()).await;
         let genesis_block = Block::genesis(network);
-        let guesser_preimage = rng.random();
+        let guesser_preimage = wallet.guesser_preimage(genesis_block.hash());
         let (block1, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
             &genesis_block,
             None,
@@ -1981,11 +1984,9 @@ mod global_state_tests {
             guesser_preimage,
         )
         .await;
-        let guesser_utxos = block1.guesser_fee_expected_utxos(guesser_preimage);
-        let all_mining_rewards = [composer_utxos, guesser_utxos].concat();
 
         global_state_lock
-            .set_new_self_mined_tip(block1.clone(), all_mining_rewards)
+            .set_new_self_composed_tip(block1.clone(), composer_utxos)
             .await
             .unwrap();
 
@@ -2211,10 +2212,10 @@ mod global_state_tests {
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = alice.chain.archival_state().get_tip().await;
-        let (mock_block_1a, expected_utxos_1a) =
+        let (mock_block_1a, composer_expected_utxos_1a) =
             make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
         alice
-            .set_new_self_mined_tip(mock_block_1a.clone(), expected_utxos_1a)
+            .set_new_self_composed_tip(mock_block_1a.clone(), composer_expected_utxos_1a)
             .await
             .unwrap();
 
@@ -2339,11 +2340,11 @@ mod global_state_tests {
 
         // 1. Create new block 1 where Alice receives two composer UTXOs, store it.
         let genesis_block = alice.chain.archival_state().get_tip().await;
-        let (block_1, alice_composer_expected_1) =
+        let (block_1, alice_composer_expected_utxos_1) =
             make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
         {
             alice
-                .set_new_self_mined_tip(block_1.clone(), alice_composer_expected_1)
+                .set_new_self_composed_tip(block_1.clone(), alice_composer_expected_utxos_1)
                 .await
                 .unwrap();
 
@@ -2674,7 +2675,7 @@ mod global_state_tests {
             .await;
 
         premine_receiver
-            .set_new_self_mined_tip(
+            .set_new_self_composed_tip(
                 block_1.clone(),
                 coinbase_expected_utxos
                     .into_iter()
@@ -3170,7 +3171,7 @@ mod global_state_tests {
                 let (next_block, expected) =
                     make_mock_block(&previous_block, None, spending_key, rng.random()).await;
                 global_state_lock
-                    .set_new_self_mined_tip(next_block.clone(), expected)
+                    .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
                     .unwrap();
                 let global_state = global_state_lock.lock_guard().await;
@@ -3191,7 +3192,7 @@ mod global_state_tests {
                 let (next_block, expected) =
                     make_mock_block(&previous_block, None, spending_key, rng.random()).await;
                 global_state_lock
-                    .set_new_self_mined_tip(next_block.clone(), expected)
+                    .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
                     .unwrap();
 
@@ -3395,11 +3396,11 @@ mod global_state_tests {
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
-            let (block_1a, expected_1a) =
+            let (block_1a, composer_expected_utxos_1a) =
                 make_mock_block(&genesis_block, None, spending_key, rng.random()).await;
-            let (block_2a, expected_2a) =
+            let (block_2a, composer_expected_utxos_2a) =
                 make_mock_block(&block_1a, None, spending_key, rng.random()).await;
-            let (block_3a, expected_3a) =
+            let (block_3a, composer_expected_utxos_3a) =
                 make_mock_block(&block_2a, None, spending_key, rng.random()).await;
 
             for claim_composer_fees in [false, true] {
@@ -3414,19 +3415,31 @@ mod global_state_tests {
 
                 if claim_composer_fees {
                     global_state
-                        .set_new_self_mined_tip(block_1a.clone(), expected_1a.clone())
+                        .set_new_self_composed_tip(
+                            block_1a.clone(),
+                            composer_expected_utxos_1a.clone(),
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_2a.clone(), expected_2a.clone())
+                        .set_new_self_composed_tip(
+                            block_2a.clone(),
+                            composer_expected_utxos_2a.clone(),
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_3a.clone(), expected_3a.clone())
+                        .set_new_self_composed_tip(
+                            block_3a.clone(),
+                            composer_expected_utxos_3a.clone(),
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1a.clone(), expected_1a.clone())
+                        .set_new_self_composed_tip(
+                            block_1a.clone(),
+                            composer_expected_utxos_1a.clone(),
+                        )
                         .await
                         .unwrap();
                 } else {
@@ -3464,14 +3477,17 @@ mod global_state_tests {
                 // Add many blocks, verify state-validity after each.
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
-                    let (next_block, expected) =
+                    let (next_block, composer_expected_utxos) =
                         make_mock_block(&previous_block, None, spending_key, rng.random()).await;
                     global_state
-                        .set_new_self_mined_tip(next_block.clone(), expected.clone())
+                        .set_new_self_composed_tip(
+                            next_block.clone(),
+                            composer_expected_utxos.clone(),
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(next_block.clone(), expected)
+                        .set_new_self_composed_tip(next_block.clone(), composer_expected_utxos)
                         .await
                         .unwrap();
                     assert_correct_global_state(
@@ -3496,7 +3512,7 @@ mod global_state_tests {
             let genesis_block = Block::genesis(network);
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
-            let (block_1, expected1) =
+            let (block_1, composer_expected_utxos_1) =
                 make_mock_block(&genesis_block, None, spend_key, rng.random()).await;
 
             for claim_cb in [false, true] {
@@ -3512,11 +3528,17 @@ mod global_state_tests {
 
                 if claim_cb {
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), expected1.clone())
+                        .set_new_self_composed_tip(
+                            block_1.clone(),
+                            composer_expected_utxos_1.clone(),
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), expected1.clone())
+                        .set_new_self_composed_tip(
+                            block_1.clone(),
+                            composer_expected_utxos_1.clone(),
+                        )
                         .await
                         .unwrap();
                 } else {

@@ -822,14 +822,8 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
     block.set_header_guesser_digest(guesser_preimage.hash());
 
-    let expected_utxos = block
-        .guesser_fee_expected_utxos(guesser_preimage)
-        .into_iter()
-        .chain(expected_composer_utxos)
-        .collect_vec();
-
     global_state_lock
-        .set_new_self_mined_tip(block.clone(), expected_utxos)
+        .set_new_self_composed_tip(block.clone(), expected_composer_utxos)
         .await?;
 
     Ok(block)
