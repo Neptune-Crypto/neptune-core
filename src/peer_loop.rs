@@ -878,8 +878,10 @@ impl PeerLoopHandler {
 
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                let state = self.global_state_lock.lock_guard().await;
-                let canonical_block_digest = state
+                let canonical_block_digest = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .chain
                     .archival_state()
                     .archival_block_mmr
@@ -889,9 +891,15 @@ impl PeerLoopHandler {
 
                 let canonical_block_digest = match canonical_block_digest {
                     None => {
-                        let own_tip_height = state.chain.light_state().header().height;
+                        let own_tip_height = self
+                            .global_state_lock
+                            .lock_guard()
+                            .await
+                            .chain
+                            .light_state()
+                            .header()
+                            .height;
                         warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
-                        drop(state);
                         self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
                             .await?;
 
@@ -900,7 +908,10 @@ impl PeerLoopHandler {
                     Some(digest) => digest,
                 };
 
-                let canonical_chain_block: Block = state
+                let canonical_chain_block: Block = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .chain
                     .archival_state()
                     .get_block(canonical_block_digest)
