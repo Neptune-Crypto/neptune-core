@@ -2868,13 +2868,17 @@ mod tests {
             half_coinbase_amt.div_two();
             let send_amt = NativeCurrencyAmount::coins(5);
 
-            let timestamp = Block::genesis(network).header().timestamp + Timestamp::hours(1);
+            let genesis_block = Block::genesis(network);
+            let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
 
             // mine a block to our wallet.  we should have 100 coins after.
-            let tip_digest =
-                mine_block_to_wallet_invalid_block_proof(&mut global_state_lock, timestamp)
-                    .await?
-                    .hash();
+            let tip_digest = mine_block_to_wallet_invalid_block_proof(
+                &mut global_state_lock,
+                genesis_block.hash(),
+                timestamp,
+            )
+            .await?
+            .hash();
 
             let tx = {
                 // verify that confirmed and unconfirmed balances.
