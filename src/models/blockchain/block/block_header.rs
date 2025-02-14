@@ -95,11 +95,15 @@ impl Display for BlockHeader {
             "Height: {}\n\
             Timestamp: {}\n\
             Prev. Digest: {}\n\
-            Cumulative Proof-of-Work: {}\n",
+            Cumulative Proof-of-Work: {}\n\
+            Difficulty: {}\n\
+            Version: {}\n",
             self.height,
             self.timestamp.standard_format(),
             self.prev_block_digest.to_hex(),
             self.cumulative_proof_of_work,
+            self.difficulty,
+            self.version
         );
 
         write!(f, "{}", string)
