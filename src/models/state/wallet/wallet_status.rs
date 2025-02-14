@@ -1,7 +1,9 @@
 use std::fmt::Display;
 
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use strum::EnumIter;
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -102,5 +104,100 @@ impl WalletStatus {
             .filter(|utxo| utxo.is_timelocked_but_otherwise_spendable_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
+    }
+}
+
+#[derive(
+    Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter, strum::Display,
+)]
+#[strum(serialize_all = "lowercase")]
+pub enum WalletStatusExportFormat {
+    #[default]
+    Json,
+    Table,
+}
+
+impl WalletStatusExportFormat {
+    pub fn export(&self, wallet_status: &WalletStatus) -> String {
+        match self {
+            Self::Json => match serde_json::to_string_pretty(&wallet_status) {
+                Ok(pretty_string) => pretty_string,
+                Err(e) => format!("JSON format error: {e:?}"),
+            },
+            Self::Table => {
+                fn row(wse: &WalletStatusElement) -> String {
+                    let utxo = &wse.utxo;
+                    let native_currency_amount = if utxo.has_native_currency() {
+                        utxo.get_native_currency_amount().display_lossless()
+                    } else {
+                        "-".to_string()
+                    };
+                    let release_date = utxo
+                        .release_date()
+                        .map_or("-".to_string(), |t| t.standard_format());
+                    format!(
+                        "| {:>7} | {:>44} | {:^29} |",
+                        wse.aocl_leaf_index, native_currency_amount, release_date
+                    )
+                }
+
+                let header = format!(
+                    "\
+                    | aocl li | {:^44} | {:^29} |\n\
+                    |:-------:|-{}:|:{}-|",
+                    "native currency amount (coins)",
+                    "release date",
+                    (0..44).map(|_| "-").join(""),
+                    (0..29).map(|_| "-").join("")
+                );
+
+                format!(
+                    "\n\
+                    **Synced Unspent**\n\
+                    \n\
+                    {header}\n\
+                    {}\n\n\
+                    Total:      {:>44} \n\
+                    \n\
+                    **Synced Spent**\n\
+                    \n\
+                    {header}\n\
+                    {}\n\n\
+                    Total:      {:>44} \n\
+                    \n\
+                    **Unsynced**\n\
+                    \n\
+                    {header}\n\
+                    {}\n\n\
+                    Total:      {:>44} \n",
+                    wallet_status
+                        .synced_unspent
+                        .iter()
+                        .map(|(wse, _)| wse)
+                        .map(row)
+                        .join("\n"),
+                    wallet_status
+                        .synced_unspent
+                        .iter()
+                        .map(|(wse, _)| wse.utxo.get_native_currency_amount())
+                        .sum::<NativeCurrencyAmount>()
+                        .display_lossless(),
+                    wallet_status.synced_spent.iter().map(row).join("\n"),
+                    wallet_status
+                        .synced_spent
+                        .iter()
+                        .map(|wse| wse.utxo.get_native_currency_amount())
+                        .sum::<NativeCurrencyAmount>()
+                        .display_lossless(),
+                    wallet_status.unsynced.iter().map(row).join("\n"),
+                    wallet_status
+                        .unsynced
+                        .iter()
+                        .map(|wse| wse.utxo.get_native_currency_amount())
+                        .sum::<NativeCurrencyAmount>()
+                        .display_lossless(),
+                )
+            }
+        }
     }
 }
