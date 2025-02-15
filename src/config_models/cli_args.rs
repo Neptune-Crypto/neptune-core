@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -272,6 +273,46 @@ pub struct Args {
     // to meaningfully suppress rapid reconnection attempts.
     #[clap(long, default_value = "1800", value_parser = duration_from_seconds_str)]
     pub reconnect_cooldown: Duration,
+
+    /// Scan incoming blocks for inbound transactions.
+    ///
+    /// Keys are generated deterministically from the secret seed and a
+    /// derivation index, and a counter recording the most recently used index
+    /// is stored. By default, incoming blocks are scanned for inbound
+    /// transactions tied to any key derived from indices smaller than this
+    /// counter.
+    ///
+    /// However, this counter can be lost, for instance after importing the
+    /// secret seed onto a new machine. In such cases, this subcommand will
+    /// instruct the client to scan incoming blocks for transactions tied to
+    /// future derivation indices -- 50 by default, but this parameter can be
+    /// adjusted with the `--scan-keys` subcommand.
+    ///
+    /// The argument to this subcommand is the range of blocks where this extra-
+    /// ordinary scanning step takes place. If no argument is supplied, the step
+    /// takes place for every incoming block.
+    #[clap(long, value_parser = parse_range, action = clap::ArgAction::Set,
+        num_args = 0..=1)]
+    pub(crate) scan_blocks: Option<RangeInclusive<u64>>,
+
+    /// Scan incoming blocks for inbound transactions.
+    ///
+    /// Keys are generated deterministically from the secret seed and a
+    /// derivation index, and a counter recording the most recently used index
+    /// is stored. By default, incoming blocks are scanned for inbound
+    /// transactions tied to any key derived from indices smaller than this
+    /// counter.
+    ///
+    /// However, this counter can be lost, for instance after importing the
+    /// secret seed onto a new machine. In such cases, this subcommand will
+    /// instruct the client to scan incoming blocks for transactions tied to the
+    /// next k derivation indices, where k is the argument supplied.
+    ///
+    /// When this flag is set, by default all blocks will be scanned. The
+    /// subcommand `--scan-blocks` can be used to restrict the range of blocks
+    /// that undergo this scan.
+    #[clap(long)]
+    pub(crate) scan_keys: Option<u64>,
 }
 
 impl Default for Args {
@@ -294,6 +335,58 @@ fn fraction_validator(s: &str) -> Result<f64, String> {
 
 fn duration_from_seconds_str(s: &str) -> Result<Duration, std::num::ParseIntError> {
     Ok(Duration::from_secs(s.parse()?))
+}
+fn parse_range(s: &str) -> Result<RangeInclusive<u64>, String> {
+    if s.is_empty() {
+        return Ok(0u64..=u64::MAX);
+    }
+
+    let parts: Vec<&str> = if s.contains("..") {
+        s.split("..").collect()
+    } else {
+        s.split(':').collect()
+    };
+
+    if parts.len() > 2 {
+        return Err("Invalid range format".to_string());
+    }
+
+    let parse_lower_bound = |s: &str| -> Result<Option<u64>, String> {
+        if s.is_empty() {
+            Ok(None)
+        } else {
+            s.parse()
+                .map(Some)
+                .map_err(|_| "Invalid number".to_string())
+        }
+    };
+
+    let parse_upper_bound = |s: &str| -> Result<Option<u64>, String> {
+        if s.is_empty() {
+            Ok(None)
+        } else if s.starts_with('=') {
+            s[1..]
+                .parse()
+                .map(Some)
+                .map_err(|_| "Invalid number".to_string())
+        } else {
+            match s.parse().map(|u: u64| u.checked_sub(1u64)) {
+                Ok(Some(u)) => Ok(Some(u)),
+                Ok(None) => Err("Invalid upper bound.".to_string()),
+                Err(e) => Err(format!("Invalid number: {e:?}")),
+            }
+        }
+    };
+
+    let start = parse_lower_bound(parts.get(0).unwrap_or(&""))?;
+    let end = parse_upper_bound(parts.get(1).unwrap_or(&""))?;
+
+    match (start, end) {
+        (Some(start), Some(end)) => Ok(start..=end),
+        (Some(start), None) => Ok(start..=u64::MAX),
+        (None, Some(end)) => Ok(0..=end),
+        (None, None) => Ok(0..=u64::MAX),
+    }
 }
 
 impl Args {
@@ -392,6 +485,7 @@ impl Args {
 #[cfg(test)]
 mod cli_args_tests {
     use std::net::Ipv6Addr;
+    use std::ops::RangeBounds;
 
     use super::*;
 
@@ -451,5 +545,41 @@ mod cli_args_tests {
     #[test]
     fn cli_args_default_network_agrees_with_enum_default() {
         assert_eq!(Args::default().network, Network::default());
+    }
+
+    #[test]
+    fn test_parse_range() {
+        macro_rules! assert_range_eq {
+            ($left:expr, $right:expr) => {{
+                let left = $left;
+                let right = $right;
+                assert_eq!(
+                    left.start_bound(),
+                    right.start_bound(),
+                    "Range start values are not equal"
+                );
+                match (left.end_bound(), right.end_bound()) {
+                    (std::ops::Bound::Excluded(a), std::ops::Bound::Included(b)) => {
+                        assert_eq!(a, &(b + 1))
+                    }
+                    (std::ops::Bound::Included(a), std::ops::Bound::Excluded(b)) => {
+                        assert_eq!(&(a + 1), b)
+                    }
+                    (a, b) => assert_eq!(a, b),
+                }
+            }};
+        }
+
+        assert_range_eq!(5u64..10, parse_range("5..10").unwrap());
+        assert_range_eq!(5u64..=10, parse_range("5..=10").unwrap());
+        assert_range_eq!(0..10u64, parse_range("..10").unwrap());
+        assert_range_eq!(0..=10u64, parse_range("..=10").unwrap());
+        assert_range_eq!(5u64..=u64::MAX, parse_range("5..").unwrap());
+        assert_range_eq!(0u64..=u64::MAX, parse_range("..").unwrap());
+
+        assert_range_eq!(5u64..10, parse_range("5:10").unwrap());
+        assert_range_eq!(5u64..=u64::MAX, parse_range("5:").unwrap());
+        assert_range_eq!(0u64..10, parse_range(":10").unwrap());
+        assert_range_eq!(0u64..=u64::MAX, parse_range(":").unwrap());
     }
 }
