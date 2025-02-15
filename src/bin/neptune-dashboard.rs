@@ -94,6 +94,8 @@ async fn main() {
     // run app until quit
     let res = DashboardApp::run(client, network, token, listen_addr_for_peers).await;
 
+    restore_text_mode(); // just in case.
+
     match res {
         Err(err) => {
             eprintln!("{:?}", err);
@@ -138,29 +140,12 @@ async fn get_cookie_hint(
 }
 
 fn set_panic_hook() {
-    std::panic::set_hook(Box::new(move |panic_info| {
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
         // get out of raw mode, and back to a happy text-mode state of affairs.
         restore_text_mode();
 
-        // not sure how to get default panic handler back.
-        // so we just print it ourselves.  doubtless this could
-        // be improved later.
-
-        let mut msg = "Caught panic.\n".to_string();
-
-        // Print the stack trace
-        if let Some(location) = panic_info.location() {
-            msg += &format!("  location: {}\n", location);
-        }
-
-        if let Some(payload) = panic_info.payload().downcast_ref::<&str>() {
-            msg += &format!("  message: {}\n", payload);
-        }
-
-        msg += &format!("  backtrace:\n{}", std::backtrace::Backtrace::capture());
-        eprintln!("{}", msg);
-
-        std::process::exit(1);
+        previous_hook(info);
     }));
 }
 
