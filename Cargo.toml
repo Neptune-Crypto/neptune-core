@@ -38,7 +38,7 @@ log-slow-read-lock = ["track-lock-location", "track-lock-time"]
 # useful for debugging deadlocks, or if a lock is never being released.
 # includes acquisition location if track-lock-location feature is enabled.
 # alternative: run tokio-console
-log-lock_events = []
+log-lock_events = ["track-lock-location"]
 
 # locks::sync::tokio support for tracking location of lock acquisition
 # requires nightly.  not generally useful by itself.
