@@ -34,6 +34,7 @@ use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
@@ -59,6 +60,7 @@ use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AH
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
+use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
 const MAX_PEER_LIST_LENGTH: usize = 10;
@@ -1292,28 +1294,59 @@ impl PeerLoopHandler {
                     .chain
                     .light_state()
                     .mutator_set_accumulator_after();
-                let confirmable =
-                    transaction.is_confirmable_relative_to(&mutator_set_accumulator_after);
-                if !confirmable {
-                    warn!("Received unconfirmable tx");
-                    self.punish(NegativePeerSanction::UnconfirmableTransaction)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
+                if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
+                    warn!(
+                        "Received unconfirmable transaction with TXID {}. Unconfirmable because:",
+                        transaction.kernel.txid()
+                    );
+                    // get fine-grained error code for informative logging
+                    let confirmability_error_code = transaction
+                        .kernel
+                        .is_confirmable_relative_to(&mutator_set_accumulator_after);
+                    match confirmability_error_code {
+                        Ok(_) => unreachable!(),
+                        Err(TransactionConfirmabilityError::InvalidRemovalRecord(index)) => {
+                            warn!("invalid removal record (at index {index})");
+                            let invalid_removal_record = transaction.kernel.inputs[index].clone();
+                            let removal_record_error_code = invalid_removal_record
+                                .validate_inner(&mutator_set_accumulator_after);
+                            debug!(
+                                "Absolute index set of removal record {index}: {:?}",
+                                invalid_removal_record.absolute_indices
+                            );
+                            match removal_record_error_code {
+                                Ok(_) => unreachable!(),
+                                Err(RemovalRecordValidityError::AbsentAuthenticatedChunk) => {
+                                    debug!("invalid because membership proof is missing");
+                                }
+                                Err(RemovalRecordValidityError::InvalidSwbfiMmrMp {
+                                    chunk_index,
+                                }) => {
+                                    debug!("invalid because membership proof for chunk index {chunk_index} is invalid");
+                                }
+                            };
+                            self.punish(NegativePeerSanction::UnconfirmableTransaction)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        Err(TransactionConfirmabilityError::DuplicateInputs) => {
+                            warn!("duplicate inputs");
+                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        Err(TransactionConfirmabilityError::AlreadySpentInput(index)) => {
+                            warn!("already spent input (at index {index})");
+                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                    };
                 }
 
-                // 6. if transaction double spends, punish.
-                let double_spends = transaction
-                    .kernel
-                    .double_spends(&mutator_set_accumulator_after);
-                if double_spends {
-                    warn!("Received double-spending tx");
-                    self.punish(NegativePeerSanction::DoubleSpendingTransaction)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 7. If transaction cannot be applied to mutator set, punish. I'm not sure how this
-                // could happen when above checks pass.
+                // If transaction cannot be applied to mutator set, punish.
+                // I don't think this can happen when above checks pass but we include
+                // the check to ensure that transaction can be applied.
                 let ms_update = MutatorSetUpdate::new(
                     transaction.kernel.inputs.clone(),
                     transaction.kernel.outputs.clone(),
@@ -1322,7 +1355,8 @@ impl PeerLoopHandler {
                     .apply_to_accumulator(&mut mutator_set_accumulator_after.clone())
                     .is_ok();
                 if !can_apply {
-                    warn!("Cannot apply transaction to current mutator set");
+                    warn!("Cannot apply transaction to current mutator set.");
+                    warn!("Transaction ID: {}", transaction.kernel.txid());
                     self.punish(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1330,7 +1364,7 @@ impl PeerLoopHandler {
 
                 let tx_timestamp = transaction.kernel.timestamp;
 
-                // 8. Ignore if transaction is too old
+                // 6. Ignore if transaction is too old
                 let now = self.now();
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
@@ -1338,7 +1372,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 9. Ignore if transaction is too far into the future
+                // 7. Ignore if transaction is too far into the future
                 if tx_timestamp
                     > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {
