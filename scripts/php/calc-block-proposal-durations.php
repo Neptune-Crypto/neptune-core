@@ -98,6 +98,8 @@ foreach ($unique_events as $height => $types) {
         $human_duration = human_time_diff($from, $to);
 
         echo sprintf("height: %s\t block: %s\t first proposal: %s\t proposal duration: %s\n", $height, format_iso8601_time($new_block_timestamp), format_iso8601_time($new_block_proposal_timestamp), $human_duration);
+    } else if ($new_block_timestamp) {
+        echo sprintf("height: %s\t block: %s\t ** no block proposal received **\n", $height, format_iso8601_time($new_block_timestamp));
     }
 }
 
@@ -112,7 +114,7 @@ function human_time_diff($from_time, $to_time)
     $intervals = array(
     'year'   => 31536000,
     'month'  => 2592000,
-    'week'   => 604800, 
+    'week'   => 604800,
     'day'    => 86400,
     'hour'   => 3600,
     'minute' => 60,
