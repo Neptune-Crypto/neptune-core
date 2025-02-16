@@ -32,6 +32,7 @@ use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
@@ -1311,9 +1312,25 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // 7. If transaction cannot be applied to mutator set, punish. I'm not sure how this
+                // could happen when above checks pass.
+                let ms_update = MutatorSetUpdate::new(
+                    transaction.kernel.inputs.clone(),
+                    transaction.kernel.outputs.clone(),
+                );
+                let can_apply = ms_update
+                    .apply_to_accumulator(&mut mutator_set_accumulator_after.clone())
+                    .is_ok();
+                if !can_apply {
+                    warn!("Cannot apply transaction to current mutator set");
+                    self.punish(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 let tx_timestamp = transaction.kernel.timestamp;
 
-                // 7. Ignore if transaction is too old
+                // 8. Ignore if transaction is too old
                 let now = self.now();
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
@@ -1321,7 +1338,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 8. Ignore if transaction is too far into the future
+                // 9. Ignore if transaction is too far into the future
                 if tx_timestamp
                     > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {

@@ -84,6 +84,7 @@ pub enum NegativePeerSanction {
     UnconfirmableTransaction,
     TransactionWithNegativeFee,
     DoubleSpendingTransaction,
+    CannotApplyTransactionToMutatorSet,
 
     InvalidBlockMmrAuthentication,
 
@@ -132,6 +133,9 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
             NegativePeerSanction::TransactionWithNegativeFee => "negative-fee transaction",
             NegativePeerSanction::DoubleSpendingTransaction => "double-spending transaction",
+            NegativePeerSanction::CannotApplyTransactionToMutatorSet => {
+                "cannot apply tx to mutator set"
+            }
             NegativePeerSanction::NonMinedTransactionHasCoinbase => {
                 "non-mined transaction has coinbase"
             }
@@ -217,6 +221,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::UnconfirmableTransaction => -2,
             NegativePeerSanction::TransactionWithNegativeFee => -22,
             NegativePeerSanction::DoubleSpendingTransaction => -14,
+            NegativePeerSanction::CannotApplyTransactionToMutatorSet => -3,
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,
