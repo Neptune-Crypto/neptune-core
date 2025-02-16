@@ -587,9 +587,10 @@ pub(crate) async fn create_block_transaction_from(
     for (i, tx_to_include) in transactions_to_merge.into_iter().enumerate() {
         info!("Merging transaction {} / {}", i + 1, num_merges);
         info!(
-            "Merging tx with {} inputs, {} outputs",
+            "Merging tx with {} inputs, {} outputs. With fee {}.",
             tx_to_include.kernel.inputs.len(),
-            tx_to_include.kernel.outputs.len()
+            tx_to_include.kernel.outputs.len(),
+            tx_to_include.kernel.fee
         );
         block_transaction = Transaction::merge_with(
             block_transaction,
