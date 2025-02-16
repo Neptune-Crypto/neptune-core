@@ -536,21 +536,27 @@ impl MainLoopHandler {
 
                 // If block proposal from miner does not build on current tip,
                 // don't broadcast it. This check covers reorgs as well.
-                if block.header().prev_block_digest
-                    != self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .hash()
-                {
+                let current_tip = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .clone();
+                if block.header().prev_block_digest != current_tip.hash() {
                     warn!(
                         "Got block proposal from miner that does not build on current tip. \
                            Rejecting. If this happens a lot, then maybe this machine is too \
                            slow to competitively compose blocks. Consider running the client only \
                            with the guesser flag set and not the compose flag."
                     );
+                    self.main_to_miner_tx.send(MainToMiner::Continue);
+                    return Ok(None);
+                }
+
+                // Ensure proposal validity before sharing
+                if !block.is_valid(&current_tip, block.header().timestamp).await {
+                    error!("Own block proposal invalid. This should not happen.");
                     self.main_to_miner_tx.send(MainToMiner::Continue);
                     return Ok(None);
                 }
