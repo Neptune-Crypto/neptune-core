@@ -586,6 +586,11 @@ pub(crate) async fn create_block_transaction_from(
     let mut block_transaction = coinbase_transaction;
     for (i, tx_to_include) in transactions_to_merge.into_iter().enumerate() {
         info!("Merging transaction {} / {}", i + 1, num_merges);
+        info!(
+            "Merging tx with {} inputs, {} outputs",
+            tx_to_include.kernel.inputs.len(),
+            tx_to_include.kernel.outputs.len()
+        );
         block_transaction = Transaction::merge_with(
             block_transaction,
             tx_to_include,
