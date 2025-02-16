@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -18,6 +19,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// TransactionKernel is immutable and its hash never changes.
@@ -95,6 +97,55 @@ impl PartialEq for TransactionKernel {
 impl From<PrimitiveWitness> for TransactionKernel {
     fn from(transaction_primitive_witness: PrimitiveWitness) -> Self {
         transaction_primitive_witness.kernel
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum TransactionConfirmabilityError {
+    InvalidRemovalRecord(usize),
+    DuplicateInputs,
+    AlreadySpentInput(usize),
+}
+
+impl TransactionKernel {
+    pub(crate) fn is_confirmable_relative_to(
+        &self,
+        mutator_set_accumulator: &MutatorSetAccumulator,
+    ) -> Result<(), TransactionConfirmabilityError> {
+        // check validity of removal records
+        //       ^^^^^^^^
+        // meaning: a) all required membership proofs exist; and b) are valid.
+        let maybe_invalid_removal_record = self
+            .inputs
+            .iter()
+            .enumerate()
+            .find(|(_, rr)| !rr.validate(mutator_set_accumulator));
+        if let Some((index, _invalid_removal_record)) = maybe_invalid_removal_record {
+            return Err(TransactionConfirmabilityError::InvalidRemovalRecord(index));
+        }
+
+        // check for duplicates
+        let has_unique_inputs = self
+            .inputs
+            .iter()
+            .unique_by(|rr| rr.absolute_indices)
+            .count()
+            == self.inputs.len();
+        if !has_unique_inputs {
+            return Err(TransactionConfirmabilityError::DuplicateInputs);
+        }
+
+        // check for already-spent inputs
+        let already_spent_removal_record = self
+            .inputs
+            .iter()
+            .enumerate()
+            .find(|(_, rr)| !mutator_set_accumulator.can_remove(rr));
+        if let Some((index, _already_spent_removal_record)) = already_spent_removal_record {
+            return Err(TransactionConfirmabilityError::AlreadySpentInput(index));
+        }
+
+        Ok(())
     }
 }
 
@@ -360,6 +411,8 @@ impl TransactionKernelModifier {
 #[cfg(test)]
 pub mod transaction_kernel_tests {
     use itertools::Itertools;
+    use proptest::prelude::Strategy;
+    use proptest::test_runner::TestRunner;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -367,6 +420,9 @@ pub mod transaction_kernel_tests {
     use rand::SeedableRng;
 
     use super::*;
+    use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+    use crate::models::blockchain::transaction::Transaction;
+    use crate::models::blockchain::transaction::TransactionProof;
     use crate::tests::shared::pseudorandom_amount;
     use crate::tests::shared::pseudorandom_option;
     use crate::tests::shared::pseudorandom_public_announcement;
@@ -433,6 +489,53 @@ pub mod transaction_kernel_tests {
             .current();
 
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn can_identify_double_spends() {
+        let mut test_runner = TestRunner::deterministic();
+        let pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let mut msa = pw.mutator_set_accumulator.clone();
+        let tx = Transaction {
+            kernel: pw.kernel.clone(),
+            proof: TransactionProof::Witness(pw),
+        };
+        assert_eq!(Ok(()), tx.kernel.is_confirmable_relative_to(&msa));
+
+        let repeated_input = [tx.kernel.inputs.clone(), vec![tx.kernel.inputs[0].clone()]].concat();
+        let repeated_input = TransactionKernelModifier::default()
+            .inputs(repeated_input)
+            .modify(tx.kernel.clone());
+        assert!(matches!(
+            repeated_input.is_confirmable_relative_to(&msa),
+            Err(TransactionConfirmabilityError::DuplicateInputs),
+        ));
+
+        // Update the mutator set to *after* applying this tx. Then verify tx is
+        // unspendable because inputs are already spent.
+        let mut removal_records = tx.kernel.inputs.clone();
+        let ms_update = MutatorSetUpdate::new(removal_records.clone(), tx.kernel.outputs.clone());
+        ms_update
+            .apply_to_accumulator_and_records(
+                &mut msa,
+                &mut removal_records.iter_mut().collect_vec(),
+            )
+            .unwrap();
+        let new_tx = TransactionKernelModifier::default()
+            .inputs(removal_records)
+            .mutator_set_hash(msa.hash())
+            .modify(tx.kernel.clone());
+        assert!(
+            matches!(
+                new_tx.is_confirmable_relative_to(&msa),
+                Err(TransactionConfirmabilityError::AlreadySpentInput(_))
+            ),
+            "{:?}",
+            repeated_input.is_confirmable_relative_to(&msa)
+        );
     }
 
     #[test]

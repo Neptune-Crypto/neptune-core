@@ -333,22 +333,46 @@ impl RemovalRecord {
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
     pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
+        self.validate_inner(mutator_set).is_ok()
+    }
+
+    /// Same as [`Self::validate`] but with informative error code.
+    pub(crate) fn validate_inner(
+        &self,
+        mutator_set: &MutatorSetAccumulator,
+    ) -> Result<(), RemovalRecordValidityError> {
         if !self.has_required_authenticated_chunks(mutator_set) {
-            return false;
+            return Err(RemovalRecordValidityError::AbsentAuthenticatedChunk);
         }
 
         let swbfi_peaks = mutator_set.swbf_inactive.peaks();
         let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
-        self.target_chunks.all(|(chunk_index, (mmr_proof, chunk))| {
-            let leaf_digest = Hash::hash(chunk);
-            mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
-        })
+        let maybe_invalid_chunk =
+            self.target_chunks
+                .iter()
+                .find(|(chunk_index, (mmr_proof, chunk))| {
+                    let leaf_digest = Hash::hash(chunk);
+                    !mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
+                });
+        if let Some((chunk_index, _)) = maybe_invalid_chunk {
+            return Err(RemovalRecordValidityError::InvalidSwbfiMmrMp {
+                chunk_index: *chunk_index,
+            });
+        }
+
+        Ok(())
     }
 
     /// Returns a hashmap from chunk index to chunk.
     pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u64, Vec<u128>> {
         indices_to_hash_map(&self.absolute_indices.to_array())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemovalRecordValidityError {
+    AbsentAuthenticatedChunk,
+    InvalidSwbfiMmrMp { chunk_index: u64 },
 }
 
 #[cfg(test)]
