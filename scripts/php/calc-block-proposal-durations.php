@@ -27,15 +27,21 @@ if (!$path) {
 // 2025-02-15T16:21:45.835421687Z  INFO ThreadId(55) neptune_cash::mine_loop: Miner received message about new block proposal for guessing.
 
 
-$cmd = "cat '$path' | grep -e 'Miner received message about new block proposal' -e 'Got new block from peer'";
-$output = shell_exec($cmd);
+// $cmd = "cat '$path' | grep -e 'Miner received message about new block proposal' -e 'Got new block from peer'";
+// $output = shell_exec($cmd);
 
-$lines = explode("\n", $output);
+$file = new SplFileObject($path);
 
 $events = [];
 
 $curr_height = null;
-foreach ($lines as $line) {
+while(!$file->eof()) {
+    $line = $file->fgets();
+
+    if(strpos($line, 'block') === false) {
+        continue;
+    }
+
 
     // filter non-printable chars
     $line = preg_replace('/\e[[][A-Za-z0-9];?[0-9]*m?/', '', $line);
@@ -52,6 +58,19 @@ foreach ($lines as $line) {
         $events[] = ["type" => 1, "timestamp" => $timestamp, "height" => $height];
     }
 
+
+    if (preg_match(
+        "/(.*)..INFO.*Guessing with.*on block (.*) with/i",
+        $line,
+        $matches
+    )
+    ) {
+        $timestamp = trim($matches[1]);
+        $height = trim($matches[2]);
+        $events[] = ["type" => 2, "timestamp" => $timestamp, "height" => $height];
+    }
+
+
     if($curr_height !== null ) {
 
         if (preg_match(
@@ -61,17 +80,17 @@ foreach ($lines as $line) {
         )
         ) {
             $timestamp = trim($matches[1]);
-            $events[] = ["type" => 2, "timestamp" => $timestamp, "height" => $curr_height];
+            $events[] = ["type" => 3, "timestamp" => $timestamp, "height" => $curr_height+1];
         }
     }
 }
-//print_r($events); exit;
+// print_r($events); exit;
 
 // remove dup events
 $unique_events = [];
 foreach ($events as $event) {
     extract($event);
-    // ignore dups.  we only need the first of both event types.
+    // ignore dups.  we only need the first of each event type.
     if (!@$unique_events[$height][$type]) {
         $unique_events[$height][$type] = $timestamp;
     }
@@ -83,24 +102,36 @@ if (!count($unique_events)) {
     die("did not find any events.");
 }
 
+$min_duration_width = strlen("03 mins, 22 secs");
+
+//$prev_block_proposal_timestamp = null;
+$prev_block_timestamp = null;
 
 foreach ($unique_events as $height => $types) {
     $new_block_timestamp = @$types[1];
-    $new_block_proposal_timestamp = @$types[2];
+    $prev_block_proposal_timestamp = @$types[2] ?: @$types[3];  // we prefer type 2 log message to 3.
 
-    if($new_block_timestamp && $new_block_proposal_timestamp) {
-        $from = strtotime($new_block_timestamp);
-        $to = strtotime($new_block_proposal_timestamp);
-        $duration = $to - $from;
-        assert($duration > 0);
+    if($new_block_timestamp && $prev_block_proposal_timestamp) {
+        $from = $prev_block_timestamp ? strtotime($prev_block_timestamp) : null;
+        $to = strtotime($prev_block_proposal_timestamp);
 
+        //        $duration = $to - $from;
+        //        assert($duration > 0);
 
-        $human_duration = human_time_diff($from, $to);
+        $guessing_from_timestamp = $prev_block_proposal_timestamp ?: $prev_block_timestamp;
 
-        echo sprintf("height: %s\t block: %s\t first proposal: %s\t proposal duration: %s\n", $height, format_iso8601_time($new_block_timestamp), format_iso8601_time($new_block_proposal_timestamp), $human_duration);
+        $guessing_from = $guessing_from_timestamp ? strtotime($guessing_from_timestamp) : null;
+        $guessing_to = strtotime($new_block_timestamp);
+
+        $human_duration = $from ? str_pad(human_time_diff($from, $to), $min_duration_width) : str_pad("???", $min_duration_width);
+        $human_guessing_duration = $guessing_from ? human_time_diff($guessing_from, $guessing_to) : "???";
+
+        echo sprintf("height: % 5d  arrived: %s  composed: %s  composing: %s  guessing: %s\n", $height, format_iso8601_time($new_block_timestamp), format_iso8601_time($prev_block_proposal_timestamp), $human_duration, $human_guessing_duration);
     } else if ($new_block_timestamp) {
-        echo sprintf("height: %s\t block: %s\t ** no block proposal received **\n", $height, format_iso8601_time($new_block_timestamp));
+        echo sprintf("height: % 5s  arrived: %s  ** no block proposal received **\n", $height, format_iso8601_time($new_block_timestamp));
     }
+
+    $prev_block_timestamp = $new_block_timestamp;
 }
 
 function human_time_diff($from_time, $to_time)
@@ -108,23 +139,23 @@ function human_time_diff($from_time, $to_time)
     $diff = $to_time - $from_time;
 
     if ($diff < 0) {
-        return "0 seconds"; // Handle negative differences
+        return " 0 secs"; // Handle negative differences
     }
 
     $intervals = array(
     'year'   => 31536000,
     'month'  => 2592000,
-    'week'   => 604800,
+    'wk'   => 604800,
     'day'    => 86400,
-    'hour'   => 3600,
-    'minute' => 60,
-    'second' => 1
+    'hr'   => 3600,
+    'min' => 60,
+    'sec' => 1
     );
 
     $ret = array();
     foreach ($intervals as $name => $seconds) {
         if (($count = floor($diff / $seconds)) > 0) {
-            $ret[] = $count . ' ' . ($count == 1 ? $name : $name . 's');
+            $ret[] = sprintf('%02d', $count) . ' ' . $name . 's';
             $diff -= ($count * $seconds);
         }
     }
@@ -148,6 +179,7 @@ function format_iso8601_time($iso8601_time)
     // Extract time parts
     list($hour, $minute, $second_microseconds) = explode(':', $time);
     list($second, $microseconds) = explode('.', $second_microseconds);
+
 
     // Shorten microseconds to 3 decimal places
     $microseconds = substr($microseconds, 0, 2);
