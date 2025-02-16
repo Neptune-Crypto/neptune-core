@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
@@ -18,6 +19,8 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// TransactionKernel is immutable and its hash never changes.
@@ -95,6 +98,25 @@ impl PartialEq for TransactionKernel {
 impl From<PrimitiveWitness> for TransactionKernel {
     fn from(transaction_primitive_witness: PrimitiveWitness) -> Self {
         transaction_primitive_witness.kernel
+    }
+}
+
+impl TransactionKernel {
+    /// Determine if the transaction double spends in input, either by spending an input that was
+    /// already spent, or by attempting to spend the same input multiple times. Relative to a given
+    /// mutator set. Will also return true if any removal records have invalid membership proofs. So
+    /// the caller should check for that before calling this method.
+    pub fn double_spends(&self, mutator_set_accumulator: &MutatorSetAccumulator) -> bool {
+        let all_inputs: HashSet<AbsoluteIndexSet> =
+            self.inputs.iter().map(|x| x.absolute_indices).collect();
+        let has_unique_inputs = self.inputs.len() == all_inputs.len();
+
+        let all_inputs_are_unspent = self
+            .inputs
+            .iter()
+            .all(|rr| mutator_set_accumulator.can_remove(rr));
+
+        !has_unique_inputs || !all_inputs_are_unspent
     }
 }
 
@@ -360,6 +382,8 @@ impl TransactionKernelModifier {
 #[cfg(test)]
 pub mod transaction_kernel_tests {
     use itertools::Itertools;
+    use proptest::prelude::Strategy;
+    use proptest::test_runner::TestRunner;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -367,6 +391,9 @@ pub mod transaction_kernel_tests {
     use rand::SeedableRng;
 
     use super::*;
+    use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+    use crate::models::blockchain::transaction::Transaction;
+    use crate::models::blockchain::transaction::TransactionProof;
     use crate::tests::shared::pseudorandom_amount;
     use crate::tests::shared::pseudorandom_option;
     use crate::tests::shared::pseudorandom_public_announcement;
@@ -433,6 +460,32 @@ pub mod transaction_kernel_tests {
             .current();
 
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn can_identify_double_spends() {
+        let mut test_runner = TestRunner::deterministic();
+        let pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let mut msa = pw.mutator_set_accumulator.clone();
+        let tx = Transaction {
+            kernel: pw.kernel.clone(),
+            proof: TransactionProof::Witness(pw),
+        };
+        assert!(!tx.kernel.double_spends(&msa));
+
+        let repeated_input = [tx.kernel.inputs.clone(), vec![tx.kernel.inputs[0].clone()]].concat();
+        let repeated_input = TransactionKernelModifier::default()
+            .inputs(repeated_input)
+            .modify(tx.kernel.clone());
+        assert!(repeated_input.double_spends(&msa));
+
+        // Update the mutator set to *after* applying this tx. Then verify tx is unspendable.
+        let ms_update = MutatorSetUpdate::new(tx.kernel.inputs.clone(), tx.kernel.outputs.clone());
+        ms_update.apply_to_accumulator(&mut msa).unwrap();
+        assert!(tx.kernel.double_spends(&msa));
     }
 
     #[test]

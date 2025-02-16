@@ -1300,9 +1300,20 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // 6. if transaction double spends, punish.
+                let double_spends = transaction
+                    .kernel
+                    .double_spends(&mutator_set_accumulator_after);
+                if double_spends {
+                    warn!("Received double-spending tx");
+                    self.punish(NegativePeerSanction::DoubleSpendingTransaction)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 let tx_timestamp = transaction.kernel.timestamp;
 
-                // 6. Ignore if transaction is too old
+                // 7. Ignore if transaction is too old
                 let now = self.now();
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
@@ -1310,7 +1321,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 7. Ignore if transaction is too far into the future
+                // 8. Ignore if transaction is too far into the future
                 if tx_timestamp
                     > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {
