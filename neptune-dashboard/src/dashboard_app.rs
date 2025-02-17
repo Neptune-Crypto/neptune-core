@@ -120,7 +120,6 @@ impl fmt::Display for MenuItem {
 
 #[derive(Debug, Clone)]
 pub enum ConsoleIO {
-    Output(String),
     InputRequested(String),
     InputSupplied(String),
 }
@@ -299,17 +298,6 @@ impl DashboardApp {
                 let mut console_queue = app.console_io.lock().await;
                 if !console_queue.is_empty() {
                     match console_queue.first().unwrap() {
-                        ConsoleIO::Output(string) => {
-                            Self::disable_raw_mode(terminal)?;
-
-                            sleep(Duration::from_millis(200)).await;
-                            println!("{}", string);
-                            let mut str = "".to_string();
-                            io::stdin().read_line(&mut str)?;
-
-                            terminal = Self::enable_raw_mode()?;
-                            draw = true;
-                        }
                         ConsoleIO::InputRequested(string) => {
                             Self::disable_raw_mode(terminal)?;
 
