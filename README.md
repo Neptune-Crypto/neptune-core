@@ -20,9 +20,14 @@ If a catastrophic vulnerability is discovered in the protocol, it will restart f
  - Install LevelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
  - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
  - Enter the repository: `cd neptune-core`
- - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
+ - Checkout the latest release branch `git checkout <release>`. (Alternatively, for the *unstable development* branch, skip this step.)
+ - Build for release and put the binaries in your local cargo path (`~/.cargo/bin/`):
 
- - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --locked --path .` (needs at least 3 GB of RAM and a few minutes)
+```
+cargo install --locked --path neptune-core
+cargo install --locked --path neptune-cli
+cargo install --locked --path neptune-dashboard
+```
 
 ### Windows
 
@@ -33,9 +38,14 @@ With a functioning version of cargo, compilation on Windows should just work out
 - Open PowerShell to run the following commands.
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
-- Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
-
-- Run `cargo install --locked --path .`
+- Checkout the latest release branch `git checkout <release>`. (Alternatively, for the *unstable development* branch, skip this step.)
+- Build for release and put the binaries in your local cargo path:
+ 
+```
+cargo install --locked --path neptune-core
+cargo install --locked --path neptune-cli
+cargo install --locked --path neptune-dashboard
+```
 
 
 ## Running & Connecting
