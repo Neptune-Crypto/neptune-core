@@ -116,6 +116,13 @@ impl PeerInfo {
         self.peer_connection_info.inbound
     }
 
+    /// returns the neptune-core version-string reported by the peer.
+    ///
+    /// note: the peer might not be honest.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
     /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
     /// incoming connections.
     pub fn listen_address(&self) -> Option<SocketAddr> {

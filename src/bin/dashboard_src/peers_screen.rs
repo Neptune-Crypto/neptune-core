@@ -193,6 +193,7 @@ impl Widget for PeersScreen {
         let style = Style::default().fg(self.fg).bg(self.bg);
         let header = vec![
             "ip",
+            "version",
             "connection established",
             "standing",
             "last punishment",
@@ -219,6 +220,7 @@ impl Widget for PeersScreen {
                     .unwrap();
                 vec![
                     pi.connected_address().to_string(),
+                    pi.version().to_string(),
                     neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
                     pi.standing().to_string(),
