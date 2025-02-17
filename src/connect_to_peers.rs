@@ -207,80 +207,70 @@ where
 async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
-    peer_address: std::net::SocketAddr,
+    peer_address: SocketAddr,
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
 ) -> Result<()>
 where
-    S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
+    S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
     info!("Established incoming TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
-    let mut peer: tokio_serde::Framed<
+    let mut peer = SymmetricallyFramed::<
         Framed<S, LengthDelimitedCodec>,
         PeerMessage,
-        PeerMessage,
         Bincode<PeerMessage, PeerMessage>,
-    > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
+    >::new(length_delimited, SymmetricalBincode::default());
 
     // Complete Neptune handshake
-    let (peer_handshake_data, acceptance_code) = match peer.try_next().await? {
-        Some(PeerMessage::Handshake(payload)) => {
-            let (v, peer_handshake_data) = *payload;
-            if v != crate::MAGIC_STRING_REQUEST {
-                bail!("Expected magic value, got {:?}", v);
-            }
-
-            peer.send(PeerMessage::Handshake(Box::new((
-                crate::MAGIC_STRING_RESPONSE.to_vec(),
-                own_handshake_data.clone(),
-            ))))
-            .await?;
-
-            // Verify peer network before moving on
-            if peer_handshake_data.network != own_handshake_data.network {
-                bail!(
-                    "Cannot connect with {}: Peer runs {}, this client runs {}.",
-                    peer_address,
-                    peer_handshake_data.network,
-                    own_handshake_data.network,
-                );
-            }
-
-            // Check if incoming connection is allowed
-            let connection_status = check_if_connection_is_allowed(
-                state.clone(),
-                &own_handshake_data,
-                &peer_handshake_data,
-                &peer_address,
-            )
-            .await;
-
-            peer.send(PeerMessage::ConnectionStatus(connection_status.into()))
-                .await?;
-
-            if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
-                warn!("Incoming connection refused: {:?}", refused_reason);
-                bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
-            }
-
-            (peer_handshake_data, connection_status)
-        }
-        _ => {
-            bail!("Didn't get handshake on connection attempt");
-        }
+    let Some(PeerMessage::Handshake(payload)) = peer.try_next().await? else {
+        bail!("Didn't get handshake on connection attempt");
     };
+    let (magic_string_request, peer_handshake_data) = *payload;
+    if magic_string_request != MAGIC_STRING_REQUEST {
+        bail!("Expected magic value, got {magic_string_request:?}");
+    }
+
+    let handshake_response = Box::new((MAGIC_STRING_RESPONSE.to_vec(), own_handshake_data.clone()));
+    peer.send(PeerMessage::Handshake(handshake_response))
+        .await?;
+
+    // Verify peer network before moving on
+    let peer_network = peer_handshake_data.network;
+    let own_network = own_handshake_data.network;
+    if peer_network != own_network {
+        bail!(
+            "Cannot connect with {peer_address}: \
+            Peer runs {peer_network}, this client runs {own_network}."
+        );
+    }
+
+    // Check if incoming connection is allowed
+    let connection_status = check_if_connection_is_allowed(
+        state.clone(),
+        &own_handshake_data,
+        &peer_handshake_data,
+        &peer_address,
+    )
+    .await;
+    peer.send(PeerMessage::ConnectionStatus(connection_status.into()))
+        .await?;
+    if let InternalConnectionStatus::Refused(reason) = connection_status {
+        let refusal_reason = "Refusing incoming connection. Reason: {reason:?}";
+        warn!(refusal_reason);
+        bail!(refusal_reason);
+    }
 
     // Whether the incoming connection comes from a peer in bad standing is
     // checked in `check_if_connection_is_allowed`. So if we get here, we are
     // good to go.
-    info!("Connection accepted from {}", peer_address);
+    info!("Connection accepted from {peer_address}");
 
     // If necessary, disconnect from another, existing peer.
-    if acceptance_code == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
+    if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
         peer_task_to_main_tx
             .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
