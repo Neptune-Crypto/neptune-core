@@ -259,7 +259,7 @@ where
     peer.send(PeerMessage::ConnectionStatus(connection_status.into()))
         .await?;
     if let InternalConnectionStatus::Refused(reason) = connection_status {
-        let refusal_reason = "Refusing incoming connection. Reason: {reason:?}";
+        let refusal_reason = format!("Refusing incoming connection. Reason: {:?}", reason);
         warn!(refusal_reason);
         bail!(refusal_reason);
     }
