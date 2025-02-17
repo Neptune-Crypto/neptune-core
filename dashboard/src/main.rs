@@ -1,3 +1,14 @@
+
+mod address_screen;
+mod dashboard_app;
+mod history_screen;
+mod mempool_screen;
+mod overview_screen;
+mod peers_screen;
+mod receive_screen;
+mod screen;
+mod send_screen;
+
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -7,7 +18,6 @@ use clap::Parser;
 use crossterm::event::DisableMouseCapture;
 use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::LeaveAlternateScreen;
-use dashboard_src::dashboard_app::DashboardApp;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
@@ -16,7 +26,7 @@ use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
 
-pub mod dashboard_src;
+
 
 #[derive(Debug, Parser, Clone)]
 #[clap(name = "neptune-dashboard", about = "Terminal user interface")]
@@ -92,7 +102,7 @@ async fn main() {
     };
 
     // run app until quit
-    let res = DashboardApp::run(client, network, token, listen_addr_for_peers).await;
+    let res = crate::dashboard_app::DashboardApp::run(client, network, token, listen_addr_for_peers).await;
 
     restore_text_mode(); // just in case.
 
