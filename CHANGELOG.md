@@ -1,4 +1,62 @@
 
+## [0.1.3](https://github.com/Neptune-Crypto/neptune-core/compare/v0.1.2..v0.1.3) - 2025-02-17
+
+### ✨ Features
+
+- Show peer count in dashboard peer screen ([ad13f936](https://github.com/Neptune-Crypto/neptune-core/commit/ad13f936))
+
+### 🐛 Bug Fixes
+
+- Avoid screen corruption on dashboard panic ([5cce5c51](https://github.com/Neptune-Crypto/neptune-core/commit/5cce5c51))
+- Improve dashboard peers display ([587f596c](https://github.com/Neptune-Crypto/neptune-core/commit/587f596c))
+- Appears to resolve a deadlock in peer_loop ([9e0a1b7f](https://github.com/Neptune-Crypto/neptune-core/commit/9e0a1b7f))
+- Leave raw mode before printing error msgs ([bf4ce45c](https://github.com/Neptune-Crypto/neptune-core/commit/bf4ce45c))
+
+### 🚀 Performance
+
+- Announce mined block to peers immediately. ([bae86981](https://github.com/Neptune-Crypto/neptune-core/commit/bae86981))
+
+### 📚 Documentation
+
+- Fix broken release isntructions ([6430d1a5](https://github.com/Neptune-Crypto/neptune-core/commit/6430d1a5))
+- Fix comment typo ([d21c4272](https://github.com/Neptune-Crypto/neptune-core/commit/d21c4272))
+- Turn regular comments into doc comments ([2d2038f7](https://github.com/Neptune-Crypto/neptune-core/commit/2d2038f7))
+- Fix typos ([7e7e34fb](https://github.com/Neptune-Crypto/neptune-core/commit/7e7e34fb))
+
+### ♻️ Refactor
+
+- Drop indirection in early return ([3c80ea41](https://github.com/Neptune-Crypto/neptune-core/commit/3c80ea41))
+- Check validity of own block proposal ([cdfc9a6c](https://github.com/Neptune-Crypto/neptune-core/commit/cdfc9a6c))
+- *(peer_loop)* Extra check of double spending txs ([3ffa280a](https://github.com/Neptune-Crypto/neptune-core/commit/3ffa280a))
+
+### 🛠 Build
+
+- Regenerate Cargo.lock to avoid yanked crate ([af109071](https://github.com/Neptune-Crypto/neptune-core/commit/af109071))
+- Restore deleted Cargo.lock ([a02fe9c9](https://github.com/Neptune-Crypto/neptune-core/commit/a02fe9c9))
+- Lock-log_events depends track-lock-time ([1c649ece](https://github.com/Neptune-Crypto/neptune-core/commit/1c649ece))
+
+### ⚙️ Miscellaneous
+
+- Update benchmark results ([c0a7cec5](https://github.com/Neptune-Crypto/neptune-core/commit/c0a7cec5))
+- Log when setting mining status ([6f8c24c1](https://github.com/Neptune-Crypto/neptune-core/commit/6f8c24c1))
+- Reword log entry ([e0f26c24](https://github.com/Neptune-Crypto/neptune-core/commit/e0f26c24))
+- Don't warn about equal fee proposals ([82c18567](https://github.com/Neptune-Crypto/neptune-core/commit/82c18567))
+- Log mempool add/remove events ([42f58d13](https://github.com/Neptune-Crypto/neptune-core/commit/42f58d13))
+- Reduce single-proof min RAM to 120Gb ([10ef6e9f](https://github.com/Neptune-Crypto/neptune-core/commit/10ef6e9f))
+- Improve readability of early aborts ([eca5efc5](https://github.com/Neptune-Crypto/neptune-core/commit/eca5efc5))
+- Set default RUST_LOG="info,tarpc=warn" ([87b8219a](https://github.com/Neptune-Crypto/neptune-core/commit/87b8219a))
+- Add script for finding deadlocks in logs ([1595e072](https://github.com/Neptune-Crypto/neptune-core/commit/1595e072))
+- Add php script to calculate block proposal durations ([8a763f93](https://github.com/Neptune-Crypto/neptune-core/commit/8a763f93))
+- Improve block-proposal duration script ([0a0ab600](https://github.com/Neptune-Crypto/neptune-core/commit/0a0ab600))
+- Report guessing times in interval script ([7abe2f2b](https://github.com/Neptune-Crypto/neptune-core/commit/7abe2f2b))
+- Replace reqwest with clienter in tests ([d1391447](https://github.com/Neptune-Crypto/neptune-core/commit/d1391447))
+- Update release workflow files ([da1e5877](https://github.com/Neptune-Crypto/neptune-core/commit/da1e5877))
+
+### Trace
+
+- *(mine_loop)* Show size of tx for merge ([0dc15ce6](https://github.com/Neptune-Crypto/neptune-core/commit/0dc15ce6))
+- *(mine_loop)* Log fee or merged-in tx ([7b8df865](https://github.com/Neptune-Crypto/neptune-core/commit/7b8df865))
+
 ## [0.1.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.1.1..v0.1.2) - 2025-02-12
 
 ### 🐛 Bug Fixes
@@ -8,14 +66,6 @@
 ### ✅ Testing
 
 - Verify that only 0.0.x versions are incompatible ([3fcc82ad](https://github.com/Neptune-Crypto/neptune-core/commit/3fcc82ad))
-
-Note: (!) indicates a breaking change.
-
-## [0.1.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.11..v0.1.0) - 2025-02-11
-
-### ⚙️ Miscellaneous
-
-- Set default CLI parameter network to "main" ([c551251f](https://github.com/Neptune-Crypto/neptune-core/commit/c551251f))
 
 Note: (!) indicates a breaking change.
 
@@ -58,6 +108,7 @@ Note: (!) indicates a breaking change.
 
 ### ⚙️ Miscellaneous
 
+- Set default CLI parameter network to "main" ([c551251f](https://github.com/Neptune-Crypto/neptune-core/commit/c551251f))
 - Update release workflow files ([f7a5779d](https://github.com/Neptune-Crypto/neptune-core/commit/f7a5779d))
 - Build benchmarks ([a955bc9b](https://github.com/Neptune-Crypto/neptune-core/commit/a955bc9b))
 - Change premine addresses ([dc8c3192](https://github.com/Neptune-Crypto/neptune-core/commit/dc8c3192))
