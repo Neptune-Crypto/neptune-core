@@ -1636,7 +1636,7 @@ impl PeerLoopHandler {
                 peer.send(PeerMessage::PeerListRequest).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::Disconnect(target_socket_addr) => {
+            MainToPeerTask::Disconnect(target_socket_addr, _reason) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
 
                 // Disconnect from this peer if its address matches that which the main
@@ -1647,8 +1647,7 @@ impl PeerLoopHandler {
             MainToPeerTask::DisconnectAll() => Ok(true),
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
                 log_slow_scope!(
-                    (crate::macros::fn_name!()
-                        + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
+                    (fn_name!() + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
                 );
 
                 if target_socket_addr == self.peer_address {

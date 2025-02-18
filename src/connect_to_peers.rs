@@ -20,6 +20,7 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
+use crate::models::channel::InternalDisconnectReason;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
@@ -272,9 +273,10 @@ where
     // If necessary, disconnect from another, existing peer.
     if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
-            .await?;
+        let message = PeerTaskToMain::DisconnectFromLongestLivedPeer(
+            InternalDisconnectReason::OutOfConnectionCapacity,
+        );
+        peer_task_to_main_tx.send(message).await?;
     }
 
     let peer_distance = 1; // All incoming connections have distance 1
