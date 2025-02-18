@@ -2412,26 +2412,18 @@ mod test {
 
             // main loop should send a `Disconnect` message
             let main_to_peers_message = main_to_peer_rx.recv().await.unwrap();
-            assert!(matches!(
-                main_to_peers_message,
-                MainToPeerTask::Disconnect(_)
-            ));
             let MainToPeerTask::Disconnect(observed_drop_peer_socket_address) =
                 main_to_peers_message
             else {
-                unreachable!()
+                panic!("Expected disconnect, got {main_to_peers_message:?}");
             };
 
             // matched observed droppee against expectation
             assert_eq!(
                 expected_drop_peer_socket_address,
-                observed_drop_peer_socket_address
+                observed_drop_peer_socket_address,
             );
-
-            println!(
-                "Dropped connection with {}.",
-                expected_drop_peer_socket_address
-            );
+            println!("Dropped connection with {expected_drop_peer_socket_address}.");
 
             // don't forget to terminate the peer task, which is still running
             incoming_peer_task_handle.abort();

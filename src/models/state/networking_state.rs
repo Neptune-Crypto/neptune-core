@@ -15,6 +15,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::database::PeerDatabases;
 use crate::models::peer::peer_info::PeerInfo;
+use crate::models::peer::InstanceId;
 use crate::models::peer::PeerStanding;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
@@ -94,6 +95,17 @@ pub struct NetworkingState {
     /// record latest successful upgrade, merely latest attempt. This is to
     /// prevent excessive runs of the proof-upgrade functionality.
     pub last_tx_proof_upgrade_attempt: std::time::SystemTime,
+
+    /// Disconnection times of past peers. Can be used to determine if a connection
+    /// request should be accepted or rejected.
+    ///
+    /// Only records times of _graceful_ disconnections that were triggered by
+    /// _this_ node. That is, times of the following events are _not_ recorded:
+    /// - Graceful disconnect initiated by the peer.
+    /// - Abrupt disconnections, for example due to network failures.
+    ///
+    /// Only the peer tasks may update this map.
+    disconnection_times: HashMap<InstanceId, SystemTime>,
 }
 
 impl NetworkingState {
@@ -107,6 +119,7 @@ impl NetworkingState {
             // Initialize to now to prevent tx proof upgrade to run immediately
             // after startup of the client.
             last_tx_proof_upgrade_attempt: SystemTime::now(),
+            disconnection_times: HashMap::new(),
         }
     }
 
@@ -187,5 +200,22 @@ impl NetworkingState {
                 .put(ip, current_standing)
                 .await
         }
+    }
+
+    /// Register the disconnection time of a peer.
+    ///
+    /// Only use this to register disconnection times of _graceful_
+    /// disconnections that were triggered by _this_ node. That is, times of the
+    /// following events should _not_ be recorded:
+    /// - Graceful disconnect initiated by the peer.
+    /// - Abrupt disconnections, for example due to network failures.
+    ///
+    /// Only the peer tasks may call this method.
+    pub(crate) fn register_peer_disconnection(&mut self, id: InstanceId, time: SystemTime) {
+        self.disconnection_times.insert(id, time);
+    }
+
+    pub(crate) fn last_disconnection_time_of_peer(&self, id: InstanceId) -> Option<SystemTime> {
+        self.disconnection_times.get(&id).copied()
     }
 }

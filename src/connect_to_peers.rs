@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::time::SystemTime;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -106,6 +107,27 @@ async fn check_if_connection_is_allowed(
         let ip = peer_address.ip();
         warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+    }
+
+    if let Some(time) = global_state
+        .net
+        .last_disconnection_time_of_peer(other_handshake.instance_id)
+    {
+        if SystemTime::now()
+            .duration_since(time)
+            .is_ok_and(|d| d < cli_arguments.reconnect_cooldown)
+        {
+            info!(
+                "Refusing connection with {peer_address} \
+                 due to reconnect cooldown ({cooldown} seconds).",
+                cooldown = cli_arguments.reconnect_cooldown.as_secs(),
+            );
+
+            // A “wrong” reason is given because of backwards compatibility.
+            // todo: Use next breaking release to give a more accurate reason here.
+            let reason = ConnectionRefusedReason::MaxPeerNumberExceeded;
+            return InternalConnectionStatus::Refused(reason);
+        }
     }
 
     // Disallow connection if max number of peers has been reached or
@@ -259,9 +281,9 @@ where
     peer.send(PeerMessage::ConnectionStatus(connection_status.into()))
         .await?;
     if let InternalConnectionStatus::Refused(reason) = connection_status {
-        let refusal_reason = format!("Refusing incoming connection. Reason: {:?}", reason);
-        warn!(refusal_reason);
-        bail!(refusal_reason);
+        let reason = format!("Refusing incoming connection. Reason: {reason:?}");
+        warn!("{reason}");
+        bail!("{reason}");
     }
 
     // Whether the incoming connection comes from a peer in bad standing is
@@ -512,6 +534,7 @@ pub(crate) async fn close_peer_connected_callback(
 
 #[cfg(test)]
 mod connect_tests {
+    use std::time::Duration;
     use std::time::SystemTime;
 
     use anyhow::bail;
@@ -751,6 +774,80 @@ mod connect_tests {
         if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on db-ban");
         }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn node_refuses_reconnects_within_disconnect_cooldown_period() -> Result<()> {
+        let network = Network::Main;
+        let reconnect_cooldown = Duration::from_secs(8);
+        let args = cli_args::Args {
+            network,
+            reconnect_cooldown,
+            ..Default::default()
+        };
+
+        let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, mut state_lock, handshake) =
+            get_test_genesis_setup(network, 0, args).await?;
+
+        // fake a graceful disconnect
+        let node_0_address = get_dummy_socket_address(0);
+        let node_0_handshake_data = get_dummy_handshake_data_for_genesis(network);
+        state_lock
+            .lock_guard_mut()
+            .await
+            .net
+            .register_peer_disconnection(node_0_handshake_data.instance_id, SystemTime::now());
+
+        // check that an immediate reconnection attempt is rejected
+        let handshake_request = PeerMessage::Handshake(Box::new((
+            MAGIC_STRING_REQUEST.to_vec(),
+            node_0_handshake_data,
+        )));
+        let handshake_response = PeerMessage::Handshake(Box::new((
+            MAGIC_STRING_RESPONSE.to_vec(),
+            handshake.clone(),
+        )));
+        let rejected_connection = Builder::new()
+            .read(&to_bytes(&handshake_request)?)
+            .write(&to_bytes(&handshake_response)?)
+            .write(&to_bytes(&PeerMessage::ConnectionStatus(
+                TransferConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded),
+            ))?)
+            .build();
+        let err = answer_peer_inner(
+            rejected_connection,
+            state_lock.clone(),
+            node_0_address,
+            broadcast_tx.subscribe(),
+            to_main_tx.clone(),
+            handshake.clone(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("Refusing incoming connection."));
+
+        // check that a reconnection attempt after some time goes through
+        let accepted_connection = Builder::new()
+            .wait(reconnect_cooldown)
+            .read(&to_bytes(&handshake_request)?)
+            .write(&to_bytes(&handshake_response)?)
+            .write(&to_bytes(&PeerMessage::ConnectionStatus(
+                TransferConnectionStatus::Accepted,
+            ))?)
+            .read(&to_bytes(&PeerMessage::Bye)?)
+            .build();
+        answer_peer_inner(
+            accepted_connection,
+            state_lock,
+            node_0_address,
+            broadcast_tx.subscribe(),
+            to_main_tx,
+            handshake,
+        )
+        .await?;
 
         Ok(())
     }

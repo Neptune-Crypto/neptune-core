@@ -1632,15 +1632,22 @@ impl PeerLoopHandler {
                 peer.send(PeerMessage::PeerListRequest).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::Disconnect(target_socket_addr) => {
+            MainToPeerTask::Disconnect(peer_address) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
 
-                // Disconnect from this peer if its address matches that which the main
-                // task requested to disconnect from.
-                Ok(target_socket_addr == self.peer_address)
+                // Only disconnect from the peer the main task requested a disconnect for.
+                if peer_address != self.peer_address {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                self.register_peer_disconnection().await;
+
+                Ok(DISCONNECT_CONNECTION)
             }
-            // Disconnect from this peer, no matter what.
-            MainToPeerTask::DisconnectAll() => Ok(true),
+            MainToPeerTask::DisconnectAll() => {
+                self.register_peer_disconnection().await;
+
+                Ok(DISCONNECT_CONNECTION)
+            }
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
                 if target_socket_addr == self.peer_address {
                     peer.send(PeerMessage::PeerListRequest).await?;
@@ -1882,6 +1889,21 @@ impl PeerLoopHandler {
         // feature to have for testing purposes.
         res
     }
+
+    /// Register graceful peer disconnection in the global state.
+    ///
+    /// See also [`NetworkingState::register_peer_disconnection`].
+    ///
+    /// # Locking:
+    ///   * acquires `global_state_lock` for write
+    async fn register_peer_disconnection(&mut self) {
+        let peer_id = self.peer_handshake_data.instance_id;
+        self.global_state_lock
+            .lock_guard_mut()
+            .await
+            .net
+            .register_peer_disconnection(peer_id, SystemTime::now());
+    }
 }
 
 #[cfg(test)]
@@ -1906,6 +1928,7 @@ mod peer_loop_tests {
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::fake_valid_block_for_tests;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
+    use crate::tests::shared::get_dummy_handshake_data_for_genesis;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
     use crate::tests::shared::get_test_genesis_setup;
@@ -2068,6 +2091,38 @@ mod peer_loop_tests {
             NegativePeerSanction::DifferentGenesis,
             peer_standing.unwrap().latest_punishment.unwrap().0
         );
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn node_does_not_record_disconnection_time_when_peer_initiates_disconnect() -> Result<()>
+    {
+        let args = cli_args::Args::default();
+        let network = args.network;
+        let (_, from_main_rx, to_main_tx, _to_main_rx, state_lock, _) =
+            get_test_genesis_setup(network, 0, args).await?;
+
+        let peer_address = get_dummy_socket_address(0);
+        let peer_handshake_data = get_dummy_handshake_data_for_genesis(network);
+        let peer_id = peer_handshake_data.instance_id;
+        let mut peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state_lock.clone(),
+            peer_address,
+            peer_handshake_data,
+            true,
+            1,
+        );
+        let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
+        peer_loop_handler.run_wrapper(mock, from_main_rx).await?;
+
+        let global_state = state_lock.lock_guard().await;
+        assert!(global_state
+            .net
+            .last_disconnection_time_of_peer(peer_id)
+            .is_none());
 
         Ok(())
     }
