@@ -1,5 +1,7 @@
 use std::fmt;
 use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::time::SystemTime;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -159,6 +161,7 @@ impl BlockIndexValue {
 #[derive(Clone)]
 pub struct PeerDatabases {
     pub peer_standings: NeptuneLevelDb<IpAddr, PeerStanding>,
+    pub disconnect_times: NeptuneLevelDb<SocketAddr, SystemTime>,
 }
 
 impl fmt::Debug for PeerDatabases {

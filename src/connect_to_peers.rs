@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::time::SystemTime;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -105,6 +106,20 @@ async fn check_if_connection_is_allowed(
         let ip = peer_address.ip();
         warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+    }
+
+    if let Some(time) = global_state
+        .net
+        .last_disconnect_time_of_peer(*peer_address)
+        .await
+    {
+        if SystemTime::now()
+            .duration_since(time)
+            .is_ok_and(|d| d < cli_arguments.reconnect_cooldown)
+        {
+            let reason = ConnectionRefusedReason::MaxPeerNumberExceeded;
+            return InternalConnectionStatus::Refused(reason);
+        }
     }
 
     // Disallow connection if max number of peers has been reached or
