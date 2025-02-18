@@ -4,6 +4,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::models::peer::peer_info::PeerInfo;
 use neptune_cash::rpc_auth;
@@ -11,6 +14,7 @@ use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
+use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
@@ -19,7 +23,9 @@ use ratatui::widgets::Borders;
 use ratatui::widgets::Cell;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Row;
+use ratatui::widgets::StatefulWidget;
 use ratatui::widgets::Table;
+use ratatui::widgets::TableState;
 use ratatui::widgets::Widget;
 use tarpc::context;
 use tokio::select;
@@ -31,39 +37,46 @@ use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
 
+type PeerInfoArc = Arc<std::sync::Mutex<Vec<PeerInfo>>>;
+type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
+type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
+
 #[derive(Debug, Clone)]
 pub struct PeersScreen {
     active: bool,
     fg: Color,
     bg: Color,
     in_focus: bool,
-    data: Arc<std::sync::Mutex<Vec<PeerInfo>>>,
+    data: PeerInfoArc,
     server: Arc<RPCClient>,
     token: rpc_auth::Token,
-    poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
-    escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
+    poll_task: Option<JoinHandleArc>,
+    escalatable_event: DashboardEventArc,
+    events: Events,
 }
 
 impl PeersScreen {
     pub fn new(rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
+        let data = Arc::new(Mutex::new(vec![]));
         Self {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            data: Arc::new(Mutex::new(vec![])),
+            data: data.clone(),
             server: rpc_server,
             token,
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
+            events: data.into(),
         }
     }
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
         token: rpc_auth::Token,
-        peer_info: Arc<std::sync::Mutex<Vec<PeerInfo>>>,
-        escalatable_event_arc: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
+        peer_info: PeerInfoArc,
+        escalatable_event_arc: DashboardEventArc,
     ) -> ! {
         // use macros to reduce boilerplate
         macro_rules! setup_poller {
@@ -125,6 +138,33 @@ impl PeersScreen {
             }
         }
     }
+
+    /// handle a DashboardEvent
+    ///
+    /// In particular we handle Up/Down keypress for scrolling
+    /// the history table.
+    pub fn handle(
+        &mut self,
+        event: DashboardEvent,
+    ) -> Result<Option<DashboardEvent>, Box<dyn std::error::Error>> {
+        let mut escalate_event = None;
+
+        if self.in_focus {
+            if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Down => self.events.next(),
+                        KeyCode::Up => self.events.previous(),
+                        // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
+                        _ => {
+                            escalate_event = Some(event);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(escalate_event)
+    }
 }
 
 impl Screen for PeersScreen {
@@ -156,13 +196,13 @@ impl Screen for PeersScreen {
         self.in_focus = false;
     }
 
-    fn escalatable_event(&self) -> Arc<std::sync::Mutex<Option<DashboardEvent>>> {
+    fn escalatable_event(&self) -> DashboardEventArc {
         self.escalatable_event.clone()
     }
 }
 
 impl Widget for PeersScreen {
-    fn render(self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
+    fn render(mut self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
         // overview box
         let style: Style = if self.in_focus {
             Style::default().fg(Color::LightCyan).bg(self.bg)
@@ -191,6 +231,8 @@ impl Widget for PeersScreen {
 
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);
+        let selected_style = style.add_modifier(Modifier::REVERSED);
+
         let header = vec![
             "ip",
             "version",
@@ -328,13 +370,85 @@ impl Widget for PeersScreen {
             .iter()
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
-        let table = Table::new(rows, width_constraints).style(style);
+        let table = Table::new(rows, width_constraints)
+            .style(style)
+            .row_highlight_style(selected_style);
         vrecter.set_width(min(
             inner.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
         ));
+
         let mut table_rect = vrecter.remaining();
         table_rect.height -= 2; // shouldn't be necessary???
-        table.render(table_rect, buf);
+
+        table_rect.width = min(
+            table_rect.width,
+            widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,
+        );
+        StatefulWidget::render(table, table_rect, buf, &mut self.events.state);
+    }
+}
+
+// Define some events to display.
+// note: based on ratatui scrollable table example at:
+//   https://github.com/ratatui-org/ratatui/blob/main/examples/table.rs
+#[derive(Debug, Clone)]
+struct Events {
+    // `items` is the state managed by the application.
+    items: PeerInfoArc,
+    // `state` is the state that can be modified by the UI. It stores the index of the selected
+    // item as well as the offset computed during the previous draw call (used to implement
+    // natural scrolling).
+    state: TableState,
+}
+
+impl From<PeerInfoArc> for Events {
+    fn from(items: PeerInfoArc) -> Self {
+        Events {
+            items,
+            state: Default::default(),
+        }
+    }
+}
+
+impl Events {
+    // # of rows in table header (1 text row, 2 border rows).
+    // this is used to avoid selecting the header rows.
+    // kind of a hack, but appears to be necessary for now.
+    // ratatui seems to be redesigning scrollable widgets at present.
+    const TABLE_HEADER_ROWS: usize = 3;
+
+    // Select the next item. This will not be reflected until the widget is drawn
+    // with `Frame::render_stateful_widget`.
+    pub fn next(&mut self) {
+        let offset = Self::TABLE_HEADER_ROWS;
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.items.lock().unwrap().len() + offset - 1 {
+                    i // end on last entry.  (no wrap to start)
+                } else {
+                    i + 1
+                }
+            }
+            None => offset,
+        };
+        self.state.select(Some(i));
+    }
+
+    // Select the previous item. This will not be reflected until the widget is drawn
+    // with `Frame::render_stateful_widget`.
+    pub fn previous(&mut self) {
+        let offset = Self::TABLE_HEADER_ROWS;
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == offset {
+                    i // stay at first entry.  (no wrap to end.)
+                } else {
+                    i - 1
+                }
+            }
+            None => offset,
+        };
+        self.state.select(Some(i));
     }
 }

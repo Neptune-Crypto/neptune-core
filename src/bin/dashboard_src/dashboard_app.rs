@@ -451,6 +451,10 @@ impl DashboardApp {
                     let mut history_screen = self.history_screen.as_ref().borrow_mut();
                     history_screen.handle(event)?
                 }
+                MenuItem::Peers => {
+                    let mut peers_screen = self.peers_screen.as_ref().borrow_mut();
+                    peers_screen.handle(event)?
+                }
                 MenuItem::Receive => {
                     let mut receive_screen = self.receive_screen.as_ref().borrow_mut();
                     receive_screen.handle(event)?
