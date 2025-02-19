@@ -470,7 +470,7 @@ impl Widget for OverviewScreen {
                 .unwrap()
                 .as_secs();
             let uptime = Duration::from_secs(now - upsince);
-            format!("{:?}", uptime)
+            format!("{}", humantime::format_duration(uptime))
         } else {
             "-".to_string()
         };

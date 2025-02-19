@@ -51,7 +51,7 @@ pub enum MiningStatus {
 
 impl Display for MiningStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let elapsed_time = match self {
+        let elapsed_time_exact = match self {
             MiningStatus::Guessing(guessing_work_info) => Some(
                 guessing_work_info
                     .work_start
@@ -66,6 +66,9 @@ impl Display for MiningStatus {
             ),
             MiningStatus::Inactive => None,
         };
+        // remove sub-second component, so humantime ends with seconds.
+        let elapsed_time =
+            elapsed_time_exact.map(|v| v - Duration::from_nanos(v.subsec_nanos().into()));
         let input_output_info = match self {
             MiningStatus::Guessing(info) => {
                 format!(" {}/{}", info.num_inputs, info.num_outputs)
@@ -75,10 +78,16 @@ impl Display for MiningStatus {
 
         let work_type_and_duration = match self {
             MiningStatus::Guessing(_) => {
-                format!("guessing for {} seconds", elapsed_time.unwrap().as_secs(),)
+                format!(
+                    "guessing for {}",
+                    humantime::format_duration(elapsed_time.unwrap())
+                )
             }
             MiningStatus::Composing(_) => {
-                format!("composing for {} seconds", elapsed_time.unwrap().as_secs())
+                format!(
+                    "composing for {}",
+                    humantime::format_duration(elapsed_time.unwrap())
+                )
             }
             MiningStatus::Inactive => "inactive".to_owned(),
         };
