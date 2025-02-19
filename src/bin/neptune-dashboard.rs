@@ -1,12 +1,12 @@
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
 use crossterm::event::DisableMouseCapture;
 use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::LeaveAlternateScreen;
+use dashboard_src::dashboard_app::Config;
 use dashboard_src::dashboard_app::DashboardApp;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::rpc_auth;
@@ -17,18 +17,6 @@ use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
 
 pub mod dashboard_src;
-
-#[derive(Debug, Parser, Clone)]
-#[clap(name = "neptune-dashboard", about = "Terminal user interface")]
-pub struct Config {
-    /// Sets the neptune-core rpc server localhost port to connect to.
-    #[clap(short, long, default_value = "9799", value_name = "port")]
-    port: u16,
-
-    /// neptune-core data directory containing wallet and blockchain state
-    #[clap(long)]
-    data_dir: Option<PathBuf>,
-}
 
 #[tokio::main]
 async fn main() {
@@ -92,7 +80,7 @@ async fn main() {
     };
 
     // run app until quit
-    let res = DashboardApp::run(client, network, token, listen_addr_for_peers).await;
+    let res = DashboardApp::run(args, client, network, token, listen_addr_for_peers).await;
 
     restore_text_mode(); // just in case.
 

@@ -33,6 +33,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
 
+use super::dashboard_app::Config;
 use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
@@ -41,8 +42,51 @@ type PeerInfoArc = Arc<std::sync::Mutex<Vec<PeerInfo>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
 
+/// column sort order
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SortOrder {
+    /// ascending
+    Ascending,
+
+    /// descending
+    Descending,
+}
+
+impl SortOrder {
+    fn compare<T: Ord>(&self, a: T, b: T) -> std::cmp::Ordering {
+        match self {
+            Self::Ascending => a.cmp(&b),
+            Self::Descending => b.cmp(&a),
+        }
+    }
+}
+
+/// column identifier
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum PeerSortColumn {
+    /// the peer's IP address
+    Ip,
+
+    /// neptune-core version reported by peer
+    Version,
+
+    /// time when connection to peer was established
+    ConnectionEstablished,
+
+    /// the peer's standing score
+    Standing,
+
+    /// latest punishment for the peer
+    LastPunishment,
+
+    /// latest reward for the peer
+    LastReward,
+}
+
 #[derive(Debug, Clone)]
 pub struct PeersScreen {
+    #[allow(dead_code)]
+    config: Arc<Config>,
     active: bool,
     fg: Color,
     bg: Color,
@@ -53,12 +97,17 @@ pub struct PeersScreen {
     poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
     events: Events,
+    sort_column: PeerSortColumn,
+    sort_order: SortOrder,
 }
 
 impl PeersScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
+    pub fn new(config: Arc<Config>, rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
         Self {
+            sort_column: config.peer_sort_column,
+            sort_order: config.peer_sort_order,
+            config,
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
@@ -122,6 +171,7 @@ impl PeersScreen {
                     // ];
                     match rpc_client.peer_info(context::current(), token).await {
                         Ok(Ok(pi)) => {
+
                             *peer_info.lock().unwrap() = pi;
 
                             *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
@@ -136,6 +186,44 @@ impl PeersScreen {
                     }
                 }
             }
+        }
+    }
+
+    fn char_to_column(c: char) -> Option<PeerSortColumn> {
+        match c {
+            'i' => Some(PeerSortColumn::Ip),
+            'v' => Some(PeerSortColumn::Version),
+            's' => Some(PeerSortColumn::Standing),
+            'c' => Some(PeerSortColumn::ConnectionEstablished),
+            'p' => Some(PeerSortColumn::LastPunishment),
+            'r' => Some(PeerSortColumn::LastReward),
+            _ => None,
+        }
+    }
+
+    fn char_to_sort_order(c: char) -> Option<SortOrder> {
+        match c {
+            'a' => Some(SortOrder::Ascending),
+            'd' => Some(SortOrder::Descending),
+            _ => None,
+        }
+    }
+
+    fn set_sort_column(&mut self, c: char) -> bool {
+        if let Some(column) = Self::char_to_column(c) {
+            self.sort_column = column;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn set_sort_order(&mut self, c: char) -> bool {
+        if let Some(sort_order) = Self::char_to_sort_order(c) {
+            self.sort_order = sort_order;
+            true
+        } else {
+            false
         }
     }
 
@@ -156,6 +244,15 @@ impl PeersScreen {
                         KeyCode::Down => self.events.next(),
                         KeyCode::Up => self.events.previous(),
                         // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
+                        KeyCode::Char(c) => {
+                            if self.set_sort_column(c) {
+                                return Ok(None);
+                            }
+                            if self.set_sort_order(c) {
+                                return Ok(None);
+                            }
+                        }
+
                         _ => {
                             escalate_event = Some(event);
                         }
@@ -225,7 +322,19 @@ impl Widget for PeersScreen {
 
         let num_peers = self.data.lock().unwrap().len();
 
-        let peer_count = Line::from(vec![Span::from(format!("Peers connected: {}", num_peers))]);
+        let peer_count_buf = if self.in_focus {
+            format!(
+                "Peers connected: {}       sort-keys: i, v, c, s, p, r   order: a, d",
+                num_peers
+            )
+        } else {
+            format!(
+                "Peers connected: {}       press enter for options",
+                num_peers
+            )
+        };
+
+        let peer_count = Line::from(vec![Span::from(peer_count_buf)]);
         let peer_count_widget = Paragraph::new(peer_count).style(style);
         peer_count_widget.render(peer_count_rect, buf);
 
@@ -242,10 +351,51 @@ impl Widget for PeersScreen {
             "last reward",
         ];
 
-        let matrix = self
-            .data
-            .lock()
-            .unwrap()
+        let mut pi = self.data.lock().unwrap();
+
+        match self.sort_column {
+            PeerSortColumn::Ip => pi.sort_by(|a, b| {
+                self.sort_order
+                    .compare(a.connected_address(), b.connected_address())
+            }),
+            PeerSortColumn::Version => {
+                pi.sort_by(|a, b| self.sort_order.compare(a.version(), b.version()))
+            }
+            PeerSortColumn::Standing => pi.sort_by(|a, b| {
+                self.sort_order
+                    .compare(a.standing().standing, b.standing().standing)
+            }),
+            PeerSortColumn::ConnectionEstablished => pi.sort_by(|a, b| {
+                self.sort_order
+                    .compare(a.connection_established(), b.connection_established())
+            }),
+            PeerSortColumn::LastPunishment => pi.sort_by(|a, b| {
+                self.sort_order.compare(
+                    a.standing()
+                        .latest_punishment
+                        .map(|p| p.0.to_string())
+                        .unwrap_or_default(),
+                    b.standing()
+                        .latest_punishment
+                        .map(|p| p.0.to_string())
+                        .unwrap_or_default(),
+                )
+            }),
+            PeerSortColumn::LastReward => pi.sort_by(|a, b| {
+                self.sort_order.compare(
+                    a.standing()
+                        .latest_reward
+                        .map(|r| r.0.to_string())
+                        .unwrap_or_default(),
+                    b.standing()
+                        .latest_reward
+                        .map(|r| r.0.to_string())
+                        .unwrap_or_default(),
+                )
+            }),
+        };
+
+        let matrix = pi
             .iter()
             .map(|pi| {
                 let latest_punishment: Option<String> = pi
@@ -265,7 +415,7 @@ impl Widget for PeersScreen {
                     pi.version().to_string(),
                     neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
-                    pi.standing().to_string(),
+                    format!("{:>8}", pi.standing().to_string()),
                     latest_punishment.unwrap_or_default(),
                     latest_reward.unwrap_or_default(),
                 ]

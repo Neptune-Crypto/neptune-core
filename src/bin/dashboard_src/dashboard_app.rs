@@ -6,6 +6,7 @@ use std::error::Error;
 use std::io;
 use std::io::Stdout;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,10 +52,33 @@ use super::address_screen::AddressScreen;
 use super::history_screen::HistoryScreen;
 use super::mempool_screen::MempoolScreen;
 use super::overview_screen::OverviewScreen;
+use super::peers_screen::PeerSortColumn;
 use super::peers_screen::PeersScreen;
+use super::peers_screen::SortOrder;
 use super::receive_screen::ReceiveScreen;
 use super::screen::Screen;
 use super::send_screen::SendScreen;
+use clap::Parser;
+
+#[derive(Debug, Parser, Clone)]
+#[clap(name = "neptune-dashboard", about = "Terminal user interface")]
+pub struct Config {
+    /// Sets the neptune-core rpc server localhost port to connect to.
+    #[clap(short, long, default_value = "9799", value_name = "port")]
+    pub port: u16,
+
+    /// neptune-core data directory containing wallet and blockchain state
+    #[clap(long)]
+    pub data_dir: Option<PathBuf>,
+
+    /// initial sort column for peers
+    #[clap(long, default_value = "standing", value_name = "COLUMN")]
+    pub peer_sort_column: PeerSortColumn,
+
+    /// initial sort order for peers
+    #[clap(long, default_value = "descending", value_name = "ORDER")]
+    pub peer_sort_order: SortOrder,
+}
 
 #[derive(Debug, Clone, Copy, EnumIter, PartialEq, Eq, EnumCount, Hash)]
 enum MenuItem {
@@ -154,6 +178,7 @@ pub struct DashboardApp {
 
 impl DashboardApp {
     pub fn new(
+        config: Arc<Config>,
         rpc_server: Arc<RPCClient>,
         network: Network,
         token: rpc_auth::Token,
@@ -170,7 +195,11 @@ impl DashboardApp {
         let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
 
-        let peers_screen = Rc::new(RefCell::new(PeersScreen::new(rpc_server.clone(), token)));
+        let peers_screen = Rc::new(RefCell::new(PeersScreen::new(
+            config.clone(),
+            rpc_server.clone(),
+            token,
+        )));
         let peers_screen_dyn = Rc::clone(&peers_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Peers, Rc::clone(&peers_screen_dyn));
 
@@ -271,13 +300,20 @@ impl DashboardApp {
     }
 
     pub async fn run(
+        config: Config,
         client: RPCClient,
         network: Network,
         token: rpc_auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Result<String, Box<dyn Error>> {
         // create app
-        let mut app = DashboardApp::new(Arc::new(client), network, token, listen_addr_for_peers);
+        let mut app = DashboardApp::new(
+            Arc::new(config),
+            Arc::new(client),
+            network,
+            token,
+            listen_addr_for_peers,
+        );
         let (refresh_tx, mut refresh_rx) = tokio::sync::mpsc::channel::<()>(2);
 
         // setup terminal
