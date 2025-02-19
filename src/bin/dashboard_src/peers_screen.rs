@@ -398,8 +398,12 @@ impl Widget for PeersScreen {
                     .connection_established()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap();
+                // convert ip to canonical form, then update SocketAddr with it.
+                let ip = pi.connected_address().ip().to_canonical();
+                let mut addr = pi.connected_address();
+                addr.set_ip(ip);
                 vec![
-                    pi.connected_address().ip().to_canonical().to_string(),
+                    addr.to_string(),
                     pi.version().to_string(),
                     neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
