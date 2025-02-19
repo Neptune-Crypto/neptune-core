@@ -59,6 +59,13 @@ impl SortOrder {
             Self::Descending => b.cmp(&a),
         }
     }
+
+    fn reverse(&mut self) {
+        *self = match self {
+            Self::Ascending => Self::Descending,
+            Self::Descending => Self::Ascending,
+        }
+    }
 }
 
 /// column identifier
@@ -201,26 +208,10 @@ impl PeersScreen {
         }
     }
 
-    fn char_to_sort_order(c: char) -> Option<SortOrder> {
-        match c {
-            'a' => Some(SortOrder::Ascending),
-            'd' => Some(SortOrder::Descending),
-            _ => None,
-        }
-    }
-
     fn set_sort_column(&mut self, c: char) -> bool {
         if let Some(column) = Self::char_to_column(c) {
             self.sort_column = column;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn set_sort_order(&mut self, c: char) -> bool {
-        if let Some(sort_order) = Self::char_to_sort_order(c) {
-            self.sort_order = sort_order;
+            self.sort_order.reverse();
             true
         } else {
             false
@@ -246,9 +237,6 @@ impl PeersScreen {
                         // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
                         KeyCode::Char(c) => {
                             if self.set_sort_column(c) {
-                                return Ok(None);
-                            }
-                            if self.set_sort_order(c) {
                                 return Ok(None);
                             }
                         }
@@ -324,12 +312,12 @@ impl Widget for PeersScreen {
 
         let peer_count_buf = if self.in_focus {
             format!(
-                "Peers connected: {}       sort-keys: i, v, c, s, p, r   order: a, d",
+                "Peers connected: {}           sort-keys: i, v, c, s, p, r",
                 num_peers
             )
         } else {
             format!(
-                "Peers connected: {}       press enter for options",
+                "Peers connected: {}           press enter for options",
                 num_peers
             )
         };
