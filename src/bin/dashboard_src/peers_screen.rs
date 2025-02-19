@@ -399,7 +399,7 @@ impl Widget for PeersScreen {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap();
                 vec![
-                    pi.connected_address().to_string(),
+                    pi.connected_address().ip().to_canonical().to_string(),
                     pi.version().to_string(),
                     neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
