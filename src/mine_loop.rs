@@ -294,16 +294,9 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(guesser_key.preimage());
-    assert!(
-        !guesser_fee_utxo_infos.is_empty(),
-        "All mined blocks have guesser fees"
-    );
-
     let new_block_found = NewBlockFound {
         block: Box::new(block),
         composer_utxos,
-        guesser_fee_utxo_infos,
     };
 
     sender

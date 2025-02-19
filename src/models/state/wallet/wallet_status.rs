@@ -101,7 +101,7 @@ impl WalletStatus {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)
-            .filter(|utxo| utxo.is_timelocked_but_otherwise_spendable_at(timestamp))
+            .filter(|utxo| !utxo.can_spend_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
     }
