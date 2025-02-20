@@ -1503,64 +1503,75 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposal(block) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposal");
-
                 info!("Got block proposal from peer.");
-                let verdict = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .favor_incoming_block_proposal(
-                        block.header().height,
-                        block.total_guesser_reward(),
-                    );
-                if let Err(rejection_reason) = verdict {
-                    let should_punish = match rejection_reason {
-                        // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
-                        BlockProposalRejectError::InsufficientFee { current, received }
-                            if Some(received) == current =>
-                        {
-                            false
-                        }
-                        _ => true,
+
+                let should_punish = {
+                    log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposal::should_punish");
+
+                    let (verdict, tip) = {
+                        let state = self.global_state_lock.lock_guard().await;
+
+                        let verdict = state.favor_incoming_block_proposal(
+                            block.header().height,
+                            block.total_guesser_reward(),
+                        );
+                        let tip = state.chain.light_state().to_owned();
+                        (verdict, tip)
                     };
 
-                    if should_punish {
-                        warn!("Rejecting new block proposal:\n{rejection_reason}");
-                        self.punish(NegativePeerSanction::NonFavorableBlockProposal)
-                            .await?;
+                    if let Err(rejection_reason) = verdict {
+                        match rejection_reason {
+                            // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
+                            BlockProposalRejectError::InsufficientFee { current, received }
+                                if Some(received) == current =>
+                            {
+                                debug!("ignoring new block proposal because the fee is equal to the present one");
+                                None
+                            }
+                            _ => {
+                                warn!("Rejecting new block proposal:\n{rejection_reason}");
+                                Some(NegativePeerSanction::NonFavorableBlockProposal)
+                            }
+                        }
                     } else {
-                        debug!("ignoring new block proposal because the fee is equal to the present one");
+                        // Verify validity and that proposal is child of current tip
+                        if !block.is_valid(&tip, self.now()).await {
+                            Some(NegativePeerSanction::InvalidBlockProposal)
+                        } else {
+                            None // all is well, no punishment.
+                        }
                     }
+                };
 
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Verify validity and that proposal is child of current tip
-                let tip = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .to_owned();
-                if !block.is_valid(&tip, self.now()).await {
-                    self.punish(NegativePeerSanction::InvalidBlockProposal)
+                if let Some(sanction) = should_punish {
+                    self.punish(sanction).await?;
+                } else {
+                    self.send_to_main(PeerTaskToMain::BlockProposal(block), line!())
                         .await?;
 
-                    return Ok(KEEP_CONNECTION_ALIVE);
+                    // Valuable, new, hard-to-produce information. Reward peer.
+                    self.reward(PositivePeerSanction::NewBlockProposal).await?;
                 }
-
-                self.to_main_tx
-                    .send(PeerTaskToMain::BlockProposal(block))
-                    .await?;
-
-                // Valuable, new, hard-to-produce information. Reward peer.
-                self.reward(PositivePeerSanction::NewBlockProposal).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }
+    }
+
+    /// send msg to main via mpsc channel `to_main_tx` and logs if slow.
+    ///
+    /// the channel could potentially fill up in which case the send() will
+    /// block until there is capacity.  we wrap the send() so we can log if
+    /// that ever happens to the extent it passes slow-scope threshold.
+    async fn send_to_main(
+        &self,
+        msg: PeerTaskToMain,
+        line: u32,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<PeerTaskToMain>> {
+        // we measure across the send() in case the channel ever fills up.
+        log_slow_scope!(fn_name!() + &format!("peer_loop.rs:{}", line));
+
+        self.to_main_tx.send(msg).await
     }
 
     /// Handle message from main task. The boolean return value indicates if
