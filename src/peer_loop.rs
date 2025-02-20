@@ -1090,10 +1090,13 @@ impl PeerLoopHandler {
                 }
 
                 let response = Self::batch_response(&state, returned_blocks, &anchor).await;
+
+                // issue 457. do not hold lock across a peer.send().  nor self.punish()
+                drop(state);
+
                 let response = match response {
                     Some(response) => response,
                     None => {
-                        drop(state);
                         warn!("Unable to satisfy batch-block request");
                         self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
                             .await?;
@@ -1401,30 +1404,34 @@ impl PeerLoopHandler {
             PeerMessage::TransactionNotification(tx_notification) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
 
-                // 1. Ignore if we already know this transaction, and
-                // the proof quality is not higher than what we already know.
-                let state = self.global_state_lock.lock_guard().await;
-                let transaction_of_same_or_higher_proof_quality_is_known =
-                    state.mempool.contains_with_higher_proof_quality(
-                        tx_notification.txid,
-                        tx_notification.proof_quality,
-                    );
-                if transaction_of_same_or_higher_proof_quality_is_known {
-                    debug!("transaction with same or higher proof quality was already known");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Only accept transactions that do not require executing
-                // `update`.
-                if state
-                    .chain
-                    .light_state()
-                    .mutator_set_accumulator_after()
-                    .hash()
-                    != tx_notification.mutator_set_hash
+                // addresses #457
+                // new scope for state read-lock to avoid holding across peer.send()
                 {
-                    debug!("transaction refers to non-canonical mutator set state");
-                    return Ok(KEEP_CONNECTION_ALIVE);
+                    // 1. Ignore if we already know this transaction, and
+                    // the proof quality is not higher than what we already know.
+                    let state = self.global_state_lock.lock_guard().await;
+                    let transaction_of_same_or_higher_proof_quality_is_known =
+                        state.mempool.contains_with_higher_proof_quality(
+                            tx_notification.txid,
+                            tx_notification.proof_quality,
+                        );
+                    if transaction_of_same_or_higher_proof_quality_is_known {
+                        debug!("transaction with same or higher proof quality was already known");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    // Only accept transactions that do not require executing
+                    // `update`.
+                    if state
+                        .chain
+                        .light_state()
+                        .mutator_set_accumulator_after()
+                        .hash()
+                        != tx_notification.mutator_set_hash
+                    {
+                        debug!("transaction refers to non-canonical mutator set state");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
                 }
 
                 // 2. Request the actual `Transaction` from peer

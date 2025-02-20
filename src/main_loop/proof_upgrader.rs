@@ -353,6 +353,7 @@ impl UpgradeJob {
                         .wallet_state
                         .add_expected_utxos(expected_utxos)
                         .await;
+                    drop(global_state); // sooner is better.
 
                     // Inform all peers about our hard work
                     main_to_peer_channel

@@ -108,8 +108,15 @@ impl MainToMinerChannel {
 pub struct MainLoopHandler {
     incoming_peer_listener: TcpListener,
     global_state_lock: GlobalStateLock,
+
+    // note: broadcast::Sender::send() does not block
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+
+    // note: mpsc::Sender::send() blocks if channel full.
+    // locks should not be held across it.
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
+
+    // note: MainToMinerChannel::send() does not block.  might log error.
     main_to_miner_tx: MainToMinerChannel,
 
     #[cfg(test)]
@@ -498,6 +505,7 @@ impl MainLoopHandler {
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
+                    drop(global_state_mut); // don't hold across send()
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
                     self.main_to_miner_tx.send(MainToMiner::Continue);
                     return Ok(None);

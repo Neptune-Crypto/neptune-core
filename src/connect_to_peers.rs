@@ -500,6 +500,8 @@ pub(crate) async fn close_peer_connected_callback(
         .net
         .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
         .await;
+    drop(global_state_mut); // avoid holding across mpsc::Sender::send()
+
     debug!(
         "Stored peer info standing {} for peer {}",
         new_standing, peer_address

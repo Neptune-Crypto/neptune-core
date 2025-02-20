@@ -11,6 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use clap::Parser;
 use crossterm::event;
 use crossterm::event::DisableMouseCapture;
 use crossterm::event::EnableMouseCapture;
@@ -58,7 +59,6 @@ use super::peers_screen::SortOrder;
 use super::receive_screen::ReceiveScreen;
 use super::screen::Screen;
 use super::send_screen::SendScreen;
-use clap::Parser;
 
 #[derive(Debug, Parser, Clone)]
 #[clap(name = "neptune-dashboard", about = "Terminal user interface")]
