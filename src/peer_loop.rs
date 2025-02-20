@@ -575,31 +575,34 @@ impl PeerLoopHandler {
                 Ok(DISCONNECT_CONNECTION)
             }
             PeerMessage::PeerListRequest => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::PeerListRequest");
+                let peer_info = {
+                    log_slow_scope!(fn_name!() + "::PeerMessage::PeerListRequest");
 
-                // We are interested in the address on which peers accept ingoing connections,
-                // not in the address in which they are connected to us. We are only interested in
-                // peers that accept incoming connections.
-                let mut peer_info: Vec<(SocketAddr, u128)> = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .peer_map
-                    .values()
-                    .filter(|peer_info| peer_info.listen_address().is_some())
-                    .take(MAX_PEER_LIST_LENGTH) // limit length of response
-                    .map(|peer_info| {
-                        (
-                            // unwrap is safe bc of above `filter`
-                            peer_info.listen_address().unwrap(),
-                            peer_info.instance_id(),
-                        )
-                    })
-                    .collect();
+                    // We are interested in the address on which peers accept ingoing connections,
+                    // not in the address in which they are connected to us. We are only interested in
+                    // peers that accept incoming connections.
+                    let mut peer_info: Vec<(SocketAddr, u128)> = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .net
+                        .peer_map
+                        .values()
+                        .filter(|peer_info| peer_info.listen_address().is_some())
+                        .take(MAX_PEER_LIST_LENGTH) // limit length of response
+                        .map(|peer_info| {
+                            (
+                                // unwrap is safe bc of above `filter`
+                                peer_info.listen_address().unwrap(),
+                                peer_info.instance_id(),
+                            )
+                        })
+                        .collect();
 
-                // We sort the returned list, so this function is easier to test
-                peer_info.sort_by_cached_key(|x| x.0);
+                    // We sort the returned list, so this function is easier to test
+                    peer_info.sort_by_cached_key(|x| x.0);
+                    peer_info
+                };
 
                 debug!("Responding with: {:?}", peer_info);
                 peer.send(PeerMessage::PeerListResponse(peer_info)).await?;
@@ -623,8 +626,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotificationRequest");
-
                 debug!("Got BlockNotificationRequest");
 
                 peer.send(PeerMessage::BlockNotification(
@@ -640,8 +641,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotification(block_notification) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
-
                 let (tip_header, sync_anchor_is_set) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
@@ -725,23 +724,26 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallenge(sync_challenge) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallenge");
+                let response = {
+                    log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallenge");
 
-                info!("Got sync challenge from {}", self.peer_address.ip());
+                    info!("Got sync challenge from {}", self.peer_address.ip());
 
-                let response = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .response_to_sync_challenge(sync_challenge)
-                    .await;
-                let response = match response {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        warn!("could not generate sync challenge response:\n{e}");
-                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
+                    let response = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .response_to_sync_challenge(sync_challenge)
+                        .await;
+
+                    match response {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            warn!("could not generate sync challenge response:\n{e}");
+                            self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
                     }
                 };
 
@@ -853,8 +855,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHash");
-
                 match self
                     .global_state_lock
                     .lock_guard()
@@ -877,51 +877,53 @@ impl PeerLoopHandler {
                 }
             }
             PeerMessage::BlockRequestByHeight(block_height) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
+                let block_response = {
+                    log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
 
-                debug!("Got BlockRequestByHeight of height {}", block_height);
+                    debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                let canonical_block_digest = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .archival_block_mmr
-                    .ammr()
-                    .try_get_leaf(block_height.into())
-                    .await;
+                    let canonical_block_digest = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .archival_state()
+                        .archival_block_mmr
+                        .ammr()
+                        .try_get_leaf(block_height.into())
+                        .await;
 
-                let canonical_block_digest = match canonical_block_digest {
-                    None => {
-                        let own_tip_height = self
-                            .global_state_lock
-                            .lock_guard()
-                            .await
-                            .chain
-                            .light_state()
-                            .header()
-                            .height;
-                        warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
-                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
-                            .await?;
+                    let canonical_block_digest = match canonical_block_digest {
+                        None => {
+                            let own_tip_height = self
+                                .global_state_lock
+                                .lock_guard()
+                                .await
+                                .chain
+                                .light_state()
+                                .header()
+                                .height;
+                            warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
+                            self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
+                                .await?;
 
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
-                    Some(digest) => digest,
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        Some(digest) => digest,
+                    };
+
+                    let canonical_chain_block: Block = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .archival_state()
+                        .get_block(canonical_block_digest)
+                        .await?
+                        .unwrap();
+
+                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()))
                 };
-
-                let canonical_chain_block: Block = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .get_block(canonical_block_digest)
-                    .await?
-                    .unwrap();
-                let block_response: PeerMessage =
-                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()));
 
                 debug!("Sending block");
                 peer.send(block_response).await?;
@@ -967,7 +969,6 @@ impl PeerLoopHandler {
                 max_response_len,
                 anchor,
             }) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestBatch");
                 debug!(
                     "Received BlockRequestBatch from peer {}, max_response_len: {max_response_len}",
                     self.peer_address
@@ -1402,11 +1403,11 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionNotification(tx_notification) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
-
                 // addresses #457
                 // new scope for state read-lock to avoid holding across peer.send()
                 {
+                    log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
+
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
                     let state = self.global_state_lock.lock_guard().await;
@@ -1442,8 +1443,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::TransasctionRequest");
-
                 if let Some(transaction) = self
                     .global_state_lock
                     .lock_guard()
@@ -1462,8 +1461,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposalNotification");
-
                 let verdict = self
                     .global_state_lock
                     .lock_guard()
@@ -1488,8 +1485,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalRequest(block_proposal_request) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposalRequest");
-
                 let matching_proposal = self
                     .global_state_lock
                     .lock_guard()
@@ -1587,8 +1582,6 @@ impl PeerLoopHandler {
         debug!("Handling {} message from main in peer loop", msg.get_type());
         match msg {
             MainToPeerTask::Block(block) => {
-                log_slow_scope!(fn_name!() + "::MainToPeerTask::Block");
-
                 // We don't currently differentiate whether a new block came from a peer, or from our
                 // own miner. It's always shared through this logic.
                 let new_block_height = block.kernel.header.height;
@@ -1602,8 +1595,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::RequestBlockBatch(batch_block_request) => {
-                log_slow_scope!(fn_name!() + "::MainToPeerTask::RequestBlockBatch");
-
                 // Only ask one of the peers about the batch of blocks
                 if batch_block_request.peer_addr_target != self.peer_address {
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1638,8 +1629,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::MakePeerDiscoveryRequest => {
-                log_slow_scope!(fn_name!() + "::MainToPeerTask::MakePeerDiscoveryRequest");
-
                 peer.send(PeerMessage::PeerListRequest).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1653,19 +1642,12 @@ impl PeerLoopHandler {
             // Disconnect from this peer, no matter what.
             MainToPeerTask::DisconnectAll() => Ok(true),
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
-                log_slow_scope!(
-                    (crate::macros::fn_name!()
-                        + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
-                );
-
                 if target_socket_addr == self.peer_address {
                     peer.send(PeerMessage::PeerListRequest).await?;
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::TransactionNotification(transaction_notification) => {
-                log_slow_scope!(fn_name!() + "::MainToPeerTask::TransactionNotification");
-
                 debug!("Sending PeerMessage::TransactionNotification");
                 peer.send(PeerMessage::TransactionNotification(
                     transaction_notification,
@@ -1675,8 +1657,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::BlockProposalNotification(block_proposal_notification) => {
-                log_slow_scope!(fn_name!() + "::MainToPeerTask::BlockProposalNotification");
-
                 debug!("Sending PeerMessage::BlockProposalNotification");
                 peer.send(PeerMessage::BlockProposalNotification(
                     block_proposal_notification,
