@@ -36,6 +36,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::models::blockchain::transaction::Transaction;
+use crate::models::channel::InternalDisconnectReason;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
@@ -1643,19 +1644,30 @@ impl PeerLoopHandler {
                 peer.send(PeerMessage::PeerListRequest).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::Disconnect(target_socket_addr) => {
+            MainToPeerTask::Disconnect(peer_address, reason) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
 
-                // Disconnect from this peer if its address matches that which the main
-                // task requested to disconnect from.
-                Ok(target_socket_addr == self.peer_address)
+                // Only disconnect from the peer the main task requested a disconnect for.
+                if peer_address != self.peer_address {
+                    return Ok(false);
+                }
+
+                if reason == InternalDisconnectReason::OutOfConnectionCapacity {
+                    self.global_state_lock
+                        .lock_guard_mut()
+                        .await
+                        .net
+                        .register_peer_disconnect(peer_address, SystemTime::now())
+                        .await;
+                }
+
+                Ok(true)
             }
             // Disconnect from this peer, no matter what.
             MainToPeerTask::DisconnectAll() => Ok(true),
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
                 log_slow_scope!(
-                    (crate::macros::fn_name!()
-                        + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
+                    (fn_name!() + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
                 );
 
                 if target_socket_addr == self.peer_address {

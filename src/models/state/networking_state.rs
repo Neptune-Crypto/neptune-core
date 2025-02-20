@@ -18,6 +18,7 @@ use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::PeerStanding;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
+pub(crate) const DISCONNECTED_PEERS_DB_NAME: &str = "disconnected_peers";
 
 type PeerMap = HashMap<SocketAddr, PeerInfo>;
 
@@ -110,7 +111,7 @@ impl NetworkingState {
         }
     }
 
-    /// Create databases for peer standings
+    /// Create databases for peer standings and peer disconnect times
     pub async fn initialize_peer_databases(data_dir: &DataDirectory) -> Result<PeerDatabases> {
         let database_dir_path = data_dir.database_dir_path();
         DataDirectory::create_dir_if_not_exists(&database_dir_path).await?;
@@ -120,8 +121,16 @@ impl NetworkingState {
             &create_db_if_missing(),
         )
         .await?;
+        let disconnect_times = NeptuneLevelDb::new(
+            &data_dir.peer_disconnect_database_dir_path(),
+            &create_db_if_missing(),
+        )
+        .await?;
 
-        Ok(PeerDatabases { peer_standings })
+        Ok(PeerDatabases {
+            peer_standings,
+            disconnect_times,
+        })
     }
 
     /// Return a list of peer sanctions stored in the database.
@@ -187,5 +196,16 @@ impl NetworkingState {
                 .put(ip, current_standing)
                 .await
         }
+    }
+
+    pub(crate) async fn register_peer_disconnect(&mut self, peer: SocketAddr, time: SystemTime) {
+        self.peer_databases.disconnect_times.put(peer, time).await;
+    }
+
+    pub(crate) async fn last_disconnect_time_of_peer(
+        &self,
+        peer: SocketAddr,
+    ) -> Option<SystemTime> {
+        self.peer_databases.disconnect_times.get(peer).await
     }
 }
