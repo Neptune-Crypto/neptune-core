@@ -201,19 +201,18 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
         tracing::error!("{}", msg);
 
+        let runtime = tokio::runtime::Handle::current();
+
         // we need to flush databases, which is async call. So we spawn a new task.
         let mut global_state_lock_panic = global_state_lock_hook.clone();
-        let handle = tokio::spawn(async move {
+
+        let _ = runtime.block_on(tokio::spawn(async move {
             tracing::info!("Flushing Database...");
             let _ = global_state_lock_panic.flush_databases().await;
             tracing::info!("*** DB flush complete. now exiting.  Bye! ****");
 
             std::process::exit(1);
-        });
-        // wait for spawned task to complete.
-        while !handle.is_finished() {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
+        }));
     }));
 
     // Check if we need to restore the wallet database, and if so, do it.

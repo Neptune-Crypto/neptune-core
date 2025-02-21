@@ -3036,7 +3036,7 @@ impl RPC for NeptuneRPCServer {
         if self.state.cli().mine() {
             let _ = self
                 .rpc_server_to_main_tx
-                .send(RPCServerToMain::PauseMiner)
+                .send(RPCServerToMain::MinerPauseByRpc)
                 .await;
         } else {
             info!("Cannot pause miner since it was never started");
@@ -3056,7 +3056,7 @@ impl RPC for NeptuneRPCServer {
         if self.state.cli().mine() {
             let _ = self
                 .rpc_server_to_main_tx
-                .send(RPCServerToMain::RestartMiner)
+                .send(RPCServerToMain::MinerUnPauseByRpc)
                 .await;
         } else {
             info!("Cannot restart miner since it was never started");

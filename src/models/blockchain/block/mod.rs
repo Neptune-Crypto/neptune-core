@@ -162,6 +162,14 @@ pub struct Block {
     digest: OnceLock<Digest>,
 }
 
+impl std::hash::Hash for Block {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // we just hash the tip5 Digest, which is already cached.
+        let digest = self.hash();
+        std::hash::Hash::hash(&digest, state)
+    }
+}
+
 impl PartialEq for Block {
     fn eq(&self, other: &Self) -> bool {
         // TBD: is it faster overall to compare hashes or equality

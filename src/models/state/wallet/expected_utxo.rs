@@ -46,7 +46,7 @@ use crate::util_types::mutator_set::commit;
 ///
 /// see [IncomingUtxo](crate::models::state::wallet::incoming_utxo::IncomingUtxo),
 /// [UtxoNotificationPayLoad](crate::models::state::wallet::utxo_notification::UtxoNotificationPayload)
-#[derive(Clone, Debug, Hash, GetSize, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExpectedUtxo {
     pub utxo: Utxo,
     pub addition_record: AdditionRecord,

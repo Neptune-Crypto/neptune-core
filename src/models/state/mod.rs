@@ -3,6 +3,7 @@ pub mod block_proposal;
 pub mod blockchain_state;
 pub mod light_state;
 pub mod mempool;
+pub mod mining_state_machine;
 pub mod mining_status;
 pub mod networking_state;
 pub mod shared;
@@ -25,8 +26,6 @@ use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
 use mempool::Mempool;
 use mempool::TransactionOrigin;
-use mining_status::ComposingWorkInfo;
-use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
@@ -179,35 +178,14 @@ impl GlobalStateLock {
         &self.vm_job_queue
     }
 
-    // check if mining
-    pub async fn mining(&self) -> bool {
-        self.lock(|s| match s.mining_status {
-            MiningStatus::Guessing(_) => true,
-            MiningStatus::Composing(_) => true,
-            MiningStatus::Inactive => false,
-        })
-        .await
-    }
+    pub async fn set_mining_status(&mut self, mining_status: MiningStatus) {
+        // this avoids acquiring write-lock if mining is disabled.
+        if !GlobalState::mining_enabled(&self.cli) {
+            return;
+        }
 
-    pub async fn set_mining_status_to_inactive(&mut self) {
-        self.lock_guard_mut().await.mining_status = MiningStatus::Inactive;
-        tracing::debug!("set mining status: inactive");
-    }
-
-    /// Indicate if we are guessing
-    pub async fn set_mining_status_to_guessing(&mut self, block: &Block) {
-        let now = SystemTime::now();
-        let block_info = GuessingWorkInfo::new(now, block);
-        self.lock_guard_mut().await.mining_status = MiningStatus::Guessing(block_info);
-        tracing::debug!("set mining status: guessing");
-    }
-
-    /// Indicate if we are composing
-    pub async fn set_mining_status_to_composing(&mut self) {
-        let now = SystemTime::now();
-        let work_info = ComposingWorkInfo::new(now);
-        self.lock_guard_mut().await.mining_status = MiningStatus::Composing(work_info);
-        tracing::debug!("set mining status: composing");
+        tracing::debug!("setting mining status: {}", mining_status);
+        self.lock_guard_mut().await.mining_status = mining_status;
     }
 
     // persist wallet state to disk
@@ -303,7 +281,7 @@ pub struct GlobalState {
     pub mempool: Mempool,
 
     /// The block proposal to which guessers contribute proof-of-work.
-    pub(crate) block_proposal: BlockProposal,
+    pub(crate) block_proposal: Option<BlockProposal>,
 
     /// Indicates whether the guessing or composing task is running, and if so,
     /// since when.
@@ -319,15 +297,25 @@ impl GlobalState {
         cli: cli_args::Args,
         mempool: Mempool,
     ) -> Self {
+        let mining_status = if Self::mining_enabled(&cli) {
+            MiningStatus::Init(SystemTime::now())
+        } else {
+            MiningStatus::Disabled(SystemTime::now())
+        };
+
         Self {
             wallet_state,
             chain,
             net,
             cli,
             mempool,
-            block_proposal: BlockProposal::default(),
-            mining_status: MiningStatus::Inactive,
+            block_proposal: None,
+            mining_status,
         }
+    }
+
+    fn mining_enabled(cli: &cli_args::Args) -> bool {
+        cli.compose || cli.guess
     }
 
     /// Return a seed used to randomize shuffling.
@@ -436,7 +424,10 @@ impl GlobalState {
             });
         }
 
-        let maybe_existing_fee = self.block_proposal.map(|x| x.total_guesser_reward());
+        let maybe_existing_fee = self
+            .block_proposal
+            .as_ref()
+            .map(|p| p.block().total_guesser_reward());
         if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
             || incoming_guesser_fee.is_zero()
         {
@@ -1508,7 +1499,7 @@ impl GlobalState {
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip.
-        self.block_proposal = BlockProposal::none();
+        self.block_proposal = None;
 
         // Flush databases
         self.flush_databases().await?;
@@ -1723,6 +1714,8 @@ impl GlobalState {
 
 #[cfg(test)]
 mod global_state_tests {
+    use std::sync::Arc;
+
     use itertools::Itertools;
     use num_traits::Zero;
     use rand::random;
@@ -2954,7 +2947,9 @@ mod global_state_tests {
             "Must favor low guesser fee over none"
         );
 
-        state.block_proposal = BlockProposal::foreign_proposal(small_guesser_fraction.clone());
+        state.block_proposal = Some(BlockProposal::foreign_proposal(Arc::new(
+            small_guesser_fraction.clone(),
+        )));
         assert!(
             state
                 .favor_incoming_block_proposal(
@@ -2965,7 +2960,9 @@ mod global_state_tests {
             "Must favor big guesser fee over low"
         );
 
-        state.block_proposal = BlockProposal::foreign_proposal(big_guesser_fraction.clone());
+        state.block_proposal = Some(BlockProposal::foreign_proposal(Arc::new(
+            big_guesser_fraction.clone(),
+        )));
         assert_eq!(
             BlockProposalRejectError::InsufficientFee {
                 current: Some(big_guesser_fraction.total_guesser_reward()),
