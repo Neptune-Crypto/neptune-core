@@ -102,11 +102,16 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     // Get wallet object, create various wallet secret files
     let wallet_dir = data_directory.wallet_directory_path();
     DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-    let (wallet_secret, _) =
+    let (wallet_secret, _, wallet_was_new) =
         WalletSecret::read_from_file_or_create(&data_directory.wallet_directory_path())?;
     info!("Now getting wallet state. This may take a while if the database needs pruning.");
-    let wallet_state =
-        WalletState::new_from_wallet_secret(&data_directory, wallet_secret, &cli_args).await;
+    let wallet_state = WalletState::new_from_wallet_secret(
+        &data_directory,
+        wallet_secret,
+        &cli_args,
+        wallet_was_new,
+    )
+    .await;
     info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync

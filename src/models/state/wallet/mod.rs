@@ -4,6 +4,7 @@ pub(crate) mod expected_utxo;
 pub(crate) mod incoming_utxo;
 pub(crate) mod monitored_utxo;
 pub(crate) mod rusty_wallet_database;
+pub(crate) mod scan_mode_configuration;
 pub mod secret_key_material;
 pub mod sent_transaction;
 pub(crate) mod transaction_output;
@@ -120,20 +121,32 @@ impl WalletSecret {
         WalletSecret::new(secret_seed)
     }
 
-    /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
-    /// and save it to `wallet_file`.
-    /// Also create files for incoming and outgoing randomness which should be appended to
-    /// on each incoming and outgoing transaction.
-    /// Returns an instance of self and the path in which the wallet secret was stored.
+    /// Read a wallet file or create it.
+    ///
+    /// Read a wallet secret from the wallet file in the given directory if it
+    /// exists, or otherwise create new wallet secret and save it there. Also,
+    /// create files for incoming and outgoing randomness which should be
+    /// appended to with each incoming and outgoing transaction.
+    ///
+    /// # Return Value
+    ///
+    /// Returns a `Result`-wrapped tuple consisting of
+    ///  - a `WalletSecret` instance
+    ///  - a tuple of file names of files containing wallet info
+    ///  - a boolean indicating whether a new wallet secret was generated (true)
+    ///    or an old one read from disk (false)
+    ///
     pub fn read_from_file_or_create(
         wallet_directory_path: &Path,
-    ) -> Result<(Self, WalletSecretFileLocations)> {
+    ) -> Result<(Self, WalletSecretFileLocations, bool)> {
         let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
-        let wallet = if wallet_secret_path.exists() {
+        let wallet_is_new;
+        let wallet_secret = if wallet_secret_path.exists() {
             info!(
                 "***** Reading wallet from {} *****\n\n\n",
                 wallet_secret_path.display()
             );
+            wallet_is_new = false;
             Self::read_from_file(&wallet_secret_path)?
         } else {
             info!(
@@ -142,6 +155,7 @@ impl WalletSecret {
             );
             let new_wallet: WalletSecret = WalletSecret::new_random();
             new_wallet.save_to_disk(&wallet_secret_path)?;
+            wallet_is_new = true;
             new_wallet
         };
 
@@ -198,7 +212,7 @@ impl WalletSecret {
             outgoing_randomness_file,
         };
 
-        Ok((wallet, wallet_secret_file_locations))
+        Ok((wallet_secret, wallet_secret_file_locations, wallet_is_new))
     }
 
     /// Return the guesser preimage for guessing on top of a given block (as

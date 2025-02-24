@@ -424,7 +424,14 @@ async fn main() -> Result<()> {
             // Get wallet object, create various wallet secret files
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
-            let (_, secret_file_paths) = WalletSecret::read_from_file_or_create(&wallet_dir)?;
+            let (_, secret_file_paths, wallet_is_new) =
+                WalletSecret::read_from_file_or_create(&wallet_dir)?;
+
+            if wallet_is_new {
+                println!("New wallet generated.");
+            } else {
+                println!("Not generating a new wallet because an existing one is present already.");
+            }
 
             println!(
                 "Wallet stored in: {}\nMake sure you also see this path if you run the neptune-core client",

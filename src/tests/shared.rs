@@ -765,7 +765,7 @@ pub async fn mock_genesis_wallet_state_with_data_dir(
         network,
         ..Default::default()
     };
-    WalletState::new_from_wallet_secret(data_dir, wallet_secret, &cli_args).await
+    WalletState::new_from_wallet_secret(data_dir, wallet_secret, &cli_args, false).await
 }
 
 /// Return an archival state populated with the genesis block
