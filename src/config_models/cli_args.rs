@@ -18,6 +18,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
 /// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]
@@ -285,14 +286,31 @@ pub struct Args {
     /// However, this counter can be lost, for instance after importing the
     /// secret seed onto a new machine. In such cases, this subcommand will
     /// instruct the client to scan incoming blocks for transactions tied to
-    /// future derivation indices -- 50 by default, but this parameter can be
-    /// adjusted with the `--scan-keys` subcommand.
+    /// future derivation indices -- 2^1337 by default, but this parameter can
+    /// be adjusted with the `--scan-keys` subcommand.
     ///
     /// The argument to this subcommand is the range of blocks where this extra-
     /// ordinary scanning step takes place. If no argument is supplied, the step
     /// takes place for every incoming block.
     #[clap(long, value_parser = parse_range, action = clap::ArgAction::Set,
-        num_args = 0..=1)]
+        num_args = 0..=1, long_help = format!(
+            "\
+    Keys are generated deterministically from the secret seed and a\n\
+    derivation index, and a counter recording the most recently used index\n\
+    is stored. By default, incoming blocks are scanned for inbound\n\
+    transactions tied to any key derived from indices smaller than this\n\
+    counter.\n\
+    \n\
+    However, this counter can be lost, for instance after importing the\n\
+    secret seed onto a new machine. In such cases, this subcommand will\n\
+    instruct the client to scan incoming blocks for transactions tied to\n\
+    future derivation indices -- {} by default, but this parameter can be\n\
+    adjusted with the `--scan-keys` subcommand.\n\
+    \
+    The argument to this subcommand is the range of blocks where this extra-\n\
+    ordinary scanning step takes place. If no argument is supplied, the step\n\
+    takes place for every incoming block.", ScanModeConfiguration::default_num_future_keys()
+        ))]
     pub(crate) scan_blocks: Option<RangeInclusive<u64>>,
 
     /// Scan incoming blocks for inbound transactions.
@@ -312,7 +330,7 @@ pub struct Args {
     /// subcommand `--scan-blocks` can be used to restrict the range of blocks
     /// that undergo this scan.
     #[clap(long)]
-    pub(crate) scan_keys: Option<u64>,
+    pub(crate) scan_keys: Option<usize>,
 }
 
 impl Default for Args {
