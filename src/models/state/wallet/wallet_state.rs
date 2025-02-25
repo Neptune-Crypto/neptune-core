@@ -3953,45 +3953,51 @@ mod tests {
             let rusty_wallet_database_2 = mock_rusty_wallet_database().await;
             let rusty_wallet_database_3 = mock_rusty_wallet_database().await;
 
-            let mut cli_args = Args::default();
-            cli_args.scan_blocks = Some(0u64..=10);
-            let wallet_state = WalletState::new_from_wallet_secret_and_database(
+            let cli_args_1 = Args {
+                scan_blocks: Some(0u64..=10),
+                ..Default::default()
+            };
+            let wallet_state_1 = WalletState::new_from_wallet_secret_and_database(
                 rusty_wallet_database_1,
                 &data_dir,
                 wallet_secret.clone(),
-                &cli_args,
+                &cli_args_1,
                 false,
                 false,
             )
             .await;
-            assert!(wallet_state.scan_mode.is_some());
+            assert!(wallet_state_1.scan_mode.is_some());
 
-            cli_args = Args::default();
-            cli_args.scan_keys = Some(10);
-            let wallet_state = WalletState::new_from_wallet_secret_and_database(
+            let cli_args_2 = Args {
+                scan_keys: Some(10),
+                ..Default::default()
+            };
+            let wallet_state_2 = WalletState::new_from_wallet_secret_and_database(
                 rusty_wallet_database_2,
                 &data_dir,
                 wallet_secret.clone(),
-                &cli_args,
+                &cli_args_2,
                 false,
                 false,
             )
             .await;
-            assert!(wallet_state.scan_mode.is_some());
+            assert!(wallet_state_2.scan_mode.is_some());
 
-            cli_args = Args::default();
-            cli_args.scan_blocks = Some(0u64..=10);
-            cli_args.scan_keys = Some(10);
-            let wallet_state = WalletState::new_from_wallet_secret_and_database(
+            let cli_args_3 = Args {
+                scan_blocks: Some(0u64..=10),
+                scan_keys: Some(10),
+                ..Default::default()
+            };
+            let wallet_state_3 = WalletState::new_from_wallet_secret_and_database(
                 rusty_wallet_database_3,
                 &data_dir,
                 wallet_secret,
-                &cli_args,
+                &cli_args_3,
                 false,
                 false,
             )
             .await;
-            assert!(wallet_state.scan_mode.is_some());
+            assert!(wallet_state_3.scan_mode.is_some());
         }
 
         #[tokio::test]
@@ -4000,8 +4006,10 @@ mod tests {
             let data_dir = mock_data_dir();
             let rusty_wallet_database = mock_rusty_wallet_database().await;
 
-            let mut cli_args = Args::default();
-            cli_args.scan_blocks = Some(0u64..=10);
+            let cli_args = Args {
+                scan_blocks: Some(0u64..=10),
+                ..Default::default()
+            };
             let wallet_state = WalletState::new_from_wallet_secret_and_database(
                 rusty_wallet_database,
                 &data_dir,
@@ -4022,8 +4030,10 @@ mod tests {
 
             // activate scan mode by setting --scan-blocks, so num future keys
             // will assume its default value
-            let mut cli_args = Args::default();
-            cli_args.scan_blocks = Some(0u64..=10);
+            let cli_args = Args {
+                scan_blocks: Some(0u64..=10),
+                ..Default::default()
+            };
             let wallet_state = WalletState::new_from_wallet_secret_and_database(
                 rusty_wallet_database,
                 &data_dir,
@@ -4049,8 +4059,10 @@ mod tests {
 
             // activate scan mode by setting --scan-blocks, so num future keys
             // will assume its default value
-            let mut cli_args = Args::default();
-            cli_args.scan_blocks = Some(lb..=ub);
+            let cli_args = Args {
+                scan_blocks: Some(lb..=ub),
+                ..Default::default()
+            };
             let wallet_state = WalletState::new_from_wallet_secret_and_database(
                 rusty_wallet_database,
                 &data_dir,
