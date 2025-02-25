@@ -741,13 +741,13 @@ impl WalletState {
     }
 
     /// Scan the given transaction for announced UTXOs as recognized by *future*
-    /// keys, *.i.e.*, keys that will be derived by the next n derivation
+    /// keys, *i.e.*, keys that will be derived by the next n derivation
     /// indices.
     async fn scan_for_utxos_announced_to_future_keys<'a>(
         &'a self,
         num_future_keys: usize,
         tx_kernel: &'a TransactionKernel,
-    ) -> impl Iterator<Item = (KeyType, u64, SpendingKey, IncomingUtxo)> + 'a {
+    ) -> impl Iterator<Item = (KeyType, u64, IncomingUtxo)> + 'a {
         self.get_future_spending_keys(num_future_keys).await
             .flat_map(|(key_type, derivation_index, key)| key.scan_for_announced_utxos(tx_kernel).into_iter().filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
                 true => true,
@@ -755,7 +755,7 @@ impl WalletState {
                     warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
                     false
                 }
-            }).map(move |au| (key_type, derivation_index, key, au)))
+            }).map(move |au| (key_type, derivation_index,  au)))
     }
 
     /// Scan the given list of addition records for items that match with list
@@ -1023,6 +1023,28 @@ impl WalletState {
         }
     }
 
+    pub(crate) async fn bump_derivation_counter(&mut self, key_type: KeyType, max_used_index: u64) {
+        if self
+            .spending_key_counter(key_type)
+            .await
+            .is_some_and(|current_counter| max_used_index + 1 > current_counter)
+        {
+            match key_type {
+                KeyType::RawHashLock => (),
+                KeyType::Generation => {
+                    self.wallet_db
+                        .set_generation_key_counter(max_used_index + 1)
+                        .await
+                }
+                KeyType::Symmetric => {
+                    self.wallet_db
+                        .set_symmetric_key_counter(max_used_index + 1)
+                        .await
+                }
+            }
+        }
+    }
+
     /// Get index of the next unused spending key of a given type.
     pub async fn spending_key_counter(&self, key_type: KeyType) -> Option<u64> {
         match key_type {
@@ -1203,7 +1225,46 @@ impl WalletState {
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
             self.scan_for_spent_utxos(&tx_kernel).await;
 
-        let onchain_received_outputs = self.scan_for_utxos_announced_to_known_keys(&tx_kernel);
+        let onchain_received_outputs = self
+            .scan_for_utxos_announced_to_known_keys(&tx_kernel)
+            .collect_vec(); // drop immutable borrow of self, for (maybe) bumping below
+
+        // if scan mode is active, scan the block with keys that will be
+        // derived in the future
+        let mut outputs_recovered_through_scan_mode = vec![];
+        if let Some(scan_mode_configuration) = self.scan_mode {
+            if scan_mode_configuration.block_is_in_range(new_block) {
+                let mut max_counters = HashMap::<KeyType, u64>::new();
+                for (key_type, derivation_index, incoming_utxo) in self
+                    .scan_for_utxos_announced_to_future_keys(
+                        scan_mode_configuration.num_future_keys(),
+                        &tx_kernel,
+                    )
+                    .await
+                {
+                    if max_counters
+                        .get(&key_type)
+                        .is_none_or(|&current_max_derivation_index| {
+                            current_max_derivation_index < derivation_index
+                        })
+                    {
+                        max_counters.insert(key_type, derivation_index);
+                    }
+                    outputs_recovered_through_scan_mode.push(incoming_utxo);
+                }
+
+                info!(
+                    "Scan Mode: recovered {} UTXOs in block {}",
+                    outputs_recovered_through_scan_mode.len(),
+                    new_block.header().height
+                );
+
+                for (key_type, derivation_index) in max_counters.into_iter() {
+                    self.bump_derivation_counter(key_type, derivation_index)
+                        .await;
+                }
+            }
+        }
 
         let MutatorSetUpdate {
             additions: addition_records,
@@ -1217,6 +1278,8 @@ impl WalletState {
         let guesser_fee_outputs = self.scan_for_guesser_fee_utxos(new_block);
 
         let all_spendable_received_outputs = onchain_received_outputs
+            .into_iter()
+            .chain(outputs_recovered_through_scan_mode)
             .chain(offchain_received_outputs.iter().cloned())
             .filter(|announced_utxo| announced_utxo.utxo.all_type_script_states_are_valid())
             .chain(guesser_fee_outputs);
