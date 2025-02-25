@@ -465,7 +465,7 @@ impl WalletState {
 
                 // scan tx for utxo with public-announcements we can claim
                 let announced_utxos_from_public_announcements =
-                    self.scan_for_announced_utxos(&tx.kernel);
+                    self.scan_for_utxos_announced_to_known_keys(&tx.kernel);
 
                 let own_utxos = announced_utxos_from_public_announcements
                     .chain(own_utxos_from_expected_utxos)
@@ -720,25 +720,42 @@ impl WalletState {
     /// Scan the given transaction for announced UTXOs as recognized by owned
     /// `SpendingKey`s, and then verify those announced UTXOs are actually
     /// present.
-    fn scan_for_announced_utxos<'a>(
+    fn scan_for_utxos_announced_to_known_keys<'a>(
         &'a self,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
         // scan for announced utxos for every known key of every key type.
-        self.get_all_known_spending_keys()
-            .flat_map(|key| key.scan_for_announced_utxos(tx_kernel))
+        self.get_all_known_spending_keys().flat_map(|key| key.scan_for_announced_utxos(tx_kernel))
 
-            // filter for presence in transaction
-            //
-            // note: this is a nice sanity check, but probably is un-necessary
-            //       work that can eventually be removed.
-            .filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
+        // filter for presence in transaction
+        //
+        // note: this is a nice sanity check, but probably is un-necessary
+        //       work that can eventually be removed.
+        .filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
+            true => true,
+            false => {
+                warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
+                false
+            }
+        })
+    }
+
+    /// Scan the given transaction for announced UTXOs as recognized by *future*
+    /// keys, *.i.e.*, keys that will be derived by the next n derivation
+    /// indices.
+    async fn scan_for_utxos_announced_to_future_keys<'a>(
+        &'a self,
+        num_future_keys: usize,
+        tx_kernel: &'a TransactionKernel,
+    ) -> impl Iterator<Item = (KeyType, u64, SpendingKey, IncomingUtxo)> + 'a {
+        self.get_future_spending_keys(num_future_keys).await
+            .flat_map(|(key_type, derivation_index, key)| key.scan_for_announced_utxos(tx_kernel).into_iter().filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
                 true => true,
                 false => {
                     warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
                     false
                 }
-            })
+            }).map(move |au| (key_type, derivation_index, key, au)))
     }
 
     /// Scan the given list of addition records for items that match with list
@@ -931,6 +948,26 @@ impl WalletState {
             .flat_map(|key_type| self.get_known_spending_keys(key_type))
     }
 
+    /// Return an iterator over the next n spending keys of all applicably key
+    /// types, with derivation info.
+    ///
+    /// Specifically, return an iterator over tuples (key type, derivation
+    /// index, spending key) for the next `num_future_keys` to be derived, for
+    /// key types "Generation" and "Symmetric Key".
+    pub(crate) async fn get_future_spending_keys(
+        &self,
+        num_future_keys: usize,
+    ) -> impl Iterator<Item = (KeyType, u64, SpendingKey)> + '_ {
+        self.get_future_generation_spending_keys(num_future_keys)
+            .await
+            .map(|(i, gsk)| (KeyType::Generation, i, SpendingKey::from(gsk)))
+            .chain(
+                self.get_future_symmetric_keys(num_future_keys)
+                    .await
+                    .map(|(i, sk)| (KeyType::Symmetric, i, SpendingKey::from(sk))),
+            )
+    }
+
     /// returns all spending keys of `key_type` with derivation index less than current counter
     pub fn get_known_spending_keys(
         &self,
@@ -1036,6 +1073,28 @@ impl WalletState {
         let key = self.wallet_secret.nth_symmetric_key(index);
         self.known_symmetric_keys.push(key.into());
         key
+    }
+
+    /// Get the next n generation spending keys (with derivation indices)
+    /// without modifying the counter.
+    pub(crate) async fn get_future_generation_spending_keys(
+        &self,
+        num_future_keys: usize,
+    ) -> impl Iterator<Item = (u64, generation_address::GenerationSpendingKey)> + use<'_> {
+        let index = self.wallet_db.get_generation_key_counter().await;
+        (index..index + (num_future_keys as u64))
+            .map(|i| (i, self.wallet_secret.nth_generation_spending_key(i)))
+    }
+
+    /// Get the next n symmetric spending keys (with derivation indices)
+    /// without modifying the counter.
+    pub(crate) async fn get_future_symmetric_keys(
+        &self,
+        num_future_keys: usize,
+    ) -> impl Iterator<Item = (u64, symmetric_key::SymmetricKey)> + use<'_> {
+        let index = self.wallet_db.get_symmetric_key_counter().await;
+        (index..index + (num_future_keys as u64))
+            .map(|i| (i, self.wallet_secret.nth_symmetric_key(i)))
     }
 
     pub(crate) async fn claim_utxo(&mut self, utxo_claim_data: ClaimUtxoData) -> Result<()> {
@@ -1144,12 +1203,13 @@ impl WalletState {
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
             self.scan_for_spent_utxos(&tx_kernel).await;
 
+        let onchain_received_outputs = self.scan_for_utxos_announced_to_known_keys(&tx_kernel);
+
         let MutatorSetUpdate {
             additions: addition_records,
             removals: _removal_records,
         } = new_block.mutator_set_update();
 
-        let onchain_received_outputs = self.scan_for_announced_utxos(&tx_kernel);
         let offchain_received_outputs = self
             .scan_for_expected_utxos(&addition_records)
             .await
