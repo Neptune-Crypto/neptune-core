@@ -369,26 +369,27 @@ fn parse_range(s: &str) -> Result<RangeInclusive<u64>, String> {
         return Err("Invalid range format".to_string());
     }
 
-    let parse_lower_bound = |s: &str| -> Result<Option<u64>, String> {
-        if s.is_empty() {
+    let parse_lower_bound = |s_: &str| -> Result<Option<u64>, String> {
+        if s_.is_empty() {
             Ok(None)
         } else {
-            s.parse()
+            s_.parse()
                 .map(Some)
                 .map_err(|_| "Invalid number".to_string())
         }
     };
 
-    let parse_upper_bound = |s: &str| -> Result<Option<u64>, String> {
-        if s.is_empty() {
+    let parse_upper_bound = |s_: &str| -> Result<Option<u64>, String> {
+        if s_.is_empty() {
             Ok(None)
-        } else if s.starts_with('=') {
-            s[1..]
+        } else if s_.starts_with('=') {
+            s_.strip_prefix('=')
+                .unwrap()
                 .parse()
                 .map(Some)
                 .map_err(|_| "Invalid number".to_string())
         } else {
-            match s.parse().map(|u: u64| u.checked_sub(1u64)) {
+            match s_.parse().map(|u: u64| u.checked_sub(1u64)) {
                 Ok(Some(u)) => Ok(Some(u)),
                 Ok(None) => Err("Invalid upper bound.".to_string()),
                 Err(e) => Err(format!("Invalid number: {e:?}")),
@@ -396,7 +397,7 @@ fn parse_range(s: &str) -> Result<RangeInclusive<u64>, String> {
         }
     };
 
-    let start = parse_lower_bound(parts.get(0).unwrap_or(&""))?;
+    let start = parse_lower_bound(parts.first().unwrap_or(&""))?;
     let end = parse_upper_bound(parts.get(1).unwrap_or(&""))?;
 
     match (start, end) {
