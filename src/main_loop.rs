@@ -562,11 +562,13 @@ impl MainLoopHandler {
                     return Ok(None);
                 }
 
-                self.main_to_peer_broadcast_tx
+                if !self.global_state_lock.cli().secret_compositions {
+                    self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::BlockProposalNotification((&block).into()))
                     .expect(
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
+                }
 
                 {
                     // Use block proposal and add expected UTXOs from this
