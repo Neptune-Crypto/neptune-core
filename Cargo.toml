@@ -232,3 +232,7 @@ harness = false
 name = "consensus"
 harness = false
 required-features = ["arbitrary-impls"]
+
+[[bench]]
+name = "fast_kernel_mast_hash"
+harness = false

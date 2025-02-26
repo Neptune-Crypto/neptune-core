@@ -315,8 +315,10 @@ impl GuessNonceResult {
 /// fields constant.
 ///
 /// Calculates the block hash in as few Tip5 invocations as possible.
+/// This function is required for benchmarks, but is not part of the public API.
 #[inline(always)]
-fn fast_kernel_mast_hash(
+#[doc(hidden)]
+pub fn fast_kernel_mast_hash(
     kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
     header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
     nonce: Digest,
