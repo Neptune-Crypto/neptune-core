@@ -728,9 +728,6 @@ impl WalletState {
         self.get_all_known_spending_keys().flat_map(|key| key.scan_for_announced_utxos(tx_kernel))
 
         // filter for presence in transaction
-        //
-        // note: this is a nice sanity check, but probably is un-necessary
-        //       work that can eventually be removed.
         .filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
             true => true,
             false => {
@@ -953,7 +950,8 @@ impl WalletState {
     ///
     /// Specifically, return an iterator over tuples (key type, derivation
     /// index, spending key) for the next `num_future_keys` to be derived, for
-    /// key types "Generation" and "Symmetric Key".
+    /// key types "Generation" and "Symmetric Key". This function does **not**
+    /// increment the derivation counter.
     pub(crate) async fn get_future_spending_keys(
         &self,
         num_future_keys: usize,
@@ -3924,6 +3922,8 @@ mod tests {
     }
 
     pub(crate) mod scan_mode {
+        use std::hint::black_box;
+
         use rand::rngs::StdRng;
         use rand::{rng, SeedableRng};
 
@@ -4059,7 +4059,7 @@ mod tests {
             .await;
             let scan_mode = wallet_state.scan_mode.unwrap();
             assert!(scan_mode.num_future_keys() > 0);
-            assert!(scan_mode.num_future_keys() < 1_000_000);
+            assert!(scan_mode.num_future_keys() < 10_000);
         }
 
         #[tokio::test]
@@ -4232,6 +4232,50 @@ mod tests {
                     );
                 }
             }
+        }
+
+        #[tokio::test]
+        async fn get_future_keys_do_not_modify_counters() {
+            let network = Network::Main;
+            let mut rng = StdRng::from_rng(&mut rng());
+            let wallet_secret = WalletSecret::new_pseudorandom(rng.random());
+            let data_dir = unit_test_data_directory(network).unwrap();
+            let wallet_state = WalletState::new_from_wallet_secret(
+                &data_dir,
+                wallet_secret.clone(),
+                &cli_args::Args::default(),
+                false,
+            )
+            .await;
+
+            // generate iterators for future keys
+            let generation_counter = wallet_state.wallet_db.get_generation_key_counter().await;
+            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter().await;
+
+            // don't just generate the iterators; run through them also
+            let num_future_keys = 100;
+            let future_generation_keys = wallet_state
+                .get_future_generation_spending_keys(num_future_keys)
+                .await
+                .collect_vec();
+            let future_symmetric_keys = wallet_state
+                .get_future_symmetric_keys(num_future_keys)
+                .await
+                .collect_vec();
+
+            // verify that the counters haven't changed
+            assert_eq!(
+                generation_counter,
+                wallet_state.wallet_db.get_generation_key_counter().await
+            );
+            assert_eq!(
+                symmetric_counter,
+                wallet_state.wallet_db.get_symmetric_key_counter().await
+            );
+
+            // make sure passing over the iterators is not being optimized away
+            black_box(future_generation_keys);
+            black_box(future_symmetric_keys);
         }
     }
 }
