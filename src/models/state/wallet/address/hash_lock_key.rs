@@ -24,10 +24,6 @@ impl HashLockKey {
         self.preimage.hash()
     }
 
-    pub(crate) fn preimage(&self) -> Digest {
-        self.preimage
-    }
-
     pub(crate) fn from_preimage(preimage: Digest) -> Self {
         Self { preimage }
     }
@@ -72,5 +68,10 @@ impl HashLockKey {
         );
 
         instructions.into()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn preimage(&self) -> Digest {
+        self.preimage
     }
 }

@@ -119,7 +119,6 @@ pub(crate) async fn guess_nonce(
     block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
-    composer_utxos: Vec<ExpectedUtxo>,
     guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
     target_block_interval: Option<Timestamp>,
@@ -141,7 +140,6 @@ pub(crate) async fn guess_nonce(
             block,
             previous_block_header,
             sender,
-            composer_utxos,
             guesser_key,
             guessing_configuration,
             target_block_interval,
@@ -199,7 +197,6 @@ fn guess_worker(
     mut block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
-    composer_utxos: Vec<ExpectedUtxo>,
     guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
     target_block_interval: Option<Timestamp>,
@@ -294,16 +291,8 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(guesser_key.preimage());
-    assert!(
-        !guesser_fee_utxo_infos.is_empty(),
-        "All mined blocks have guesser fees"
-    );
-
     let new_block_found = NewBlockFound {
         block: Box::new(block),
-        composer_utxos,
-        guesser_fee_utxo_infos,
     };
 
     sender
@@ -701,8 +690,6 @@ pub(crate) async fn mine(
         }
 
         let guesser_task: Option<JoinHandle<()>> = if should_guess {
-            let composer_utxos = maybe_proposal.composer_utxos();
-
             // safe because above `is_some`
             let proposal = maybe_proposal.unwrap();
             let guesser_key = global_state_lock
@@ -719,7 +706,6 @@ pub(crate) async fn mine(
                 proposal.to_owned(),
                 latest_block_header,
                 guesser_tx,
-                composer_utxos,
                 guesser_key,
                 GuessingConfiguration {
                     sleepy_guessing: cli_args.sleepy_guessing,
@@ -1404,7 +1390,7 @@ pub(crate) mod mine_loop_tests {
         let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
+        let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state(
             &tip_block_orig,
             &global_state_lock,
             0f64,
@@ -1432,7 +1418,6 @@ pub(crate) mod mine_loop_tests {
             block,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
-            coinbase_utxo_info,
             guesser_key,
             GuessingConfiguration {
                 sleepy_guessing,
@@ -1482,7 +1467,7 @@ pub(crate) mod mine_loop_tests {
         // pretend/simulate that it takes at least 10 seconds to mine the block.
         let ten_seconds_ago = now - Timestamp::seconds(10);
 
-        let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
+        let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state(
             &tip_block_orig,
             &global_state_lock,
             0f64,
@@ -1513,7 +1498,6 @@ pub(crate) mod mine_loop_tests {
             template,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
-            coinbase_utxo_info,
             guesser_key,
             GuessingConfiguration {
                 sleepy_guessing,
@@ -1644,16 +1628,11 @@ pub(crate) mod mine_loop_tests {
             let start_time = Timestamp::now();
             let start_st = std::time::SystemTime::now();
 
-            let (transaction, composer_utxos) = {
-                (
-                    make_mock_transaction_with_mutator_set_hash(
-                        vec![],
-                        vec![],
-                        prev_block.mutator_set_accumulator_after().hash(),
-                    ),
-                    vec![dummy_expected_utxo()],
-                )
-            };
+            let transaction = make_mock_transaction_with_mutator_set_hash(
+                vec![],
+                vec![],
+                prev_block.mutator_set_accumulator_after().hash(),
+            );
 
             let guesser_key = HashLockKey::from_preimage(Digest::default());
 
@@ -1671,7 +1650,6 @@ pub(crate) mod mine_loop_tests {
                 block,
                 *prev_block.header(),
                 worker_task_tx,
-                composer_utxos,
                 guesser_key,
                 GuessingConfiguration {
                     sleepy_guessing,

@@ -525,14 +525,7 @@ impl MainLoopHandler {
                     );
 
                 let update_jobs = global_state_mut
-                    .set_new_self_mined_tip(
-                        new_block.as_ref().clone(),
-                        [
-                            new_block_info.composer_utxos,
-                            new_block_info.guesser_fee_utxo_infos,
-                        ]
-                        .concat(),
-                    )
+                    .set_new_tip(new_block.as_ref().clone())
                     .await?;
                 drop(global_state_mut);
 
@@ -569,11 +562,13 @@ impl MainLoopHandler {
                     return Ok(None);
                 }
 
-                self.main_to_peer_broadcast_tx
+                if !self.global_state_lock.cli().secret_compositions {
+                    self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::BlockProposalNotification((&block).into()))
                     .expect(
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
+                }
 
                 {
                     // Use block proposal and add expected UTXOs from this

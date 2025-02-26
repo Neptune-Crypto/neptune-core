@@ -201,16 +201,22 @@ impl WalletSecret {
         Ok((wallet, wallet_secret_file_locations))
     }
 
-    /// Returns the spending for guessing on top of the given block.
-    pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
-        HashLockKey::from_preimage(Tip5::hash_varlen(
+    /// Return the guesser preimage for guessing on top of a given block (as
+    /// identified by the block's predecessor's hash).
+    pub(crate) fn guesser_preimage(&self, prev_block_digest: Digest) -> Digest {
+        Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
                 vec![hash_lock_key::RAW_HASH_LOCK_KEY_FLAG],
                 prev_block_digest.encode(),
             ]
             .concat(),
-        ))
+        )
+    }
+
+    /// Returns the spending key for guessing on top of the given block.
+    pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
+        HashLockKey::from_preimage(self.guesser_preimage(prev_block_digest))
     }
 
     /// derives a generation spending key at `index`
