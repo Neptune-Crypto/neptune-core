@@ -1756,9 +1756,10 @@ mod tests {
         .await;
 
         alice
-            .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
-            .await
-            .unwrap();
+            .wallet_state
+            .add_expected_utxos(composer_expected_utxos.clone())
+            .await;
+        alice.set_new_tip(block1.clone()).await.unwrap();
 
         let input_utxos = alice
             .wallet_state
@@ -1803,8 +1804,6 @@ mod tests {
             make_mock_block(&Block::genesis(network), None, bob_key, rng.random()).await;
 
         bob_global_lock
-            .lock_guard_mut()
-            .await
             .set_new_self_composed_tip(block1.clone(), composer_fee_eutxos)
             .await
             .unwrap();
@@ -2155,9 +2154,7 @@ mod tests {
         bob.wallet_state
             .add_expected_utxos(expected_utxos_block_1a.clone())
             .await;
-        bob.set_new_self_composed_tip(block_1a.clone(), vec![])
-            .await
-            .unwrap();
+        bob.set_new_tip(block_1a.clone()).await.unwrap();
         assert_eq!(4, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
         assert_eq!(
             4,
@@ -2376,9 +2373,10 @@ mod tests {
         // Add block 3a with a coinbase UTXO for us
         let (block_3a, composer_expected_utxos_3a) =
             make_mock_block(&latest_block.clone(), None, bob_spending_key, rng.random()).await;
-        bob.set_new_self_composed_tip(block_3a, composer_expected_utxos_3a)
-            .await
-            .unwrap();
+        bob.wallet_state
+            .add_expected_utxos(composer_expected_utxos_3a)
+            .await;
+        bob.set_new_tip(block_3a).await.unwrap();
 
         assert_eq!(
             2,
@@ -2578,14 +2576,12 @@ mod tests {
             // Mine it till it has a valid PoW digest
             // Add this block to the wallet through the same pipeline as the
             // mine_loop.
-            let claimable_composer_utxos = vec![];
             let sleepy_guessing = false;
             let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
             guess_nonce(
                 block1_proposal,
                 *genesis_block.header(),
                 guesser_tx,
-                claimable_composer_utxos,
                 guesser_key,
                 GuessingConfiguration {
                     sleepy_guessing,
@@ -3042,8 +3038,6 @@ mod tests {
 
             // Alice gets all mining rewards
             alice
-                .lock_guard_mut()
-                .await
                 .set_new_self_composed_tip(block.clone(), composer_expected_utxos)
                 .await
                 .unwrap();
@@ -3673,8 +3667,6 @@ mod tests {
                 .await;
 
             alice_global_lock
-                .lock_guard_mut()
-                .await
                 .set_new_self_composed_tip(block_1a.clone(), composer_expected_utxos_1a)
                 .await
                 .unwrap();

@@ -4280,8 +4280,6 @@ mod rpc_server_tests {
 
                     rpc_server
                         .state
-                        .lock_guard_mut()
-                        .await
                         .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
                         .await
                         .unwrap();
@@ -4411,8 +4409,6 @@ mod rpc_server_tests {
                     make_mock_block(&genesis_block, None, bob_key, Default::default()).await;
 
                 bob.state
-                    .lock_guard_mut()
-                    .await
                     .set_new_self_composed_tip(block1.clone(), composer_expected_utxos)
                     .await
                     .unwrap();

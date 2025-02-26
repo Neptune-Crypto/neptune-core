@@ -525,10 +525,7 @@ impl MainLoopHandler {
                     );
 
                 let update_jobs = global_state_mut
-                    .set_new_self_composed_tip(
-                        new_block.as_ref().clone(),
-                        new_block_info.composer_utxos,
-                    )
+                    .set_new_tip(new_block.as_ref().clone())
                     .await?;
                 drop(global_state_mut);
 

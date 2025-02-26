@@ -60,7 +60,6 @@ impl MainToMiner {
 #[derive(Clone, Debug)]
 pub(crate) struct NewBlockFound {
     pub block: Box<Block>,
-    pub composer_utxos: Vec<ExpectedUtxo>,
 }
 
 #[derive(Clone, Debug)]

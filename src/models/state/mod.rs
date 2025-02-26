@@ -226,10 +226,12 @@ impl GlobalStateLock {
         new_block: Block,
         composer_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
-        self.lock_guard_mut()
-            .await
-            .set_new_self_composed_tip(new_block, composer_reward_utxo_infos)
-            .await
+        let mut state = self.lock_guard_mut().await;
+        state
+            .wallet_state
+            .add_expected_utxos(composer_reward_utxo_infos)
+            .await;
+        state.set_new_tip(new_block).await
     }
 
     /// store a block (non coinbase)
@@ -1409,24 +1411,7 @@ impl GlobalState {
         &mut self,
         new_block: Block,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
-        self.set_new_tip_internal(new_block, vec![]).await
-    }
-
-    /// Update client's state with a new block that was composed locally.
-    ///
-    /// The block is assumed to be valid, also with regards to to proof-of-work.
-    /// The given block will be set as the new tip, regardless of its
-    /// accumulated proof-of-work number.
-    ///
-    /// Returns a list of update-jobs that should be
-    /// performed by this client.
-    pub(crate) async fn set_new_self_composed_tip(
-        &mut self,
-        new_block: Block,
-        composer_reward_utxo_infos: Vec<ExpectedUtxo>,
-    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
-        self.set_new_tip_internal(new_block, composer_reward_utxo_infos)
-            .await
+        self.set_new_tip_internal(new_block).await
     }
 
     /// Store a block to client's state *without* marking this block as a new
@@ -1458,7 +1443,6 @@ impl GlobalState {
     async fn set_new_tip_internal(
         &mut self,
         new_block: Block,
-        composer_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         crate::macros::log_scope_duration!();
 
@@ -1479,14 +1463,6 @@ impl GlobalState {
             .update_mutator_set(&new_block)
             .await
             .expect("Updating mutator set must succeed");
-
-        // If this block is our own composition, notify wallet to expect
-        // coinbase (or more generally, composer reward) UTXOs.
-        for composer_reward_utxo_info in composer_reward_utxo_infos {
-            self.wallet_state
-                .add_expected_utxo(composer_reward_utxo_info)
-                .await;
-        }
 
         // Get parent of tip for mutator-set data needed for various updates. Parent of the
         // stored block will always exist since all blocks except the genesis block have a
@@ -2215,9 +2191,10 @@ mod global_state_tests {
         let (mock_block_1a, composer_expected_utxos_1a) =
             make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
         alice
-            .set_new_self_composed_tip(mock_block_1a.clone(), composer_expected_utxos_1a)
-            .await
-            .unwrap();
+            .wallet_state
+            .add_expected_utxos(composer_expected_utxos_1a)
+            .await;
+        alice.set_new_tip(mock_block_1a.clone()).await.unwrap();
 
         // Verify that wallet has monitored UTXOs, 1 from genesis, 2 from
         // block 1a.
@@ -2344,9 +2321,10 @@ mod global_state_tests {
             make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
         {
             alice
-                .set_new_self_composed_tip(block_1.clone(), alice_composer_expected_utxos_1)
-                .await
-                .unwrap();
+                .wallet_state
+                .add_expected_utxos(alice_composer_expected_utxos_1)
+                .await;
+            alice.set_new_tip(block_1.clone()).await.unwrap();
 
             // Verify that composer UTXOs were recorded
             assert_eq!(
@@ -3415,33 +3393,25 @@ mod global_state_tests {
 
                 if claim_composer_fees {
                     global_state
-                        .set_new_self_composed_tip(
-                            block_1a.clone(),
-                            composer_expected_utxos_1a.clone(),
-                        )
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos_1a.clone())
+                        .await;
+                    global_state.set_new_tip(block_1a.clone()).await.unwrap();
                     global_state
-                        .set_new_self_composed_tip(
-                            block_2a.clone(),
-                            composer_expected_utxos_2a.clone(),
-                        )
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos_2a.clone())
+                        .await;
+                    global_state.set_new_tip(block_2a.clone()).await.unwrap();
                     global_state
-                        .set_new_self_composed_tip(
-                            block_3a.clone(),
-                            composer_expected_utxos_3a.clone(),
-                        )
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos_3a.clone())
+                        .await;
+                    global_state.set_new_tip(block_3a.clone()).await.unwrap();
                     global_state
-                        .set_new_self_composed_tip(
-                            block_1a.clone(),
-                            composer_expected_utxos_1a.clone(),
-                        )
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos_1a.clone())
+                        .await;
+                    global_state.set_new_tip(block_1a.clone()).await.unwrap();
                 } else {
                     global_state.set_new_tip(block_1a.clone()).await.unwrap();
                     global_state.set_new_tip(block_2a.clone()).await.unwrap();
@@ -3480,16 +3450,15 @@ mod global_state_tests {
                     let (next_block, composer_expected_utxos) =
                         make_mock_block(&previous_block, None, spending_key, rng.random()).await;
                     global_state
-                        .set_new_self_composed_tip(
-                            next_block.clone(),
-                            composer_expected_utxos.clone(),
-                        )
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos.clone())
+                        .await;
+                    global_state.set_new_tip(next_block.clone()).await.unwrap();
                     global_state
-                        .set_new_self_composed_tip(next_block.clone(), composer_expected_utxos)
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos.clone())
+                        .await;
+                    global_state.set_new_tip(next_block.clone()).await.unwrap();
                     assert_correct_global_state(
                         &global_state,
                         next_block.clone(),
@@ -3528,19 +3497,15 @@ mod global_state_tests {
 
                 if claim_cb {
                     global_state
-                        .set_new_self_composed_tip(
-                            block_1.clone(),
-                            composer_expected_utxos_1.clone(),
-                        )
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos_1.clone())
+                        .await;
+                    global_state.set_new_tip(block_1.clone()).await.unwrap();
                     global_state
-                        .set_new_self_composed_tip(
-                            block_1.clone(),
-                            composer_expected_utxos_1.clone(),
-                        )
-                        .await
-                        .unwrap();
+                        .wallet_state
+                        .add_expected_utxos(composer_expected_utxos_1.clone())
+                        .await;
+                    global_state.set_new_tip(block_1.clone()).await.unwrap();
                 } else {
                     global_state.set_new_tip(block_1.clone()).await.unwrap();
                     global_state.set_new_tip(block_1.clone()).await.unwrap();
