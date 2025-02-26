@@ -169,21 +169,16 @@ impl PeerLoopHandler {
                 .unwrap()
                 .standing
         );
-        match global_state_mut
-            .net
-            .peer_map
-            .get_mut(&self.peer_address)
-            .map(|p: &mut PeerInfo| p.standing.sanction(PeerSanction::Negative(reason)))
-        {
-            Some(Ok(_standing)) => Ok(()),
-            Some(Err(_banned)) => {
-                warn!("Banning peer");
-                bail!("Banning peer");
-            }
-            None => {
-                bail!("Could not read peer map.");
-            }
+
+        let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_address) else {
+            bail!("Could not read peer map.");
+        };
+        let sanction_result = peer_info.standing.sanction(PeerSanction::Negative(reason));
+        if let Err(err) = sanction_result {
+            warn!("Banning peer: {err}");
         }
+
+        sanction_result.map_err(|err| anyhow::anyhow!("Banning peer: {err}"))
     }
 
     /// Reward a peer for good behavior.
@@ -195,22 +190,16 @@ impl PeerLoopHandler {
     async fn reward(&mut self, reason: PositivePeerSanction) -> Result<()> {
         let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
         info!("Rewarding peer {} for {:?}", self.peer_address.ip(), reason);
-        match global_state_mut
-            .net
-            .peer_map
-            .get_mut(&self.peer_address)
-            .map(|p| p.standing.sanction(PeerSanction::Positive(reason)))
-        {
-            Some(Ok(_standing)) => Ok(()),
-            Some(Err(_banned)) => {
-                error!("Cannot reward banned peer");
-                bail!("Cannot reward banned peer");
-            }
-            None => {
-                error!("Could not read peer map.");
-                Ok(())
-            }
+        let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_address) else {
+            error!("Could not read peer map.");
+            return Ok(());
+        };
+        let sanction_result = peer_info.standing.sanction(PeerSanction::Positive(reason));
+        if sanction_result.is_err() {
+            error!("Cannot reward banned peer");
         }
+
+        sanction_result.map_err(|err| anyhow::anyhow!("Cannot reward banned peer: {err}"))
     }
 
     /// Construct a batch response, with blocks and their MMR membership proofs
@@ -1885,7 +1874,7 @@ impl PeerLoopHandler {
             self.peer_address,
             &self.to_main_tx,
         )
-        .await?;
+        .await;
 
         debug!("Ending peer loop for {}", self.peer_address);
 
