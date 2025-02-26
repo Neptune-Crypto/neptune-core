@@ -286,12 +286,21 @@ pub struct Args {
     /// However, this counter can be lost, for instance after importing the
     /// secret seed onto a new machine. In such cases, this subcommand will
     /// instruct the client to scan incoming blocks for transactions tied to
-    /// future derivation indices -- 2^1337 by default, but this parameter can
-    /// be adjusted with the `--scan-keys` subcommand.
+    /// future derivation indices --
+    /// [`ScanModeConfiguration::default_num_future_keys()`] by default, but
+    /// this parameter can be adjusted with the `--scan-keys` subcommand.
     ///
     /// The argument to this subcommand is the range of blocks where this extra-
     /// ordinary scanning step takes place. If no argument is supplied, the step
     /// takes place for every incoming block.
+    ///
+    /// Examples:
+    ///  - `neptune-core --scan-blocks ..` (scan all blocks)
+    ///  - `neptune-core --scan-blocks ..1337` (everything up to 1337)
+    ///  - `neptune-core --scan-blocks 1337..` (1337 and everything after)
+    ///  - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in
+    ///    between)
+    ///  - `neptune-core --scan-blocks 13:37` (python index ranges also work)
     #[clap(long, value_parser = parse_range, action = clap::ArgAction::Set,
         num_args = 0..=1, long_help = format!(
             "\
@@ -306,10 +315,19 @@ pub struct Args {
     instruct the client to scan incoming blocks for transactions tied to\n\
     future derivation indices -- {} by default, but this parameter can be\n\
     adjusted with the `--scan-keys` subcommand.\n\
-    \
+    \n\
     The argument to this subcommand is the range of blocks where this extra-\n\
     ordinary scanning step takes place. If no argument is supplied, the step\n\
-    takes place for every incoming block.", ScanModeConfiguration::default_num_future_keys()
+    takes place for every incoming block.\n\
+    \n\
+    Examples: \n\
+     - `neptune-core --scan-blocks ..` (scan all blocks)\n\
+     - `neptune-core --scan-blocks ..1337` (everything up to 1337)\n\
+     - `neptune-core --scan-blocks 1337..` (1337 and everything after)\n\
+     - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in\n\
+       between)\n\
+     - `neptune-core --scan-blocks 13:37` (python index ranges also work)",
+    ScanModeConfiguration::default_num_future_keys()
         ))]
     pub(crate) scan_blocks: Option<RangeInclusive<u64>>,
 
@@ -329,6 +347,8 @@ pub struct Args {
     /// When this flag is set, by default all blocks will be scanned. The
     /// subcommand `--scan-blocks` can be used to restrict the range of blocks
     /// that undergo this scan.
+    ///
+    /// Example: `neptune-core --scan-keys 42`
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
 }
