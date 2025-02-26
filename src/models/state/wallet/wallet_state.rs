@@ -1088,18 +1088,16 @@ impl WalletState {
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
             self.scan_for_spent_utxos(&tx_kernel).await;
 
-        let onchain_received_outputs = self.scan_for_announced_utxos(&tx_kernel);
-
         let MutatorSetUpdate {
             additions: addition_records,
             removals: _removal_records,
         } = new_block.mutator_set_update();
 
+        let onchain_received_outputs = self.scan_for_announced_utxos(&tx_kernel);
         let offchain_received_outputs = self
             .scan_for_expected_utxos(&addition_records)
             .await
             .collect_vec();
-
         let guesser_fee_outputs = self.scan_for_guesser_fee_utxos(new_block);
 
         let all_spendable_received_outputs = onchain_received_outputs
