@@ -2529,6 +2529,7 @@ mod tests {
     mod guesser_fee_utxos {
         use futures::channel::oneshot;
         use guesser_fee_utxos::composer_parameters::ComposerParameters;
+        use rand::rng;
 
         use super::*;
         use crate::mine_loop::composer_parameters;
@@ -2809,6 +2810,38 @@ mod tests {
                     "Must show zero liquid balance after spending liquid guesser UTXO"
                 );
             }
+        }
+
+        #[tokio::test]
+        async fn guesser_fee_scanner_finds_guesser_fee_iff_present() {
+            let network = Network::Main;
+            let mut rng = rng();
+            let wallet_state = mock_genesis_wallet_state(WalletSecret::new_random(), network).await;
+            let composer_key = wallet_state.wallet_secret.nth_generation_spending_key(0);
+            let genesis_block = Block::genesis(network);
+            let (mut incoming_block, _) =
+                make_mock_block(&genesis_block, None, composer_key, rng.random()).await;
+
+            // other guesser -> no detection
+            incoming_block.set_header_guesser_digest(rng.random());
+            assert_eq!(
+                0,
+                wallet_state
+                    .scan_for_guesser_fee_utxos(&incoming_block)
+                    .count()
+            );
+
+            // our lucky guess -> guesser fees detected
+            let guesser_preimage = wallet_state
+                .wallet_secret
+                .guesser_preimage(genesis_block.hash());
+            incoming_block.set_header_guesser_digest(guesser_preimage.hash());
+            assert_eq!(
+                2,
+                wallet_state
+                    .scan_for_guesser_fee_utxos(&incoming_block)
+                    .count()
+            );
         }
     }
 
