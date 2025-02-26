@@ -6,6 +6,7 @@ pub mod transfer_block;
 pub mod transfer_transaction;
 
 use std::fmt::Display;
+use std::fmt::Formatter;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
@@ -284,23 +285,17 @@ pub struct PeerStanding {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct StandingExceedsBanThreshold;
 
-impl PeerStanding {
-    #[cfg(test)]
-    pub(crate) fn init(
-        standing: i32,
-        latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
-        latest_reward: Option<(PositivePeerSanction, SystemTime)>,
-        peer_tolerance: i32,
-    ) -> PeerStanding {
-        Self {
-            standing,
-            latest_punishment,
-            latest_reward,
-            peer_tolerance,
-        }
+impl Display for StandingExceedsBanThreshold {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "standing exceeds ban threshold")
     }
+}
 
+impl std::error::Error for StandingExceedsBanThreshold {}
+
+impl PeerStanding {
     pub(crate) fn new(peer_tolerance: u16) -> Self {
+        assert!(peer_tolerance > 0, "peer tolerance must be positive");
         Self {
             peer_tolerance: i32::from(peer_tolerance),
             standing: 0,
@@ -312,30 +307,26 @@ impl PeerStanding {
     /// Sanction peer and return latest standing score
     pub(crate) fn sanction(
         &mut self,
-        reason: PeerSanction,
-    ) -> Result<i32, StandingExceedsBanThreshold> {
+        sanction: PeerSanction,
+    ) -> Result<(), StandingExceedsBanThreshold> {
         self.standing = self
             .standing
-            .saturating_add(reason.severity())
+            .saturating_add(sanction.severity())
             .clamp(-self.peer_tolerance, self.peer_tolerance);
         trace!(
             "new standing: {}, peer tolerance: {}",
             self.standing,
             self.peer_tolerance
         );
-        match reason {
-            PeerSanction::Negative(negative_peer_sanction) => {
-                self.latest_punishment = Some((negative_peer_sanction, SystemTime::now()))
-            }
-            PeerSanction::Positive(positive_peer_sanction) => {
-                self.latest_reward = Some((positive_peer_sanction, SystemTime::now()))
-            }
+        let now = SystemTime::now();
+        match sanction {
+            PeerSanction::Negative(sanction) => self.latest_punishment = Some((sanction, now)),
+            PeerSanction::Positive(sanction) => self.latest_reward = Some((sanction, now)),
         }
-        if self.standing == -self.peer_tolerance {
-            Err(StandingExceedsBanThreshold)
-        } else {
-            Ok(self.standing)
-        }
+
+        self.is_good()
+            .then_some(())
+            .ok_or(StandingExceedsBanThreshold)
     }
 
     /// Clear peer standing record
@@ -349,23 +340,12 @@ impl PeerStanding {
         self.standing.is_negative()
     }
 
-    /// Should only be used if peer was expected to be found in the peer map
-    /// but, for some reason, was not there. Please only use this function for
-    /// that purpose.
-    pub fn new_on_no_standing_found(peer_tolerance: u16) -> Self {
-        assert!(
-            peer_tolerance > 0,
-            " peer tolerance must be greater than zero"
-        );
-        Self {
-            standing: NegativePeerSanction::NoStandingFoundMaybeCrash.severity(),
-            latest_punishment: Some((
-                NegativePeerSanction::NoStandingFoundMaybeCrash,
-                SystemTime::now(),
-            )),
-            latest_reward: None,
-            peer_tolerance: peer_tolerance.into(),
-        }
+    pub(crate) fn is_bad(&self) -> bool {
+        self.standing <= -self.peer_tolerance
+    }
+
+    pub(crate) fn is_good(&self) -> bool {
+        !self.is_bad()
     }
 }
 
@@ -924,6 +904,22 @@ mod tests {
     use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
+
+    impl PeerStanding {
+        pub fn init(
+            standing: i32,
+            latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
+            latest_reward: Option<(PositivePeerSanction, SystemTime)>,
+            peer_tolerance: i32,
+        ) -> PeerStanding {
+            Self {
+                standing,
+                latest_punishment,
+                latest_reward,
+                peer_tolerance,
+            }
+        }
+    }
 
     #[tokio::test]
     async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {

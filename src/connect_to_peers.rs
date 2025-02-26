@@ -24,7 +24,9 @@ use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
 use crate::models::peer::InternalConnectionStatus;
+use crate::models::peer::NegativePeerSanction;
 use crate::models::peer::PeerMessage;
+use crate::models::peer::PeerSanction;
 use crate::models::peer::PeerStanding;
 use crate::models::peer::TransferConnectionStatus;
 use crate::models::state::GlobalStateLock;
@@ -100,7 +102,7 @@ async fn check_if_connection_is_allowed(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some() && standing.unwrap().standing <= -(cli_arguments.peer_tolerance as i32) {
+    if standing.is_some_and(|standing| standing.is_bad()) {
         let ip = peer_address.ip();
         warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
@@ -481,31 +483,26 @@ pub(crate) async fn close_peer_connected_callback(
 ) -> Result<()> {
     let cli_arguments = global_state_lock.cli().clone();
     let mut global_state_mut = global_state_lock.lock_guard_mut().await;
+
     // Store any new peer-standing to database
     let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_address);
-
-    let peer_tolerance = cli_arguments.peer_tolerance;
-    let new_standing = match peer_info_writeback {
-        Some(new) => new.standing(),
-        None => {
-            error!("Could not find peer standing for {peer_address}");
-            PeerStanding::new_on_no_standing_found(peer_tolerance)
-        }
+    let new_standing = if let Some(new) = peer_info_writeback {
+        new.standing()
+    } else {
+        error!("Could not find peer standing for {peer_address}");
+        let mut standing = PeerStanding::new(cli_arguments.peer_tolerance);
+        let sanction = NegativePeerSanction::NoStandingFoundMaybeCrash;
+        standing.sanction(PeerSanction::Negative(sanction))?;
+        standing
     };
-    debug!(
-        "Fetched peer info standing {} for peer {}",
-        new_standing, peer_address
-    );
+    debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
+
     global_state_mut
         .net
         .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
         .await;
     drop(global_state_mut); // avoid holding across mpsc::Sender::send()
-
-    debug!(
-        "Stored peer info standing {} for peer {}",
-        new_standing, peer_address
-    );
+    debug!("Stored peer info standing {new_standing} for peer {peer_address}");
 
     // This message is used to determine if we are to exit synchronization mode
     to_main_tx

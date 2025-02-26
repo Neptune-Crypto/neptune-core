@@ -43,13 +43,18 @@ pub struct Args {
     #[clap(long, value_name = "IP")]
     pub(crate) ban: Vec<IpAddr>,
 
-    /// Refuse connection if peer is in bad standing.
+    /// The threshold at which a peer's standing is considered “bad”. Current
+    /// connections to peers in bad standing are terminated. Connection attempts
+    /// from peers in bad standing are refused.
     ///
-    /// This sets the threshold for when a peer should be automatically refused.
-    /// The default is set to 1000.
-    ///
-    /// For a list of reasons that cause bad standing, see [PeerSanctionReason](crate::models::peer::PeerSanctionReason).
-    #[clap(long, default_value = "1000", value_name = "VALUE")]
+    /// For a list of reasons that cause bad standing, see
+    /// [NegativePeerSanction](crate::models::peer::NegativePeerSanction).
+    #[clap(
+        long,
+        default_value = "1000",
+        value_name = "VALUE",
+        value_parser = clap::value_parser!(u16).range(1..),
+    )]
     pub(crate) peer_tolerance: u16,
 
     /// Maximum number of peers to accept connections from.

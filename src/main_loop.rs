@@ -956,14 +956,15 @@ impl MainLoopHandler {
                 .get_peer_standing_from_database(peer_with_lost_connection.ip())
                 .await;
 
-            if standing.is_some()
-                && standing.unwrap().standing
-                    < -(self.global_state_lock.cli().peer_tolerance as i32)
-            {
-                info!("Not reconnecting to peer with lost connection because it was banned: {peer_with_lost_connection}");
+            if standing.is_some_and(|standing| standing.is_bad()) {
+                info!(
+                    "Not reconnecting to peer with lost connection because it was banned: \
+                    {peer_with_lost_connection}"
+                );
             } else {
                 info!(
-                    "Attempting to reconnect to peer with lost connection: {peer_with_lost_connection}"
+                    "Attempting to reconnect to peer with lost connection: \
+                    {peer_with_lost_connection}"
                 );
             }
 
