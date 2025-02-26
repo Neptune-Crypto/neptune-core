@@ -1277,6 +1277,15 @@ impl WalletState {
             .collect_vec();
         let guesser_fee_outputs = self.scan_for_guesser_fee_utxos(new_block);
 
+        debug!(
+            "Scanned block for incoming UTXOs; received {} onchain \
+            notifications, {} onchain through scan mode, {} offchain \
+            notifications",
+            onchain_received_outputs.len(),
+            outputs_recovered_through_scan_mode.len(),
+            offchain_received_outputs.len()
+        );
+
         let all_spendable_received_outputs = onchain_received_outputs
             .into_iter()
             .chain(outputs_recovered_through_scan_mode)
@@ -3915,7 +3924,12 @@ mod tests {
     }
 
     pub(crate) mod scan_mode {
+        use rand::rngs::StdRng;
+        use rand::{rng, SeedableRng};
+
+        use crate::job_queue::JobQueue;
         use crate::models::blockchain::block::block_height::BlockHeight;
+        use crate::tests::shared::unit_test_data_directory;
 
         use super::*;
 
@@ -4079,6 +4093,144 @@ mod tests {
                     (lb..=ub).contains(&h),
                     scan_mode.block_height_is_in_range(BlockHeight::from(h)),
                 );
+            }
+        }
+
+        /// Test scan mode.
+        ///
+        /// In rough terms, this test verifies that importing a wallet followed
+        /// by booting the node in scan mode will recover UTXOs sent to it.
+        ///
+        /// Specifically:
+        ///  - Alice is recipient of a transaction in block 1, but the address
+        ///    for this transaction uses derivation index 20, which is in the
+        ///    future.
+        ///  - If Alice does nothing special, she does not catch the UTXO.
+        ///  - If Alice activates scan mode with the right parameters, she does
+        ///    catch the UTXO.
+        ///  - In the last case, her derivation counter is updated accordingly.
+        #[traced_test]
+        #[tokio::test]
+        async fn test_recovery_on_imported_wallet() {
+            let network = Network::Main;
+            let mut rng = StdRng::from_rng(&mut rng());
+            let alice_secret = WalletSecret::new_pseudorandom(rng.random());
+            let data_dir = unit_test_data_directory(network).unwrap();
+
+            // generate events
+            let genesis_block = Block::genesis(network);
+            let premine_receiver = mock_genesis_global_state(
+                network,
+                0,
+                WalletSecret::devnet_wallet(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let premine_change_key = premine_receiver
+                .lock_guard()
+                .await
+                .wallet_state
+                .nth_spending_key(KeyType::Symmetric, 0)
+                .expect("wallet should be capable of generating symmetric spending keys");
+            let now =
+                genesis_block.header().timestamp + Timestamp::months(6) + Timestamp::minutes(5);
+            let sender_randomness = rng.random();
+            let alice_future_spending_key = alice_secret.nth_generation_spending_key(20);
+            let tx_output = TxOutput::onchain_native_currency(
+                NativeCurrencyAmount::coins(1),
+                sender_randomness,
+                alice_future_spending_key.to_address().into(),
+                false,
+            );
+            let (transaction, _, _) = premine_receiver
+                .lock_guard()
+                .await
+                .create_transaction_with_prover_capability(
+                    vec![tx_output].into(),
+                    premine_change_key,
+                    UtxoNotificationMedium::OffChain,
+                    NativeCurrencyAmount::coins(0),
+                    now,
+                    TxProvingCapability::PrimitiveWitness,
+                    &JobQueue::dummy(),
+                )
+                .await
+                .unwrap();
+            let block_1 = invalid_block_with_transaction(&genesis_block, transaction);
+
+            // some possible CLI configurations:
+            // scan mode is inactive
+            let cli_default = cli_args::Args::default();
+            // scan mode is active but looking in the wrong blocks
+            let cli_wrong_range = cli_args::Args {
+                scan_blocks: Some(10..=100),
+                ..Default::default()
+            };
+            // scan mode is active but scanning for too few keys
+            let cli_too_few_keys = cli_args::Args {
+                scan_keys: Some(5),
+                ..Default::default()
+            };
+            // scan mode is active and scanning for the right keys in the right
+            // blocks
+            let cli_well_configured = cli_args::Args {
+                scan_blocks: Some(0..=u64::MAX),
+                scan_keys: Some(25),
+                ..Default::default()
+            };
+
+            for (case, cli_args, should_catch_utxo) in [
+                (0, cli_default, false),
+                (1, cli_wrong_range, false),
+                (2, cli_too_few_keys, false),
+                (3, cli_well_configured, true),
+            ] {
+                println!("testing case {case} ...");
+                let mut alice_wallet_state = WalletState::new_from_wallet_secret(
+                    &data_dir,
+                    alice_secret.clone(),
+                    &cli_args,
+                    false,
+                )
+                .await;
+
+                let wallet_status_ = alice_wallet_state
+                    .get_wallet_status(block_1.hash(), &block_1.mutator_set_accumulator_after())
+                    .await;
+                let balance_ = alice_wallet_state.confirmed_available_balance(&wallet_status_, now);
+                assert_eq!(NativeCurrencyAmount::coins(0), balance_);
+
+                alice_wallet_state
+                    .update_wallet_state_with_new_block(
+                        &genesis_block.mutator_set_accumulator_after(),
+                        &block_1,
+                    )
+                    .await
+                    .unwrap();
+
+                let wallet_status = alice_wallet_state
+                    .get_wallet_status(block_1.hash(), &block_1.mutator_set_accumulator_after())
+                    .await;
+                let balance = alice_wallet_state.confirmed_available_balance(&wallet_status, now);
+                if should_catch_utxo {
+                    assert_eq!(NativeCurrencyAmount::coins(1), balance);
+                    assert_eq!(
+                        21,
+                        alice_wallet_state
+                            .wallet_db
+                            .get_generation_key_counter()
+                            .await
+                    );
+                } else {
+                    assert_eq!(NativeCurrencyAmount::coins(0), balance);
+                    assert_eq!(
+                        1,
+                        alice_wallet_state
+                            .wallet_db
+                            .get_generation_key_counter()
+                            .await
+                    );
+                }
             }
         }
     }

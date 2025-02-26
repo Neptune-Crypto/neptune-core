@@ -36,8 +36,8 @@ impl ScanModeConfiguration {
     /// Best used in conjuction with constructor-helpers
     /// [`Self::for_future_keys`] and [`Self::blocks`], *e.g.*:
     ///
-    /// ```
-    /// let config = ScanModeConfiguration::scan().blocks(1..2).for_future_keys(3);
+    /// ```notest
+    /// let config = ScanModeConfiguration::scan().blocks(1..=2).for_future_keys(3);
     /// ```
     pub(crate) fn scan() -> Self {
         Default::default()
