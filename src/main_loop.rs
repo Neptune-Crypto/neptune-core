@@ -895,12 +895,13 @@ impl MainLoopHandler {
         let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
 
         // Check if we are connected to too many peers
-        if connected_peers.len() > cli_args.max_num_peers {
+        let num_peers = connected_peers.len();
+        let max_num_peers = cli_args.max_num_peers;
+        if num_peers > max_num_peers {
             // If *all* peer connections were outgoing, then it's OK to exceed
             // the max-peer count. But in that case we don't want to connect to
-            // more peers, so we should just stop execution of this scheduled
-            // task here.
-            if connected_peers.iter().all(|x| !x.connection_is_inbound()) {
+            // more peers; stop execution here.
+            if connected_peers.iter().all(|x| x.connection_is_outbound()) {
                 return Ok(());
             }
 
@@ -908,31 +909,24 @@ impl MainLoopHandler {
             // we unfortunately cannot exclude. So we just disconnect from a peer that the user
             // didn't request a connection to.
             warn!(
-                "Max peer parameter is exceeded. max is {} but we are connected to {}. \
-                Attempting to fix.",
-                self.global_state_lock.cli().max_num_peers,
-                connected_peers.len(),
+                "Max peer parameter is exceeded. max is {max_num_peers} but we are connected \
+                to {num_peers}. Attempting to fix."
             );
 
-            // pick a peer that was not specified in the CLI arguments to disconnect from
-            let mut rng = rand::rng();
-            let peer_to_disconnect = connected_peers
-                .iter()
-                .filter(|peer| {
-                    !self
-                        .global_state_lock
-                        .cli()
-                        .peers
-                        .contains(&peer.connected_address())
-                })
-                .choose(&mut rng);
-            match peer_to_disconnect {
-                Some(peer) => {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
-                }
-                None => warn!("Unable to resolve max peer constraint due to manual override."),
-            };
+            // pick peers that were not specified in the CLI arguments to disconnect from
+            let num_peers_to_disconnect = max_num_peers - num_peers;
+            let peers_to_disconnect = connected_peers
+                .into_iter()
+                .filter(|peer| !cli_args.peers.contains(&peer.connected_address()))
+                .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
+            match peers_to_disconnect.len() {
+                0 => warn!("Unable to resolve max peer constraint due to manual override."),
+                i => info!("Disconnecting from {i} peers."),
+            }
+            for peer in peers_to_disconnect {
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
+            }
 
             return Ok(());
         }
@@ -1766,7 +1760,7 @@ mod test {
                 .net
                 .peer_map
                 .iter()
-                .all(|(_addr, peer)| !peer.connection_is_inbound()),
+                .all(|(_addr, peer)| peer.connection_is_outbound()),
             "Test assumption: All initial peers must represent outgoing connections."
         );
 
