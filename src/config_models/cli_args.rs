@@ -303,6 +303,12 @@ pub struct Args {
     ///  - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in
     ///    between)
     ///  - `neptune-core --scan-blocks 13:37` (python index ranges also work)
+    //
+    // Everything above should constitute the help documentation for this
+    // command, with the exception of the concrete value for the default number
+    // of future indices. To present the user with that piece of information,
+    // we override this docstring by setting `long_help`, which allows us to
+    // invoke `format!` and embed the integer.
     #[clap(long, value_parser = parse_range, action = clap::ArgAction::Set,
         num_args = 0..=1, long_help = format!(
             "\
