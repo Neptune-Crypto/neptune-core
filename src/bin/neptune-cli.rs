@@ -27,9 +27,10 @@ use neptune_cash::models::state::wallet::coin_with_possible_timelock::CoinWithPo
 use neptune_cash::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use neptune_cash::models::state::wallet::utxo_notification::PrivateNotificationData;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_cash::models::state::wallet::wallet_file::WalletFile;
+use neptune_cash::models::state::wallet::wallet_file::WalletFileContext;
 use neptune_cash::models::state::wallet::wallet_status::WalletStatus;
 use neptune_cash::models::state::wallet::wallet_status::WalletStatusExportFormat;
-use neptune_cash::models::state::wallet::WalletSecret;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
@@ -408,7 +409,7 @@ async fn main() -> Result<()> {
                 DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
-            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            let wallet_file = WalletFileContext::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
                 eprintln!("No wallet file found at {}.", wallet_file.display());
                 return Ok(());
@@ -424,10 +425,9 @@ async fn main() -> Result<()> {
             // Get wallet object, create various wallet secret files
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
-            let (_, secret_file_paths, wallet_is_new) =
-                WalletSecret::read_from_file_or_create(&wallet_dir)?;
+            let wallet_file_context = WalletFileContext::read_from_file_or_create(&wallet_dir)?;
 
-            if wallet_is_new {
+            if wallet_file_context.wallet_is_new {
                 println!("New wallet generated.");
             } else {
                 println!("Not generating a new wallet because an existing one is present already.");
@@ -435,7 +435,7 @@ async fn main() -> Result<()> {
 
             println!(
                 "Wallet stored in: {}\nMake sure you also see this path if you run the neptune-core client",
-                secret_file_paths.wallet_secret_path.display()
+                wallet_file_context.wallet_secret_path.display()
             );
 
             println!(
@@ -449,7 +449,7 @@ async fn main() -> Result<()> {
             let data_directory = DataDirectory::get(args.data_dir.clone(), *network)?;
             let wallet_dir = data_directory.wallet_directory_path();
             let wallet_db_dir = data_directory.wallet_database_dir_path();
-            let wallet_secret_path = WalletSecret::wallet_secret_path(&wallet_dir);
+            let wallet_secret_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 
             // if the wallet dir already exists,
             if wallet_dir.exists() {
@@ -476,7 +476,7 @@ async fn main() -> Result<()> {
                     return Ok(());
                 }
             };
-            let wallet_secret = WalletSecret::new(secret_key);
+            let wallet_secret = WalletFile::new(secret_key);
 
             // wallet file does not exist yet, so create it and save
             println!(
@@ -501,14 +501,14 @@ async fn main() -> Result<()> {
                 DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
-            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            let wallet_file = WalletFileContext::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
                 bail!(
                     concat!("Cannot export seed phrase because there is no wallet.dat file to export from.\n",
                     "Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
                 );
             }
-            let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
+            let wallet_secret = match WalletFile::read_from_file(&wallet_file) {
                 Err(e) => {
                     println!("Could not export seed phrase.");
                     println!("Error:");
@@ -519,7 +519,7 @@ async fn main() -> Result<()> {
             };
             println!("Seed phrase for {}.", network);
             println!("Read from file `{}`.", wallet_file.display());
-            print_seed_phrase_dialog(wallet_secret);
+            print_seed_phrase_dialog(wallet_secret.secret_key());
             return Ok(());
         }
         Command::NthReceivingAddress { network, index } => {
@@ -531,7 +531,7 @@ async fn main() -> Result<()> {
         Command::ShamirCombine { t, network } => {
             let wallet_dir =
                 DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
-            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            let wallet_file = WalletFileContext::wallet_secret_path(&wallet_dir);
 
             // if the wallet file already exists, bail
             if wallet_file.exists() {
@@ -635,7 +635,7 @@ async fn main() -> Result<()> {
             };
 
             // create wallet and save to disk
-            let wallet_secret = WalletSecret::new(original_secret);
+            let wallet_secret = WalletFile::new(original_secret);
 
             // wallet file does not exist yet (we verified that upstairs) so
             // create it and save
@@ -673,15 +673,15 @@ async fn main() -> Result<()> {
                 DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
-            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
-            if !wallet_file.exists() {
+            let wallet_file_name = WalletFileContext::wallet_secret_path(&wallet_dir);
+            if !wallet_file_name.exists() {
                 println!(
                     concat!("Cannot Shamir-secret-share wallet secret because there is no wallet.dat file to read from.\n \
                     Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
                 );
                 return Ok(());
             }
-            let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
+            let wallet_file = match WalletFile::read_from_file(&wallet_file_name) {
                 Err(e) => {
                     println!("Could not read from wallet file.");
                     eprintln!("Error: {e}");
@@ -689,8 +689,9 @@ async fn main() -> Result<()> {
                 }
                 Ok(result) => result,
             };
+            let wallet_secret = wallet_file.secret_key();
             println!("Wallet for {}.", network);
-            println!("Read from file `{}`.\n", wallet_file.display());
+            println!("Read from file `{}`.\n", wallet_file_name.display());
 
             let mut rng = rand::rng();
             let shamir_shares = match wallet_secret.share_shamir(*t, *n, rng.random()) {
@@ -705,8 +706,8 @@ async fn main() -> Result<()> {
             let n = shamir_shares.len();
             for (i, secret_key) in shamir_shares {
                 println!("Key share {i}/{}:", n);
-                let wallet_secret = WalletSecret::new(secret_key);
-                print_seed_phrase_dialog(wallet_secret);
+                let wallet_secret = WalletFile::new(secret_key);
+                print_seed_phrase_dialog(wallet_secret.secret_key());
                 println!();
             }
 
@@ -1194,25 +1195,26 @@ fn get_nth_receiving_address(
     let wallet_dir = DataDirectory::get(data_dir.clone(), network)?.wallet_directory_path();
 
     // Get wallet object, create various wallet secret files
-    let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
-    if !wallet_file.exists() {
-        bail!("No wallet file found at {}.", wallet_file.display());
+    let wallet_file_name = WalletFileContext::wallet_secret_path(&wallet_dir);
+    if !wallet_file_name.exists() {
+        bail!("No wallet file found at {}.", wallet_file_name.display());
     } else {
-        println!("{}", wallet_file.display());
+        println!("{}", wallet_file_name.display());
     }
 
-    let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
+    let wallet_file = match WalletFile::read_from_file(&wallet_file_name) {
         Ok(ws) => ws,
         Err(e) => {
             eprintln!(
                 "Could not open wallet file at {}. Got error: {e}",
-                wallet_file.to_string_lossy()
+                wallet_file_name.to_string_lossy()
             );
             return Ok(());
         }
     };
+    let wallet_entropy = wallet_file.entropy();
 
-    let nth_spending_key = wallet_secret.nth_generation_spending_key(index as u64);
+    let nth_spending_key = wallet_entropy.nth_generation_spending_key(index as u64);
     let nth_receiving_address = nth_spending_key.to_address();
     let nth_address_as_string = match nth_receiving_address.to_bech32m(network) {
         Ok(s) => s,
@@ -1347,7 +1349,7 @@ fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
     }
 }
 
-fn print_seed_phrase_dialog(wallet_secret: WalletSecret) {
+fn print_seed_phrase_dialog(wallet_secret: SecretKeyMaterial) {
     for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
         println!("{}. {word}", i + 1);
     }

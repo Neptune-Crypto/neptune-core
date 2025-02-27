@@ -10,460 +10,27 @@ pub mod sent_transaction;
 pub(crate) mod transaction_output;
 pub(crate) mod unlocked_utxo;
 pub mod utxo_notification;
+pub(crate) mod wallet_entropy;
+pub mod wallet_file;
 pub(crate) mod wallet_state;
 pub mod wallet_status;
-
-use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
-
-use address::generation_address;
-use address::hash_lock_key;
-use address::hash_lock_key::HashLockKey;
-use address::symmetric_key;
-use anyhow::bail;
-use anyhow::Context;
-use anyhow::Result;
-use bip39::Mnemonic;
-use itertools::Itertools;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
-use secret_key_material::SecretKeyMaterial;
-use secret_key_material::ShamirSecretSharingError;
-use serde::Deserialize;
-use serde::Serialize;
-use tasm_lib::prelude::Tip5;
-use tracing::info;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::digest::Digest;
-use twenty_first::math::x_field_element::XFieldElement;
-use zeroize::ZeroizeOnDrop;
-
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::prelude::twenty_first;
-use crate::Hash;
-
-pub const WALLET_DIRECTORY: &str = "wallet";
-pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
-pub const WALLET_OUTGOING_SECRETS_FILE_NAME: &str = "outgoing_randomness.dat";
-pub const WALLET_INCOMING_SECRETS_FILE_NAME: &str = "incoming_randomness.dat";
-const STANDARD_WALLET_NAME: &str = "standard_wallet";
-const STANDARD_WALLET_VERSION: u8 = 0;
-pub const WALLET_DB_NAME: &str = "wallet";
-pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
-
-/// Wallet contains the wallet-related data we want to store in a JSON file,
-/// and that is not updated during regular program execution.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ZeroizeOnDrop)]
-pub struct WalletSecret {
-    name: String,
-
-    secret_seed: SecretKeyMaterial,
-    version: u8,
-}
-
-/// Struct for containing file paths for secrets. To be communicated to user upon
-/// wallet creation or wallet opening.
-pub struct WalletSecretFileLocations {
-    pub wallet_secret_path: PathBuf,
-    pub incoming_randomness_file: PathBuf,
-    pub outgoing_randomness_file: PathBuf,
-}
-
-impl WalletSecret {
-    pub fn wallet_secret_path(wallet_directory_path: &Path) -> PathBuf {
-        wallet_directory_path.join(WALLET_SECRET_FILE_NAME)
-    }
-
-    fn wallet_outgoing_secrets_path(wallet_directory_path: &Path) -> PathBuf {
-        wallet_directory_path.join(WALLET_OUTGOING_SECRETS_FILE_NAME)
-    }
-
-    fn wallet_incoming_secrets_path(wallet_directory_path: &Path) -> PathBuf {
-        wallet_directory_path.join(WALLET_INCOMING_SECRETS_FILE_NAME)
-    }
-
-    /// Create new `Wallet` given a `secret` key.
-    pub fn new(secret_seed: SecretKeyMaterial) -> Self {
-        Self {
-            name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed,
-            version: STANDARD_WALLET_VERSION,
-        }
-    }
-
-    /// Create a new `Wallet` and populate it with a new secret seed, with entropy
-    /// obtained via `rand::rng()` from the operating system.
-    pub fn new_random() -> Self {
-        Self::new_pseudorandom(rand::rng().random())
-    }
-
-    /// Create a new `Wallet` and populate it by expanding a given seed.
-    pub fn new_pseudorandom(seed: [u8; 32]) -> Self {
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        Self {
-            name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed: SecretKeyMaterial(rng.random()),
-            version: STANDARD_WALLET_VERSION,
-        }
-    }
-
-    /// Create a `Wallet` with a fixed digest
-    pub fn devnet_wallet() -> Self {
-        let secret_seed = SecretKeyMaterial(XFieldElement::new([
-            BFieldElement::new(12063201067205522823),
-            BFieldElement::new(1529663126377206632),
-            BFieldElement::new(2090171368883726200),
-        ]));
-
-        WalletSecret::new(secret_seed)
-    }
-
-    /// Read a wallet file or create it.
-    ///
-    /// Read a wallet secret from the wallet file in the given directory if it
-    /// exists, or otherwise create new wallet secret and save it there. Also,
-    /// create files for incoming and outgoing randomness which should be
-    /// appended to with each incoming and outgoing transaction.
-    ///
-    /// # Return Value
-    ///
-    /// Returns a `Result`-wrapped tuple consisting of
-    ///  - a `WalletSecret` instance
-    ///  - a tuple of file names of files containing wallet info
-    ///  - a boolean indicating whether a new wallet secret was generated (true)
-    ///    or an old one read from disk (false)
-    ///
-    pub fn read_from_file_or_create(
-        wallet_directory_path: &Path,
-    ) -> Result<(Self, WalletSecretFileLocations, bool)> {
-        let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
-        let wallet_is_new;
-        let wallet_secret = if wallet_secret_path.exists() {
-            info!(
-                "***** Reading wallet from {} *****\n\n\n",
-                wallet_secret_path.display()
-            );
-            wallet_is_new = false;
-            Self::read_from_file(&wallet_secret_path)?
-        } else {
-            info!(
-                "***** Creating new wallet in {} *****\n\n\n",
-                wallet_secret_path.display()
-            );
-            let new_wallet: WalletSecret = WalletSecret::new_random();
-            new_wallet.save_to_disk(&wallet_secret_path)?;
-            wallet_is_new = true;
-            new_wallet
-        };
-
-        // Generate files for outgoing and ingoing randomness if those files
-        // do not already exist
-        let outgoing_randomness_file: PathBuf =
-            Self::wallet_outgoing_secrets_path(wallet_directory_path);
-        if !outgoing_randomness_file.exists() {
-            Self::create_empty_wallet_randomness_file(&outgoing_randomness_file).unwrap_or_else(
-                |_| {
-                    panic!(
-                "Create file for outgoing randomness must succeed. Attempted to create file: {}",
-                outgoing_randomness_file.to_string_lossy()
-            )
-                },
-            );
-        }
-
-        let incoming_randomness_file = Self::wallet_incoming_secrets_path(wallet_directory_path);
-        if !incoming_randomness_file.exists() {
-            Self::create_empty_wallet_randomness_file(&incoming_randomness_file).unwrap_or_else(
-                |_| {
-                    panic!(
-                "Create file for outgoing randomness must succeed. Attempted to create file: {}",
-                incoming_randomness_file.to_string_lossy()
-            )
-                },
-            );
-        }
-
-        // Sanity checks that files were actually created
-        if !wallet_secret_path.exists() {
-            bail!(
-                "Wallet secret file '{}' must exist on disk after reading/creating it.",
-                wallet_secret_path.display()
-            );
-        }
-        if !outgoing_randomness_file.exists() {
-            bail!(
-                "file containing outgoing randomness '{}' must exist on disk.",
-                outgoing_randomness_file.display()
-            );
-        }
-        if !incoming_randomness_file.exists() {
-            bail!(
-                "file containing ingoing randomness '{}' must exist on disk.",
-                incoming_randomness_file.display()
-            );
-        }
-
-        let wallet_secret_file_locations = WalletSecretFileLocations {
-            wallet_secret_path,
-            incoming_randomness_file,
-            outgoing_randomness_file,
-        };
-
-        Ok((wallet_secret, wallet_secret_file_locations, wallet_is_new))
-    }
-
-    /// Return the guesser preimage for guessing on top of a given block (as
-    /// identified by the block's predecessor's hash).
-    pub(crate) fn guesser_preimage(&self, prev_block_digest: Digest) -> Digest {
-        Tip5::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![hash_lock_key::RAW_HASH_LOCK_KEY_FLAG],
-                prev_block_digest.encode(),
-            ]
-            .concat(),
-        )
-    }
-
-    /// Returns the spending key for guessing on top of the given block.
-    pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
-        HashLockKey::from_preimage(self.guesser_preimage(prev_block_digest))
-    }
-
-    /// derives a generation spending key at `index`
-    //
-    // note: this is a read-only method and does not modify wallet state.  When
-    // requesting a new key for purposes of a new wallet receiving address,
-    // callers should use [wallet_state::WalletState::next_unused_spending_key()]
-    // which takes &mut self.
-    pub fn nth_generation_spending_key(
-        &self,
-        index: u64,
-    ) -> generation_address::GenerationSpendingKey {
-        // We keep n between 0 and 2^16 as this makes it possible to scan all possible addresses
-        // in case you don't know with what counter you made the address
-        let key_seed = Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![
-                    generation_address::GENERATION_FLAG,
-                    BFieldElement::new(index),
-                ],
-            ]
-            .concat(),
-        );
-        generation_address::GenerationSpendingKey::derive_from_seed(key_seed)
-    }
-
-    /// derives a symmetric key at `index`
-    //
-    // note: this is a read-only method and does not modify wallet state.  When
-    // requesting a new key for purposes of a new wallet receiving address,
-    // callers should use [wallet_state::WalletState::next_unused_spending_key()]
-    // which takes &mut self.
-    pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
-        let key_seed = Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![symmetric_key::SYMMETRIC_KEY_FLAG, BFieldElement::new(index)],
-            ]
-            .concat(),
-        );
-        symmetric_key::SymmetricKey::from_seed(key_seed)
-    }
-
-    // note: legacy tests were written to call nth_generation_spending_key()
-    // when requesting a new address.  As such, they may be unprepared to mutate
-    // wallet state.  This method enables them to compile while making clear
-    // it is an improper usage.
-    //
-    // [wallet_state::WalletState::next_unused_generation_spending_key()] should be used
-    #[cfg(test)]
-    pub fn nth_generation_spending_key_for_tests(
-        &self,
-        counter: u64,
-    ) -> generation_address::GenerationSpendingKey {
-        self.nth_generation_spending_key(counter)
-    }
-
-    // note: legacy tests were written to call nth_symmetric_key()
-    // when requesting a new key.  As such, they may be unprepared to mutate
-    // wallet state.  This method enables them to compile while making clear
-    // it is an improper usage.
-    //
-    // [wallet_state::WalletState::next_unused_symmetric_key()] should be used
-    #[cfg(test)]
-    pub fn nth_symmetric_key_for_tests(&self, counter: u64) -> symmetric_key::SymmetricKey {
-        self.nth_symmetric_key(counter)
-    }
-
-    /// Return a deterministic seed that can be used to seed an RNG
-    pub(crate) fn deterministic_derived_seed(&self, block_height: BlockHeight) -> Digest {
-        const SEED_FLAG: u64 = 0x2315439570c4a85fu64;
-        Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![BFieldElement::new(SEED_FLAG), block_height.into()],
-            ]
-            .concat(),
-        )
-    }
-
-    /// Return a seed used to randomize shuffling.
-    pub(crate) fn shuffle_seed(&self, block_height: BlockHeight) -> [u8; 32] {
-        let secure_seed_from_wallet = self.deterministic_derived_seed(block_height);
-        let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
-
-        seed[0..32].try_into().unwrap()
-    }
-
-    /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
-    /// for the mutator set.
-    pub fn generate_sender_randomness(
-        &self,
-        block_height: BlockHeight,
-        receiver_digest: Digest,
-    ) -> Digest {
-        const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
-        Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![
-                    BFieldElement::new(SENDER_RANDOMNESS_FLAG),
-                    block_height.into(),
-                ],
-                receiver_digest.encode(),
-            ]
-            .concat(),
-        )
-    }
-
-    /// Read Wallet from file as JSON
-    pub fn read_from_file(wallet_file: &Path) -> Result<Self> {
-        let wallet_file_content: String = fs::read_to_string(wallet_file)
-            .with_context(|| format!("Failed to read wallet from {}", wallet_file.display(),))?;
-
-        serde_json::from_str::<WalletSecret>(&wallet_file_content)
-            .with_context(|| format!("Failed to decode wallet from {}", wallet_file.display(),))
-    }
-
-    /// Used to generate both the file for incoming and outgoing randomness
-    fn create_empty_wallet_randomness_file(file_path: &Path) -> Result<()> {
-        let init_value: String = String::default();
-
-        #[cfg(unix)]
-        {
-            Self::create_wallet_file_unix(&file_path.to_path_buf(), init_value)
-        }
-        #[cfg(not(unix))]
-        {
-            Self::create_wallet_file_windows(&file_path.to_path_buf(), init_value)
-        }
-    }
-
-    /// Save this wallet to disk. If necessary, create the file (with restrictive permissions).
-    pub fn save_to_disk(&self, wallet_file: &Path) -> Result<()> {
-        let wallet_secret_as_json: String = serde_json::to_string(self).unwrap();
-
-        #[cfg(unix)]
-        {
-            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_secret_as_json)
-        }
-        #[cfg(not(unix))]
-        {
-            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_secret_as_json)
-        }
-    }
-
-    #[cfg(unix)]
-    /// Create a wallet file, and set restrictive permissions
-    fn create_wallet_file_unix(path: &PathBuf, file_content: String) -> Result<()> {
-        // On Unix/Linux we set the file permissions to 600, to disallow
-        // other users on the same machine to access the secrets.
-        // I don't think the `std::os::unix` library can be imported on a Windows machine,
-        // so this function and the below import is only compiled on Unix machines.
-        use std::os::unix::prelude::OpenOptionsExt;
-        fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .mode(0o600)
-            .open(path)
-            .unwrap();
-        fs::write(path.clone(), file_content).context("Failed to write wallet file to disk")
-    }
-
-    #[cfg(not(unix))]
-    /// Create a wallet file, without setting restrictive UNIX permissions
-    fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) -> Result<()> {
-        fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(path)
-            .unwrap();
-        fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
-    }
-
-    /// Convert the wallet secret into a BIP-39 phrase consisting of 18 words (for 192
-    /// bits of entropy).
-    pub fn to_phrase(&self) -> Vec<String> {
-        let entropy = self
-            .secret_seed
-            .0
-            .coefficients
-            .iter()
-            .flat_map(|bfe| bfe.value().to_le_bytes())
-            .collect_vec();
-        assert_eq!(
-            entropy.len(),
-            24,
-            "Entropy for secret seed does not consist of 24 bytes."
-        );
-        let mnemonic = Mnemonic::from_entropy(&entropy, bip39::Language::English)
-            .expect("Wrong entropy length (should be 24 bytes).");
-        mnemonic
-            .phrase()
-            .split(' ')
-            .map(|s| s.to_string())
-            .collect_vec()
-    }
-
-    /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a
-    /// [`WalletSecret`]
-    pub fn from_phrase(phrase: &[String]) -> Result<Self> {
-        let key = SecretKeyMaterial::from_phrase(phrase)?;
-        Ok(Self::new(key))
-    }
-
-    /// Split the secret across n shares such that combining any t of them
-    /// yields the secret again.
-    ///
-    /// Calls [`SecretKeyMaterial::share_shamir`] on the `secret_seed` field.
-    /// See that method for documentation.
-    pub fn share_shamir(
-        &self,
-        t: usize,
-        n: usize,
-        seed: [u8; 32],
-    ) -> Result<Vec<(usize, SecretKeyMaterial)>, ShamirSecretSharingError> {
-        self.secret_seed.share_shamir(t, n, seed)
-    }
-}
 
 #[cfg(test)]
 mod wallet_tests {
     use expected_utxo::ExpectedUtxo;
+    use itertools::Itertools;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::triton_vm::prelude::XFieldElement;
+    use tasm_lib::twenty_first::math::x_field_element::EXTENSION_DEGREE;
     use tracing_test::traced_test;
-    use twenty_first::math::tip5::Digest;
-    use twenty_first::math::x_field_element::EXTENSION_DEGREE;
     use unlocked_utxo::UnlockedUtxo;
 
     use super::monitored_utxo::MonitoredUtxo;
@@ -485,9 +52,11 @@ mod wallet_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+    use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -507,7 +76,8 @@ mod wallet_tests {
 
         let mut rng = rand::rng();
         for network in Network::iter() {
-            let mut alice = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+            let mut alice =
+                mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
             let alice_wallet = get_monitored_utxos(&alice).await;
             assert_eq!(
                 1,
@@ -521,7 +91,7 @@ mod wallet_tests {
                 "Devnet wallet's monitored UTXO must match that from genesis block at initialization"
             );
 
-            let bob_wallet = WalletSecret::new_pseudorandom(rng.random());
+            let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
             let bob_wallet = mock_genesis_wallet_state(bob_wallet, network).await;
             let bob_mutxos = get_monitored_utxos(&bob_wallet).await;
             assert!(
@@ -532,7 +102,7 @@ mod wallet_tests {
             // Add 12 blocks and verify that membership proofs are still valid
             let genesis_block = Block::genesis(network);
             let mut next_block = genesis_block.clone();
-            let charlie_wallet = WalletSecret::new_pseudorandom(rng.random());
+            let charlie_wallet = WalletEntropy::new_pseudorandom(rng.random());
             let charlie_key = charlie_wallet.nth_generation_spending_key_for_tests(0);
             for _ in 0..12 {
                 let previous_block = next_block;
@@ -572,9 +142,9 @@ mod wallet_tests {
     async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
         let mut rng = rand::rng();
         let network = Network::RegTest;
-        let alice_wallet = WalletSecret::new_random();
+        let alice_wallet = WalletEntropy::new_random();
         let mut alice_wallet = mock_genesis_wallet_state(alice_wallet.clone(), network).await;
-        let bob_wallet = WalletSecret::new_random();
+        let bob_wallet = WalletEntropy::new_random();
         let bob_key = bob_wallet.nth_generation_spending_key_for_tests(0);
 
         assert!(
@@ -584,7 +154,7 @@ mod wallet_tests {
 
         let genesis_block = Block::genesis(network);
         let alice_key = alice_wallet
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block_1, block1_composer_expected) =
             make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
@@ -692,7 +262,7 @@ mod wallet_tests {
         // a test of block validity logic.
 
         let network = Network::Main;
-        let alice_wallet_secret = WalletSecret::new_random();
+        let alice_wallet_secret = WalletEntropy::new_random();
         let mut alice =
             mock_genesis_global_state(network, 1, alice_wallet_secret, cli_args::Args::default())
                 .await;
@@ -700,7 +270,7 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let genesis_block = Block::genesis(network);
 
@@ -927,7 +497,7 @@ mod wallet_tests {
 
         let network = Network::Main;
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
-        let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.random());
+        let alice_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
         let mut alice =
             mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args::Args::default())
                 .await;
@@ -935,13 +505,13 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let genesis_block = Block::genesis(network);
-        let bob_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
+        let bob_wallet = mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network)
             .await
-            .wallet_secret;
+            .wallet_entropy;
         let mut bob_global_lock =
             mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args::Args::default())
                 .await;
@@ -957,7 +527,7 @@ mod wallet_tests {
             "Premine must have non-zero synced balance"
         );
 
-        let bob_sender_randomness = bob.wallet_state.wallet_secret.generate_sender_randomness(
+        let bob_sender_randomness = bob.wallet_state.wallet_entropy.generate_sender_randomness(
             genesis_block.kernel.header.height,
             alice_address.privacy_digest(),
         );
@@ -1131,7 +701,7 @@ mod wallet_tests {
         // Bob mines a block, ignoring Alice's spree and forking instead
         let bob_key = bob
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
@@ -1396,7 +966,7 @@ mod wallet_tests {
         let bob = mock_genesis_global_state(
             network,
             42,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1424,7 +994,7 @@ mod wallet_tests {
             Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
         let tx_output =
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
-        let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
+        let change_key = WalletEntropy::devnet_wallet().nth_symmetric_key_for_tests(0);
         let (sender_tx, _, _change_output) = bob
             .lock_guard()
             .await
@@ -1469,7 +1039,7 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn basic_wallet_secret_functionality_test() {
-        let random_wallet_secret = WalletSecret::new_random();
+        let random_wallet_secret = WalletEntropy::new_random();
         let spending_key = random_wallet_secret.nth_generation_spending_key_for_tests(0);
         let _address = spending_key.to_address();
         let _sender_randomness = random_wallet_secret
@@ -1488,7 +1058,7 @@ mod wallet_tests {
             .try_into()
             .unwrap(),
         );
-        let wallet = WalletSecret::new(SecretKeyMaterial(secret));
+        let wallet = WalletEntropy::new(SecretKeyMaterial(secret));
         assert_ne!(
             wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
             secret_as_digest
@@ -1498,7 +1068,7 @@ mod wallet_tests {
     #[test]
     fn get_devnet_wallet_info() {
         // Helper function/test to print the public key associated with the authority signatures
-        let devnet_wallet = WalletSecret::devnet_wallet();
+        let devnet_wallet = WalletEntropy::devnet_wallet();
         let spending_key = devnet_wallet.nth_generation_spending_key_for_tests(0);
         let address = spending_key.to_address();
         println!(
@@ -1511,29 +1081,9 @@ mod wallet_tests {
         );
     }
 
-    #[test]
-    fn phrase_conversion_works() {
-        let wallet_secret = WalletSecret::new_random();
-        let phrase = wallet_secret.to_phrase();
-        let wallet_again = WalletSecret::from_phrase(&phrase).unwrap();
-        let phrase_again = wallet_again.to_phrase();
-
-        assert_eq!(wallet_secret, wallet_again);
-        assert_eq!(phrase, phrase_again);
-    }
-
-    #[test]
-    fn bad_phrase_conversion_fails() {
-        let wallet_secret = WalletSecret::new_random();
-        let mut phrase = wallet_secret.to_phrase();
-        phrase.push("blank".to_string());
-        assert!(WalletSecret::from_phrase(&phrase).is_err());
-        assert!(WalletSecret::from_phrase(&phrase[0..phrase.len() - 2]).is_err());
-        phrase[0] = "bbb".to_string();
-        assert!(WalletSecret::from_phrase(&phrase[0..phrase.len() - 1]).is_err());
-    }
-
     mod generation_key_derivation {
+        use itertools::Itertools;
+
         use super::*;
 
         // This test derives a set of generation keys and compares the derived
@@ -1543,7 +1093,7 @@ mod wallet_tests {
         // The test will fail if the key format or derivation method ever changes.
         #[test]
         fn verify_derived_generation_keys() {
-            let devnet_wallet = WalletSecret::devnet_wallet();
+            let devnet_wallet = WalletEntropy::devnet_wallet();
             let indexes = worker::known_key_indexes();
             let known_keys = worker::known_keys();
 
@@ -1568,7 +1118,7 @@ mod wallet_tests {
         #[test]
         fn verify_derived_generation_addrs() {
             let network = Network::Main;
-            let devnet_wallet = WalletSecret::devnet_wallet();
+            let devnet_wallet = WalletEntropy::devnet_wallet();
             let indexes = worker::known_key_indexes();
             let known_addrs = worker::known_addrs();
 
@@ -1603,7 +1153,7 @@ mod wallet_tests {
         //  2. in case we ever need to generate them again.
         #[test]
         fn print_json_serialized_generation_spending_keys() {
-            let devnet_wallet = WalletSecret::devnet_wallet();
+            let devnet_wallet = WalletEntropy::devnet_wallet();
             let indexes = worker::known_key_indexes();
 
             let addrs = indexes
@@ -1631,7 +1181,7 @@ mod wallet_tests {
         #[test]
         fn print_json_serialized_generation_receiving_addrs() {
             let network = Network::Main;
-            let devnet_wallet = WalletSecret::devnet_wallet();
+            let devnet_wallet = WalletEntropy::devnet_wallet();
             let indexes = worker::known_key_indexes();
 
             let addrs = indexes
@@ -1659,7 +1209,7 @@ mod wallet_tests {
             let genesis_block = Block::genesis(network);
             let seven_months_after_launch = genesis_block.header().timestamp + Timestamp::months(7);
             for seed_phrase in worker::test_seed_phrases() {
-                let wallet_secret = WalletSecret::from_phrase(&seed_phrase)
+                let wallet_secret = WalletEntropy::from_phrase(&seed_phrase)
                     .expect("legacy seed phrase must still be valid");
                 let premine_recipient =
                     mock_genesis_global_state(network, 0, wallet_secret, cli.clone()).await;
@@ -1681,7 +1231,7 @@ mod wallet_tests {
         }
 
         mod worker {
-            use super::*;
+            use crate::models::state::wallet::address::generation_address;
 
             // provides the set of indexes to derive keys at
             pub fn known_key_indexes() -> [u64; 13] {
