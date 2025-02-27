@@ -254,6 +254,15 @@ pub struct Args {
     /// Exposing the data directory leaks some privacy. Disable to prevent.
     #[clap(long)]
     pub disable_cookie_hint: bool,
+
+    /// The duration (in seconds) during which new connection attempts from peers
+    /// are ignored after a connection to them was closed.
+    ///
+    /// Does not affect abnormally closed connections. For example, if a connection
+    /// is dropped due to networking issues, an immediate reconnection attempt is
+    /// not affected by this cooldown.
+    #[clap(long, default_value = "30", value_parser = duration_from_seconds_str)]
+    pub reconnect_cooldown: Duration,
 }
 
 impl Default for Args {
@@ -272,6 +281,10 @@ fn fraction_validator(s: &str) -> Result<f64, String> {
     } else {
         Err(format!("Fraction must be between 0 and 1, got {value}"))
     }
+}
+
+fn duration_from_seconds_str(s: &str) -> Result<Duration, std::num::ParseIntError> {
+    Ok(Duration::from_secs(s.parse()?))
 }
 
 impl Args {

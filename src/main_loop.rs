@@ -915,24 +915,17 @@ impl MainLoopHandler {
             );
 
             // pick a peer that was not specified in the CLI arguments to disconnect from
-            let mut rng = rand::rng();
+            let peers = &self.global_state_lock.cli().peers;
             let peer_to_disconnect = connected_peers
                 .iter()
-                .filter(|peer| {
-                    !self
-                        .global_state_lock
-                        .cli()
-                        .peers
-                        .contains(&peer.connected_address())
-                })
-                .choose(&mut rng);
-            match peer_to_disconnect {
-                Some(peer) => {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
-                }
-                None => warn!("Unable to resolve max peer constraint due to manual override."),
-            };
+                .filter(|peer| !peers.contains(&peer.connected_address()))
+                .choose(&mut rand::rng());
+            if let Some(peer) = peer_to_disconnect {
+                let disconnect_message = MainToPeerTask::Disconnect(peer.connected_address());
+                self.main_to_peer_broadcast_tx.send(disconnect_message)?;
+            } else {
+                warn!("Unable to resolve max peer constraint due to manual override.");
+            }
 
             return Ok(());
         }
@@ -2419,26 +2412,18 @@ mod test {
 
             // main loop should send a `Disconnect` message
             let main_to_peers_message = main_to_peer_rx.recv().await.unwrap();
-            assert!(matches!(
-                main_to_peers_message,
-                MainToPeerTask::Disconnect(_)
-            ));
             let MainToPeerTask::Disconnect(observed_drop_peer_socket_address) =
                 main_to_peers_message
             else {
-                unreachable!()
+                panic!("Expected disconnect, got {main_to_peers_message:?}");
             };
 
             // matched observed droppee against expectation
             assert_eq!(
                 expected_drop_peer_socket_address,
-                observed_drop_peer_socket_address
+                observed_drop_peer_socket_address,
             );
-
-            println!(
-                "Dropped connection with {}.",
-                expected_drop_peer_socket_address
-            );
+            println!("Dropped connection with {expected_drop_peer_socket_address}.");
 
             // don't forget to terminate the peer task, which is still running
             incoming_peer_task_handle.abort();
