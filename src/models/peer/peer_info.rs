@@ -116,6 +116,10 @@ impl PeerInfo {
         self.peer_connection_info.inbound
     }
 
+    pub(crate) fn connection_is_outbound(&self) -> bool {
+        !self.connection_is_inbound()
+    }
+
     /// returns the neptune-core version-string reported by the peer.
     ///
     /// note: the peer might not be honest.
