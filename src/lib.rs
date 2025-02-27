@@ -106,8 +106,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
     info!("Now getting wallet state. This may take a while if the database needs pruning.");
     let wallet_state =
-        WalletState::new_from_wallet_file_context(&data_directory, wallet_file_context, &cli_args)
-            .await;
+        WalletState::new_from_context(&data_directory, wallet_file_context, &cli_args).await;
     info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync
