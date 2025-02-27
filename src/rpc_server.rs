@@ -66,11 +66,14 @@ use twenty_first::math::digest::Digest;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::mine_loop::precalculate_block_auth_paths;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
+use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -79,6 +82,7 @@ use crate::models::channel::RPCServerToMain;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
@@ -196,6 +200,36 @@ impl MempoolTransactionInfo {
     pub fn synced(mut self) -> Self {
         self.synced = true;
         self
+    }
+}
+
+/// Data required to attempt to solve the proof-of-work challenge that allows
+/// the minting of the next block.
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+pub struct GuessChallengeInfo {
+    kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
+    header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
+    threshold: Digest,
+    total_guesser_reward: NativeCurrencyAmount,
+}
+
+impl GuessChallengeInfo {
+    fn new(
+        mut block_proposal: Block,
+        guesser_key_after_image: Digest,
+        latest_block_header: BlockHeader,
+    ) -> Self {
+        block_proposal.set_header_guesser_digest(guesser_key_after_image);
+        let guesser_reward = block_proposal.total_guesser_reward();
+        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block_proposal);
+        let threshold = latest_block_header.difficulty.target();
+
+        Self {
+            kernel_auth_path,
+            header_auth_path,
+            threshold,
+            total_guesser_reward: guesser_reward,
+        }
     }
 }
 
@@ -1293,6 +1327,11 @@ pub trait RPC {
     /// # }
     /// ```
     async fn cpu_temp(token: rpc_auth::Token) -> RpcResult<Option<f32>>;
+
+    /// Get the proof-of-work challenge for the next block.
+    ///
+    /// Returns `None` if no block proposal for the next block is known yet.
+    async fn pow_challenge(token: rpc_auth::Token) -> RpcResult<Option<GuessChallengeInfo>>;
 
     /******** BLOCKCHAIN STATISTICS ********/
     // Place all endpoints that relate to statistics of the blockchain here
@@ -3130,6 +3169,43 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn pow_challenge(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Option<GuessChallengeInfo>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let Some(proposal) = self
+            .state
+            .lock_guard()
+            .await
+            .block_proposal
+            .map(|x| x.to_owned())
+        else {
+            return Ok(None);
+        };
+
+        let (guesser_key_after_image, latest_block_header) = {
+            let state = self.state.lock_guard().await;
+            let guesser_key_after_image = state
+                .wallet_state
+                .wallet_secret
+                .guesser_spending_key(proposal.header().prev_block_digest);
+            let latest_block_header = *state.chain.light_state().header();
+
+            (guesser_key_after_image.after_image(), latest_block_header)
+        };
+
+        Ok(Some(GuessChallengeInfo::new(
+            proposal,
+            guesser_key_after_image,
+            latest_block_header,
+        )))
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn block_intervals(
         self,
         _context: tarpc::context::Context,
@@ -3527,6 +3603,7 @@ mod rpc_server_tests {
                 Network::Testnet,
             )
             .await;
+        let _ = rpc_server.clone().pow_challenge(ctx, token).await;
         let _ = rpc_server
             .clone()
             .block_intervals(ctx, token, BlockSelector::Tip, None)
@@ -4181,6 +4258,88 @@ mod rpc_server_tests {
             )
             .await
             .is_err());
+    }
+
+    mod pow_challenge_tests {
+        use rand::random;
+
+        use super::*;
+        use crate::mine_loop::fast_kernel_mast_hash;
+        use crate::models::state::block_proposal::BlockProposal;
+        use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+        use crate::tests::shared::invalid_empty_block;
+
+        #[test]
+        fn guess_challenge_info_is_consistent_with_block_hash() {
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let mut block1 = invalid_empty_block(&genesis);
+            let hash_lock_key = HashLockKey::from_preimage(random());
+            let guess_challenge = GuessChallengeInfo::new(
+                block1.clone(),
+                hash_lock_key.after_image(),
+                *genesis.header(),
+            );
+            let nonce = random();
+            let challenge_guess = fast_kernel_mast_hash(
+                guess_challenge.kernel_auth_path,
+                guess_challenge.header_auth_path,
+                nonce,
+            );
+
+            block1.set_header_guesser_digest(hash_lock_key.after_image());
+            block1.set_header_nonce(nonce);
+
+            assert_eq!(block1.hash(), challenge_guess);
+        }
+
+        #[tokio::test]
+        async fn exported_guess_challenge_is_consistent_with_block_hash() {
+            let network = Network::Main;
+            let bob = WalletSecret::new_random();
+            let mut bob = test_rpc_server(network, bob.clone(), 2, cli_args::Args::default()).await;
+            let bob_token = cookie_token(&bob).await;
+
+            let genesis = Block::genesis(network);
+            let mut block1 = invalid_empty_block(&genesis);
+            bob.state
+                .lock_mut(|x| x.block_proposal = BlockProposal::ForeignComposition(block1.clone()))
+                .await;
+
+            let guess_challenge = bob
+                .clone()
+                .pow_challenge(context::current(), bob_token)
+                .await
+                .unwrap()
+                .unwrap();
+
+            let nonce = random();
+            let challenge_guess = fast_kernel_mast_hash(
+                guess_challenge.kernel_auth_path,
+                guess_challenge.header_auth_path,
+                nonce,
+            );
+
+            block1.set_header_nonce(nonce);
+
+            let expected_guesser_digest = bob
+                .state
+                .lock(|x| {
+                    x.wallet_state
+                        .wallet_secret
+                        .guesser_spending_key(genesis.hash())
+                })
+                .await
+                .after_image();
+            block1.set_header_guesser_digest(expected_guesser_digest);
+            assert_eq!(block1.hash(), challenge_guess);
+            assert_eq!(
+                block1.total_guesser_reward(),
+                guess_challenge.total_guesser_reward
+            );
+
+            // TODO: Check that successfull guess is registered by wallet.
+        }
     }
 
     mod claim_utxo_tests {
