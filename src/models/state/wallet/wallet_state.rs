@@ -316,7 +316,10 @@ impl WalletState {
         let scan_mode = match (&cli_args.scan_blocks, cli_args.scan_keys) {
             (None, None) => {
                 if !wallet_was_new && database_was_new {
-                    info!("Activating scan mode: wallet file present but databse absent; wallet may have been imported.");
+                    info!(
+                        "Activating scan mode: wallet file present but \
+                    databse absent; wallet may have been imported."
+                    );
                     Some(ScanModeConfiguration::default())
                 } else {
                     None
@@ -331,7 +334,10 @@ impl WalletState {
                 Some(ScanModeConfiguration::scan().blocks(range.to_owned()))
             }
             (Some(range), Some(num_future_keys)) => {
-                info!("Activating scan mode: CLI arguments `--scan-keys` and `--scan-blocks`.");
+                info!(
+                    "Activating scan mode: CLI arguments `--scan-keys` and \
+                `--scan-blocks`."
+                );
                 Some(
                     ScanModeConfiguration::scan()
                         .blocks(range.to_owned())
