@@ -1073,8 +1073,10 @@ impl GlobalState {
                 Err(err) => bail!("Could not restore MS membership proof. Got: {err}"),
             };
 
-            let mut restored_mutxo =
-                MonitoredUtxo::new(incoming_utxo.utxo, self.wallet_state.number_of_mps_per_utxo);
+            let mut restored_mutxo = MonitoredUtxo::new(
+                incoming_utxo.utxo,
+                self.wallet_state.configuration.num_mps_per_utxo,
+            );
             restored_mutxo.add_membership_proof_for_tip(tip_hash, restored_msmp);
 
             // Add block info for restored MUTXO

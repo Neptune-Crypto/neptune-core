@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
-use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -36,12 +35,11 @@ use super::expected_utxo::ExpectedUtxo;
 use super::expected_utxo::UtxoNotifier;
 use super::incoming_utxo::IncomingUtxo;
 use super::rusty_wallet_database::RustyWalletDatabase;
-use super::scan_mode_configuration::ScanModeConfiguration;
 use super::sent_transaction::SentTransaction;
 use super::unlocked_utxo::UnlockedUtxo;
+use super::wallet_configuration::WalletConfiguration;
 use super::wallet_entropy::WalletEntropy;
 use super::wallet_file::WalletFileContext;
-use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
 use crate::config_models::cli_args::Args;
@@ -74,8 +72,6 @@ use crate::Hash;
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
     pub wallet_entropy: WalletEntropy,
-    pub number_of_mps_per_utxo: usize,
-    wallet_directory_path: PathBuf,
 
     /// these two fields are for monitoring wallet-affecting utxos in the mempool.
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
@@ -92,9 +88,8 @@ pub struct WalletState {
     // Contains guesser-preimages from miner PoW-guessing.
     known_raw_hash_lock_keys: Vec<SpendingKey>,
 
-    /// Whether we are in scan mode and, if so, how many future keys to scan
-    /// with and the range of block heights where the scanning step is done.
-    pub(crate) scan_mode: Option<ScanModeConfiguration>,
+    /// Tunable options for configuring how the wallet state operates.
+    pub(crate) configuration: WalletConfiguration,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -156,20 +151,21 @@ impl Debug for WalletState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WalletState")
             .field("wallet_secret", &self.wallet_entropy)
-            .field("number_of_mps_per_utxo", &self.number_of_mps_per_utxo)
-            .field("wallet_directory_path", &self.wallet_directory_path)
+            .field(
+                "number_of_mps_per_utxo",
+                &self.configuration.num_mps_per_utxo,
+            )
+            .field(
+                "wallet_directory_path",
+                &self.configuration.wallet_files_directory_path(),
+            )
             .finish()
     }
 }
 
 impl WalletState {
-    fn incoming_secrets_path(&self) -> PathBuf {
-        self.wallet_directory_path
-            .join(WALLET_INCOMING_SECRETS_FILE_NAME)
-    }
-
-    /// Store information needed to recover mutator set membership proof of a UTXO, in case
-    /// the wallet database is deleted.
+    /// Store information needed to recover mutator set membership proof of a
+    /// UTXO, in case the wallet database is deleted.
     ///
     /// Uses non-blocking I/O via tokio.
     async fn store_utxo_ms_recovery_data(
@@ -178,14 +174,14 @@ impl WalletState {
     ) -> Result<()> {
         #[cfg(test)]
         {
-            tokio::fs::create_dir_all(self.wallet_directory_path.clone()).await?;
+            tokio::fs::create_dir_all(self.configuration.wallet_files_directory_path()).await?;
         }
 
         // Open file
         let incoming_secrets_file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(self.incoming_secrets_path())
+            .open(self.configuration.incoming_secrets_path())
             .await?;
         let mut incoming_secrets_file = BufWriter::new(incoming_secrets_file);
 
@@ -207,8 +203,9 @@ impl WalletState {
         Ok(())
     }
 
-    /// Read recovery-information for mutator set membership proof of a UTXO. Returns all lines in the files,
-    /// where each line represents an incoming UTXO.
+    /// Read recovery-information for mutator set membership proof of a UTXO.
+    /// Returns all lines in the files, where each line represents an incoming
+    /// UTXO.
     ///
     /// Uses non-blocking I/O via tokio.
     pub(crate) async fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
@@ -216,7 +213,7 @@ impl WalletState {
         let incoming_secrets_file = OpenOptions::new()
             .read(true)
             .write(false)
-            .open(self.incoming_secrets_path())
+            .open(self.configuration.incoming_secrets_path())
             .await?;
 
         let file_reader = BufReader::new(incoming_secrets_file);
@@ -231,21 +228,37 @@ impl WalletState {
         Ok(ret)
     }
 
-    async fn new_from_wallet_entropy_and_new_bool(
+    /// Create a `WalletState` object from related data.
+    ///
+    /// Convenience method to extract required data prior to calling the
+    /// canonical constructor, [`Self::new`].
+    pub(crate) async fn new_from_context(
         data_dir: &DataDirectory,
-        wallet_entropy: WalletEntropy,
+        wallet_file_context: WalletFileContext,
         cli_args: &Args,
-        wallet_was_new: bool,
     ) -> Self {
-        // Create or connect to wallet block DB
+        let database_is_new = tokio::fs::try_exists(&data_dir.wallet_database_dir_path())
+            .await
+            .unwrap();
+        let configuration = WalletConfiguration::new(data_dir)
+            .absorb_options(cli_args)
+            .with_scan_mode_if_necessary(wallet_file_context.wallet_is_new, database_is_new);
+        Self::new(configuration, wallet_file_context.entropy()).await
+    }
 
-        let wallet_database_path = data_dir.wallet_database_dir_path();
-        let database_is_new = tokio::fs::try_exists(&wallet_database_path).await.unwrap();
+    /// Construct a `WalletState` object.
+    ///
+    /// Canonical constructor.
+    pub(crate) async fn new(
+        configuration: WalletConfiguration,
+        wallet_entropy: WalletEntropy,
+    ) -> Self {
+        let wallet_database_path = configuration.wallet_database_directory_path();
         DataDirectory::create_dir_if_not_exists(&wallet_database_path)
             .await
             .unwrap();
         let wallet_db = NeptuneLevelDb::new(
-            &data_dir.wallet_database_dir_path(),
+            &wallet_database_path,
             &crate::database::create_db_if_missing(),
         )
         .await;
@@ -259,49 +272,16 @@ impl WalletState {
 
         let rusty_wallet_database = RustyWalletDatabase::connect(wallet_db).await;
 
-        Self::new_from_wallet_secret_and_database(
-            rusty_wallet_database,
-            data_dir,
-            wallet_entropy,
-            cli_args,
-            wallet_was_new,
-            database_is_new,
-        )
-        .await
-    }
-
-    pub async fn new_from_wallet_file_context(
-        data_dir: &DataDirectory,
-        wallet_file_context: WalletFileContext,
-        cli_args: &Args,
-    ) -> Self {
-        Self::new_from_wallet_entropy_and_new_bool(
-            data_dir,
-            wallet_file_context.entropy(),
-            cli_args,
-            wallet_file_context.wallet_is_new,
-        )
-        .await
-    }
-
-    async fn new_from_wallet_secret_and_database(
-        rusty_wallet_database: RustyWalletDatabase,
-        data_dir: &DataDirectory,
-        wallet_secret: WalletEntropy,
-        cli_args: &Args,
-        wallet_was_new: bool,
-        database_was_new: bool,
-    ) -> Self {
         let sync_label = rusty_wallet_database.get_sync_label().await;
 
         // generate and cache all used generation keys
         let known_generation_keys = (0..rusty_wallet_database.get_generation_key_counter().await)
-            .map(|idx| wallet_secret.nth_generation_spending_key(idx).into())
+            .map(|idx| wallet_entropy.nth_generation_spending_key(idx).into())
             .collect_vec();
 
         // generate and cache all used symmetric keys
         let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter().await)
-            .map(|idx| wallet_secret.nth_symmetric_key(idx).into())
+            .map(|idx| wallet_entropy.nth_symmetric_key(idx).into())
             .collect_vec();
 
         let known_raw_hash_lock_keys = rusty_wallet_database
@@ -313,50 +293,15 @@ impl WalletState {
             .map(SpendingKey::RawHashLock)
             .collect_vec();
 
-        let scan_mode = match (&cli_args.scan_blocks, cli_args.scan_keys) {
-            (None, None) => {
-                if !wallet_was_new && database_was_new {
-                    info!(
-                        "Activating scan mode: wallet file present but \
-                    databse absent; wallet may have been imported."
-                    );
-                    Some(ScanModeConfiguration::default())
-                } else {
-                    None
-                }
-            }
-            (None, Some(num_future_keys)) => {
-                info!("Activating scan mode: CLI argument `--scan-keys`.");
-                Some(ScanModeConfiguration::scan().for_many_future_keys(num_future_keys))
-            }
-            (Some(range), None) => {
-                info!("Activating scan mode: CLI argument `--scan-blocks`.");
-                Some(ScanModeConfiguration::scan().blocks(range.to_owned()))
-            }
-            (Some(range), Some(num_future_keys)) => {
-                info!(
-                    "Activating scan mode: CLI arguments `--scan-keys` and \
-                `--scan-blocks`."
-                );
-                Some(
-                    ScanModeConfiguration::scan()
-                        .blocks(range.to_owned())
-                        .for_many_future_keys(num_future_keys),
-                )
-            }
-        };
-
         let mut wallet_state = Self {
             wallet_db: rusty_wallet_database,
-            wallet_entropy: wallet_secret,
-            number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
-            wallet_directory_path: data_dir.wallet_directory_path(),
+            wallet_entropy,
             mempool_spent_utxos: Default::default(),
             mempool_unspent_utxos: Default::default(),
             known_generation_keys,
             known_symmetric_keys,
             known_raw_hash_lock_keys,
-            scan_mode,
+            configuration: configuration.clone(),
         };
 
         // Generation key 0 is reserved for composing and guessing rewards. The
@@ -401,12 +346,12 @@ impl WalletState {
                 let own_receiving_address = premine_key
                     .to_address()
                     .expect("premine keys should have associated addresses");
-                for utxo in Block::premine_utxos(cli_args.network) {
+                for utxo in Block::premine_utxos(configuration.network()) {
                     if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
                         wallet_state
                             .add_expected_utxo(ExpectedUtxo::new(
                                 utxo,
-                                Block::premine_sender_randomness(cli_args.network),
+                                Block::premine_sender_randomness(configuration.network()),
                                 premine_key
                                     .privacy_preimage()
                                     .expect("premine keys should have associated privacy preimage"),
@@ -420,7 +365,7 @@ impl WalletState {
             wallet_state
                 .update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
-                    &Block::genesis(cli_args.network),
+                    &Block::genesis(configuration.network()),
                 )
                 .await
                 .expect("Updating wallet state with genesis block must succeed");
@@ -1253,7 +1198,7 @@ impl WalletState {
         // if scan mode is active, scan the block with keys that will be
         // derived in the future
         let mut outputs_recovered_through_scan_mode = vec![];
-        if let Some(scan_mode_configuration) = self.scan_mode {
+        if let Some(scan_mode_configuration) = self.configuration.scan_mode {
             if scan_mode_configuration.block_is_in_range(new_block) {
                 let mut max_counters = HashMap::<KeyType, u64>::new();
                 for (key_type, derivation_index, incoming_utxo) in self
@@ -1410,7 +1355,8 @@ impl WalletState {
                 let strong_key = StrongUtxoKey::new(*addition_record, aocl_index);
 
                 // Add the new UTXO to the list of monitored UTXOs
-                let mut mutxo = MonitoredUtxo::new(utxo.clone(), self.number_of_mps_per_utxo);
+                let mut mutxo =
+                    MonitoredUtxo::new(utxo.clone(), self.configuration.num_mps_per_utxo);
                 mutxo.confirmed_in_block = Some((
                     new_block.hash(),
                     new_block.kernel.header.timestamp,
@@ -1804,12 +1750,13 @@ impl WalletState {
         wallet_entropy: WalletEntropy,
         cli_args: &Args,
     ) -> Self {
-        Self::new_from_wallet_entropy_and_new_bool(data_dir, wallet_entropy, cli_args, false).await
+        let configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
+        Self::new(configuration, wallet_entropy).await
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use generation_address::GenerationSpendingKey;
     use rand::random;
     use rand::Rng;
@@ -3961,173 +3908,9 @@ mod tests {
         use rand::{rng, SeedableRng};
 
         use crate::job_queue::JobQueue;
-        use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::tests::shared::unit_test_data_directory;
 
         use super::*;
-
-        async fn mock_rusty_wallet_database() -> RustyWalletDatabase {
-            let neptune_leveldb = NeptuneLevelDb::open_new_test_database(true, None, None, None)
-                .await
-                .unwrap();
-            RustyWalletDatabase::connect(neptune_leveldb).await
-        }
-
-        fn mock_data_dir() -> DataDirectory {
-            DataDirectory::get(None, Default::default()).unwrap()
-        }
-
-        #[tokio::test]
-        async fn scan_mode_is_off_by_default() {
-            let rusty_wallet_database = mock_rusty_wallet_database().await;
-            let wallet_state = WalletState::new_from_wallet_secret_and_database(
-                rusty_wallet_database,
-                &mock_data_dir(),
-                WalletEntropy::new_random(),
-                &Args::default(),
-                false,
-                false,
-            )
-            .await;
-            assert!(wallet_state.scan_mode.is_none());
-        }
-
-        #[tokio::test]
-        async fn scan_mode_is_on_with_scan_blocks_or_scan_keys() {
-            let wallet_secret = WalletEntropy::new_random();
-            let data_dir = mock_data_dir();
-            let rusty_wallet_database_1 = mock_rusty_wallet_database().await;
-            let rusty_wallet_database_2 = mock_rusty_wallet_database().await;
-            let rusty_wallet_database_3 = mock_rusty_wallet_database().await;
-
-            let cli_args_1 = Args {
-                scan_blocks: Some(0u64..=10),
-                ..Default::default()
-            };
-            let wallet_state_1 = WalletState::new_from_wallet_secret_and_database(
-                rusty_wallet_database_1,
-                &data_dir,
-                wallet_secret.clone(),
-                &cli_args_1,
-                false,
-                false,
-            )
-            .await;
-            assert!(wallet_state_1.scan_mode.is_some());
-
-            let cli_args_2 = Args {
-                scan_keys: Some(10),
-                ..Default::default()
-            };
-            let wallet_state_2 = WalletState::new_from_wallet_secret_and_database(
-                rusty_wallet_database_2,
-                &data_dir,
-                wallet_secret.clone(),
-                &cli_args_2,
-                false,
-                false,
-            )
-            .await;
-            assert!(wallet_state_2.scan_mode.is_some());
-
-            let cli_args_3 = Args {
-                scan_blocks: Some(0u64..=10),
-                scan_keys: Some(10),
-                ..Default::default()
-            };
-            let wallet_state_3 = WalletState::new_from_wallet_secret_and_database(
-                rusty_wallet_database_3,
-                &data_dir,
-                wallet_secret,
-                &cli_args_3,
-                false,
-                false,
-            )
-            .await;
-            assert!(wallet_state_3.scan_mode.is_some());
-        }
-
-        #[tokio::test]
-        async fn scan_mode_is_on_if_wallet_was_imported() {
-            let wallet_secret = WalletEntropy::new_random();
-            let data_dir = mock_data_dir();
-            let rusty_wallet_database = mock_rusty_wallet_database().await;
-
-            let cli_args = Args {
-                scan_blocks: Some(0u64..=10),
-                ..Default::default()
-            };
-            let wallet_state = WalletState::new_from_wallet_secret_and_database(
-                rusty_wallet_database,
-                &data_dir,
-                wallet_secret.clone(),
-                &cli_args,
-                false,
-                true,
-            )
-            .await;
-            assert!(wallet_state.scan_mode.is_some());
-        }
-
-        #[tokio::test]
-        async fn num_future_keys_default_is_sane() {
-            let wallet_secret = WalletEntropy::new_random();
-            let data_dir = mock_data_dir();
-            let rusty_wallet_database = mock_rusty_wallet_database().await;
-
-            // activate scan mode by setting --scan-blocks, so num future keys
-            // will assume its default value
-            let cli_args = Args {
-                scan_blocks: Some(0u64..=10),
-                ..Default::default()
-            };
-            let wallet_state = WalletState::new_from_wallet_secret_and_database(
-                rusty_wallet_database,
-                &data_dir,
-                wallet_secret.clone(),
-                &cli_args,
-                false,
-                false,
-            )
-            .await;
-            let scan_mode = wallet_state.scan_mode.unwrap();
-            assert!(scan_mode.num_future_keys() > 0);
-            assert!(scan_mode.num_future_keys() < 10_000);
-        }
-
-        #[tokio::test]
-        async fn block_height_range_check_agrees_with_interval_membership() {
-            let wallet_secret = WalletEntropy::new_random();
-            let data_dir = mock_data_dir();
-            let rusty_wallet_database = mock_rusty_wallet_database().await;
-
-            let lb = 10;
-            let ub = 20;
-
-            // activate scan mode by setting --scan-blocks, so num future keys
-            // will assume its default value
-            let cli_args = Args {
-                scan_blocks: Some(lb..=ub),
-                ..Default::default()
-            };
-            let wallet_state = WalletState::new_from_wallet_secret_and_database(
-                rusty_wallet_database,
-                &data_dir,
-                wallet_secret.clone(),
-                &cli_args,
-                false,
-                false,
-            )
-            .await;
-            let scan_mode = wallet_state.scan_mode.unwrap();
-
-            for h in (lb - 5)..(ub + 5) {
-                assert_eq!(
-                    (lb..=ub).contains(&h),
-                    scan_mode.block_height_is_in_range(BlockHeight::from(h)),
-                );
-            }
-        }
 
         /// Test scan mode.
         ///
