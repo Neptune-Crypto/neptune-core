@@ -354,7 +354,7 @@ pub(crate) mod test {
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::GlobalStateLock;
 
@@ -492,11 +492,11 @@ pub(crate) mod test {
 
         let network = Network::Main;
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_wallet = WalletEntropy::devnet_wallet();
         let alice = mock_genesis_global_state(
             network,
             3,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;

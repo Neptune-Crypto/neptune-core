@@ -61,7 +61,7 @@ use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::WalletSecret;
+use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
@@ -473,7 +473,7 @@ impl Block {
 
     fn premine_distribution() -> Vec<(ReceivingAddress, NativeCurrencyAmount)> {
         // The premine UTXOs can be hardcoded here.
-        let authority_wallet = WalletSecret::devnet_wallet();
+        let authority_wallet = WalletEntropy::devnet_wallet();
         let authority_receiving_address = authority_wallet
             .nth_generation_spending_key(0)
             .to_address()
@@ -1029,7 +1029,7 @@ pub(crate) mod block_tests {
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -1066,7 +1066,7 @@ pub(crate) mod block_tests {
     async fn test_difficulty_control_matches() {
         let network = Network::Main;
 
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletEntropy::new_random();
         let a_key = a_wallet_secret.nth_generation_spending_key_for_tests(0);
 
         // TODO: Can this outer-loop be parallelized?
@@ -1173,7 +1173,7 @@ pub(crate) mod block_tests {
         let mut mmra = MmrAccumulator::new_from_leafs(vec![genesis_block.hash()]);
 
         for i in 0..55 {
-            let wallet_secret = WalletSecret::new_random();
+            let wallet_secret = WalletEntropy::new_random();
             let key = wallet_secret.nth_generation_spending_key_for_tests(0);
             let (new_block, _) =
                 make_mock_block(blocks.last().unwrap(), None, key, rng.random()).await;
@@ -1264,7 +1264,7 @@ pub(crate) mod block_tests {
                 fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
                     .await;
 
-            let alice_wallet = WalletSecret::devnet_wallet();
+            let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice = mock_genesis_global_state(
                 network,
                 3,
@@ -1633,7 +1633,7 @@ pub(crate) mod block_tests {
             let launch_date = genesis_block.header().timestamp;
             let in_seven_months = launch_date + Timestamp::months(7);
             let in_eight_months = launch_date + Timestamp::months(8);
-            let alice_wallet = WalletSecret::devnet_wallet();
+            let alice_wallet = WalletEntropy::devnet_wallet();
             let alice_key = alice_wallet.nth_generation_spending_key(0);
             let alice_address = alice_key.to_address();
             let mut alice =

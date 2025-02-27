@@ -1174,7 +1174,7 @@ mod archival_state_tests {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -1209,7 +1209,7 @@ mod archival_state_tests {
         let mut archival_state0 = make_test_archival_state(network).await;
 
         let b = Block::genesis(network);
-        let some_wallet_secret = WalletSecret::new_random();
+        let some_wallet_secret = WalletEntropy::new_random();
         let some_key = some_wallet_secret.nth_generation_spending_key_for_tests(0);
 
         let (block_1, _) = make_mock_block(&b, None, some_key, rng.random()).await;
@@ -1284,12 +1284,12 @@ mod archival_state_tests {
         let network = Network::Alpha;
         let mut archival_state = make_test_archival_state(network).await;
         let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
         let (mock_block_1, _) = make_mock_block(
             &archival_state.genesis_block,
             None,
             genesis_wallet_state
-                .wallet_secret
+                .wallet_entropy
                 .nth_generation_spending_key_for_tests(0),
             rng.random(),
         )
@@ -1322,15 +1322,15 @@ mod archival_state_tests {
 
         let network = Network::Alpha;
         let mut rng = StdRng::seed_from_u64(107221549301u64);
-        let alice_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let alice_wallet = alice_wallet.wallet_secret;
+        let alice_wallet = mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
+        let alice_wallet = alice_wallet.wallet_entropy;
         let mut alice =
             mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
         let alice_key = alice
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key(0);
 
         let genesis_block = Block::genesis(network);
@@ -1401,7 +1401,7 @@ mod archival_state_tests {
         let network = Network::Alpha;
         let (mut archival_state, _peer_db_lock, _data_dir) =
             mock_genesis_archival_state(network).await;
-        let own_wallet = WalletSecret::new_random();
+        let own_wallet = WalletEntropy::new_random();
         let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
 
         // 1. Create new block 1 and store it to the DB
@@ -1444,7 +1444,7 @@ mod archival_state_tests {
         // blocks.
         let network = Network::RegTest;
         let mut rng = rand::rng();
-        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_wallet = WalletEntropy::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let mut alice =
@@ -1542,7 +1542,7 @@ mod archival_state_tests {
 
         let network = Network::RegTest;
         let mut rng = rand::rng();
-        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_wallet = WalletEntropy::devnet_wallet();
         let genesis_block = Block::genesis(network);
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
@@ -1724,12 +1724,12 @@ mod archival_state_tests {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         let network = Network::Main;
         let premine_rec_ws =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let premine_rec_spending_key = premine_rec_ws.wallet_secret.nth_generation_spending_key(0);
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
+        let premine_rec_spending_key = premine_rec_ws.wallet_entropy.nth_generation_spending_key(0);
         let mut premine_rec = mock_genesis_global_state(
             network,
             3,
-            premine_rec_ws.wallet_secret,
+            premine_rec_ws.wallet_entropy,
             cli_args::Args::default(),
         )
         .await;
@@ -1747,13 +1747,13 @@ mod archival_state_tests {
         );
 
         let mut rng = StdRng::seed_from_u64(41251549301u64);
-        let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.random());
+        let wallet_secret_alice = WalletEntropy::new_pseudorandom(rng.random());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
         let mut alice =
             mock_genesis_global_state(network, 3, wallet_secret_alice, cli_args::Args::default())
                 .await;
 
-        let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.random());
+        let wallet_secret_bob = WalletEntropy::new_pseudorandom(rng.random());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let mut bob =
             mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
@@ -2013,7 +2013,7 @@ mod archival_state_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_symmetric_key_for_tests(0)
             .into();
         let (tx_from_alice, _, alice_change) = alice
@@ -2059,7 +2059,7 @@ mod archival_state_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_symmetric_key_for_tests(0)
             .into();
         let (tx_from_bob, _, bob_change) = bob
@@ -2260,7 +2260,7 @@ mod archival_state_tests {
 
             // Add a block to archival state and verify that this is returned
             let mut rng = rand::rng();
-            let own_wallet = WalletSecret::new_random();
+            let own_wallet = WalletEntropy::new_random();
             let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
             let genesis = *archival_state.genesis_block.clone();
             let (mock_block_1, _) = make_mock_block(&genesis, None, own_key, rng.random()).await;
@@ -2330,7 +2330,7 @@ mod archival_state_tests {
         let mut archival_state = make_test_archival_state(network).await;
 
         let genesis = *archival_state.genesis_block.clone();
-        let own_wallet = WalletSecret::new_random();
+        let own_wallet = WalletEntropy::new_random();
         let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
         let (mock_block_1, _) =
             make_mock_block(&genesis.clone(), None, own_key, rng.random()).await;
@@ -2441,7 +2441,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn ms_update_to_tip_five_blocks() {
         let network = Network::Main;
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(network).await;
         let mut current_block = Block::genesis(network);
@@ -2486,7 +2486,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn find_canonical_block_with_aocl_index_five_blocks() {
         let network = Network::Main;
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(network).await;
         let mut current_block = Block::genesis(network);
@@ -2616,7 +2616,7 @@ mod archival_state_tests {
     async fn ms_update_to_tip_fork_depth_1() {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let mut archival_state = make_test_archival_state(network).await;
         let genesis_block = Block::genesis(network);
         let genesis_msa = &genesis_block.mutator_set_accumulator_after();
@@ -2660,7 +2660,7 @@ mod archival_state_tests {
     async fn ms_update_to_tip_fork_depth_2() {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let mut archival_state = make_test_archival_state(network).await;
         let genesis_block = Block::genesis(network);
         let genesis_msa = &genesis_block.mutator_set_accumulator_after();
@@ -2770,7 +2770,7 @@ mod archival_state_tests {
         );
 
         // Add a fork with genesis as LUCA and verify that correct results are returned
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
         let (mock_block_1_a, _) = make_mock_block(&genesis.clone(), None, key, rng.random()).await;
         add_block_to_archival_state(&mut archival_state, mock_block_1_a.clone()).await?;
@@ -2909,7 +2909,7 @@ mod archival_state_tests {
         );
 
         // Insert a block that is descendant from genesis block and verify that it is canonical
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
         let (block1, _) = make_mock_block(&genesis.clone(), None, key, rng.random()).await;
         add_block_to_archival_state(&mut archival_state, block1.clone()).await?;
@@ -3256,7 +3256,7 @@ mod archival_state_tests {
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
 
         assert!(archival_state
@@ -3355,7 +3355,7 @@ mod archival_state_tests {
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
-        let wallet = WalletSecret::new_random();
+        let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
 
         let (mock_block_1, _) = make_mock_block(&genesis.clone(), None, key, rng.random()).await;
