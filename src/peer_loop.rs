@@ -2066,7 +2066,7 @@ mod peer_loop_tests {
         );
         assert_eq!(
             NegativePeerSanction::DifferentGenesis,
-            peer_standing.unwrap().latest_punishment.unwrap().0
+            peer_standing.unwrap().latest_punishment.unwrap(),
         );
 
         Ok(())
@@ -3758,7 +3758,6 @@ mod peer_loop_tests {
                 latest_sanction
                     .latest_punishment
                     .expect("peer must be sanctioned")
-                    .0
             );
         }
 
@@ -3819,7 +3818,6 @@ mod peer_loop_tests {
                 latest_sanction
                     .latest_punishment
                     .expect("peer must be sanctioned")
-                    .0
             );
         }
 

@@ -113,7 +113,7 @@ pub enum PositivePeerSanction {
 }
 
 impl Display for NegativePeerSanction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let string = match self {
             NegativePeerSanction::InvalidBlock(_) => "invalid block",
             NegativePeerSanction::DifferentGenesis => "different genesis",
@@ -171,7 +171,7 @@ impl Display for NegativePeerSanction {
 }
 
 impl Display for PositivePeerSanction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let string = match self {
             PositivePeerSanction::ValidBlocks(_) => "valid blocks",
             PositivePeerSanction::NewBlockProposal => "new block proposal",
@@ -278,10 +278,11 @@ impl Sanction for PeerSanction {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerStanding {
     pub standing: i32,
-    pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
-    pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
+    pub latest_punishment: Option<NegativePeerSanction>,
+    pub latest_reward: Option<PositivePeerSanction>,
     peer_tolerance: i32,
 }
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct StandingExceedsBanThreshold;
 
@@ -318,10 +319,9 @@ impl PeerStanding {
             self.standing,
             self.peer_tolerance
         );
-        let now = SystemTime::now();
         match sanction {
-            PeerSanction::Negative(sanction) => self.latest_punishment = Some((sanction, now)),
-            PeerSanction::Positive(sanction) => self.latest_reward = Some((sanction, now)),
+            PeerSanction::Negative(sanction) => self.latest_punishment = Some(sanction),
+            PeerSanction::Positive(sanction) => self.latest_reward = Some(sanction),
         }
 
         self.is_good()
@@ -350,7 +350,7 @@ impl PeerStanding {
 }
 
 impl Display for PeerStanding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.standing)
     }
 }
@@ -908,8 +908,8 @@ mod tests {
     impl PeerStanding {
         pub fn init(
             standing: i32,
-            latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
-            latest_reward: Option<(PositivePeerSanction, SystemTime)>,
+            latest_punishment: Option<NegativePeerSanction>,
+            latest_reward: Option<PositivePeerSanction>,
             peer_tolerance: i32,
         ) -> PeerStanding {
             Self {

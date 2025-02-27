@@ -361,11 +361,11 @@ impl Widget for PeersScreen {
                 self.sort_order.compare(
                     a.standing()
                         .latest_punishment
-                        .map(|p| p.0.to_string())
+                        .map(|p| p.to_string())
                         .unwrap_or_default(),
                     b.standing()
                         .latest_punishment
-                        .map(|p| p.0.to_string())
+                        .map(|p| p.to_string())
                         .unwrap_or_default(),
                 )
             }),
@@ -373,11 +373,11 @@ impl Widget for PeersScreen {
                 self.sort_order.compare(
                     a.standing()
                         .latest_reward
-                        .map(|r| r.0.to_string())
+                        .map(|r| r.to_string())
                         .unwrap_or_default(),
                     b.standing()
                         .latest_reward
-                        .map(|r| r.0.to_string())
+                        .map(|r| r.to_string())
                         .unwrap_or_default(),
                 )
             }),
@@ -386,14 +386,8 @@ impl Widget for PeersScreen {
         let matrix = pi
             .iter()
             .map(|pi| {
-                let latest_punishment: Option<String> = pi
-                    .standing()
-                    .latest_punishment
-                    .map(|(peer_sanction, _timestamp)| peer_sanction.to_string());
-                let latest_reward: Option<String> = pi
-                    .standing()
-                    .latest_reward
-                    .map(|(peer_sanction, _timestamp)| peer_sanction.to_string());
+                let latest_punishment = pi.standing().latest_punishment.map(|p| p.to_string());
+                let latest_reward = pi.standing().latest_reward.map(|r| r.to_string());
                 let connection_established = pi
                     .connection_established()
                     .duration_since(std::time::UNIX_EPOCH)

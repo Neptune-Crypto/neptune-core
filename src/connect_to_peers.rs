@@ -514,8 +514,6 @@ pub(crate) async fn close_peer_connected_callback(
 
 #[cfg(test)]
 mod connect_tests {
-    use std::time::SystemTime;
-
     use anyhow::bail;
     use anyhow::Result;
     use tokio_test::io::Builder;
@@ -728,10 +726,10 @@ mod connect_tests {
         // Then check that peers can be banned by bad behavior
         let bad_standing: PeerStanding = PeerStanding::init(
             i32::MIN,
-            Some((
-                NegativePeerSanction::InvalidBlock((7u64.into(), Digest::default())),
-                SystemTime::now(),
-            )),
+            Some(NegativePeerSanction::InvalidBlock((
+                7u64.into(),
+                Digest::default(),
+            ))),
             None,
             i32::from(cli.peer_tolerance),
         );
@@ -1023,10 +1021,10 @@ mod connect_tests {
         .await?;
         let bad_standing: PeerStanding = PeerStanding::init(
             i32::MIN,
-            Some((
-                NegativePeerSanction::InvalidBlock((7u64.into(), Digest::default())),
-                SystemTime::now(),
-            )),
+            Some(NegativePeerSanction::InvalidBlock((
+                7u64.into(),
+                Digest::default(),
+            ))),
             None,
             i32::from(cli_args::Args::default().peer_tolerance),
         );
