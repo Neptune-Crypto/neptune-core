@@ -105,8 +105,8 @@ use crate::models::state::wallet::address::generation_address::GenerationReceivi
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::wallet::wallet_state::WalletState;
-use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -199,7 +199,7 @@ pub(crate) async fn mock_genesis_global_state(
     // TODO: Remove network and read it from CLI arguments instead
     network: Network,
     peer_count: u8,
-    wallet: WalletSecret,
+    wallet: WalletEntropy,
     cli: cli_args::Args,
 ) -> GlobalStateLock {
     let (archival_state, peer_db, _data_dir) = mock_genesis_archival_state(network).await;
@@ -264,7 +264,7 @@ pub(crate) async fn get_test_genesis_setup(
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let devnet_wallet = WalletSecret::devnet_wallet();
+    let devnet_wallet = WalletEntropy::devnet_wallet();
     let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
@@ -748,7 +748,7 @@ pub(crate) async fn make_mock_block(
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
 pub async fn mock_genesis_wallet_state(
-    wallet_secret: WalletSecret,
+    wallet_secret: WalletEntropy,
     network: Network,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(network).unwrap();
@@ -756,7 +756,7 @@ pub async fn mock_genesis_wallet_state(
 }
 
 pub async fn mock_genesis_wallet_state_with_data_dir(
-    wallet_secret: WalletSecret,
+    wallet_entropy: WalletEntropy,
     network: Network,
     data_dir: &DataDirectory,
 ) -> WalletState {
@@ -765,7 +765,7 @@ pub async fn mock_genesis_wallet_state_with_data_dir(
         network,
         ..Default::default()
     };
-    WalletState::new_from_wallet_secret(data_dir, wallet_secret, &cli_args, false).await
+    WalletState::new_from_wallet_entropy(data_dir, wallet_entropy, &cli_args).await
 }
 
 /// Return an archival state populated with the genesis block
@@ -823,7 +823,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .lock_guard()
         .await
         .wallet_state
-        .wallet_secret
+        .wallet_entropy
         .guesser_preimage(prev_block_digest);
     let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
     block.set_header_guesser_digest(guesser_preimage.hash());

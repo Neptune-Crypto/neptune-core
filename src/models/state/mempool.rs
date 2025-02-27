@@ -840,7 +840,7 @@ mod tests {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
     use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
@@ -975,7 +975,7 @@ mod tests {
         let network = Network::Main;
         let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
         let genesis_block = Block::genesis(network);
-        let bob_wallet_secret = WalletSecret::devnet_wallet();
+        let bob_wallet_secret = WalletEntropy::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let bob = mock_genesis_global_state(
             network,
@@ -1095,7 +1095,7 @@ mod tests {
 
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
         let network = Network::Main;
-        let bob_wallet_secret = WalletSecret::devnet_wallet();
+        let bob_wallet_secret = WalletEntropy::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut bob =
             mock_genesis_global_state(network, 2, bob_wallet_secret, cli_args::Args::default())
@@ -1103,7 +1103,7 @@ mod tests {
 
         let bob_address = bob_spending_key.to_address();
 
-        let alice_wallet = WalletSecret::new_pseudorandom(rng.random());
+        let alice_wallet = WalletEntropy::new_pseudorandom(rng.random());
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let mut alice =
@@ -1443,7 +1443,7 @@ mod tests {
         // non-empty. Then mine a a block 1b that also does not contain this
         // transaction.
         let network = Network::Main;
-        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_wallet = WalletEntropy::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let proving_capability = TxProvingCapability::SingleProof;
         let cli_with_proof_capability = cli_args::Args {
@@ -1454,7 +1454,7 @@ mod tests {
             mock_genesis_global_state(network, 2, alice_wallet, cli_with_proof_capability).await;
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
-        let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.random());
+        let bob_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let bob_address = bob_key.to_address();
 
@@ -1575,7 +1575,7 @@ mod tests {
         let mut preminer = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1583,7 +1583,7 @@ mod tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let premine_address = premine_spending_key.to_address();
         let mut rng = StdRng::seed_from_u64(589111u64);
@@ -1796,7 +1796,7 @@ mod tests {
             fee: NativeCurrencyAmount,
         ) -> Transaction {
             let genesis_block = Block::genesis(network);
-            let bob_wallet_secret = WalletSecret::devnet_wallet();
+            let bob_wallet_secret = WalletEntropy::devnet_wallet();
             let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
             let bob = mock_genesis_global_state(
                 network,

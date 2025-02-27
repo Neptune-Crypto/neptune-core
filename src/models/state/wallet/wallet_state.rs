@@ -39,10 +39,11 @@ use super::rusty_wallet_database::RustyWalletDatabase;
 use super::scan_mode_configuration::ScanModeConfiguration;
 use super::sent_transaction::SentTransaction;
 use super::unlocked_utxo::UnlockedUtxo;
+use super::wallet_entropy::WalletEntropy;
+use super::wallet_file::WalletFileContext;
+use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
-use super::WalletSecret;
-use super::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::DbtVec;
@@ -72,7 +73,7 @@ use crate::Hash;
 
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
-    pub wallet_secret: WalletSecret,
+    pub wallet_entropy: WalletEntropy,
     pub number_of_mps_per_utxo: usize,
     wallet_directory_path: PathBuf,
 
@@ -154,7 +155,7 @@ impl StrongUtxoKey {
 impl Debug for WalletState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WalletState")
-            .field("wallet_secret", &self.wallet_secret)
+            .field("wallet_secret", &self.wallet_entropy)
             .field("number_of_mps_per_utxo", &self.number_of_mps_per_utxo)
             .field("wallet_directory_path", &self.wallet_directory_path)
             .finish()
@@ -230,9 +231,9 @@ impl WalletState {
         Ok(ret)
     }
 
-    pub async fn new_from_wallet_secret(
+    async fn new_from_wallet_entropy_and_new_bool(
         data_dir: &DataDirectory,
-        wallet_secret: WalletSecret,
+        wallet_entropy: WalletEntropy,
         cli_args: &Args,
         wallet_was_new: bool,
     ) -> Self {
@@ -261,7 +262,7 @@ impl WalletState {
         Self::new_from_wallet_secret_and_database(
             rusty_wallet_database,
             data_dir,
-            wallet_secret,
+            wallet_entropy,
             cli_args,
             wallet_was_new,
             database_is_new,
@@ -269,10 +270,24 @@ impl WalletState {
         .await
     }
 
+    pub async fn new_from_wallet_file_context(
+        data_dir: &DataDirectory,
+        wallet_file_context: WalletFileContext,
+        cli_args: &Args,
+    ) -> Self {
+        Self::new_from_wallet_entropy_and_new_bool(
+            data_dir,
+            wallet_file_context.entropy(),
+            cli_args,
+            wallet_file_context.wallet_is_new,
+        )
+        .await
+    }
+
     async fn new_from_wallet_secret_and_database(
         rusty_wallet_database: RustyWalletDatabase,
         data_dir: &DataDirectory,
-        wallet_secret: WalletSecret,
+        wallet_secret: WalletEntropy,
         cli_args: &Args,
         wallet_was_new: bool,
         database_was_new: bool,
@@ -327,7 +342,7 @@ impl WalletState {
 
         let mut wallet_state = Self {
             wallet_db: rusty_wallet_database,
-            wallet_secret,
+            wallet_entropy: wallet_secret,
             number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
             wallet_directory_path: data_dir.wallet_directory_path(),
             mempool_spent_utxos: Default::default(),
@@ -789,7 +804,7 @@ impl WalletState {
         block: &Block,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
         let receiver_preimage = self
-            .wallet_secret
+            .wallet_entropy
             .guesser_preimage(block.header().prev_block_digest);
         let receiver_digest = receiver_preimage.hash();
         let incoming_utxos = if block.header().guesser_digest == receiver_digest {
@@ -1055,10 +1070,12 @@ impl WalletState {
     /// Get the nth derived spending key of a given type.
     pub fn nth_spending_key(&self, key_type: KeyType, index: u64) -> Option<SpendingKey> {
         match key_type {
-            KeyType::Generation => {
-                Some(self.wallet_secret.nth_generation_spending_key(index).into())
-            }
-            KeyType::Symmetric => Some(self.wallet_secret.nth_symmetric_key(index).into()),
+            KeyType::Generation => Some(
+                self.wallet_entropy
+                    .nth_generation_spending_key(index)
+                    .into(),
+            ),
+            KeyType::Symmetric => Some(self.wallet_entropy.nth_symmetric_key(index).into()),
             KeyType::RawHashLock => None,
         }
     }
@@ -1075,7 +1092,7 @@ impl WalletState {
     ) -> generation_address::GenerationSpendingKey {
         let index = self.wallet_db.get_generation_key_counter().await;
         self.wallet_db.set_generation_key_counter(index + 1).await;
-        let key = self.wallet_secret.nth_generation_spending_key(index);
+        let key = self.wallet_entropy.nth_generation_spending_key(index);
         self.known_generation_keys.push(key.into());
         key
     }
@@ -1090,7 +1107,7 @@ impl WalletState {
     pub async fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
         let index = self.wallet_db.get_symmetric_key_counter().await;
         self.wallet_db.set_symmetric_key_counter(index + 1).await;
-        let key = self.wallet_secret.nth_symmetric_key(index);
+        let key = self.wallet_entropy.nth_symmetric_key(index);
         self.known_symmetric_keys.push(key.into());
         key
     }
@@ -1103,7 +1120,7 @@ impl WalletState {
     ) -> impl Iterator<Item = (u64, generation_address::GenerationSpendingKey)> + use<'_> {
         let index = self.wallet_db.get_generation_key_counter().await;
         (index..index + (num_future_keys as u64))
-            .map(|i| (i, self.wallet_secret.nth_generation_spending_key(i)))
+            .map(|i| (i, self.wallet_entropy.nth_generation_spending_key(i)))
     }
 
     /// Get the next n symmetric spending keys (with derivation indices)
@@ -1114,7 +1131,7 @@ impl WalletState {
     ) -> impl Iterator<Item = (u64, symmetric_key::SymmetricKey)> + use<'_> {
         let index = self.wallet_db.get_symmetric_key_counter().await;
         (index..index + (num_future_keys as u64))
-            .map(|i| (i, self.wallet_secret.nth_symmetric_key(i)))
+            .map(|i| (i, self.wallet_entropy.nth_symmetric_key(i)))
     }
 
     pub(crate) async fn claim_utxo(&mut self, utxo_claim_data: ClaimUtxoData) -> Result<()> {
@@ -1774,6 +1791,15 @@ impl WalletState {
         }
         own_coins
     }
+
+    #[cfg(test)]
+    pub(crate) async fn new_from_wallet_entropy(
+        data_dir: &DataDirectory,
+        wallet_entropy: WalletEntropy,
+        cli_args: &Args,
+    ) -> Self {
+        Self::new_from_wallet_entropy_and_new_bool(data_dir, wallet_entropy, cli_args, false).await
+    }
 }
 
 #[cfg(test)]
@@ -1816,7 +1842,7 @@ mod tests {
         let alice_global_lock = mock_genesis_global_state(
             network,
             0,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1871,7 +1897,7 @@ mod tests {
         let mut alice_global_lock = mock_genesis_global_state(
             network,
             0,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1929,7 +1955,7 @@ mod tests {
         let block_1_timestamp = launch_timestamp + Timestamp::minutes(2);
         let alice_key = alice
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block1, composer_expected_utxos) = make_mock_block(
             genesis,
@@ -1978,7 +2004,7 @@ mod tests {
         let mut rng = rand::rng();
         let cli = cli_args::Args::default();
 
-        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_wallet_secret = WalletEntropy::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut bob_global_lock =
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli.clone()).await;
@@ -2001,7 +2027,7 @@ mod tests {
         let network = Network::Main;
         let cli = cli_args::Args::default();
 
-        let alice_wallet_secret = WalletSecret::new_random();
+        let alice_wallet_secret = WalletEntropy::new_random();
         let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut alice = mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
 
@@ -2110,7 +2136,7 @@ mod tests {
         let cli = cli_args::Args::default();
         let (block1, mut bob, bob_key) = bob_mines_one_block(network).await;
 
-        let alice_wallet_secret = WalletSecret::new_random();
+        let alice_wallet_secret = WalletEntropy::new_random();
         let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut alice = mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
         alice
@@ -2207,7 +2233,7 @@ mod tests {
         let network = Network::Main;
         let cli = cli_args::Args::default();
 
-        let alice_wallet_secret = WalletSecret::new_random();
+        let alice_wallet_secret = WalletEntropy::new_random();
         let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut alice = mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
 
@@ -2306,7 +2332,7 @@ mod tests {
     async fn never_store_same_utxo_twice_different_blocks() {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_wallet_secret = WalletEntropy::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut bob_global_lock = mock_genesis_global_state(
             network,
@@ -2412,7 +2438,7 @@ mod tests {
     async fn never_store_same_utxo_twice_same_block() {
         let mut rng = rand::rng();
         let network = Network::Main;
-        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_wallet_secret = WalletEntropy::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut bob_global_lock =
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
@@ -2501,7 +2527,7 @@ mod tests {
 
         let mut rng = rand::rng();
         let network = Network::RegTest;
-        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_wallet_secret = WalletEntropy::new_random();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut bob_global_lock =
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
@@ -2519,7 +2545,7 @@ mod tests {
         );
 
         // Add two blocks with no UTXOs for us
-        let alice_key = WalletSecret::new_random().nth_generation_spending_key_for_tests(0);
+        let alice_key = WalletEntropy::new_random().nth_generation_spending_key_for_tests(0);
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo) =
@@ -2676,7 +2702,7 @@ mod tests {
     #[tokio::test]
     async fn mock_wallet_state_is_synchronized_to_genesis_block() {
         let network = Network::RegTest;
-        let wallet = WalletSecret::devnet_wallet();
+        let wallet = WalletEntropy::devnet_wallet();
         let genesis_block = Block::genesis(network);
 
         let wallet_state = mock_genesis_wallet_state(wallet, network).await;
@@ -2735,7 +2761,7 @@ mod tests {
             let mut bob = mock_genesis_global_state(
                 network,
                 3,
-                WalletSecret::new_random(),
+                WalletEntropy::new_random(),
                 cli_args::Args::default_with_network(network),
             )
             .await;
@@ -2755,7 +2781,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .wallet_secret
+                .wallet_entropy
                 .guesser_spending_key(genesis_block.hash());
 
             // Mine it till it has a valid PoW digest
@@ -3002,8 +3028,9 @@ mod tests {
         async fn guesser_fee_scanner_finds_guesser_fee_iff_present() {
             let network = Network::Main;
             let mut rng = rng();
-            let wallet_state = mock_genesis_wallet_state(WalletSecret::new_random(), network).await;
-            let composer_key = wallet_state.wallet_secret.nth_generation_spending_key(0);
+            let wallet_state =
+                mock_genesis_wallet_state(WalletEntropy::new_random(), network).await;
+            let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (mut incoming_block, _) =
                 make_mock_block(&genesis_block, None, composer_key, rng.random()).await;
@@ -3019,7 +3046,7 @@ mod tests {
 
             // our lucky guess -> guesser fees detected
             let guesser_preimage = wallet_state
-                .wallet_secret
+                .wallet_entropy
                 .guesser_preimage(genesis_block.hash());
             incoming_block.set_header_guesser_digest(guesser_preimage.hash());
             assert_eq!(
@@ -3064,7 +3091,7 @@ mod tests {
             let mut global_state_lock = mock_genesis_global_state(
                 network,
                 0,
-                WalletSecret::new_pseudorandom(rng.random()),
+                WalletEntropy::new_pseudorandom(rng.random()),
                 cli_args::Args::default(),
             )
             .await;
@@ -3227,7 +3254,7 @@ mod tests {
 
             let network = Network::Main;
             let mut rng = rand::rng();
-            let alice_wallet = WalletSecret::new_pseudorandom(rng.random());
+            let alice_wallet = WalletEntropy::new_pseudorandom(rng.random());
             let mut alice = mock_genesis_global_state(
                 network,
                 0,
@@ -3380,7 +3407,7 @@ mod tests {
 
                 // 1. Generate a mock WalletState
                 let mut wallet =
-                    mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+                    mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
 
                 let num_known_keys = wallet.get_known_spending_keys(key_type).count();
                 let num_to_derive = 20;
@@ -3416,7 +3443,7 @@ mod tests {
                 info!("key_type: {}", key_type);
 
                 let network = Network::RegTest;
-                let wallet_secret = WalletSecret::new_random();
+                let wallet_secret = WalletEntropy::new_random();
                 let data_dir = unit_test_data_directory(network)?;
 
                 // 1. create new wallet and generate 20 keys
@@ -3479,7 +3506,7 @@ mod tests {
         #[tokio::test]
         async fn insert_and_scan() {
             let mut wallet =
-                mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
 
             assert!(wallet.wallet_db.expected_utxos().is_empty().await);
             assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
@@ -3534,7 +3561,7 @@ mod tests {
         #[tokio::test]
         async fn prune_stale() {
             let mut wallet =
-                mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
 
             let mock_utxo = Utxo::new_native_currency(
                 LockScript::anyone_can_spend(),
@@ -3632,7 +3659,7 @@ mod tests {
             ///    is added. asserts that the restored wallet has 0 ExpectedUtxo.
             pub(super) async fn restore_wallet(persist: bool) {
                 let network = Network::RegTest;
-                let wallet_secret = WalletSecret::new_random();
+                let wallet_secret = WalletEntropy::new_random();
                 let data_dir = unit_test_data_directory(network).unwrap();
 
                 // create initial wallet in a new directory
@@ -3744,7 +3771,7 @@ mod tests {
             // 5. Verify no abandoned/unsynced MUTXOs
             // 6. Verify that Alice can, again, create a transaction spending premine.
             let network = Network::Main;
-            let alice_wallet = WalletSecret::devnet_wallet();
+            let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice_global_lock = mock_genesis_global_state(
                 network,
                 0,
@@ -3860,7 +3887,7 @@ mod tests {
             // 6. Verify presence of abandoned/unsynced MUTXOs.
             let network = Network::Main;
             let mut rng = rand::rng();
-            let alice_wallet = WalletSecret::new_pseudorandom(rng.random());
+            let alice_wallet = WalletEntropy::new_pseudorandom(rng.random());
             let mut alice_global_lock = mock_genesis_global_state(
                 network,
                 0,
@@ -3950,7 +3977,7 @@ mod tests {
             let wallet_state = WalletState::new_from_wallet_secret_and_database(
                 rusty_wallet_database,
                 &mock_data_dir(),
-                WalletSecret::new_random(),
+                WalletEntropy::new_random(),
                 &Args::default(),
                 false,
                 false,
@@ -3961,7 +3988,7 @@ mod tests {
 
         #[tokio::test]
         async fn scan_mode_is_on_with_scan_blocks_or_scan_keys() {
-            let wallet_secret = WalletSecret::new_random();
+            let wallet_secret = WalletEntropy::new_random();
             let data_dir = mock_data_dir();
             let rusty_wallet_database_1 = mock_rusty_wallet_database().await;
             let rusty_wallet_database_2 = mock_rusty_wallet_database().await;
@@ -4016,7 +4043,7 @@ mod tests {
 
         #[tokio::test]
         async fn scan_mode_is_on_if_wallet_was_imported() {
-            let wallet_secret = WalletSecret::new_random();
+            let wallet_secret = WalletEntropy::new_random();
             let data_dir = mock_data_dir();
             let rusty_wallet_database = mock_rusty_wallet_database().await;
 
@@ -4038,7 +4065,7 @@ mod tests {
 
         #[tokio::test]
         async fn num_future_keys_default_is_sane() {
-            let wallet_secret = WalletSecret::new_random();
+            let wallet_secret = WalletEntropy::new_random();
             let data_dir = mock_data_dir();
             let rusty_wallet_database = mock_rusty_wallet_database().await;
 
@@ -4064,7 +4091,7 @@ mod tests {
 
         #[tokio::test]
         async fn block_height_range_check_agrees_with_interval_membership() {
-            let wallet_secret = WalletSecret::new_random();
+            let wallet_secret = WalletEntropy::new_random();
             let data_dir = mock_data_dir();
             let rusty_wallet_database = mock_rusty_wallet_database().await;
 
@@ -4114,7 +4141,7 @@ mod tests {
         async fn test_recovery_on_imported_wallet() {
             let network = Network::Main;
             let mut rng = StdRng::from_rng(&mut rng());
-            let alice_secret = WalletSecret::new_pseudorandom(rng.random());
+            let alice_secret = WalletEntropy::new_pseudorandom(rng.random());
             let data_dir = unit_test_data_directory(network).unwrap();
 
             // generate events
@@ -4122,7 +4149,7 @@ mod tests {
             let premine_receiver = mock_genesis_global_state(
                 network,
                 0,
-                WalletSecret::devnet_wallet(),
+                WalletEntropy::devnet_wallet(),
                 cli_args::Args::default(),
             )
             .await;
@@ -4186,11 +4213,10 @@ mod tests {
                 (3, cli_well_configured, true),
             ] {
                 println!("testing case {case} ...");
-                let mut alice_wallet_state = WalletState::new_from_wallet_secret(
+                let mut alice_wallet_state = WalletState::new_from_wallet_entropy(
                     &data_dir,
                     alice_secret.clone(),
                     &cli_args,
-                    false,
                 )
                 .await;
 
@@ -4238,13 +4264,12 @@ mod tests {
         async fn get_future_keys_do_not_modify_counters() {
             let network = Network::Main;
             let mut rng = StdRng::from_rng(&mut rng());
-            let wallet_secret = WalletSecret::new_pseudorandom(rng.random());
+            let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
             let data_dir = unit_test_data_directory(network).unwrap();
-            let wallet_state = WalletState::new_from_wallet_secret(
+            let wallet_state = WalletState::new_from_wallet_entropy(
                 &data_dir,
-                wallet_secret.clone(),
+                wallet_secret,
                 &cli_args::Args::default(),
-                false,
             )
             .await;
 

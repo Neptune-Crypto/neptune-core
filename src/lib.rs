@@ -46,6 +46,7 @@ use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::handshake_data::HandshakeData;
 use models::peer::peer_info::PeerInfo;
+use models::state::wallet::wallet_file::WalletFileContext;
 use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
@@ -76,7 +77,6 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::wallet_state::WalletState;
-use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
 
@@ -102,16 +102,12 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     // Get wallet object, create various wallet secret files
     let wallet_dir = data_directory.wallet_directory_path();
     DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-    let (wallet_secret, _, wallet_was_new) =
-        WalletSecret::read_from_file_or_create(&data_directory.wallet_directory_path())?;
+    let wallet_file_context =
+        WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
     info!("Now getting wallet state. This may take a while if the database needs pruning.");
-    let wallet_state = WalletState::new_from_wallet_secret(
-        &data_directory,
-        wallet_secret,
-        &cli_args,
-        wallet_was_new,
-    )
-    .await;
+    let wallet_state =
+        WalletState::new_from_wallet_file_context(&data_directory, wallet_file_context, &cli_args)
+            .await;
     info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync
