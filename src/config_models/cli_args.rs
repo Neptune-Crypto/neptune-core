@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::ops::Not;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -9,6 +10,7 @@ use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
 use clap::builder::TypedValueParser;
 use clap::Parser;
+use itertools::Itertools;
 use num_traits::Zero;
 use sysinfo::System;
 
@@ -374,58 +376,87 @@ fn fraction_validator(s: &str) -> Result<f64, String> {
 fn duration_from_seconds_str(s: &str) -> Result<Duration, std::num::ParseIntError> {
     Ok(Duration::from_secs(s.parse()?))
 }
-fn parse_range(s: &str) -> Result<RangeInclusive<u64>, String> {
-    if s.is_empty() {
+
+/// Parses strings that represent ranges of non-negative integers, in either
+/// rust or python (index-range) format.
+///
+/// Disallows empty ranges.
+fn parse_range(range_string: &str) -> Result<RangeInclusive<u64>, String> {
+    if range_string.is_empty() {
         return Ok(0u64..=u64::MAX);
     }
 
-    let parts: Vec<&str> = if s.contains("..") {
-        s.split("..").collect()
+    let range_parts = if range_string.contains("..") {
+        range_string.split("..")
     } else {
-        s.split(':').collect()
+        range_string.split(":")
     };
 
-    if parts.len() > 2 {
-        return Err("Invalid range format".to_string());
-    }
+    let Some((start, end)) = range_parts.collect_tuple() else {
+        let error_message = format!(
+            "Invalid range: \"{range_string}\". \
+            Syntax: `start..end`, `start..=end`, or `start:end`"
+        );
+        return Err(error_message);
+    };
 
-    let parse_lower_bound = |s_: &str| -> Result<Option<u64>, String> {
-        if s_.is_empty() {
-            Ok(None)
-        } else {
-            s_.parse()
-                .map(Some)
-                .map_err(|_| "Invalid number".to_string())
+    let start = match start.is_empty().not().then(|| start.parse()) {
+        None => 0_u64,
+        Some(Ok(u)) => u,
+        Some(Err(e)) => {
+            let error_message = format!(
+                "Invalid start \"{start}\" in range \
+                \"{range_string}\": {e:?}"
+            );
+            return Err(error_message);
         }
     };
 
-    let parse_upper_bound = |s_: &str| -> Result<Option<u64>, String> {
-        if s_.is_empty() {
-            Ok(None)
-        } else if s_.starts_with('=') {
-            s_.strip_prefix('=')
-                .unwrap()
-                .parse()
-                .map(Some)
-                .map_err(|_| "Invalid number".to_string())
+    let end = if end.is_empty() {
+        u64::MAX
+    } else {
+        let parse_result = if let Some(end_inclusive) = end.strip_prefix('=') {
+            end_inclusive.parse().map(Some)
         } else {
-            match s_.parse().map(|u: u64| u.checked_sub(1u64)) {
-                Ok(Some(u)) => Ok(Some(u)),
-                Ok(None) => Err("Invalid upper bound.".to_string()),
-                Err(e) => Err(format!("Invalid number: {e:?}")),
+            end.parse()
+                .map(|end_exclusive: u64| end_exclusive.checked_sub(1))
+        };
+        match parse_result {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                let error_message = format!(
+                    "Range upper bound \
+                \"{end}\" is invalid when excluded"
+                );
+                return Err(error_message);
+            }
+            Err(e) => {
+                let error_message = format!(
+                    "Invalid start \"{start}\" in range \
+                    \"{range_string}\": {e:?}"
+                );
+                return Err(error_message);
             }
         }
     };
 
-    let start = parse_lower_bound(parts.first().unwrap_or(&""))?;
-    let end = parse_upper_bound(parts.get(1).unwrap_or(&""))?;
-
-    match (start, end) {
-        (Some(start), Some(end)) => Ok(start..=end),
-        (Some(start), None) => Ok(start..=u64::MAX),
-        (None, Some(end)) => Ok(0..=end),
-        (None, None) => Ok(0..=u64::MAX),
+    if start == end {
+        let error_message = format!(
+            "Range \"{range_string}\" is \
+        empty; not allowed."
+        );
+        return Err(error_message);
     }
+
+    if start > end {
+        let error_message = format!(
+            "Range \"{range_string}\" is \
+        invalid: lower bound exceeds upper bound."
+        );
+        return Err(error_message);
+    }
+
+    Ok(start..=end)
 }
 
 impl Args {
