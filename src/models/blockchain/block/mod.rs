@@ -1262,6 +1262,7 @@ pub(crate) mod block_tests {
     }
 
     mod block_is_valid {
+        use bytesize::ByteSize;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
@@ -1270,6 +1271,7 @@ pub(crate) mod block_tests {
         use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;
+        use crate::tests::shared::no_pow_fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]
         #[tokio::test]
@@ -1478,6 +1480,275 @@ pub(crate) mod block_tests {
             let future_time5 = now + Timestamp::seconds(86400 * 2);
             block1.kernel.header.timestamp = future_time5;
             assert!(!block1.is_valid(&genesis_block, now).await);
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn big_blocks_are_valid() {
+            use std::collections::HashMap;
+
+            fn block_size_statistics(block: &Block) -> HashMap<String, (usize, f64)> {
+                let mut dictionary = HashMap::new();
+                let total_size = block.size() * 8;
+                dictionary.insert("_total".to_string(), (total_size, 1.0));
+
+                macro_rules! insert_statistic {
+                    ($field_expr:expr, $label:expr) => {{
+                        let size = $field_expr.encode().len() * 8;
+                        dictionary.insert(
+                            $label.to_string(),
+                            (size, (size as f64) / (total_size as f64)),
+                        );
+                    }};
+                }
+                insert_statistic!(block.header(), "header");
+                insert_statistic!(block.body(), "body");
+                insert_statistic!(&block.body().block_mmr_accumulator, "body / block_mmra");
+                insert_statistic!(
+                    &block.body().lock_free_mmr_accumulator,
+                    "body / lock_free_mmra"
+                );
+                insert_statistic!(&block.body().mutator_set_accumulator, "body / mutator_set");
+                insert_statistic!(&block.body().transaction_kernel, "body / transaction");
+                insert_statistic!(
+                    &block.body().transaction_kernel.inputs,
+                    "body / transaction / inputs"
+                );
+                insert_statistic!(
+                    &block.body().transaction_kernel.outputs,
+                    "body / transaction / outputs"
+                );
+                insert_statistic!(
+                    &block.body().transaction_kernel.public_announcements,
+                    "body / transaction / public_announcements"
+                );
+                insert_statistic!(block.appendix(), "appendix");
+                insert_statistic!(&block.proof, "proof");
+
+                dictionary
+            }
+
+            fn print_block_size_statistics(dictionary: HashMap<String, (usize, f64)>) {
+                let max_label_length = dictionary.keys().map(|k| k.len()).max().unwrap();
+                let byte_size_string =
+                    |(abs, _rs): (usize, f64)| ByteSize::b(abs as u64).to_string_as(true);
+                let percentage_string = |(_abs, rs)| format!("{:.2}%", 100.0 * rs);
+                let max_size_string = dictionary
+                    .values()
+                    .cloned()
+                    .map(byte_size_string)
+                    .map(|s| s.len())
+                    .max()
+                    .unwrap();
+                let max_percentage_string = dictionary
+                    .values()
+                    .cloned()
+                    .map(percentage_string)
+                    .map(|p| p.len())
+                    .max()
+                    .unwrap();
+
+                let mut collection = dictionary.into_iter().collect_vec();
+                collection.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+                for (k, v) in collection {
+                    println!(
+                        "{:<max_label_length$} {:>max_size_string$} {:>max_percentage_string$}",
+                        k,
+                        byte_size_string(v),
+                        percentage_string(v)
+                    );
+                }
+            }
+
+            // Scenario: Build a block with 1 input and 33 outputs and
+            // verify its validity. Then build a block with 33 inputs and
+            // verify its validity.
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+            let block1 =
+                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
+                    .await;
+            let block_interval = Timestamp::minutes(20);
+            let num_blocks = 100;
+            let many_blocks = no_pow_fake_valid_sequence_of_blocks_for_tests_dyn(
+                &block1,
+                block_interval,
+                rng.random(),
+                num_blocks,
+            )
+            .await;
+            let latest_block = many_blocks.last().unwrap().clone();
+
+            let alice_wallet = WalletEntropy::devnet_wallet();
+            let mut alice = mock_genesis_global_state(
+                network,
+                3,
+                alice_wallet.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            alice.set_new_tip(block1.clone()).await.unwrap();
+            for block in many_blocks {
+                alice.set_new_tip(block).await.unwrap();
+            }
+            let alice_key = alice
+                .lock_guard()
+                .await
+                .wallet_state
+                .nth_spending_key(KeyType::Generation, 0)
+                .unwrap();
+            let output_to_self = TxOutput::onchain_native_currency(
+                NativeCurrencyAmount::from_nau(50),
+                rng.random(),
+                alice_key.to_address().unwrap(),
+                true,
+            );
+
+            let block_timestamp = latest_block.header().timestamp + Timestamp::minutes(20);
+            let (coinbase_tx, _) = make_coinbase_transaction_from_state(
+                &latest_block,
+                &alice,
+                0.5f64,
+                block_timestamp,
+                TxProvingCapability::SingleProof,
+                (TritonVmJobPriority::Normal, None).into(),
+            )
+            .await
+            .unwrap();
+            let fee = NativeCurrencyAmount::coins(1);
+
+            let num_outputs = 32;
+            let tx_outputs = vec![output_to_self.clone(); num_outputs];
+            let (tx_many_outputs, _, _) = alice
+                .lock_guard_mut()
+                .await
+                .create_transaction_with_prover_capability(
+                    tx_outputs.into(),
+                    alice_key,
+                    UtxoNotificationMedium::OnChain,
+                    fee,
+                    block_timestamp,
+                    TxProvingCapability::SingleProof,
+                    &TritonVmJobQueue::dummy(),
+                )
+                .await
+                .unwrap();
+            let block_tx_many_outputs = coinbase_tx
+                .clone()
+                .merge_with(
+                    tx_many_outputs,
+                    rng.random(),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+            let block_many_outputs = Block::compose(
+                &latest_block,
+                block_tx_many_outputs,
+                block_timestamp,
+                None,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            print_block_size_statistics(block_size_statistics(&block_many_outputs));
+
+            assert!(
+                block_many_outputs
+                    .is_valid(&latest_block, block_timestamp)
+                    .await,
+                "Block with {num_outputs} outputs must be valid"
+            );
+
+            // Spend entire balance of 19 coins (1 was paid as fee). This should
+            // result in a transaction with `num_outputs + 1` inputs.
+            alice.set_new_tip(block_many_outputs.clone()).await.unwrap();
+            let num_more_blocks = 1000;
+            let many_more_blocks = no_pow_fake_valid_sequence_of_blocks_for_tests_dyn(
+                &block_many_outputs,
+                block_interval,
+                rng.random(),
+                num_more_blocks,
+            )
+            .await;
+            let block_before_many_inputs = many_more_blocks.last().unwrap().clone();
+            for block in many_more_blocks {
+                alice.set_new_tip(block).await.unwrap();
+            }
+            let new_output_to_self = TxOutput::onchain_native_currency(
+                NativeCurrencyAmount::coins(19),
+                rng.random(),
+                alice_key.to_address().unwrap(),
+                true,
+            );
+
+            let fee_many_inputs = NativeCurrencyAmount::coins(0);
+            let (tx_many_inputs, _, _) = alice
+                .lock_guard_mut()
+                .await
+                .create_transaction_with_prover_capability(
+                    vec![new_output_to_self].into(),
+                    alice_key,
+                    UtxoNotificationMedium::OnChain,
+                    fee_many_inputs,
+                    block_timestamp,
+                    TxProvingCapability::SingleProof,
+                    &TritonVmJobQueue::dummy(),
+                )
+                .await
+                .unwrap();
+            let num_inputs = tx_many_inputs.kernel.inputs.len();
+            assert_eq!(num_outputs + 1, num_inputs);
+
+            let many_inputs_block_timestamp =
+                block_before_many_inputs.header().timestamp + Timestamp::minutes(20);
+            let (new_coinbase_tx, _) = make_coinbase_transaction_from_state(
+                &block_before_many_inputs,
+                &alice,
+                0.5f64,
+                many_inputs_block_timestamp,
+                TxProvingCapability::SingleProof,
+                (TritonVmJobPriority::Normal, None).into(),
+            )
+            .await
+            .unwrap();
+            let many_inputs_block_tx = new_coinbase_tx
+                .clone()
+                .merge_with(
+                    tx_many_inputs,
+                    rng.random(),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+            let many_inputs_block = Block::compose(
+                &block_before_many_inputs,
+                many_inputs_block_tx,
+                many_inputs_block_timestamp,
+                None,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(
+                many_inputs_block
+                    .is_valid(&block_before_many_inputs, many_inputs_block_timestamp)
+                    .await,
+                "Block with {num_inputs} inputs must be valid"
+            );
+            println!(
+                "many_inputs_block size: {}",
+                many_inputs_block.encode().len()
+            );
+            print_block_size_statistics(block_size_statistics(&many_inputs_block));
         }
     }
 

@@ -1060,6 +1060,35 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
         .unwrap()
 }
 
+/// Create a deterministic sequence of valid blocks, without a valid
+/// proof-of-work hash.
+///
+/// Sequence is N-long. Every block i with i > 0 has block i-1 as its
+/// predecessor; block 0 has the `predecessor` argument as predecessor. Every
+/// block is valid in terms of both `is_valid` but not (necessarily)
+/// `has_proof_of_work`. The STARK proofs are mocked.
+pub(crate) async fn no_pow_fake_valid_sequence_of_blocks_for_tests_dyn(
+    mut predecessor: &Block,
+    block_interval: Timestamp,
+    seed: [u8; 32],
+    n: usize,
+) -> Vec<Block> {
+    let mut blocks = vec![];
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    for i in 0..n {
+        println!("fake block, now pow, i={i}");
+        let block = fake_valid_block_proposal_successor_for_test(
+            predecessor,
+            predecessor.header().timestamp + block_interval,
+            rng.random(),
+        )
+        .await;
+        blocks.push(block);
+        predecessor = blocks.last().unwrap();
+    }
+    blocks
+}
+
 /// Create a deterministic sequence of valid blocks.
 ///
 /// Sequence is N-long. Every block i with i > 0 has block i-1 as its
@@ -1074,7 +1103,8 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
 ) -> Vec<Block> {
     let mut blocks = vec![];
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    for _ in 0..n {
+    for i in 0..n {
+        println!("fake block, i={i}");
         let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
