@@ -324,7 +324,7 @@ impl WalletState {
             }
             (None, Some(num_future_keys)) => {
                 info!("Activating scan mode: CLI argument `--scan-keys`.");
-                Some(ScanModeConfiguration::scan().for_future_keys(num_future_keys))
+                Some(ScanModeConfiguration::scan().for_many_future_keys(num_future_keys))
             }
             (Some(range), None) => {
                 info!("Activating scan mode: CLI argument `--scan-blocks`.");
@@ -335,7 +335,7 @@ impl WalletState {
                 Some(
                     ScanModeConfiguration::scan()
                         .blocks(range.to_owned())
-                        .for_future_keys(num_future_keys),
+                        .for_many_future_keys(num_future_keys),
                 )
             }
         };

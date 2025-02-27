@@ -44,7 +44,7 @@ impl ScanModeConfiguration {
     }
 
     /// Constructor-helper for setting the number of future keys to scan for.
-    pub(crate) fn for_future_keys(mut self, num_future_keys: usize) -> Self {
+    pub(crate) fn for_many_future_keys(mut self, num_future_keys: usize) -> Self {
         self.num_future_keys = num_future_keys;
         self
     }
