@@ -205,6 +205,7 @@ pub(crate) struct ClaimUtxoData {
 #[derive(Clone, Debug)]
 pub(crate) enum RPCServerToMain {
     BroadcastTx(Box<Transaction>),
+    SolvePow(Box<Block>),
     Shutdown,
     PauseMiner,
     RestartMiner,

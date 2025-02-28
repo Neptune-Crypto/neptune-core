@@ -1735,6 +1735,14 @@ pub trait RPC {
     /// ```
     async fn restart_miner(token: rpc_auth::Token) -> RpcResult<()>;
 
+    /// Provide a PoW-solution to the current block proposal.
+    ///
+    /// Returns true iff the provided solution satisfies the proof-of-work
+    /// threshold of the next block. False otherwise. False can be returned if
+    /// the solution comes in too late in which case either a new block
+    /// proposal is stored by the client, or no block proposal is known at all.
+    async fn pow_solution(token: rpc_auth::Token, nonce: Digest) -> RpcResult<bool>;
+
     /// mark MUTXOs as abandoned
     ///
     /// ```no_run
@@ -3104,6 +3112,64 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn pow_solution(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        nonce: Digest,
+    ) -> RpcResult<bool> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let Some(mut proposal) = self
+            .state
+            .lock_guard()
+            .await
+            .block_proposal
+            .map(|x| x.to_owned())
+        else {
+            warn!(
+                "Got claimed PoW solution but no challenge was known. \
+            Did solution come in too late?"
+            );
+            return Ok(false);
+        };
+
+        // A proposal was found. Check if solution works.
+        let (guesser_key_after_image, latest_block_header) = {
+            let state = self.state.lock_guard().await;
+            let guesser_key_after_image = state
+                .wallet_state
+                .wallet_secret
+                .guesser_spending_key(proposal.header().prev_block_digest);
+            let latest_block_header = *state.chain.light_state().header();
+
+            (guesser_key_after_image.after_image(), latest_block_header)
+        };
+
+        proposal.set_header_guesser_digest(guesser_key_after_image);
+        proposal.set_header_nonce(nonce);
+        let threshold = latest_block_header.difficulty.target();
+        let solution_digest = proposal.hash();
+        if solution_digest > threshold {
+            warn!(
+                "Got claimed PoW solution but PoW threshold was not met.\n\
+            Claimed solution: {solution_digest};\nthreshold: {threshold}"
+            );
+            return Ok(false);
+        }
+
+        // No time to waste! Inform main_loop!
+        let solution = Box::new(proposal);
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::SolvePow(solution))
+            .await;
+
+        Ok(true)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn prune_abandoned_monitored_utxos(
         mut self,
         _context: tarpc::context::Context,
@@ -4294,6 +4360,29 @@ mod rpc_server_tests {
         }
 
         #[tokio::test]
+        async fn guess_with_no_proposal() {
+            let network = Network::Main;
+            let bob = test_rpc_server(
+                network,
+                WalletSecret::new_random(),
+                2,
+                cli_args::Args::default(),
+            )
+            .await;
+            let bob_token = cookie_token(&bob).await;
+            assert!(!bob.state.lock_guard().await.block_proposal.is_some());
+            let accepted = bob
+                .clone()
+                .pow_solution(context::current(), bob_token, random())
+                .await
+                .unwrap();
+            assert!(
+                !accepted,
+                "Must reject PoW solution when no proposal exists"
+            );
+        }
+
+        #[tokio::test]
         async fn exported_guess_challenge_is_consistent_with_block_hash() {
             let network = Network::Main;
             let bob = WalletSecret::new_random();
@@ -4313,14 +4402,14 @@ mod rpc_server_tests {
                 .unwrap()
                 .unwrap();
 
-            let nonce = random();
-            let challenge_guess = fast_kernel_mast_hash(
+            let mock_nonce = random();
+            let mut challenge_guess = fast_kernel_mast_hash(
                 guess_challenge.kernel_auth_path,
                 guess_challenge.header_auth_path,
-                nonce,
+                mock_nonce,
             );
 
-            block1.set_header_nonce(nonce);
+            block1.set_header_nonce(mock_nonce);
 
             let expected_guesser_digest = bob
                 .state
@@ -4338,7 +4427,48 @@ mod rpc_server_tests {
                 guess_challenge.total_guesser_reward
             );
 
-            // TODO: Check that successfull guess is registered by wallet.
+            // Check that succesful guess is accepted by endpoint.
+            let actual_threshold = genesis.header().difficulty.target();
+            let mut actual_nonce = mock_nonce;
+            while challenge_guess > actual_threshold {
+                actual_nonce = random();
+                challenge_guess = fast_kernel_mast_hash(
+                    guess_challenge.kernel_auth_path,
+                    guess_challenge.header_auth_path,
+                    actual_nonce,
+                );
+            }
+
+            block1.set_header_nonce(actual_nonce);
+            let good_is_accepted = bob
+                .clone()
+                .pow_solution(context::current(), bob_token, actual_nonce)
+                .await
+                .unwrap();
+            assert!(
+                good_is_accepted,
+                "Actual PoW solution must be accepted by RPC endpoint."
+            );
+
+            // Check that bad guess is rejected by endpoint.
+            let mut bad_nonce: Digest = actual_nonce;
+            while challenge_guess <= actual_threshold {
+                bad_nonce = random();
+                challenge_guess = fast_kernel_mast_hash(
+                    guess_challenge.kernel_auth_path,
+                    guess_challenge.header_auth_path,
+                    bad_nonce,
+                );
+            }
+            let bad_is_accepted = bob
+                .clone()
+                .pow_solution(context::current(), bob_token, bad_nonce)
+                .await
+                .unwrap();
+            assert!(
+                !bad_is_accepted,
+                "Bad PoW solution must be rejected by RPC endpoint."
+            );
         }
     }
 
