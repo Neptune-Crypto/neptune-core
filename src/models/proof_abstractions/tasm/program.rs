@@ -483,8 +483,6 @@ pub mod test {
             attempt_to_get_test_name(),
         );
 
-        // TODO: Use regular (non-blocking) reqwest client if this function
-        // is made `async`.
         for server in servers {
             let server_ = server.clone();
             let filename_ = filename.clone();
@@ -501,6 +499,7 @@ pub mod test {
                 http_client.headers = headers_;
                 let request = http_client.request(clienter::HttpMethod::GET, uri);
 
+                // note: send() blocks
                 let Ok(mut response) = http_client.send(&request) else {
                     println!(
                         "server '{}' failed for file '{}'; trying next ...",
@@ -511,7 +510,14 @@ pub mod test {
                     return None;
                 };
 
-                let body = response.body();
+                // only retrieve body if we got a 2xx code.
+                // addresses #477
+                // https://github.com/Neptune-Crypto/neptune-core/issues/477
+                let body = if response.status.is_success() {
+                    response.body()
+                } else {
+                    Ok(vec![])
+                };
 
                 Some((response.status, body))
             });
