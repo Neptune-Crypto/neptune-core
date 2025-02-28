@@ -678,6 +678,20 @@ impl ConsensusProgram for SingleProof {
 
         *HASH.get_or_init(|| self.program().hash())
     }
+
+    fn program(&self) -> Program {
+        // Overwrite trait-implementation since this leads to much faster code.
+        // Throughout the lifetime of a client, the `SingleProof` program never
+        // changes, so this is OK.
+        static PROGRAM: OnceLock<Program> = OnceLock::new();
+
+        PROGRAM
+            .get_or_init(|| {
+                let (_, code) = self.library_and_code();
+                Program::new(&code)
+            })
+            .clone()
+    }
 }
 
 #[cfg(test)]
