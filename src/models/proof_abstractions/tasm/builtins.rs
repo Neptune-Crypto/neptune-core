@@ -292,10 +292,11 @@ pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
 
 /// Verify a STARK proof. Crashes if the (claim, proof) pair is invalid.
 ///
-/// Consumes the right number of non-deterministic digests from the ND digests
-/// stream. Also consumes the right number of non-deterministic individual
-/// tokens from the ND individual tokens stream. The latter number happens to
-/// be 0 right now, but that might change if the `StarkVerify` snippet changes.
+/// Consumes the right number of non-deterministic digests from the
+/// non-deterministic digests stream. Also consumes the right number of
+/// non-deterministic individual tokens from the non-deterministic individual
+/// tokens stream. The latter number happens to be 0 right now, but that might
+/// change if the `StarkVerify` snippet changes.
 pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
     assert!(triton_vm::verify(stark_parameters, claim, proof));
 

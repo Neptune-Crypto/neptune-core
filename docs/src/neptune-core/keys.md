@@ -13,7 +13,7 @@ Three `enum` are provided for working with keys and addresses:
 | `ReceivingAddress` | enumerates address types and provides methods    |
 
 note: It was decided to use `enum` rather than traits because the enums can be
-used within our RPC layer while traits cannnot.
+used within our RPC layer while traits cannot.
 
 Most public APIs use these types.  That provides flexibility and should also make it easy to add new implementations in the future if necessary.
 

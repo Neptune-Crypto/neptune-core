@@ -431,7 +431,7 @@ impl MainLoopHandler {
     async fn update_mempool_jobs(
         update_jobs: Vec<UpdateMutatorSetDataJob>,
         job_queue: &TritonVmJobQueue,
-        transcation_update_sender: mpsc::Sender<Vec<Transaction>>,
+        transaction_update_sender: mpsc::Sender<Vec<Transaction>>,
         proof_job_options: TritonVmProofJobOptions,
     ) {
         debug!(
@@ -450,7 +450,7 @@ impl MainLoopHandler {
             result.push(job_result);
         }
 
-        transcation_update_sender
+        transaction_update_sender
             .send(result)
             .await
             .expect("Receiver for updated txs in main loop must still exist");
@@ -1000,7 +1000,7 @@ impl MainLoopHandler {
         }
 
         info!("Performing peer discovery");
-        // Potential procedure for peer discovey:
+        // Potential procedure for peer discovery:
         // 0) Ask all peers for their peer lists
         // 1) Get peer candidate from these responses
         // 2) Connect to one of those peers, A.
@@ -1692,7 +1692,7 @@ impl MainLoopHandler {
                 Ok(false)
             }
             RPCServerToMain::Shutdown => {
-                info!("Recived RPC shutdown request.");
+                info!("Received RPC shutdown request.");
 
                 // shut down
                 Ok(true)

@@ -47,7 +47,7 @@ When working on an open github issue, it is recommended to prefix the topic bran
 
 When the branch is intended to become a pull request, it is recommended to add the suffix `_pr`.
 
-If the branch exists in a triton/neptune official repo, (as opposed to a personal fork), then it is recommended to prefix with your github username follwed by `/`.
+If the branch exists in a triton/neptune official repo, (as opposed to a personal fork), then it is recommended to prefix with your github username followed by `/`.
 
 So if working on issue `#232` and adding feature *walk_and_chew_gum* one might name the branch `myuser/232_walk_and_chew_gum_pr`.
 

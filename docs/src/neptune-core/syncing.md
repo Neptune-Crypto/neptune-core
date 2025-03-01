@@ -28,5 +28,5 @@ the `PeerMessage::BlockRequestBatch` type constructor. This type takes a list of
 batch size as parameter. The list of block digests represents the block digests of the blocks that the client
 has already stored to its database.
 
-The peer then reponds with a list of transfers that follows the first digest that it recognizes in the list of
+The peer then responds with a list of transfers that follows the first digest that it recognizes in the list of
 block digest the syncing node has sent.

@@ -246,11 +246,11 @@ impl GlobalStateLock {
 
     pub async fn prune_abandoned_monitored_utxos(
         &mut self,
-        block_depth_threshhold: usize,
+        block_depth_threshold: usize,
     ) -> Result<usize> {
         self.lock_guard_mut()
             .await
-            .prune_abandoned_monitored_utxos(block_depth_threshhold)
+            .prune_abandoned_monitored_utxos(block_depth_threshold)
             .await
     }
 
@@ -689,7 +689,7 @@ impl GlobalState {
     /// order to save blockchain space compared to a regular address.
     ///
     /// Note that `create_transaction()` does not modify any state and does not
-    /// require acquiring write lock.  This is important becauce internally it
+    /// require acquiring write lock.  This is important because internally it
     /// calls prove() which is a very lengthy operation.
     ///
     /// Example:
@@ -860,7 +860,7 @@ impl GlobalState {
     /// Failure to do so can result in loss of funds!
     ///
     /// Note that `create_raw_transaction()` does not modify any state and does
-    /// not require acquiring write lock.  This is important becauce internally
+    /// not require acquiring write lock.  This is important because internally
     /// it calls prove() which is a very lengthy operation.
     ///
     /// Example:
@@ -1295,7 +1295,7 @@ impl GlobalState {
     }
 
     /// Delete from the database all monitored UTXOs from abandoned chains with a depth deeper than
-    /// `block_depth_threshhold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
+    /// `block_depth_threshold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
     /// abandoned chains of unknown depth.
     /// Returns the number of monitored UTXOs that were marked as abandoned.
     ///
@@ -1303,14 +1303,14 @@ impl GlobalState {
     ///  * acquires `monitored_utxos` lock for write
     pub async fn prune_abandoned_monitored_utxos(
         &mut self,
-        block_depth_threshhold: usize,
+        block_depth_threshold: usize,
     ) -> Result<usize> {
         const MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING: usize = 10;
-        if block_depth_threshhold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
+        if block_depth_threshold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
             bail!(
                 "
                 Cannot prune monitored UTXOs with a depth threshold less than
-                {MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING}. Got threshold {block_depth_threshhold}"
+                {MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING}. Got threshold {block_depth_threshold}"
             )
         }
 
@@ -1344,7 +1344,7 @@ impl GlobalState {
             if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
                 let depth = current_tip_header.height - block_height_confirmed + 1;
 
-                let abandoned = depth >= block_depth_threshhold as i128
+                let abandoned = depth >= block_depth_threshold as i128
                     && mutxo.was_abandoned(self.chain.archival_state()).await;
 
                 if abandoned {
@@ -2713,7 +2713,7 @@ mod global_state_tests {
         //         .synced_unspent_available_amount(in_seven_months);
         //     assert_eq!(
         //         expected, got,
-        //         "premine receiver's balance should be 110: mining reward + premine - sent - fee + fee. Expecte: {expected:?}\nGot: {got}"
+        //         "premine receiver's balance should be 110: mining reward + premine - sent - fee + fee. Expected: {expected:?}\nGot: {got}"
         //     );
         // }
 

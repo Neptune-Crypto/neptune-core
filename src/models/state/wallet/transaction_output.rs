@@ -97,7 +97,7 @@ impl TxOutput {
         }
     }
 
-    /// Instantiaties [TxOutput] without any associated notification-info.
+    /// Instantiates [TxOutput] without any associated notification-info.
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.

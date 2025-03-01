@@ -134,7 +134,7 @@ pub struct DashBoardOverviewDataFromClient {
     // `None` indicates that wallet balance has never changed.
     pub confirmations: Option<BlockHeight>,
 
-    /// CPU temperature in degrees Celcius
+    /// CPU temperature in degrees Celsius
     pub cpu_temp: Option<f32>,
 }
 
@@ -1471,7 +1471,7 @@ pub trait RPC {
     /// // Max fee
     /// let fee : NativeCurrencyAmount = NativeCurrencyAmount::coins(10);
     /// #
-    /// // neptune-core server sends token to a single receipient
+    /// // neptune-core server sends token to a single recipient
     /// let send_result = client.send(context::current(), token, amount, address, notify_self, notify_other, fee).await??;
     /// # Ok(())
     /// # }
@@ -1563,7 +1563,7 @@ pub trait RPC {
     /// // Max fee
     /// let fee : NativeCurrencyAmount = NativeCurrencyAmount::coins(10);
     /// #
-    /// // neptune-core server sends token to a single receipient
+    /// // neptune-core server sends token to a single recipient
     /// let send_result = client.send_to_many(context::current(), token, outputs, notify_self, notify_other, fee).await??;
     /// # Ok(())
     /// # }
@@ -1722,8 +1722,8 @@ pub trait RPC {
     /// # // load the cookie file from disk and assign it to a token
     /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
-    ///  // marks mutxos as abandonned
-    /// let abandonned_monitored_utxos = client.prune_abandoned_monitored_utxos(context::current(), token).await??;
+    ///  // marks mutxos as abandoned
+    /// let abandoned_monitored_utxos = client.prune_abandoned_monitored_utxos(context::current(), token).await??;
     /// # Ok(())
     /// # }
     /// ```
@@ -1975,7 +1975,7 @@ impl NeptuneRPCServer {
             gsm.flush_databases().await.expect("flushed DBs");
         }
 
-        tracing::debug!("stmi: step 8. send messges. no lock needed");
+        tracing::debug!("stmi: step 8. send messages. no lock needed");
 
         // Send transaction message to main
         let response = self

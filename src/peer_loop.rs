@@ -855,7 +855,7 @@ impl PeerLoopHandler {
                 {
                     None => {
                         // TODO: Consider punishing here
-                        warn!("Peer requested unkown block with hash {}", block_digest);
+                        warn!("Peer requested unknown block with hash {}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                     Some(b) => {
@@ -1118,9 +1118,9 @@ impl PeerLoopHandler {
                 }
 
                 // Verify that we are in fact in syncing mode
-                // TODO: Seperate peer messages into those allowed under syncing
+                // TODO: Separate peer messages into those allowed under syncing
                 // and those that are not
-                let Some(sync_achor) = self
+                let Some(sync_anchor) = self
                     .global_state_lock
                     .lock_guard()
                     .await
@@ -1151,7 +1151,7 @@ impl PeerLoopHandler {
                 let most_canonical_own_block_match: Block = match most_canonical_own_block_match {
                     Some(block) => block,
                     None => {
-                        warn!("Got batch reponse with invalid start block");
+                        warn!("Got batch response with invalid start block");
                         self.punish(NegativePeerSanction::BatchBlocksInvalidStartHeight)
                             .await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
@@ -1175,8 +1175,8 @@ impl PeerLoopHandler {
                     if !membership_proof.verify(
                         block.header().height.into(),
                         block.hash(),
-                        &sync_achor.block_mmr.peaks(),
-                        sync_achor.block_mmr.num_leafs(),
+                        &sync_anchor.block_mmr.peaks(),
+                        sync_anchor.block_mmr.num_leafs(),
                     ) {
                         warn!("Authentication of received block fails relative to anchor");
                         self.punish(NegativePeerSanction::InvalidBlockMmrAuthentication)
@@ -1208,7 +1208,7 @@ impl PeerLoopHandler {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Handshake");
 
                 // The handshake should have been sent during connection
-                // initalization. Here it is out of order at best, malicious at
+                // initialization. Here it is out of order at best, malicious at
                 // worst.
                 self.punish(NegativePeerSanction::InvalidMessage).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -1217,7 +1217,7 @@ impl PeerLoopHandler {
                 log_slow_scope!(fn_name!() + "::PeerMessage::ConnectionStatus");
 
                 // The connection status should have been sent during connection
-                // initalization. Here it is out of order at best, malicious at
+                // initialization. Here it is out of order at best, malicious at
                 // worst.
 
                 self.punish(NegativePeerSanction::InvalidMessage).await?;
@@ -2046,7 +2046,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        // Verify that no futher message was sent to main loop
+        // Verify that no further message was sent to main loop
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
             _ => bail!("Block notification must not be sent for block with invalid PoW"),
@@ -2102,7 +2102,7 @@ mod peer_loop_tests {
         // work.
         block_without_valid_pow.set_header_nonce(Digest::default());
 
-        // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
+        // Sending an invalid block will not necessarily result in a ban. This depends on the peer
         // tolerance that is set in the client. For this reason, we include a "Bye" here.
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
@@ -2132,7 +2132,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        // Verify that no futher message was sent to main loop
+        // Verify that no further message was sent to main loop
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
             _ => bail!("Block notification must not be sent for block with invalid PoW"),
@@ -3264,7 +3264,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn empty_mempool_request_tx_test() {
-        // In this scenerio the client receives a transaction notification from
+        // In this scenario the client receives a transaction notification from
         // a peer of a transaction it doesn't know; the client must then request it.
 
         let network = Network::Main;

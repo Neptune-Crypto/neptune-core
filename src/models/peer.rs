@@ -128,7 +128,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksInvalidStartHeight => {
                 "invalid start height of batch blocks"
             }
-            NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
+            NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unknown request",
             NegativePeerSanction::InvalidTransaction => "invalid transaction",
             NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
             NegativePeerSanction::TransactionWithNegativeFee => "negative-fee transaction",

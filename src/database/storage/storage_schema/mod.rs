@@ -720,7 +720,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn singleton_vector_key_collission() {
+    async fn singleton_vector_key_collision() {
         let db = NeptuneLevelDb::open_new_test_database(false, None, None, None)
             .await
             .unwrap();

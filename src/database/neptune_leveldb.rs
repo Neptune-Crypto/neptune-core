@@ -159,7 +159,7 @@ where
 /// around `NeptuneLevelDbInternal`.
 ///
 /// Methods in the underlying struct `LevelDB` from `rs-leveldb` crate are all sync
-/// and they sometimes perfom blocking file IO.  It is discouraged to
+/// and they sometimes perform blocking file IO.  It is discouraged to
 /// call blocking IO from async code as it can lead to concurrency problems,
 /// usually hidden until a certain level of load is reached.
 ///

@@ -485,7 +485,7 @@ impl MsMembershipProof {
         // those whose leaf has changed, since an authentication path changes if *any* leaf
         // in the same Merkle tree (under the same MMR peak) changes.
         // It would be sufficient to only update the membership proofs that live in the Merkle
-        // trees that have been updated, but it probably will not give a measureable speedup
+        // trees that have been updated, but it probably will not give a measurable speedup
         // since this change would not reduce the amount of hashing needed
         let chunk_mmr_lis = self
             .target_chunks

@@ -160,7 +160,7 @@ impl TryFrom<ReceivingAddress> for generation_address::GenerationReceivingAddres
 }
 
 impl ReceivingAddress {
-    /// returns `receiver_identifer`
+    /// returns `receiver_identifier`
     pub fn receiver_identifier(&self) -> BFieldElement {
         match self {
             Self::Generation(a) => a.receiver_identifier(),
@@ -361,7 +361,7 @@ impl ReceivingAddress {
 }
 
 /// Represents cryptographic data necessary for spending funds (or, more
-/// specifically, fo unlocking UTXOs).
+/// specifically, for unlocking UTXOs).
 ///
 /// This enum provides an abstraction API for spending key types, so that a
 /// method or struct may simply accept a `SpendingKey` and be
@@ -491,7 +491,7 @@ impl SpendingKey {
     /// # Side Effects
     ///
     ///  - Logs a warning for any announcement targeted at this key that cannot
-    ///    be decypted.
+    ///    be decrypted.
     pub(crate) fn scan_for_announced_utxos(
         &self,
         tx_kernel: &TransactionKernel,

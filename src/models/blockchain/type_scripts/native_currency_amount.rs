@@ -585,7 +585,7 @@ pub(crate) mod test {
             let amount = NativeCurrencyAmount::coins(number);
             let string = amount.to_string();
             let reconstructed_amount = NativeCurrencyAmount::coins_from_str(&string)
-                .expect("Coult not parse as number a string generated from a number.");
+                .expect("Could not parse as number a string generated from a number.");
 
             assert_eq!(amount, reconstructed_amount);
         }

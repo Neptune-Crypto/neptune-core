@@ -88,11 +88,14 @@ mod test {
         let tblock_genesis: Result<TransferBlock> = (&genesis).try_into();
         assert!(
             tblock_genesis.is_err(),
-            "Transfering genesis block is disallowed"
+            "Transferring genesis block is disallowed"
         );
         let invalid_block_1 = invalid_empty_block(&genesis);
         let tblock_1 = TransferBlock::try_from(invalid_block_1);
-        assert!(tblock_1.is_err(), "Transfering invalid block is disallowed");
+        assert!(
+            tblock_1.is_err(),
+            "Transferring invalid block is disallowed"
+        );
     }
 
     // test: verify digest is the same after conversion from

@@ -38,7 +38,7 @@ pub(crate) enum TransferTransactionProof {
 /// For transferring proved transactions between peers.
 ///
 /// This type exists to ensure that a transaction supported by
-/// [TransactionProof::Witness] is never shared betwen peers, as this would
+/// [TransactionProof::Witness] is never shared between peers, as this would
 /// leak secret keys and lead to loss of funds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct TransferTransaction {

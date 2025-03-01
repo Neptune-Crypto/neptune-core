@@ -584,7 +584,7 @@ mod archival_mutator_set_tests {
 
     #[tokio::test]
     async fn bloom_filter_is_reversible() {
-        // With the `3086841408u32` seed a collission is generated at i = 1 and i = 38, on index 510714
+        // With the `3086841408u32` seed a collision is generated at i = 1 and i = 38, on index 510714
         let seed_integer = 3086841408u32;
         let seed = seed_integer.to_be_bytes();
         let mut seed_as_bytes = [0u8; 32];
@@ -602,7 +602,7 @@ mod archival_mutator_set_tests {
 
         let mut items = vec![];
         let mut mps = vec![];
-        let mut saw_collission_at = None;
+        let mut saw_collision_at = None;
         let mut all_indices: HashMap<u128, usize> = HashMap::default();
         let added_items = 50;
         for current_item in 0..added_items {
@@ -629,33 +629,33 @@ mod archival_mutator_set_tests {
             for index in indices {
                 let seen_before = all_indices.insert(index, current_item);
                 if let Some(colliding_item) = seen_before {
-                    saw_collission_at = Some(((colliding_item, current_item), index))
+                    saw_collision_at = Some(((colliding_item, current_item), index))
                 }
             }
         }
 
-        let saw_collission_at = if let Some(collission) = saw_collission_at {
-            collission
+        let saw_collision_at = if let Some(collision) = saw_collision_at {
+            collision
         } else {
-            panic!("Collission must be generated with seeded RNG");
+            panic!("Collision must be generated with seeded RNG");
         };
 
-        println!("collission: {saw_collission_at:?}");
+        println!("collision: {saw_collision_at:?}");
 
         // Verify that the MPs with colliding indices are still valid
         {
             let ms = &msa;
             assert!(
                 ms.verify(
-                    items[saw_collission_at.0 .0],
-                    &mps[saw_collission_at.0 .0].clone()
+                    items[saw_collision_at.0 .0],
+                    &mps[saw_collision_at.0 .0].clone()
                 ),
                 "First colliding MS MP must be valid"
             );
             assert!(
                 ms.verify(
-                    items[saw_collission_at.0 .1],
-                    &mps[saw_collission_at.0 .1].clone()
+                    items[saw_collision_at.0 .1],
+                    &mps[saw_collision_at.0 .1].clone()
                 ),
                 "Second colliding MS MP must be valid"
             );
@@ -664,16 +664,16 @@ mod archival_mutator_set_tests {
             let ms = &archival_mutator_set;
             assert!(
                 ms.verify(
-                    items[saw_collission_at.0 .0],
-                    &mps[saw_collission_at.0 .0].clone()
+                    items[saw_collision_at.0 .0],
+                    &mps[saw_collision_at.0 .0].clone()
                 )
                 .await,
                 "First colliding MS MP must be valid"
             );
             assert!(
                 ms.verify(
-                    items[saw_collission_at.0 .1],
-                    &mps[saw_collission_at.0 .1].clone()
+                    items[saw_collision_at.0 .1],
+                    &mps[saw_collision_at.0 .1].clone()
                 )
                 .await,
                 "Second colliding MS MP must be valid"
@@ -683,21 +683,21 @@ mod archival_mutator_set_tests {
         // Remove 1st colliding element
         assert!(
             !archival_mutator_set
-                .bloom_filter_contains(saw_collission_at.1)
+                .bloom_filter_contains(saw_collision_at.1)
                 .await,
             "Bloom filter must be empty when no removal records have been applied"
         );
         let digest_before_removal = archival_mutator_set.hash().await;
         let rem0 = archival_mutator_set
-            .drop(items[saw_collission_at.0 .0], &mps[saw_collission_at.0 .0])
+            .drop(items[saw_collision_at.0 .0], &mps[saw_collision_at.0 .0])
             .await;
         archival_mutator_set.remove(&rem0).await;
         msa.remove(&rem0);
         assert!(
             archival_mutator_set
-                .bloom_filter_contains(saw_collission_at.1)
+                .bloom_filter_contains(saw_collision_at.1)
                 .await,
-            "Bloom filter must have collission bit set after 1st removal"
+            "Bloom filter must have collision bit set after 1st removal"
         );
 
         // Update all MPs
@@ -707,8 +707,8 @@ mod archival_mutator_set_tests {
             let ms = &msa;
             assert!(
                 !ms.verify(
-                    items[saw_collission_at.0 .0],
-                    &mps[saw_collission_at.0 .0].clone()
+                    items[saw_collision_at.0 .0],
+                    &mps[saw_collision_at.0 .0].clone()
                 ),
                 "First colliding MS MP must be invalid after removal"
             );
@@ -717,8 +717,8 @@ mod archival_mutator_set_tests {
             let ms = &archival_mutator_set;
             assert!(
                 !ms.verify(
-                    items[saw_collission_at.0 .0],
-                    &mps[saw_collission_at.0 .0].clone()
+                    items[saw_collision_at.0 .0],
+                    &mps[saw_collision_at.0 .0].clone()
                 )
                 .await,
                 "First colliding MS MP must be invalid after removal"
@@ -727,15 +727,15 @@ mod archival_mutator_set_tests {
 
         // Remove 2nd colliding element
         let rem1 = archival_mutator_set
-            .drop(items[saw_collission_at.0 .1], &mps[saw_collission_at.0 .1])
+            .drop(items[saw_collision_at.0 .1], &mps[saw_collision_at.0 .1])
             .await;
         archival_mutator_set.remove(&rem1).await;
         msa.remove(&rem1);
         assert!(
             archival_mutator_set
-                .bloom_filter_contains(saw_collission_at.1)
+                .bloom_filter_contains(saw_collision_at.1)
                 .await,
-            "Bloom filter must have collission bit set after 2nd removal"
+            "Bloom filter must have collision bit set after 2nd removal"
         );
 
         // Update all MPs
@@ -745,8 +745,8 @@ mod archival_mutator_set_tests {
             let ms = &msa;
             assert!(
                 !ms.verify(
-                    items[saw_collission_at.0 .1],
-                    &mps[saw_collission_at.0 .1].clone()
+                    items[saw_collision_at.0 .1],
+                    &mps[saw_collision_at.0 .1].clone()
                 ),
                 "Second colliding MS MP must be invalid after removal"
             );
@@ -755,8 +755,8 @@ mod archival_mutator_set_tests {
             let ms = &archival_mutator_set;
             assert!(
                 !ms.verify(
-                    items[saw_collission_at.0 .1],
-                    &mps[saw_collission_at.0 .1].clone()
+                    items[saw_collision_at.0 .1],
+                    &mps[saw_collision_at.0 .1].clone()
                 )
                 .await,
                 "Second colliding MS MP must be invalid after removal"
@@ -765,22 +765,22 @@ mod archival_mutator_set_tests {
 
         // Verify that AMS and MSA agree now that we know we have an index in the Bloom filter
         // that was set twice
-        assert_eq!(archival_mutator_set.hash().await, msa.hash(), "Archival MS and MS accumulator must agree also with collissions in the Bloom filter indices");
+        assert_eq!(archival_mutator_set.hash().await, msa.hash(), "Archival MS and MS accumulator must agree also with collisions in the Bloom filter indices");
 
         // Reverse 1st removal
         archival_mutator_set.revert_remove(&rem0).await;
         assert!(
             archival_mutator_set
-                .bloom_filter_contains(saw_collission_at.1)
+                .bloom_filter_contains(saw_collision_at.1)
                 .await,
-            "Bloom filter must have collission bit set after 1st removal revert"
+            "Bloom filter must have collision bit set after 1st removal revert"
         );
 
         // Update all MPs
         for (i, (mp, &itm)) in mps.iter_mut().zip_eq(items.iter()).enumerate() {
             mp.revert_update_from_remove(&rem0);
             assert!(
-                i == saw_collission_at.0 .1 || archival_mutator_set.verify(itm, mp).await,
+                i == saw_collision_at.0 .1 || archival_mutator_set.verify(itm, mp).await,
                 "MS MP must be valid after reversing a removal update"
             );
         }
@@ -789,9 +789,9 @@ mod archival_mutator_set_tests {
         archival_mutator_set.revert_remove(&rem1).await;
         assert!(
             !archival_mutator_set
-                .bloom_filter_contains(saw_collission_at.1)
+                .bloom_filter_contains(saw_collision_at.1)
                 .await,
-            "Bloom filter must not have collission bit set after 2nd removal revert"
+            "Bloom filter must not have collision bit set after 2nd removal revert"
         );
 
         // Update all MPs

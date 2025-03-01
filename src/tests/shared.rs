@@ -146,10 +146,10 @@ pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
 /// Get a dummy-peer representing an outgoing connection.
 pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
     let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, false);
-    let peer_handhake = get_dummy_handshake_data_for_genesis(Network::Main);
+    let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
     PeerInfo::new(
         peer_connection_info,
-        &peer_handhake,
+        &peer_handshake,
         SystemTime::now(),
         cli_args::Args::default().peer_tolerance,
     )
@@ -174,9 +174,9 @@ pub(crate) fn get_dummy_handshake_data_for_genesis(network: Network) -> Handshak
 
 pub(crate) fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     let mut transport = LengthDelimitedCodec::new();
-    let mut formating = SymmetricalBincode::<PeerMessage>::default();
+    let mut formatting = SymmetricalBincode::<PeerMessage>::default();
     let mut buf = BytesMut::new();
-    transport.encode(Pin::new(&mut formating).serialize(message)?, &mut buf)?;
+    transport.encode(Pin::new(&mut formatting).serialize(message)?, &mut buf)?;
     Ok(buf.freeze())
 }
 

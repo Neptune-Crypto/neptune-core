@@ -68,7 +68,7 @@ pub struct OverviewData {
     cpu_capacity: Option<f64>,
     proving_capability: TxProvingCapability,
 
-    /// CPU temperature in degrees Celcius
+    /// CPU temperature in degrees Celsius
     cpu_temperature: Option<f32>,
     ram_total: Option<ByteSize>,
     ram_available: Option<ByteSize>,

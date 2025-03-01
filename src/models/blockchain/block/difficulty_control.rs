@@ -413,7 +413,7 @@ pub(crate) fn difficulty_control(
     // single arbitrarily large concrete block time can induce an arbitrarily
     // large downward adjustment to the difficulty.
     // After clamping a `u64` suffices but before clamping we might get overflow
-    // for very large block times so we use i128 for the `relative_errror`.
+    // for very large block times so we use i128 for the `relative_error`.
 
     // Every time ADVANCE_DIFFICULTY_CORRECTION_WAIT target block times pass
     // between two blocks, the effective difficulty (the thing being compared
@@ -760,7 +760,7 @@ mod test {
         );
         let r_times_a_plus_r_times_b_bui = r_times_a_bui + r_times_b_bui;
 
-        // ignore least significant bit because it might differ due to a carry
+        // ignore least-significant bit because it might differ due to a carry
         // from the fractional part
         prop_assert!(
             r_times_a_plus_r_times_b_bui.clone() == r_times_a_plus_b_bui.clone()

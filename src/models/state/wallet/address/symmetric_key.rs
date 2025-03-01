@@ -134,7 +134,7 @@ impl SymmetricKey {
             false => return Err(DecryptError::MissingNonce),
         };
 
-        // 2. generate Nonce and cyphertext_bytes
+        // 2. generate Nonce and ciphertext_bytes
         let nonce_as_bytes = [&nonce_ctxt[0].value().to_be_bytes(), [0u8; 4].as_slice()].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
         let ciphertext_bytes = common::bfes_to_bytes(ciphertext)?;

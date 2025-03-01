@@ -97,7 +97,7 @@ The default log level is: `RUST_LOG='info,tarpc=warn'`.   This prevents logging 
 
 To see even more detail, but without tarpc spam: `RUST_LOG='debug,tarpc=warn'`
 
-For development purposes it can sometimes be nice to get a more succint logging output by piping stdout through `sed` with the below command. This will only print the namespace of the logging event and the log text. The log output can also be stored to file by piping it to `tee`, like this: `cargo run 2>&1 | tee -a integration_test.log`.
+For development purposes it can sometimes be nice to get a more succinct logging output by piping stdout through `sed` with the below command. This will only print the namespace of the logging event and the log text. The log output can also be stored to file by piping it to `tee`, like this: `cargo run 2>&1 | tee -a integration_test.log`.
 ```
 sed 's/.*neptune_core:\+\(.*\)/\1/g'
 ```

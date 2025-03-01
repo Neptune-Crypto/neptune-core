@@ -96,7 +96,7 @@ impl FromStr for TransactionOutput {
     ///     <OUTPUTS>...  format: address:amount address:amount ...
     ///
     /// So each output is space delimited and the two fields are
-    /// colon delimted.
+    /// colon delimited.
     ///
     /// This format was chosen because it should be simple for humans
     /// to generate on the command-line.
@@ -764,8 +764,8 @@ async fn main() -> Result<()> {
             println!("{network}")
         }
         Command::OwnListenAddressForPeers => {
-            let own_listen_addres = client.own_listen_address_for_peers(ctx, token).await??;
-            match own_listen_addres {
+            let own_listen_address = client.own_listen_address_for_peers(ctx, token).await??;
+            match own_listen_address {
                 Some(addr) => println!("{addr}"),
                 None => println!("No listen address configured"),
             }

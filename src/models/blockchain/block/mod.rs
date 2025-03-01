@@ -695,7 +695,7 @@ impl Block {
     ///
     /// Like `is_valid` but also allows specifying a custom
     /// `target_block_interval` and `minimum_block_time`. If `None` is passed,
-    /// these variabes take the default values.
+    /// these variables take the default values.
     ///
     /// Also, unlike `is_valid`, this function returns a `Result` type whose
     /// associated error type is a [`BlockValidationError`]. This error type gives

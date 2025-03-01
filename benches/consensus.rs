@@ -41,7 +41,7 @@ mod transaction {
     const COMMON: (usize, usize) = (2, 2);
     const LARGEISH: (usize, usize) = (4, 4);
 
-    /// Benchmark the TASM code fo a consensus program, and write the result to
+    /// Benchmark the TASM code for a consensus program, and write the result to
     /// disk.
     pub fn bench_consensus_program<CP: ConsensusProgram>(
         cp: CP,

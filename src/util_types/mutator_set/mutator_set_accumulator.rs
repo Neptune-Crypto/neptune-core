@@ -451,11 +451,11 @@ impl MutatorSetAccumulator {
             // Create a vector of pointers to the MMR-membership part of the mutator set membership
             // proofs that we want to preserve. This is used as input to a batch-call to the
             // underlying MMR.
-            let preseved_mmr_leaf_indices = preserved_membership_proofs
+            let preserved_mmr_leaf_indices = preserved_membership_proofs
                 .iter()
                 .flat_map(|msmp| msmp.target_chunks.iter().map(|(i, _)| *i).collect_vec())
                 .collect_vec();
-            let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof> =
+            let mut preserved_mmr_membership_proofs: Vec<&mut MmrMembershipProof> =
                 preserved_membership_proofs
                     .iter_mut()
                     .flat_map(|x| {
@@ -469,8 +469,8 @@ impl MutatorSetAccumulator {
             // Apply the batch-update to the inactive part of the sliding window Bloom filter.
             // This updates both the inactive part of the SWBF and the MMR membership proofs
             self.swbf_inactive.batch_mutate_leaf_and_update_mps(
-                &mut preseved_mmr_membership_proofs,
-                &preseved_mmr_leaf_indices,
+                &mut preserved_mmr_membership_proofs,
+                &preserved_mmr_leaf_indices,
                 swbf_inactive_mutation_data
                     .iter()
                     .map(|(i, l, p)| LeafMutation::new(*i, *l, p.clone()))
@@ -921,6 +921,6 @@ mod ms_accumulator_tests {
             }
         }
 
-        println!("{} operations resulted in a set containin {} elements; mutator set accumulator size: {} bytes", num_iterations, items_and_membership_proofs.len(), msa.get_size());
+        println!("{} operations resulted in a set containing {} elements; mutator set accumulator size: {} bytes", num_iterations, items_and_membership_proofs.len(), msa.get_size());
     }
 }

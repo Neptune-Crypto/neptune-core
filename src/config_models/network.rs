@@ -20,7 +20,7 @@ pub enum Network {
     Alpha,
 
     /// 2nd iteration of integration testing. Not feature-complete either but
-    /// moreso than Alpha.
+    /// more than Alpha.
     Beta,
 
     /// Feature-complete (or as feature-complete as possible) test network separate
