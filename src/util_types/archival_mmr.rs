@@ -394,7 +394,7 @@ pub(crate) mod mmr_test {
 
     impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         /// Return the number of nodes in all the trees in the MMR
-        async fn count_nodes(&mut self) -> u64 {
+        async fn count_nodes(&self) -> u64 {
             self.digests.len().await - 1
         }
     }
@@ -997,8 +997,7 @@ pub(crate) mod mmr_test {
 
         for (leaf_count, node_count, peak_count) in izip!(leaf_counts, node_counts, peak_counts) {
             let input_hashes: Vec<Digest> = random_elements(leaf_count as usize);
-            let mut mmr: ArchivalMmr<Storage> =
-                mock::get_ammr_from_digests(input_hashes.clone()).await;
+            let mmr: ArchivalMmr<Storage> = mock::get_ammr_from_digests(input_hashes.clone()).await;
 
             assert_eq!(leaf_count, mmr.num_leafs().await);
             assert_eq!(node_count, mmr.count_nodes().await);
@@ -1026,7 +1025,8 @@ pub(crate) mod mmr_test {
                 assert!(valid_res);
             }
 
-            // // Make a new MMR where we append with a value and run the verify_append
+            // Make a new MMR where we append with a value and run the verify_append
+            let mut mmr = mmr;
             let new_leaf_hash = H::hash(&BFieldElement::new(201));
             let li = mmr.num_leafs().await;
             let mp = mmr.append(new_leaf_hash).await;
@@ -1087,7 +1087,7 @@ pub(crate) mod mmr_test {
         let input_digests_big: Vec<Digest> = random_elements(big_size);
         let input_digests_small: Vec<Digest> = input_digests_big[0..small_size].to_vec();
 
-        let mut mmr_small: ArchivalMmr<Storage> =
+        let mmr_small: ArchivalMmr<Storage> =
             mock::get_ammr_from_digests(input_digests_small).await;
         let mut mmr_big: ArchivalMmr<Storage> =
             mock::get_ammr_from_digests(input_digests_big).await;
