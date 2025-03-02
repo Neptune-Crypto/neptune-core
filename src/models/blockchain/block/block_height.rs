@@ -27,6 +27,8 @@ pub struct BlockHeight(BFieldElement);
 pub const BLOCKS_PER_GENERATION: u64 = 160815;
 
 impl BlockHeight {
+    pub const MAX: u64 = BFieldElement::MAX;
+
     pub fn get_generation(&self) -> u64 {
         self.0.value() / BLOCKS_PER_GENERATION
     }

@@ -1161,7 +1161,7 @@ impl WalletState {
             new_block.header().height
         );
 
-        for (key_type, derivation_index) in max_counters.into_iter() {
+        for (key_type, derivation_index) in max_counters {
             self.bump_derivation_counter(key_type, derivation_index)
                 .await;
         }
