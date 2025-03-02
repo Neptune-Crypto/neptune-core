@@ -1,8 +1,3 @@
-use super::address::generation_address;
-use super::address::hash_lock_key;
-use super::address::hash_lock_key::HashLockKey;
-use super::address::symmetric_key;
-use super::secret_key_material::SecretKeyMaterial;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
@@ -14,6 +9,11 @@ use twenty_first::math::x_field_element::XFieldElement;
 use zeroize::ZeroizeOnDrop;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::address::hash_lock_key;
+use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+use crate::models::state::wallet::address::symmetric_key;
+use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use crate::prelude::twenty_first;
 use crate::Hash;
 
