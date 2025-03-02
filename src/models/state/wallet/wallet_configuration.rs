@@ -14,7 +14,7 @@ use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 /// These configurations are often downstream from CLI arguments. However,
 /// exceptions to this rule exist. For instance: scan mode can be activated by
 /// importing a wallet, even without CLI arguments.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WalletConfiguration {
     /// Whether we are in scan mode and, if so, how many future keys to scan
     /// with and the range of block heights where the scanning step is done.
@@ -37,8 +37,7 @@ impl WalletConfiguration {
     /// Constructor for [`WalletConfiguration`].
     ///
     /// Best used in combination with self-consuming constructor-helpers
-    /// [`Self::absorb_options`] and [`Self::with_scan_mode_if_necessary`], in
-    /// that order.
+    /// [`Self::absorb_options`] and [`Self::with_scan_mode_if_necessary`].
     pub(crate) fn new(data_dir: &DataDirectory) -> Self {
         Self {
             scan_mode: None,
@@ -57,7 +56,7 @@ impl WalletConfiguration {
         self.num_mps_per_utxo = cli_args.number_of_mps_per_utxo;
 
         self.scan_mode = match (&cli_args.scan_blocks, cli_args.scan_keys) {
-            (None, None) => None,
+            (None, None) => self.scan_mode,
             (None, Some(num_future_keys)) => {
                 info!("Activating scan mode: CLI argument `--scan-keys`.");
                 Some(ScanModeConfiguration::scan().for_many_future_keys(num_future_keys))
@@ -128,6 +127,8 @@ impl WalletConfiguration {
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
+
     use crate::config_models::cli_args::Args;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::tests::shared::unit_test_data_directory;
@@ -222,6 +223,33 @@ mod test {
             assert_eq!(
                 (lower_bound..=upper_bound).contains(&h),
                 scan_mode.block_height_is_in_range(BlockHeight::from(h)),
+            );
+        }
+    }
+
+    #[test]
+    fn constructor_helpers_commute() {
+        let network = Network::Main;
+        let data_dir = unit_test_data_directory(network).unwrap();
+        for (((scan_blocks, scan_keys), wallet_was_new), database_was_new) in [None, Some(10..=10)]
+            .into_iter()
+            .cartesian_product([None, Some(5)])
+            .cartesian_product([true, false])
+            .cartesian_product([true, false])
+        {
+            let cli_args = Args {
+                scan_blocks,
+                scan_keys,
+                ..Default::default()
+            };
+
+            assert_eq!(
+                WalletConfiguration::new(&data_dir)
+                    .absorb_options(&cli_args)
+                    .with_scan_mode_if_necessary(wallet_was_new, database_was_new),
+                WalletConfiguration::new(&data_dir)
+                    .with_scan_mode_if_necessary(wallet_was_new, database_was_new)
+                    .absorb_options(&cli_args),
             );
         }
     }
