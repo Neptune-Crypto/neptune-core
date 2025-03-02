@@ -15,7 +15,6 @@ use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::symmetric_key;
 use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use crate::prelude::twenty_first;
-use crate::Hash;
 
 /// The wallet's one source of randomness, from which all keys are derived.
 ///
@@ -73,7 +72,7 @@ impl WalletEntropy {
     ) -> generation_address::GenerationSpendingKey {
         // We keep n between 0 and 2^16 as this makes it possible to scan all possible addresses
         // in case you don't know with what counter you made the address
-        let key_seed = Hash::hash_varlen(
+        let key_seed = Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
                 vec![
@@ -93,7 +92,7 @@ impl WalletEntropy {
     // callers should use [wallet_state::WalletState::next_unused_spending_key()]
     // which takes &mut self.
     pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
-        let key_seed = Hash::hash_varlen(
+        let key_seed = Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
                 vec![symmetric_key::SYMMETRIC_KEY_FLAG, BFieldElement::new(index)],
@@ -131,7 +130,7 @@ impl WalletEntropy {
     /// Return a deterministic seed that can be used to seed an RNG
     pub(crate) fn deterministic_derived_seed(&self, block_height: BlockHeight) -> Digest {
         const SEED_FLAG: u64 = 0x2315439570c4a85fu64;
-        Hash::hash_varlen(
+        Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
                 vec![BFieldElement::new(SEED_FLAG), block_height.into()],
@@ -156,7 +155,7 @@ impl WalletEntropy {
         receiver_digest: Digest,
     ) -> Digest {
         const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
-        Hash::hash_varlen(
+        Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
                 vec![
