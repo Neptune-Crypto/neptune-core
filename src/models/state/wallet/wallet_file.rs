@@ -51,19 +51,10 @@ impl WalletFileContext {
 
     /// Read a wallet from disk or create it.
     ///
-    /// Read a wallet file from the `wallet.dat`` file in the given directory if
+    /// Read a wallet file from the `wallet.dat` file in the given directory if
     /// it exists, or otherwise create new wallet secret and save it there.
     /// Also, create files for incoming and outgoing randomness which should be
     /// appended to with each incoming and outgoing transaction.
-    ///
-    /// # Return Value
-    ///
-    /// Returns a `Result`-wrapped tuple consisting of
-    ///  - a `WalletSecret` instance
-    ///  - a tuple of file names of files containing wallet info
-    ///  - a boolean indicating whether a new wallet secret was generated (true)
-    ///    or an old one read from disk (false)
-    ///
     pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
         let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
         let wallet_is_new;
@@ -79,7 +70,7 @@ impl WalletFileContext {
                 "***** Creating new wallet in {} *****\n\n\n",
                 wallet_secret_path.display()
             );
-            let new_wallet: WalletFile = WalletFile::new_random();
+            let new_wallet = WalletFile::new_random();
             new_wallet.save_to_disk(&wallet_secret_path)?;
             wallet_is_new = true;
             new_wallet
@@ -87,15 +78,15 @@ impl WalletFileContext {
 
         // Generate files for outgoing and ingoing randomness if those files
         // do not already exist
-        let outgoing_randomness_file: PathBuf =
-            Self::wallet_outgoing_secrets_path(wallet_directory_path);
+        let outgoing_randomness_file = Self::wallet_outgoing_secrets_path(wallet_directory_path);
         if !outgoing_randomness_file.exists() {
             WalletFile::create_empty_wallet_randomness_file(&outgoing_randomness_file)
                 .unwrap_or_else(|_| {
                     panic!(
-                "Create file for outgoing randomness must succeed. Attempted to create file: {}",
-                outgoing_randomness_file.to_string_lossy()
-            )
+                        "Create file for outgoing randomness must succeed. \
+                        Attempted to create file: {}",
+                        outgoing_randomness_file.to_string_lossy()
+                    )
                 });
         }
 
@@ -104,9 +95,10 @@ impl WalletFileContext {
             WalletFile::create_empty_wallet_randomness_file(&incoming_randomness_file)
                 .unwrap_or_else(|_| {
                     panic!(
-                "Create file for outgoing randomness must succeed. Attempted to create file: {}",
-                incoming_randomness_file.to_string_lossy()
-            )
+                        "Create file for outgoing randomness must succeed. \
+                        Attempted to create file: {}",
+                        incoming_randomness_file.to_string_lossy()
+                    )
                 });
         }
 
@@ -203,7 +195,7 @@ impl WalletFile {
 
     /// Save this wallet to disk. If necessary, create the file (with restrictive permissions).
     pub fn save_to_disk(&self, wallet_file: &Path) -> Result<()> {
-        let wallet_secret_as_json: String = serde_json::to_string(self).unwrap();
+        let wallet_secret_as_json: String = serde_json::to_string(self)?;
 
         #[cfg(unix)]
         {
@@ -228,8 +220,7 @@ impl WalletFile {
             .truncate(false)
             .write(true)
             .mode(0o600)
-            .open(path)
-            .unwrap();
+            .open(path)?;
         fs::write(path.clone(), file_content).context("Failed to write wallet file to disk")
     }
 
@@ -240,8 +231,7 @@ impl WalletFile {
             .create(true)
             .truncate(false)
             .write(true)
-            .open(path)
-            .unwrap();
+            .open(path)?;
         fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
     }
 }
