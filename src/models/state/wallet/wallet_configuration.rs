@@ -67,10 +67,7 @@ impl WalletConfiguration {
                 Some(ScanModeConfiguration::scan().blocks(range.to_owned()))
             }
             (Some(range), Some(num_future_keys)) => {
-                info!(
-                    "Activating scan mode: CLI arguments `--scan-keys` and \
-                `--scan-blocks`."
-                );
+                info!("Activating scan mode: CLI arguments `--scan-keys` and `--scan-blocks`.");
                 Some(
                     ScanModeConfiguration::scan()
                         .blocks(range.to_owned())
@@ -209,21 +206,21 @@ mod test {
         let network = Network::Main;
         let data_dir = unit_test_data_directory(network).unwrap();
 
-        let lb = 10;
-        let ub = 20;
+        let lower_bound = 10;
+        let upper_bound = 20;
 
         // activate scan mode by setting --scan-blocks, so num future keys
         // will assume its default value
         let cli_args = Args {
-            scan_blocks: Some(lb..=ub),
+            scan_blocks: Some(lower_bound..=upper_bound),
             ..Default::default()
         };
         let configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli_args);
         let scan_mode = configuration.scan_mode.unwrap();
 
-        for h in (lb - 5)..(ub + 5) {
+        for h in (lower_bound - 5)..(upper_bound + 5) {
             assert_eq!(
-                (lb..=ub).contains(&h),
+                (lower_bound..=upper_bound).contains(&h),
                 scan_mode.block_height_is_in_range(BlockHeight::from(h)),
             );
         }
