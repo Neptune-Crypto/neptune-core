@@ -36,8 +36,8 @@ pub(crate) struct WalletConfiguration {
 impl WalletConfiguration {
     /// Constructor for [`WalletConfiguration`].
     ///
-    /// Best used in combination with self-consuming constructor-helpers
-    /// [`Self::absorb_options`] and [`Self::with_scan_mode_if_necessary`].
+    /// Best used in combination with self-consuming constructor-helper
+    /// [`Self::absorb_options`].
     pub(crate) fn new(data_dir: &DataDirectory) -> Self {
         Self {
             scan_mode: None,
@@ -80,31 +80,15 @@ impl WalletConfiguration {
         self
     }
 
-    /// Self-consuming constructor-helper for [`WalletConfiguration`].
-    ///
-    /// If not already active, activate scan mode if necessary.
-    ///
-    /// Specifically, scan mode is activated with default parameters if (all
-    /// of):
-    ///  - it is not already active,
-    ///  - the wallet file was present (it is not new), and
-    ///  - the wallet database was absent (it is new).
-    ///
-    /// The latter two bullet points indicate that the wallet was imported,
-    /// perhaps via the command line tool.
-    pub(crate) fn with_scan_mode_if_necessary(
-        mut self,
-        wallet_was_new: bool,
-        database_was_new: bool,
-    ) -> Self {
-        if self.scan_mode.is_none() && !wallet_was_new && database_was_new {
+    /// Activate scan mode with default parameters, if not active already.
+    pub(crate) fn enable_scan_mode(&mut self) {
+        if self.scan_mode.is_none() {
             info!(
                 "Activating scan mode: wallet file present but \
             databse absent; wallet may have been imported."
             );
             self.scan_mode = Some(ScanModeConfiguration::default());
         }
-        self
     }
 
     pub(crate) fn incoming_secrets_path(&self) -> PathBuf {
@@ -127,7 +111,6 @@ impl WalletConfiguration {
 
 #[cfg(test)]
 mod test {
-    use itertools::Itertools;
 
     use crate::config_models::cli_args::Args;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -171,20 +154,6 @@ mod test {
     }
 
     #[test]
-    fn scan_mode_is_on_if_wallet_was_imported() {
-        let network = Network::Main;
-        let data_dir = unit_test_data_directory(network).unwrap();
-        let cli_args = Args {
-            scan_blocks: Some(0u64..=10),
-            ..Default::default()
-        };
-        let configuration = WalletConfiguration::new(&data_dir)
-            .absorb_options(&cli_args)
-            .with_scan_mode_if_necessary(false, true);
-        assert!(configuration.scan_mode.is_some());
-    }
-
-    #[test]
     fn num_future_keys_default_is_sane() {
         let network = Network::Main;
         let data_dir = unit_test_data_directory(network).unwrap();
@@ -223,33 +192,6 @@ mod test {
             assert_eq!(
                 (lower_bound..=upper_bound).contains(&h),
                 scan_mode.block_height_is_in_range(BlockHeight::from(h)),
-            );
-        }
-    }
-
-    #[test]
-    fn constructor_helpers_commute() {
-        let network = Network::Main;
-        let data_dir = unit_test_data_directory(network).unwrap();
-        for (((scan_blocks, scan_keys), wallet_was_new), database_was_new) in [None, Some(10..=10)]
-            .into_iter()
-            .cartesian_product([None, Some(5)])
-            .cartesian_product([true, false])
-            .cartesian_product([true, false])
-        {
-            let cli_args = Args {
-                scan_blocks,
-                scan_keys,
-                ..Default::default()
-            };
-
-            assert_eq!(
-                WalletConfiguration::new(&data_dir)
-                    .absorb_options(&cli_args)
-                    .with_scan_mode_if_necessary(wallet_was_new, database_was_new),
-                WalletConfiguration::new(&data_dir)
-                    .with_scan_mode_if_necessary(wallet_was_new, database_was_new)
-                    .absorb_options(&cli_args),
             );
         }
     }
