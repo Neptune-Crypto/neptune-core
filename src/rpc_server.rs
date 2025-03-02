@@ -3393,7 +3393,7 @@ mod rpc_server_tests {
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
-    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::rpc_server::NeptuneRPCServer;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
@@ -3403,7 +3403,7 @@ mod rpc_server_tests {
 
     async fn test_rpc_server(
         network: Network,
-        wallet_secret: WalletSecret,
+        wallet_secret: WalletEntropy,
         peer_count: u8,
         cli: cli_args::Args,
     ) -> NeptuneRPCServer {
@@ -3441,7 +3441,7 @@ mod rpc_server_tests {
         for network in Network::iter() {
             let rpc_server = test_rpc_server(
                 network,
-                WalletSecret::new_random(),
+                WalletEntropy::new_random(),
                 2,
                 cli_args::Args {
                     network,
@@ -3466,7 +3466,7 @@ mod rpc_server_tests {
 
         let rpc_server = test_rpc_server(
             network,
-            WalletSecret::new_pseudorandom(rng.random()),
+            WalletEntropy::new_pseudorandom(rng.random()),
             2,
             cli_args::Args::default(),
         )
@@ -3587,7 +3587,7 @@ mod rpc_server_tests {
         // Verify that a wallet not receiving a premine is empty at startup
         let rpc_server = test_rpc_server(
             Network::Alpha,
-            WalletSecret::new_random(),
+            WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
         )
@@ -3607,7 +3607,7 @@ mod rpc_server_tests {
     async fn clear_ip_standing_test() -> Result<()> {
         let mut rpc_server = test_rpc_server(
             Network::Alpha,
-            WalletSecret::new_random(),
+            WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
         )
@@ -3766,7 +3766,7 @@ mod rpc_server_tests {
         // Create initial conditions
         let mut rpc_server = test_rpc_server(
             Network::Alpha,
-            WalletSecret::new_random(),
+            WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
         )
@@ -3895,7 +3895,7 @@ mod rpc_server_tests {
     async fn utxo_digest_test() {
         let rpc_server = test_rpc_server(
             Network::Alpha,
-            WalletSecret::new_random(),
+            WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
         )
@@ -3935,7 +3935,7 @@ mod rpc_server_tests {
         let network = Network::RegTest;
         let rpc_server = test_rpc_server(
             network,
-            WalletSecret::new_random(),
+            WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
         )
@@ -4042,7 +4042,7 @@ mod rpc_server_tests {
         let network = Network::RegTest;
         let rpc_server = test_rpc_server(
             network,
-            WalletSecret::new_random(),
+            WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
         )
@@ -4126,7 +4126,7 @@ mod rpc_server_tests {
         // crash the host machine, we don't verify that any value is returned.
         let rpc_server = test_rpc_server(
             Network::Alpha,
-            WalletSecret::new_random(),
+            WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
         )
@@ -4153,7 +4153,7 @@ mod rpc_server_tests {
             ..Default::default()
         };
 
-        let rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2, cli_on).await;
+        let rpc_server = test_rpc_server(network, WalletEntropy::new_random(), 2, cli_on).await;
         let token = cookie_token(&rpc_server).await;
 
         assert!(rpc_server
@@ -4234,7 +4234,7 @@ mod rpc_server_tests {
                 // bob's node
                 let (pay_to_bob_outputs, bob_rpc_server, bob_token) = {
                     let rpc_server =
-                        test_rpc_server(network, WalletSecret::new_random(), 2, Args::default())
+                        test_rpc_server(network, WalletEntropy::new_random(), 2, Args::default())
                             .await;
                     let token = cookie_token(&rpc_server).await;
 
@@ -4259,7 +4259,7 @@ mod rpc_server_tests {
 
                 // alice's node
                 let (blocks, alice_to_bob_utxo_notifications, bob_amount) = {
-                    let wallet_secret = WalletSecret::new_random();
+                    let wallet_secret = WalletEntropy::new_random();
                     let mut rpc_server =
                         test_rpc_server(network, wallet_secret.clone(), 2, Args::default()).await;
 
@@ -4394,7 +4394,7 @@ mod rpc_server_tests {
                     "If UTXO is spent, it must also be mined"
                 );
                 let network = Network::Main;
-                let bob_wallet = WalletSecret::new_random();
+                let bob_wallet = WalletEntropy::new_random();
                 let mut bob =
                     test_rpc_server(network, bob_wallet.clone(), 2, Args::default()).await;
                 let bob_token = cookie_token(&bob).await;
@@ -4453,7 +4453,7 @@ mod rpc_server_tests {
 
                     if spent {
                         // Send entire liquid balance somewhere else
-                        let another_address = WalletSecret::new_random()
+                        let another_address = WalletEntropy::new_random()
                             .nth_generation_spending_key(0)
                             .to_address();
                         let (spending_tx, _) = bob
@@ -4552,7 +4552,7 @@ mod rpc_server_tests {
             let network = Network::Main;
             let rpc_server = test_rpc_server(
                 network,
-                WalletSecret::new_pseudorandom(rng.random()),
+                WalletEntropy::new_pseudorandom(rng.random()),
                 2,
                 cli_args::Args::default(),
             )
@@ -4613,7 +4613,7 @@ mod rpc_server_tests {
             let network = Network::Main;
             let rpc_server = test_rpc_server(
                 network,
-                WalletSecret::devnet_wallet(),
+                WalletEntropy::devnet_wallet(),
                 2,
                 cli_args::Args::default(),
             )
@@ -4686,7 +4686,7 @@ mod rpc_server_tests {
                 let network = Network::Main;
                 let mut rpc_server = test_rpc_server(
                     network,
-                    WalletSecret::new_pseudorandom(rng.random()),
+                    WalletEntropy::new_pseudorandom(rng.random()),
                     2,
                     cli_args::Args::default(),
                 )
