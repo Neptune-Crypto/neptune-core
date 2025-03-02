@@ -74,8 +74,4 @@ impl ScanModeConfiguration {
     pub(crate) fn num_future_keys(&self) -> usize {
         self.num_future_keys
     }
-
-    pub(crate) fn default_num_future_keys() -> usize {
-        Self::default().num_future_keys()
-    }
 }
