@@ -1198,9 +1198,9 @@ fn get_nth_receiving_address(
     let wallet_file_name = WalletFileContext::wallet_secret_path(&wallet_dir);
     if !wallet_file_name.exists() {
         bail!("No wallet file found at {}.", wallet_file_name.display());
-    } else {
-        println!("{}", wallet_file_name.display());
     }
+
+    println!("{}", wallet_file_name.display());
 
     let wallet_file = match WalletFile::read_from_file(&wallet_file_name) {
         Ok(ws) => ws,
