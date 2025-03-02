@@ -723,14 +723,25 @@ impl WalletState {
         num_future_keys: usize,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = (KeyType, u64, IncomingUtxo)> + 'a {
-        self.get_future_spending_keys(num_future_keys).await
-            .flat_map(|(key_type, derivation_index, key)| key.scan_for_announced_utxos(tx_kernel).into_iter().filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
-                true => true,
-                false => {
-                    warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
-                    false
-                }
-            }).map(move |au| (key_type, derivation_index,  au)))
+        self.get_future_spending_keys(num_future_keys)
+            .await
+            .flat_map(|(key_type, derivation_index, key)| {
+                key.scan_for_announced_utxos(tx_kernel)
+                    .into_iter()
+                    .filter(|au| {
+                        let transaction_contains_addition_record =
+                            tx_kernel.outputs.contains(&au.addition_record());
+                        if !transaction_contains_addition_record {
+                            warn!(
+                                "Transaction does not contain announced UTXO \
+                                encrypted to own receiving address."
+                            );
+                            debug!("Announced UTXO was: {:#?}", au.utxo);
+                        }
+                        transaction_contains_addition_record
+                    })
+                    .map(move |au| (key_type, derivation_index, au))
+            })
     }
 
     /// Scan the given list of addition records for items that match with list
@@ -1110,8 +1121,11 @@ impl WalletState {
         Ok(())
     }
 
-    /// If scan mode is active and block is in range, scan the block with keys
-    /// that will be derived in the future
+    /// Scan the block with keys that will be derived in the future.
+    ///
+    /// The scan is done only if scan mode is active and the block is in range.
+    /// If incoming UTXOs are found, the relevant key derivation counters are
+    /// updated.
     async fn recover_by_scanning(&mut self, new_block: &Block) -> Vec<IncomingUtxo> {
         let Some(scan_mode_configuration) = self.configuration.scan_mode else {
             return Vec::new();
@@ -3925,6 +3939,8 @@ pub(crate) mod tests {
         use rand::rng;
 
         use crate::job_queue::JobQueue;
+        use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+        use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
 
         use super::*;
@@ -4105,6 +4121,193 @@ pub(crate) mod tests {
             // make sure passing over the iterators is not being optimized away
             black_box(future_generation_keys);
             black_box(future_symmetric_keys);
+        }
+
+        /// Test that the method
+        /// [`WalletState::scan_for_utxos_announced_to_future_keys`] behaves as
+        /// exepected.
+        ///
+        /// Specifically:
+        ///  - Generate a random transaction kernel.
+        ///  - Generate future generation and symmetric keys, with random
+        ///    offsets.
+        ///  - Generate UTXOs with all necessary supplementary information, one
+        ///    for each key.
+        ///  - Generate public announcements for all UTXOs and put them into the
+        ///    transaction kernel.
+        ///  - For a subset of UTXOs, put the corresponding addition record into
+        ///    the transaction kernel.
+        ///  - Scan!
+        ///  - Verify that the UTXOs coming back from scanning matches with the
+        ///    master list of UTXOs filtered for:
+        ///     a) the addition record was selected for placement into the
+        ///        kernel;
+        ///     b) the relative index is smaller than num_future_keys.
+        ///
+        #[traced_test]
+        #[tokio::test]
+        async fn scan_for_utxos_announced_to_future_keys_behaves() {
+            let network = Network::Main;
+            let mut rng = StdRng::from_rng(&mut rng());
+            let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let data_dir = unit_test_data_directory(network).unwrap();
+            let wallet_state = WalletState::new_from_wallet_entropy(
+                &data_dir,
+                wallet_secret.clone(),
+                &cli_args::Args::default(),
+            )
+            .await;
+            println!("(ignore everything above)");
+
+            let generation_counter = wallet_state.wallet_db.get_generation_key_counter().await;
+            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter().await;
+
+            let num_future_keys = 20;
+            let mut future_generation_relative_indices = (0..num_future_keys)
+                .map(|_| rng.random_range(0_usize..100))
+                .collect_vec();
+            future_generation_relative_indices.sort();
+            let future_generation_keys = future_generation_relative_indices
+                .into_iter()
+                .map(|relative_index| (relative_index, generation_counter + relative_index as u64))
+                .map(|(relative_index, absolute_index)| {
+                    (
+                        KeyType::Generation,
+                        relative_index,
+                        absolute_index,
+                        SpendingKey::from(
+                            wallet_secret.nth_generation_spending_key(absolute_index),
+                        ),
+                    )
+                })
+                .collect_vec();
+            let mut future_symmetric_relative_indices = (0..num_future_keys)
+                .map(|_| rng.random_range(0_usize..100))
+                .collect_vec();
+            future_symmetric_relative_indices.sort();
+            let future_symmetric_keys = future_symmetric_relative_indices
+                .into_iter()
+                .map(|relative_index| (relative_index, symmetric_counter + relative_index as u64))
+                .map(|(relative_index, absolute_index)| {
+                    (
+                        KeyType::Symmetric,
+                        relative_index,
+                        absolute_index,
+                        SpendingKey::from(wallet_secret.nth_symmetric_key(absolute_index)),
+                    )
+                })
+                .collect_vec();
+
+            let kernel = pseudorandom_transaction_kernel(rng.random(), 10, 10, 10);
+
+            let mut public_announcements = kernel.public_announcements.clone();
+            let mut addition_records = kernel.outputs.clone();
+            let all_utxos = future_generation_keys
+                .into_iter()
+                .chain(future_symmetric_keys.into_iter())
+                .map(|(kt, ri, ai, k)| {
+                    (
+                        rng.random::<bool>(),
+                        kt,
+                        ri,
+                        ai,
+                        Utxo::from((
+                            rng.random::<Digest>(),
+                            vec![Coin::new_native_currency(NativeCurrencyAmount::coins(
+                                rng.random::<u32>() >> 15,
+                            ))],
+                        )),
+                        rng.random::<Digest>(),
+                        k,
+                    )
+                })
+                .map(|(select, kt, ri, ai, utxo, sender_randomness, key)| {
+                    let receiver_preimage = key.privacy_preimage().unwrap();
+                    let utxo_notification_payload =
+                        UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
+                    let public_announcement = key
+                        .to_address()
+                        .unwrap()
+                        .generate_public_announcement(utxo_notification_payload);
+                    public_announcements.push(public_announcement);
+
+                    let addition_record = commit(
+                        Tip5::hash(&utxo),
+                        sender_randomness,
+                        receiver_preimage.hash(),
+                    );
+                    if select {
+                        addition_records.push(addition_record);
+                    }
+
+                    (
+                        select,
+                        kt,
+                        ri,
+                        ai,
+                        utxo,
+                        sender_randomness,
+                        receiver_preimage,
+                    )
+                })
+                .collect_vec();
+
+            let new_kernel = TransactionKernelModifier::default()
+                .public_announcements(public_announcements)
+                .outputs(addition_records)
+                .modify(kernel);
+
+            // scan
+            let caught_utxos = wallet_state
+                .scan_for_utxos_announced_to_future_keys(num_future_keys, &new_kernel)
+                .await
+                .collect_vec();
+
+            // filter master list according to expectation
+            let filtered_utxos = all_utxos
+                .into_iter()
+                .filter(|(select, _, _, _, _, _, _)| {
+                    if !*select {
+                        println!("rejecting UTXO because not selected");
+                    }
+                    *select
+                })
+                .filter(|(_, _, relative_index, _, _, _, _)| {
+                    let index_in_range = *relative_index < num_future_keys;
+                    if !index_in_range {
+                        println!(
+                            "rejecting UTXO because index {} >= {}",
+                            *relative_index, num_future_keys
+                        );
+                    }
+                    index_in_range
+                })
+                .map(
+                    |(
+                        _,
+                        keytype,
+                        _,
+                        absolute_index,
+                        utxo,
+                        sender_randomness,
+                        receiver_preimage,
+                    )| {
+                        (
+                            keytype,
+                            absolute_index,
+                            IncomingUtxo {
+                                utxo,
+                                sender_randomness,
+                                receiver_preimage,
+                            },
+                        )
+                    },
+                )
+                .collect_vec();
+
+            println!("filtered utxos has {} elements", filtered_utxos.len());
+
+            assert_eq!(filtered_utxos, caught_utxos);
         }
     }
 }
