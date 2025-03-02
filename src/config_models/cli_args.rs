@@ -289,7 +289,7 @@ pub struct Args {
     /// secret seed onto a new machine. In such cases, this subcommand will
     /// instruct the client to scan incoming blocks for transactions tied to
     /// future derivation indices --
-    /// [`ScanModeConfiguration::default_num_future_keys()`] by default, but
+    /// [`ScanModeConfiguration`]`::default().num_future_keys()` by default, but
     /// this parameter can be adjusted with the `--scan-keys` subcommand.
     ///
     /// The argument to this subcommand is the range of blocks where this extra-
@@ -335,7 +335,7 @@ pub struct Args {
      - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in\n\
        between)\n\
      - `neptune-core --scan-blocks 13:37` (python index ranges also work)",
-    ScanModeConfiguration::default_num_future_keys()
+    ScanModeConfiguration::default().num_future_keys()
         ))]
     pub(crate) scan_blocks: Option<RangeInclusive<u64>>,
 
