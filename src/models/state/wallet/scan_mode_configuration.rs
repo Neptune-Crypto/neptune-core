@@ -13,7 +13,7 @@ use crate::models::blockchain::block::Block;
 /// wallet secret seed but with future derivation indices. If an incoming
 /// message is observed, the derivation index counter is updated accordingly.
 /// The number of future indices to scan for is a tunable parameter.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ScanModeConfiguration {
     num_future_keys: usize,
     first_block_height: BlockHeight,
