@@ -406,21 +406,12 @@ fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
         return Err(error_message);
     };
 
-    let start = match start
+    let start = start
         .is_empty()
-        .then_some(Ok(0_u64))
+        .then_some(Ok(0))
         .or_else(|| Some(start.parse()))
         .unwrap()
-    {
-        Ok(u) => u,
-        Err(e) => {
-            let error_message = format!(
-                "Invalid start \"{start}\" in range \
-                \"{unparsed_range}\": {e:?}"
-            );
-            return Err(error_message);
-        }
-    };
+        .map_err(|e| format!("Invalid start \"{start}\" in range \"{unparsed_range}\": {e:?}"))?;
 
     let end = if end.is_empty() {
         u64::MAX
