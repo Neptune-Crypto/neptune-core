@@ -33,11 +33,11 @@ impl Default for ScanModeConfiguration {
 impl ScanModeConfiguration {
     /// Constructor for `ScanModeConfiguration`.
     ///
-    /// Best used in conjuction with constructor-helpers
+    /// Best used in conjunction with constructor-helpers
     /// [`Self::for_future_keys`] and [`Self::blocks`], *e.g.*:
     ///
     /// ```notest
-    /// let config = ScanModeConfiguration::scan().blocks(1..=2).for_future_keys(3);
+    /// let config = ScanModeConfiguration::scan().blocks(1..=2).for_many_future_keys(3);
     /// ```
     pub(crate) fn scan() -> Self {
         Default::default()
@@ -59,6 +59,10 @@ impl ScanModeConfiguration {
     }
 
     /// Determine whether to scan a block given its height.
+    ///
+    /// Marked `pub(crate)` for testing. Not part of the API. Use
+    /// [`Self::block_is_in_range`] instead.
+    #[doc(hidden)]
     pub(crate) fn block_height_is_in_range(&self, block_height: BlockHeight) -> bool {
         self.first_block_height <= block_height
             && self.last_block_height.is_none_or(|lbh| lbh >= block_height)
