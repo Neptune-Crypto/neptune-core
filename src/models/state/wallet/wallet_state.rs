@@ -150,7 +150,7 @@ impl StrongUtxoKey {
 impl Debug for WalletState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WalletState")
-            .field("wallet_secret", &self.wallet_entropy)
+            .field("wallet_entropy", &self.wallet_entropy)
             .field(
                 "number_of_mps_per_utxo",
                 &self.configuration.num_mps_per_utxo,
@@ -240,9 +240,17 @@ impl WalletState {
         let database_is_new = tokio::fs::try_exists(&data_dir.wallet_database_dir_path())
             .await
             .unwrap();
-        let configuration = WalletConfiguration::new(data_dir)
-            .absorb_options(cli_args)
-            .with_scan_mode_if_necessary(wallet_file_context.wallet_is_new, database_is_new);
+        let mut configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
+
+        // if wallet was imported, ensure scan mode is enabled
+        if !wallet_file_context.wallet_is_new && database_is_new {
+            info!(
+                "Activating scan mode: wallet file present but \
+                databse absent; wallet may have been imported."
+            );
+            configuration.enable_scan_mode();
+        }
+
         Self::new(configuration, wallet_file_context.entropy()).await
     }
 
@@ -691,16 +699,20 @@ impl WalletState {
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
         // scan for announced utxos for every known key of every key type.
-        self.get_all_known_spending_keys().flat_map(|key| key.scan_for_announced_utxos(tx_kernel))
-
-        // filter for presence in transaction
-        .filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
-            true => true,
-            false => {
-                warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
-                false
-            }
-        })
+        self.get_all_known_spending_keys()
+            .flat_map(|key| key.scan_for_announced_utxos(tx_kernel))
+            .filter(|au| {
+                let transaction_contains_addition_record =
+                    tx_kernel.outputs.contains(&au.addition_record());
+                if !transaction_contains_addition_record {
+                    warn!(
+                        "Transaction does not contain announced UTXO encrypted \
+                        to own receiving address. Announced UTXO was: {:#?}",
+                        au.utxo
+                    );
+                }
+                transaction_contains_addition_record
+            })
     }
 
     /// Scan the given transaction for announced UTXOs as recognized by *future*
@@ -922,14 +934,15 @@ impl WalletState {
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (KeyType, u64, SpendingKey)> + '_ {
-        self.get_future_generation_spending_keys(num_future_keys)
+        let future_generation_keys = self
+            .get_future_generation_spending_keys(num_future_keys)
             .await
-            .map(|(i, gsk)| (KeyType::Generation, i, SpendingKey::from(gsk)))
-            .chain(
-                self.get_future_symmetric_keys(num_future_keys)
-                    .await
-                    .map(|(i, sk)| (KeyType::Symmetric, i, SpendingKey::from(sk))),
-            )
+            .map(|(i, gsk)| (KeyType::Generation, i, SpendingKey::from(gsk)));
+        let future_symmetric_keys = self
+            .get_future_symmetric_keys(num_future_keys)
+            .await
+            .map(|(i, sk)| (KeyType::Symmetric, i, SpendingKey::from(sk)));
+        future_generation_keys.chain(future_symmetric_keys)
     }
 
     /// returns all spending keys of `key_type` with derivation index less than current counter
@@ -988,23 +1001,16 @@ impl WalletState {
     }
 
     pub(crate) async fn bump_derivation_counter(&mut self, key_type: KeyType, max_used_index: u64) {
+        let new_counter = max_used_index + 1;
         if self
             .spending_key_counter(key_type)
             .await
-            .is_some_and(|current_counter| max_used_index + 1 > current_counter)
+            .is_some_and(|current_counter| new_counter > current_counter)
         {
             match key_type {
                 KeyType::RawHashLock => (),
-                KeyType::Generation => {
-                    self.wallet_db
-                        .set_generation_key_counter(max_used_index + 1)
-                        .await
-                }
-                KeyType::Symmetric => {
-                    self.wallet_db
-                        .set_symmetric_key_counter(max_used_index + 1)
-                        .await
-                }
+                KeyType::Generation => self.wallet_db.set_generation_key_counter(new_counter).await,
+                KeyType::Symmetric => self.wallet_db.set_symmetric_key_counter(new_counter).await,
             }
         }
     }
@@ -1103,6 +1109,51 @@ impl WalletState {
         Ok(())
     }
 
+    /// If scan mode is active and block is in range, scan the block with keys
+    /// that will be derived in the future
+    async fn recover_by_scanning(&mut self, new_block: &Block) -> Vec<IncomingUtxo> {
+        let Some(scan_mode_configuration) = self.configuration.scan_mode else {
+            return Vec::new();
+        };
+        if !scan_mode_configuration.block_is_in_range(new_block) {
+            return Vec::new();
+        }
+
+        let mut recovered_outputs = vec![];
+
+        let mut max_counters = HashMap::<KeyType, u64>::new();
+        for (key_type, derivation_index, incoming_utxo) in self
+            .scan_for_utxos_announced_to_future_keys(
+                scan_mode_configuration.num_future_keys(),
+                &new_block.body().transaction_kernel,
+            )
+            .await
+        {
+            if max_counters
+                .get(&key_type)
+                .is_none_or(|&current_max_derivation_index| {
+                    current_max_derivation_index < derivation_index
+                })
+            {
+                max_counters.insert(key_type, derivation_index);
+            }
+            recovered_outputs.push(incoming_utxo);
+        }
+
+        info!(
+            "Scan Mode: recovered {} UTXOs in block {}",
+            recovered_outputs.len(),
+            new_block.header().height
+        );
+
+        for (key_type, derivation_index) in max_counters.into_iter() {
+            self.bump_derivation_counter(key_type, derivation_index)
+                .await;
+        }
+
+        recovered_outputs
+    }
+
     /// Update wallet state with new block.
     ///
     /// Assume the given block is valid and that the wallet state is not synced
@@ -1195,42 +1246,7 @@ impl WalletState {
             .scan_for_utxos_announced_to_known_keys(&tx_kernel)
             .collect_vec(); // drop immutable borrow of self, for (maybe) bumping below
 
-        // if scan mode is active, scan the block with keys that will be
-        // derived in the future
-        let mut outputs_recovered_through_scan_mode = vec![];
-        if let Some(scan_mode_configuration) = self.configuration.scan_mode {
-            if scan_mode_configuration.block_is_in_range(new_block) {
-                let mut max_counters = HashMap::<KeyType, u64>::new();
-                for (key_type, derivation_index, incoming_utxo) in self
-                    .scan_for_utxos_announced_to_future_keys(
-                        scan_mode_configuration.num_future_keys(),
-                        &tx_kernel,
-                    )
-                    .await
-                {
-                    if max_counters
-                        .get(&key_type)
-                        .is_none_or(|&current_max_derivation_index| {
-                            current_max_derivation_index < derivation_index
-                        })
-                    {
-                        max_counters.insert(key_type, derivation_index);
-                    }
-                    outputs_recovered_through_scan_mode.push(incoming_utxo);
-                }
-
-                info!(
-                    "Scan Mode: recovered {} UTXOs in block {}",
-                    outputs_recovered_through_scan_mode.len(),
-                    new_block.header().height
-                );
-
-                for (key_type, derivation_index) in max_counters.into_iter() {
-                    self.bump_derivation_counter(key_type, derivation_index)
-                        .await;
-                }
-            }
-        }
+        let outputs_recovered_through_scan_mode = self.recover_by_scanning(new_block).await;
 
         let MutatorSetUpdate {
             additions: addition_records,
@@ -1743,16 +1759,6 @@ impl WalletState {
         }
         own_coins
     }
-
-    #[cfg(test)]
-    pub(crate) async fn new_from_wallet_entropy(
-        data_dir: &DataDirectory,
-        wallet_entropy: WalletEntropy,
-        cli_args: &Args,
-    ) -> Self {
-        let configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
-        Self::new(configuration, wallet_entropy).await
-    }
 }
 
 #[cfg(test)]
@@ -1785,6 +1791,16 @@ pub(crate) mod tests {
         pub(crate) async fn clear_raw_hash_keys(&mut self) {
             self.known_raw_hash_lock_keys.clear();
             self.wallet_db.guesser_preimages_mut().clear().await;
+        }
+
+        #[cfg(test)]
+        pub(crate) async fn new_from_wallet_entropy(
+            data_dir: &DataDirectory,
+            wallet_entropy: WalletEntropy,
+            cli_args: &Args,
+        ) -> Self {
+            let configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
+            Self::new(configuration, wallet_entropy).await
         }
     }
 
@@ -3904,8 +3920,8 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
-        use rand::rngs::StdRng;
-        use rand::{rng, SeedableRng};
+        use rand::prelude::*;
+        use rand::rng;
 
         use crate::job_queue::JobQueue;
         use crate::tests::shared::unit_test_data_directory;
@@ -3929,8 +3945,7 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn test_recovery_on_imported_wallet() {
             let network = Network::Main;
-            let mut rng = StdRng::from_rng(&mut rng());
-            let alice_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let alice_secret = WalletEntropy::new_random();
             let data_dir = unit_test_data_directory(network).unwrap();
 
             // generate events
@@ -3950,7 +3965,7 @@ pub(crate) mod tests {
                 .expect("wallet should be capable of generating symmetric spending keys");
             let now =
                 genesis_block.header().timestamp + Timestamp::months(6) + Timestamp::minutes(5);
-            let sender_randomness = rng.random();
+            let sender_randomness = rng().random();
             let alice_future_spending_key = alice_secret.nth_generation_spending_key(20);
             let tx_output = TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
@@ -3995,13 +4010,12 @@ pub(crate) mod tests {
                 ..Default::default()
             };
 
-            for (case, cli_args, should_catch_utxo) in [
-                (0, cli_default, false),
-                (1, cli_wrong_range, false),
-                (2, cli_too_few_keys, false),
-                (3, cli_well_configured, true),
+            for (cli_args, should_catch_utxo) in [
+                (cli_default, false),
+                (cli_wrong_range, false),
+                (cli_too_few_keys, false),
+                (cli_well_configured, true),
             ] {
-                println!("testing case {case} ...");
                 let mut alice_wallet_state = WalletState::new_from_wallet_entropy(
                     &data_dir,
                     alice_secret.clone(),
