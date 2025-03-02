@@ -1,6 +1,5 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::ops::Not;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -297,7 +296,8 @@ pub struct Args {
     /// takes place for every incoming block.
     ///
     /// Examples:
-    ///  - `neptune-core --scan-blocks ..` (scan all blocks)
+    ///  - `neptune-core --scan-blocks ..` (scan all blocks; this is the
+    ///    default)
     ///  - `neptune-core --scan-blocks ..1337` (everything up to 1337)
     ///  - `neptune-core --scan-blocks 1337..` (1337 and everything after)
     ///  - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in
@@ -329,7 +329,7 @@ pub struct Args {
     takes place for every incoming block.\n\
     \n\
     Examples: \n\
-     - `neptune-core --scan-blocks ..` (scan all blocks)\n\
+     - `neptune-core --scan-blocks ..` (scan all blocks; this is the default)\n\
      - `neptune-core --scan-blocks ..1337` (everything up to 1337)\n\
      - `neptune-core --scan-blocks 1337..` (1337 and everything after)\n\
      - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in\n\
@@ -387,32 +387,36 @@ fn duration_from_seconds_str(s: &str) -> Result<Duration, std::num::ParseIntErro
 /// rust or python (index-range) format.
 ///
 /// Disallows empty ranges.
-fn parse_range(range_string: &str) -> Result<RangeInclusive<u64>, String> {
-    if range_string.is_empty() {
-        return Ok(0u64..=u64::MAX);
+fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
+    if unparsed_range.is_empty() {
+        return Ok(0..=u64::MAX);
     }
 
-    let range_parts = if range_string.contains("..") {
-        range_string.split("..")
+    let range_parts = if unparsed_range.contains("..") {
+        unparsed_range.split("..")
     } else {
-        range_string.split(":")
+        unparsed_range.split(":")
     };
 
     let Some((start, end)) = range_parts.collect_tuple() else {
         let error_message = format!(
-            "Invalid range: \"{range_string}\". \
+            "Invalid range: \"{unparsed_range}\". \
             Syntax: `start..end`, `start..=end`, or `start:end`"
         );
         return Err(error_message);
     };
 
-    let start = match start.is_empty().not().then(|| start.parse()) {
-        None => 0_u64,
-        Some(Ok(u)) => u,
-        Some(Err(e)) => {
+    let start = match start
+        .is_empty()
+        .then_some(Ok(0_u64))
+        .or_else(|| Some(start.parse()))
+        .unwrap()
+    {
+        Ok(u) => u,
+        Err(e) => {
             let error_message = format!(
                 "Invalid start \"{start}\" in range \
-                \"{range_string}\": {e:?}"
+                \"{unparsed_range}\": {e:?}"
             );
             return Err(error_message);
         }
@@ -421,45 +425,22 @@ fn parse_range(range_string: &str) -> Result<RangeInclusive<u64>, String> {
     let end = if end.is_empty() {
         u64::MAX
     } else {
-        let parse_result = if let Some(end_inclusive) = end.strip_prefix('=') {
-            end_inclusive.parse().map(Some)
+        let format_error =
+            |e| format!("Invalid end \"{end}\" in range \"{unparsed_range}\": {e:?}");
+        if let Some(end_inclusive) = end.strip_prefix('=') {
+            end_inclusive.parse().map_err(format_error)?
         } else {
-            end.parse()
-                .map(|end_exclusive: u64| end_exclusive.checked_sub(1))
-        };
-        match parse_result {
-            Ok(Some(u)) => u,
-            Ok(None) => {
-                let error_message = format!(
-                    "Range upper bound \
-                \"{end}\" is invalid when excluded"
-                );
-                return Err(error_message);
-            }
-            Err(e) => {
-                let error_message = format!(
-                    "Invalid start \"{start}\" in range \
-                    \"{range_string}\": {e:?}"
-                );
-                return Err(error_message);
-            }
+            end.parse::<u64>()
+                .map_err(format_error)?
+                .checked_sub(1)
+                .ok_or_else(|| format!("Range upper bound \"{end}\" is invalid when excluded"))?
         }
     };
 
-    if start == end {
-        let error_message = format!(
-            "Range \"{range_string}\" is \
-        empty; not allowed."
-        );
-        return Err(error_message);
-    }
-
     if start > end {
-        let error_message = format!(
-            "Range \"{range_string}\" is \
-        invalid: lower bound exceeds upper bound."
-        );
-        return Err(error_message);
+        return Err(format!(
+            "Range \"{unparsed_range}\" is invalid: lower bound exceeds upper bound"
+        ));
     }
 
     Ok(start..=end)
@@ -647,6 +628,7 @@ mod cli_args_tests {
         }
 
         assert_range_eq!(5u64..10, parse_range("5..10").unwrap());
+        assert_range_eq!(5u64..=5, parse_range("5..=5").unwrap());
         assert_range_eq!(5u64..=10, parse_range("5..=10").unwrap());
         assert_range_eq!(0..10u64, parse_range("..10").unwrap());
         assert_range_eq!(0..=10u64, parse_range("..=10").unwrap());
