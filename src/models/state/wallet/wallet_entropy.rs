@@ -2,6 +2,8 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::bfe_vec;
+use tasm_lib::twenty_first::xfe;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
@@ -33,10 +35,10 @@ impl WalletEntropy {
 
     /// Create a `WalletEntropy` object with a fixed digest
     pub(crate) fn devnet_wallet() -> Self {
-        let secret_seed = SecretKeyMaterial(XFieldElement::new([
-            BFieldElement::new(12063201067205522823),
-            BFieldElement::new(1529663126377206632),
-            BFieldElement::new(2090171368883726200),
+        let secret_seed = SecretKeyMaterial(xfe!([
+            12063201067205522823_u64,
+            1529663126377206632_u64,
+            2090171368883726200_u64,
         ]));
 
         Self::new(secret_seed)
@@ -75,10 +77,7 @@ impl WalletEntropy {
         let key_seed = Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                vec![
-                    generation_address::GENERATION_FLAG,
-                    BFieldElement::new(index),
-                ],
+                bfe_vec![generation_address::GENERATION_FLAG, index],
             ]
             .concat(),
         );
@@ -95,7 +94,7 @@ impl WalletEntropy {
         let key_seed = Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                vec![symmetric_key::SYMMETRIC_KEY_FLAG, BFieldElement::new(index)],
+                bfe_vec![symmetric_key::SYMMETRIC_KEY_FLAG, index],
             ]
             .concat(),
         );
@@ -133,7 +132,7 @@ impl WalletEntropy {
         Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                vec![BFieldElement::new(SEED_FLAG), block_height.into()],
+                bfe_vec![SEED_FLAG, block_height],
             ]
             .concat(),
         )
@@ -158,10 +157,7 @@ impl WalletEntropy {
         Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                vec![
-                    BFieldElement::new(SENDER_RANDOMNESS_FLAG),
-                    block_height.into(),
-                ],
+                bfe_vec![SENDER_RANDOMNESS_FLAG, block_height],
                 receiver_digest.encode(),
             ]
             .concat(),
@@ -174,23 +170,6 @@ impl WalletEntropy {
         let key = SecretKeyMaterial::from_phrase(phrase)?;
         Ok(Self::new(key))
     }
-
-    /// Create a new `WalletEntropy` object and populate it with entropy
-    /// obtained via `rand::rng()` from the operating system.
-    #[cfg(test)]
-    pub(crate) fn new_random() -> Self {
-        Self::new_pseudorandom(rand::Rng::random(&mut rand::rng()))
-    }
-
-    /// Create a new `WalletEntropy` object and populate it by expanding a given
-    /// seed.
-    #[cfg(test)]
-    pub(crate) fn new_pseudorandom(seed: [u8; 32]) -> Self {
-        let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-        Self {
-            secret_seed: SecretKeyMaterial(rand::Rng::random(&mut rng)),
-        }
-    }
 }
 
 impl From<SecretKeyMaterial> for WalletEntropy {
@@ -202,5 +181,29 @@ impl From<SecretKeyMaterial> for WalletEntropy {
 impl From<WalletEntropy> for SecretKeyMaterial {
     fn from(value: WalletEntropy) -> Self {
         value.secret_seed.clone()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    impl WalletEntropy {
+        /// Create a new `WalletEntropy` object and populate it with entropy
+        /// obtained via `rand::rng()` from the operating system.
+        #[cfg(test)]
+        pub(crate) fn new_random() -> Self {
+            Self::new_pseudorandom(rand::Rng::random(&mut rand::rng()))
+        }
+
+        /// Create a new `WalletEntropy` object and populate it by expanding a given
+        /// seed.
+        #[cfg(test)]
+        pub(crate) fn new_pseudorandom(seed: [u8; 32]) -> Self {
+            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
+            Self {
+                secret_seed: SecretKeyMaterial(rand::Rng::random(&mut rng)),
+            }
+        }
     }
 }
