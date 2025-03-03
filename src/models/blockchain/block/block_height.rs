@@ -1,3 +1,4 @@
+use std::cmp::min;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::Add;
@@ -16,6 +17,11 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::prelude::twenty_first;
 
+/// The distance, in number of blocks, to the genesis block.
+///
+/// This struct wraps around a [`BFieldElement`], so the maximum block height
+/// is P-1 = 2^64 - 2^32. With an average block time of 588 seconds, this
+/// maximum will be reached roughly 344 trillion years after launch. Not urgent.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec, GetSize,
 )]
@@ -84,7 +90,7 @@ impl From<BlockHeight> for BFieldElement {
 
 impl From<u64> for BlockHeight {
     fn from(val: u64) -> Self {
-        BlockHeight(BFieldElement::new(val))
+        BlockHeight(BFieldElement::new(min(BFieldElement::MAX, val)))
     }
 }
 

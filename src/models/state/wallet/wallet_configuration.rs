@@ -83,10 +83,7 @@ impl WalletConfiguration {
     /// Activate scan mode with default parameters, if not active already.
     pub(crate) fn enable_scan_mode(&mut self) {
         if self.scan_mode.is_none() {
-            info!(
-                "Activating scan mode: wallet file present but \
-            databse absent; wallet may have been imported."
-            );
+            info!("Activating scan mode with default configurations.");
             self.scan_mode = Some(ScanModeConfiguration::default());
         }
     }

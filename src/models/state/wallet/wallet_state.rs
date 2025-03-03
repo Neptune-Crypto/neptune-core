@@ -244,10 +244,7 @@ impl WalletState {
 
         // if wallet was imported, ensure scan mode is enabled
         if !wallet_file_context.wallet_is_new && database_is_new {
-            info!(
-                "Activating scan mode: wallet file present but \
-                databse absent; wallet may have been imported."
-            );
+            info!("Wallet file present but database absent; wallet may have been imported.");
             configuration.enable_scan_mode();
         }
 
@@ -4148,7 +4145,9 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn scan_for_utxos_announced_to_future_keys_behaves() {
             let network = Network::Main;
-            let mut rng = StdRng::from_rng(&mut rng());
+            let seed: [u8; 32] = random();
+            dbg!(seed);
+            let mut rng = StdRng::from_seed(seed);
             let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
             let data_dir = unit_test_data_directory(network).unwrap();
             let wallet_state = WalletState::new_from_wallet_entropy(
@@ -4157,7 +4156,7 @@ pub(crate) mod tests {
                 &cli_args::Args::default(),
             )
             .await;
-            println!("(ignore everything above)");
+            println!("(ignore all log messages above 😆)");
 
             let generation_counter = wallet_state.wallet_db.get_generation_key_counter().await;
             let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter().await;
@@ -4200,6 +4199,16 @@ pub(crate) mod tests {
 
             let kernel = pseudorandom_transaction_kernel(rng.random(), 10, 10, 10);
 
+            // create master list of UTXOs with context
+            struct UtxoContext {
+                select: bool,
+                key_type: KeyType,
+                relative_index: usize,
+                absolute_index: u64,
+                utxo: Utxo,
+                sender_randomness: Digest,
+                receiver_preimage: Digest,
+            }
             let mut public_announcements = kernel.public_announcements.clone();
             let mut addition_records = kernel.outputs.clone();
             let all_utxos = future_generation_keys
@@ -4240,15 +4249,15 @@ pub(crate) mod tests {
                         addition_records.push(addition_record);
                     }
 
-                    (
+                    UtxoContext {
                         select,
-                        kt,
-                        ri,
-                        ai,
+                        key_type: kt,
+                        relative_index: ri,
+                        absolute_index: ai,
                         utxo,
                         sender_randomness,
                         receiver_preimage,
-                    )
+                    }
                 })
                 .collect_vec();
 
@@ -4264,46 +4273,32 @@ pub(crate) mod tests {
                 .collect_vec();
 
             // filter master list according to expectation
-            let filtered_utxos = all_utxos
-                .into_iter()
-                .filter(|(select, _, _, _, _, _, _)| {
-                    if !*select {
-                        println!("rejecting UTXO because not selected");
-                    }
-                    *select
-                })
-                .filter(|(_, _, relative_index, _, _, _, _)| {
-                    let index_in_range = *relative_index < num_future_keys;
-                    if !index_in_range {
-                        println!(
-                            "rejecting UTXO because index {} >= {}",
-                            *relative_index, num_future_keys
-                        );
-                    }
-                    index_in_range
-                })
-                .map(
-                    |(
-                        _,
-                        keytype,
-                        _,
-                        absolute_index,
-                        utxo,
-                        sender_randomness,
-                        receiver_preimage,
-                    )| {
-                        (
-                            keytype,
-                            absolute_index,
-                            IncomingUtxo {
-                                utxo,
-                                sender_randomness,
-                                receiver_preimage,
-                            },
-                        )
+            let mut filtered_utxos = vec![];
+            for uc in all_utxos {
+                if !uc.select {
+                    println!("rejecting UTXO because not selected");
+                    continue;
+                }
+
+                let index_in_range = uc.relative_index < num_future_keys;
+                if !index_in_range {
+                    println!(
+                        "rejecting UTXO because index {} >= {}",
+                        uc.relative_index, num_future_keys
+                    );
+                    continue;
+                }
+                let filtered_utxo = (
+                    uc.key_type,
+                    uc.absolute_index,
+                    IncomingUtxo {
+                        utxo: uc.utxo,
+                        sender_randomness: uc.sender_randomness,
+                        receiver_preimage: uc.receiver_preimage,
                     },
-                )
-                .collect_vec();
+                );
+                filtered_utxos.push(filtered_utxo);
+            }
 
             println!("filtered utxos has {} elements", filtered_utxos.len());
 

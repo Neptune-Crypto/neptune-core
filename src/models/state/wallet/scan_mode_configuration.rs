@@ -1,4 +1,3 @@
-use std::cmp::min;
 use std::ops::RangeInclusive;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -53,7 +52,10 @@ impl ScanModeConfiguration {
     /// Constructor-helper for setting the range of blocks to scan.
     pub(crate) fn blocks<T: Into<u64> + Copy>(mut self, block_heights: RangeInclusive<T>) -> Self {
         let first_height: u64 = block_heights.start().to_owned().into();
-        let last_height: u64 = min(block_heights.end().to_owned().into(), BlockHeight::MAX);
+        let last_height: u64 = block_heights.end().to_owned().into();
+
+        // note: `From<u64> for BlockHeight` clamps large values to
+        // `BFieldElement::MAX` rather than wrapping round.
         self.first_block_height = BlockHeight::from(first_height);
         self.last_block_height = Some(BlockHeight::from(last_height));
         self
