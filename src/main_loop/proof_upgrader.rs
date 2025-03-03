@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use itertools::Itertools;
@@ -100,7 +101,7 @@ impl UpdateMutatorSetDataJob {
 
     pub(crate) async fn upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         let UpdateMutatorSetDataJob {
@@ -292,7 +293,7 @@ impl UpgradeJob {
     /// informs peers of this new transaction.
     pub(crate) async fn handle_upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         tx_origin: TransactionOrigin,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
@@ -340,7 +341,7 @@ impl UpgradeJob {
             let (upgraded, expected_utxos) = match upgrade_job
                 .clone()
                 .upgrade(
-                    triton_vm_job_queue,
+                    triton_vm_job_queue.clone(),
                     job_options,
                     &wallet_entropy,
                     block_height,
@@ -517,7 +518,7 @@ impl UpgradeJob {
     /// prover is busy.
     pub(crate) async fn upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
         own_wallet_entropy: &WalletEntropy,
         current_block_height: BlockHeight,
@@ -552,9 +553,12 @@ impl UpgradeJob {
                 vec![]
             };
             let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
-            let gobbler_proof =
-                SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())
-                    .await?;
+            let gobbler_proof = SingleProof::produce(
+                &gobbler,
+                triton_vm_job_queue.clone(),
+                proof_job_options.clone(),
+            )
+            .await?;
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
             let gobbler = Transaction {
                 kernel: gobbler.kernel,
@@ -579,7 +583,7 @@ impl UpgradeJob {
                     .prove(
                         claim,
                         nondeterminism,
-                        triton_vm_job_queue,
+                        triton_vm_job_queue.clone(),
                         proof_job_options.clone(),
                     )
                     .await?;
@@ -599,7 +603,7 @@ impl UpgradeJob {
                         .merge_with(
                             rhs,
                             gobble_shuffle_seed,
-                            triton_vm_job_queue,
+                            triton_vm_job_queue.clone(),
                             proof_job_options,
                         )
                         .await?;
@@ -632,7 +636,7 @@ impl UpgradeJob {
                     left,
                     right,
                     shuffle_seed.to_owned(),
-                    triton_vm_job_queue,
+                    triton_vm_job_queue.clone(),
                     proof_job_options.clone(),
                 )
                 .await?;
@@ -803,9 +807,9 @@ mod test {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::fake_block_successor_with_merged_tx;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::invalid_empty_block_with_timestamp;
@@ -832,21 +836,17 @@ mod test {
         .into();
         let mut state = state.lock_guard_mut().await;
         let change_key = state.wallet_state.next_unused_symmetric_key().await;
+        let dummy = TritonVmJobQueue::dummy();
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
-        let (tx, _, _) = state
-            .create_transaction_with_prover_capability(
-                tx_outputs,
-                change_key.into(),
-                UtxoNotificationMedium::OffChain,
-                fee,
-                timestamp,
-                proof_quality,
-                &TritonVmJobQueue::dummy(),
-            )
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(change_key.into())
+            .with_prover_capability(proof_quality)
+            .use_job_queue(dummy);
+        state
+            .create_transaction(tx_outputs, fee, timestamp, config)
             .await
-            .unwrap();
-
-        tx
+            .unwrap()
+            .transaction
     }
 
     #[traced_test]
@@ -947,7 +947,7 @@ mod test {
                 UpgradeJob::from_primitive_witness(proving_capability, pw.to_owned());
             pw_to_tx_upgrade_job
                 .handle_upgrade(
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TransactionOrigin::Own,
                     true,
                     alice.clone(),
@@ -1031,7 +1031,7 @@ mod test {
             alice.set_new_tip(block1).await.unwrap();
             upgrade_job
                 .handle_upgrade(
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TransactionOrigin::Own,
                     true,
                     alice.clone(),
@@ -1148,7 +1148,7 @@ mod test {
             broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
         merge_upgrade_job
             .handle_upgrade(
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TransactionOrigin::Own,
                 true,
                 alice.clone(),

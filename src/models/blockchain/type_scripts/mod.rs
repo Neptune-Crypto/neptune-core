@@ -5,6 +5,7 @@ pub mod time_lock;
 
 use std::collections::HashMap;
 use std::hash::Hasher as StdHasher;
+use std::sync::Arc;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -104,7 +105,7 @@ impl TypeScriptAndWitness {
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -39,6 +40,9 @@ impl From<&[LabelledInstruction]> for LockScript {
 }
 
 impl LockScript {
+    #[cfg(test)]
+    const BURN_ERROR: i128 = 1_000_300;
+
     pub fn new(program: Program) -> Self {
         Self { program }
     }
@@ -146,7 +150,7 @@ impl LockScriptAndWitness {
     pub(crate) async fn prove(
         &self,
         public_input: PublicInput,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
@@ -180,6 +184,18 @@ mod test {
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+    impl LockScript {
+        /// A lock script that is guaranteed to fail
+        #[cfg(test)]
+        pub(crate) fn burn() -> Self {
+            Self {
+                program: triton_program! {
+                    push 0 assert error_id {Self::BURN_ERROR}
+                },
+            }
+        }
+    }
 
     #[proptest]
     fn lock_script_halts_gracefully_prop(

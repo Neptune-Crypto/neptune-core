@@ -10,6 +10,7 @@ pub mod difficulty_control;
 pub mod mutator_set_update;
 pub mod validity;
 
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use block_appendix::BlockAppendix;
@@ -227,7 +228,7 @@ impl Block {
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let body = primitive_witness.body().to_owned();
@@ -255,7 +256,7 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let tx_claim = SingleProof::claim(transaction.kernel.mast_hash());
@@ -290,7 +291,7 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         Self::make_block_template_with_valid_proof(
@@ -1073,15 +1074,19 @@ pub(crate) mod block_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::mine_loop::composer_parameters::ComposerParameters;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::TypeScript;
+    use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_block_with_transaction;
@@ -1411,6 +1416,7 @@ pub(crate) mod block_tests {
         use super::*;
         use crate::job_queue::triton_vm::TritonVmJobPriority;
         use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+        use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;
 
@@ -1482,26 +1488,22 @@ pub(crate) mod block_tests {
                 .await;
                 alice.set_new_tip(block1.clone()).await.unwrap();
                 let outputs = vec![output_to_self.clone(); i];
-                let (tx2, _, _) = alice
+                let config2 = TxCreationConfig::default()
+                    .recover_change_on_chain(alice_key)
+                    .with_prover_capability(TxProvingCapability::SingleProof);
+                let tx2 = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_prover_capability(
-                        outputs.into(),
-                        alice_key,
-                        UtxoNotificationMedium::OnChain,
-                        fee,
-                        plus_eight_months,
-                        TxProvingCapability::SingleProof,
-                        &TritonVmJobQueue::dummy(),
-                    )
+                    .create_transaction(outputs.into(), fee, plus_eight_months, config2)
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .transaction;
                 let block2_tx = coinbase_for_block2
                     .clone()
                     .merge_with(
                         tx2,
                         rng.random(),
-                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
                     .await
@@ -1511,7 +1513,7 @@ pub(crate) mod block_tests {
                     block2_tx,
                     plus_eight_months,
                     None,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1537,26 +1539,27 @@ pub(crate) mod block_tests {
                 )
                 .await
                 .unwrap();
-                let (tx3, _, _) = alice
+                let config3 = TxCreationConfig::default()
+                    .recover_change_on_chain(alice_key)
+                    .with_prover_capability(TxProvingCapability::SingleProof);
+                let tx3 = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_prover_capability(
+                    .create_transaction(
                         vec![output_to_self.clone()].into(),
-                        alice_key,
-                        UtxoNotificationMedium::OnChain,
                         fee,
                         plus_nine_months,
-                        TxProvingCapability::SingleProof,
-                        &TritonVmJobQueue::dummy(),
+                        config3,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .transaction;
                 let block3_tx = coinbase_for_block3
                     .clone()
                     .merge_with(
                         tx3,
                         rng.random(),
-                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
                     .await
@@ -1570,7 +1573,7 @@ pub(crate) mod block_tests {
                     block3_tx,
                     plus_nine_months,
                     None,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1721,6 +1724,7 @@ pub(crate) mod block_tests {
 
     mod guesser_fee_utxos {
         use super::*;
+        use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
 
@@ -1818,39 +1822,31 @@ pub(crate) mod block_tests {
                 true,
             );
             let fee = NativeCurrencyAmount::coins(1);
-            let (tx1, _, _) = alice
+            let config1 = TxCreationConfig::default()
+                .recover_change_on_chain(alice_key.into())
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let tx1 = alice
                 .lock_guard()
                 .await
-                .create_transaction_with_prover_capability(
-                    vec![output.clone()].into(),
-                    alice_key.into(),
-                    UtxoNotificationMedium::OnChain,
-                    fee,
-                    in_seven_months,
-                    TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
-                )
+                .create_transaction(vec![output.clone()].into(), fee, in_seven_months, config1)
                 .await
-                .unwrap();
+                .unwrap()
+                .transaction;
 
             let block1 =
                 Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
             alice.set_new_tip(block1.clone()).await.unwrap();
 
-            let (tx2, _, _) = alice
+            let config2 = TxCreationConfig::default()
+                .recover_change_on_chain(alice_key.into())
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let tx2 = alice
                 .lock_guard()
                 .await
-                .create_transaction_with_prover_capability(
-                    vec![output].into(),
-                    alice_key.into(),
-                    UtxoNotificationMedium::OnChain,
-                    fee,
-                    in_eight_months,
-                    TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
-                )
+                .create_transaction(vec![output].into(), fee, in_eight_months, config2)
                 .await
-                .unwrap();
+                .unwrap()
+                .transaction;
 
             let block2 = Block::block_template_invalid_proof(&block1, tx2, in_eight_months, None);
 
@@ -1883,5 +1879,127 @@ pub(crate) mod block_tests {
     #[test]
     fn premine_distribution_does_not_crash() {
         Block::premine_distribution();
+    }
+
+    /// Exhibits a strategy for creating one transaction by merging in many
+    /// small ones that spend from one's own wallet. The difficulty you run into
+    /// when you do this naïvely is that you end up merging in transactions that
+    /// spend the same UTXOs over and over. To avoid doing this, you insert the
+    /// transaction into the mempool thus making the wallet aware of this
+    /// transaction and avoiding a double-spend of a UTXO.
+    #[tokio::test]
+    async fn avoid_reselecting_same_input_utxos() {
+        let mut rng = StdRng::seed_from_u64(893423984854);
+        let network = Network::Main;
+        let devnet_wallet = WalletEntropy::devnet_wallet();
+        let mut alice =
+            mock_genesis_global_state(network, 0, devnet_wallet, cli_args::Args::default()).await;
+
+        let job_queue = TritonVmJobQueue::dummy();
+
+        let genesis_block = Block::genesis(network);
+
+        let mut blocks = vec![genesis_block];
+
+        // Spend i inputs in block i, for i in {1,2}. The first expenditure and
+        // block is guaranteed to succeed. Prior to the second block, Alice owns
+        // two inputs and creates a big transaction by merging in smaller ones.
+        // She needs to ensure the two transactions she merges in do not spend
+        // the same UTXO.
+        let launch_date = network.launch_date();
+        let mut now = launch_date + Timestamp::months(6);
+        for i in 1..3 {
+            now += TARGET_BLOCK_INTERVAL;
+
+            // create coinbase transaction
+            let (mut transaction, _) = make_coinbase_transaction_from_state(
+                &blocks[i - 1],
+                &alice,
+                launch_date,
+                TxProvingCapability::SingleProof,
+                TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
+            )
+            .await
+            .unwrap();
+
+            // for all own UTXOs, spend to self
+            for _ in 0..i {
+                // create a transaction spending it to self
+                let change_key = alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_symmetric_key()
+                    .await;
+                let receiving_address = alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Generation)
+                    .await
+                    .unwrap()
+                    .to_address()
+                    .unwrap();
+                let tx_outputs = vec![TxOutput::onchain_native_currency(
+                    NativeCurrencyAmount::coins(1),
+                    rng.random(),
+                    receiving_address,
+                    true,
+                )]
+                .into();
+                let config = TxCreationConfig::default()
+                    .recover_change_on_chain(change_key.into())
+                    .with_prover_capability(TxProvingCapability::SingleProof)
+                    .use_job_queue(job_queue.clone());
+                let transaction_creation_artifacts = alice
+                    .lock_guard_mut()
+                    .await
+                    .create_transaction(tx_outputs, NativeCurrencyAmount::coins(0), now, config)
+                    .await
+                    .unwrap();
+                let self_spending_transaction = transaction_creation_artifacts.transaction;
+
+                // merge that transaction in
+                transaction = transaction
+                    .merge_with(
+                        self_spending_transaction,
+                        rng.random(),
+                        job_queue.clone(),
+                        TritonVmProofJobOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+
+                alice
+                    .lock_guard_mut()
+                    .await
+                    .mempool_insert(transaction.clone(), TransactionOrigin::Own)
+                    .await;
+            }
+
+            // compose block
+            let block = Block::compose(
+                blocks.last().unwrap(),
+                transaction,
+                now,
+                None,
+                job_queue.clone(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            let block_is_valid = block
+                .is_valid_internal(blocks.last().unwrap(), now, None, None)
+                .await;
+            println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));
+            println!();
+            assert!(block_is_valid.is_ok());
+
+            // update state with new block
+            alice.set_new_tip(block.clone()).await.unwrap();
+
+            blocks.push(block);
+        }
     }
 }

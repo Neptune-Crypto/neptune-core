@@ -1,6 +1,7 @@
 pub(crate) mod composer_parameters;
 
 use std::cmp::max;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::bail;
@@ -28,7 +29,7 @@ use tracing::*;
 use twenty_first::math::digest::Digest;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::JobQueue;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -46,6 +47,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -377,20 +379,18 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     proving_power: TxProvingCapability,
-    vm_job_queue: &JobQueue<TritonVmJobPriority>,
+    vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_outputs, transaction_details) =
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
 
     info!("Start: generate single proof for coinbase transaction");
-    let transaction = GlobalState::create_raw_transaction(
-        &transaction_details,
-        proving_power,
-        vm_job_queue,
-        job_options,
-    )
-    .await?;
+    let config = TxCreationConfig::default()
+        .use_job_queue(vm_job_queue)
+        .with_proof_job_options(job_options)
+        .with_prover_capability(proving_power);
+    let transaction = GlobalState::create_raw_transaction(&transaction_details, config).await?;
     info!("Done: generating single proof for coinbase transaction");
 
     Ok((transaction, composer_outputs))
@@ -571,7 +571,7 @@ pub(crate) async fn create_block_transaction_from(
         composer_parameters.clone(),
         timestamp,
         TxProvingCapability::SingleProof,
-        vm_job_queue,
+        vm_job_queue.clone(),
         job_options.clone(),
     )
     .await?;
@@ -599,7 +599,8 @@ pub(crate) async fn create_block_transaction_from(
         let nop =
             TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
         let nop = PrimitiveWitness::from_transaction_details(&nop);
-        let nop_proof = SingleProof::produce(&nop, vm_job_queue, job_options.clone()).await?;
+        let nop_proof =
+            SingleProof::produce(&nop, vm_job_queue.clone(), job_options.clone()).await?;
         let nop = Transaction {
             kernel: nop.kernel,
             proof: TransactionProof::SingleProof(nop_proof),
@@ -622,7 +623,7 @@ pub(crate) async fn create_block_transaction_from(
             block_transaction,
             tx_to_include,
             rng.random(),
-            vm_job_queue,
+            vm_job_queue.clone(),
             job_options.clone(),
         )
         .await
@@ -990,8 +991,8 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
     use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::invalid_empty_block;
@@ -1187,20 +1188,21 @@ pub(crate) mod mine_loop_tests {
             alice_key.to_address().into(),
             false,
         );
-        let (tx_from_alice, _, _maybe_change_output) = alice
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let tx_from_alice = alice
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
+            .create_transaction(
                 vec![output_to_alice].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 now,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         let mut cli = cli_args::Args::default();
         for guesser_fee_fraction in [0f64, 0.5, 1.0] {
@@ -1257,7 +1259,7 @@ pub(crate) mod mine_loop_tests {
                 transaction_empty_mempool,
                 now,
                 None,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::High.into(),
             )
             .await
@@ -1299,7 +1301,7 @@ pub(crate) mod mine_loop_tests {
                 transaction_non_empty_mempool,
                 now,
                 None,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
