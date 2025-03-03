@@ -486,13 +486,19 @@ impl MainLoopHandler {
         self.main_to_miner_tx.send(MainToMiner::Continue);
     }
 
+    /// Process a block whose PoW solution was solved by this client (or an
+    /// external program) and has not been seen by the rest of the network yet.
+    ///
+    /// Shares block with all connected peers, updates own state, and updates
+    /// any mempool transactions to be valid under this new block.
+    ///
+    /// Locking:
+    ///  * acquires `global_state_lock` for write
     async fn handle_self_guessed_block(
         &mut self,
         main_loop_state: &mut MutableMainLoopState,
         new_block: Box<Block>,
     ) -> Result<()> {
-        // Store block in database
-        // This block spans global state write lock for updating.
         let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
         if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
@@ -508,11 +514,9 @@ impl MainLoopHandler {
         info!("broadcasting new block to peers");
         self.main_to_peer_broadcast_tx
             .send(MainToPeerTask::Block(new_block.clone()))
-            .expect("Peer handler broadcast channel prematurely closed. This should never happen.");
+            .expect("Peer handler broadcast channel prematurely closed.");
 
-        let update_jobs = global_state_mut
-            .set_new_tip(new_block.as_ref().clone())
-            .await?;
+        let update_jobs = global_state_mut.set_new_tip(*new_block).await?;
         drop(global_state_mut);
 
         self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
@@ -1683,7 +1687,7 @@ impl MainLoopHandler {
                 // do not shut down
                 Ok(false)
             }
-            RPCServerToMain::SolvePow(new_block) => {
+            RPCServerToMain::ProofOfWorkSolution(new_block) => {
                 info!("Handling PoW solution from RPC call");
 
                 self.handle_self_guessed_block(main_loop_state, new_block)
