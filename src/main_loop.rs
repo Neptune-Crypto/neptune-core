@@ -773,7 +773,7 @@ impl MainLoopHandler {
                     main_loop_state.potential_peers.add(
                         reported_by,
                         pot_peer,
-                        max_peers as usize,
+                        max_peers,
                         distance,
                         self.now(),
                     );
@@ -895,7 +895,7 @@ impl MainLoopHandler {
         let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
 
         // Check if we are connected to too many peers
-        if connected_peers.len() > cli_args.max_num_peers as usize {
+        if connected_peers.len() > cli_args.max_num_peers {
             // If *all* peer connections were outgoing, then it's OK to exceed
             // the max-peer count. But in that case we don't want to connect to
             // more peers, so we should just stop execution of this scheduled
@@ -992,9 +992,8 @@ impl MainLoopHandler {
 
         // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
         // one below the peer limit as we reserve this last slot for an ingoing connection.
-        if connected_peers.len() == cli_args.max_num_peers as usize
-            || connected_peers.len() > 2
-                && connected_peers.len() - 1 == cli_args.max_num_peers as usize
+        if connected_peers.len() == cli_args.max_num_peers
+            || connected_peers.len() > 2 && connected_peers.len() - 1 == cli_args.max_num_peers
         {
             return Ok(());
         }
@@ -2288,7 +2287,7 @@ mod test {
             } = test_setup;
 
             let mocked_cli = cli_args::Args {
-                max_num_peers: num_init_peers_outgoing as u16 + 1,
+                max_num_peers: usize::from(num_init_peers_outgoing) + 1,
                 bootstrap: true,
                 network,
                 ..Default::default()
@@ -2302,7 +2301,7 @@ mod test {
 
             // check sanity: at startup, we are connected to the initial number of peers
             assert_eq!(
-                num_init_peers_outgoing as usize,
+                usize::from(num_init_peers_outgoing),
                 main_loop_handler
                     .global_state_lock
                     .lock_guard()

@@ -2780,7 +2780,7 @@ impl RPC for NeptuneRPCServer {
         info!("proving capability: {proving_capability}");
 
         let peer_count = Some(state.net.peer_map.len());
-        let max_num_peers = self.state.cli().max_num_peers as usize;
+        let max_num_peers = self.state.cli().max_num_peers;
 
         let mining_status = Some(state.mining_status.clone());
 

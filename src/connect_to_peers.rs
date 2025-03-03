@@ -117,9 +117,7 @@ async fn check_if_connection_is_allowed(
     // `DisconnectFromLongestLivedPeer` message should have been sent to
     // the main loop already but that message need not have been processed by
     // the time we get here.
-    if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len()
-        && !cli_arguments.bootstrap
-    {
+    if cli_arguments.max_num_peers <= global_state.net.peer_map.len() && !cli_arguments.bootstrap {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
     }
 
@@ -147,7 +145,7 @@ async fn check_if_connection_is_allowed(
 
     // If this connection touches the maximum number of peer connections, say
     // so with special OK code.
-    if cli_arguments.max_num_peers as usize == global_state.net.peer_map.len() + 1 {
+    if cli_arguments.max_num_peers == global_state.net.peer_map.len() + 1 {
         info!("ConnectionStatus::Accepted, but max # connections is now reached");
         return InternalConnectionStatus::AcceptedMaxReached;
     }

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
+use clap::builder::TypedValueParser;
 use clap::Parser;
 use num_traits::Zero;
 use sysinfo::System;
@@ -61,8 +62,13 @@ pub struct Args {
     ///
     /// Will not prevent outgoing connections made with `--peers`.
     /// Set this value to 0 to refuse all incoming connections.
-    #[clap(long, default_value = "10", value_name = "COUNT")]
-    pub(crate) max_num_peers: u16,
+    #[clap(
+        long,
+        default_value = "10",
+        value_name = "COUNT",
+        value_parser = clap::value_parser!(u16).map(|u| usize::from(u)),
+    )]
+    pub(crate) max_num_peers: usize,
 
     /// Whether to act as bootstrapper node.
     ///

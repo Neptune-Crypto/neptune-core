@@ -1831,7 +1831,7 @@ impl PeerLoopHandler {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
 
-        if global_state.net.peer_map.len() >= cli_args.max_num_peers as usize {
+        if global_state.net.peer_map.len() >= cli_args.max_num_peers {
             bail!("Attempted to connect to more peers than allowed. Aborting connection.");
         }
 
