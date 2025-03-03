@@ -111,6 +111,8 @@ impl Display for BlockHeader {
 }
 
 impl BlockHeader {
+    pub(crate) const GENESIS_DIFFICULTY: Difficulty = Difficulty::new([1_000_000_000, 0, 0, 0, 0]);
+
     pub(crate) fn genesis(network: Network) -> Self {
         Self {
             version: BFieldElement::zero(),
@@ -128,7 +130,7 @@ impl BlockHeader {
             cumulative_proof_of_work: ProofOfWork::zero(),
 
             #[cfg(not(test))]
-            difficulty: Difficulty::new([1_000_000_000, 0, 0, 0, 0]),
+            difficulty: Self::GENESIS_DIFFICULTY,
 
             // Avoid setting this too high when running tests, otherwise CI
             // fails and tests take forever.

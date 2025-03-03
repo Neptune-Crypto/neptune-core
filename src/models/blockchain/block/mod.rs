@@ -1054,6 +1054,31 @@ pub(crate) mod block_tests {
         );
     }
 
+    impl Block {
+        #[cfg(test)]
+        fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
+            self.kernel.header.difficulty = difficulty;
+            self.unset_digest();
+            self
+        }
+    }
+
+    #[test]
+    fn genesis_block_hasnt_changed() {
+        // Ensure that code changes does not modify the hash of main net's
+        // genesis block.
+
+        // Insert the real difficulty such that the block's hash can be
+        // compared to the one found in block explorers and other real
+        // instances, otherwise the hash would only be valid for test code.
+        let genesis_block =
+            Block::genesis(Network::Main).with_difficulty(BlockHeader::GENESIS_DIFFICULTY);
+        assert_eq!(
+            "3eeaed3acdd8765b9a3e689d74f745365d6a3de57fb4a9a19c46ac432ce419a92fb82d47dc0d3f54",
+            genesis_block.hash().to_hex()
+        );
+    }
+
     #[test]
     fn block_subsidy_calculation_terminates() {
         Block::block_subsidy(BFieldElement::MAX.into());
