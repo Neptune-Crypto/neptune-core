@@ -413,10 +413,15 @@ impl TransactionKernelModifier {
 
 #[cfg(test)]
 pub mod transaction_kernel_tests {
+    use bytesize::ByteSize;
     use itertools::Itertools;
+    use lstsq::lstsq;
+    use nalgebra::DMatrix;
+    use nalgebra::DVector;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::random;
+    use rand::rng;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::RngCore;
@@ -424,8 +429,11 @@ pub mod transaction_kernel_tests {
 
     use super::*;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+    use crate::models::blockchain::transaction::utxo::pseudorandom_utxo;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
+    use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
     use crate::tests::shared::pseudorandom_amount;
     use crate::tests::shared::pseudorandom_option;
     use crate::tests::shared::pseudorandom_public_announcement;
@@ -470,6 +478,110 @@ pub mod transaction_kernel_tests {
             merge_bit,
         }
         .into_kernel()
+    }
+
+    pub(crate) fn pseudorandom_transaction_kernel_with_num_inputs_and_outputs(
+        num_inputs: usize,
+        num_outputs: usize,
+        seed: [u8; 32],
+    ) -> TransactionKernel {
+        let mut rng = StdRng::from_seed(seed);
+        let inputs = (0..num_inputs)
+            .map(|_| pseudorandom_removal_record(rng.random()))
+            .collect_vec();
+        let outputs = (0..num_outputs)
+            .map(|_| pseudorandom_addition_record(rng.random()))
+            .collect_vec();
+
+        // we want the public announcements to represent public key encryptions
+        // notifying the recipients of the UTXO data
+        let mut public_announcements = vec![];
+        for _ in 0..num_outputs {
+            let spending_key = GenerationSpendingKey::derive_from_seed(rng.random());
+            let receiving_address = spending_key.to_address();
+            let utxo = pseudorandom_utxo(rng.random());
+            let sender_randomness: Digest = rng.random();
+            let utxo_notification_payload = UtxoNotificationPayload::new(utxo, sender_randomness);
+            let public_announcement =
+                receiving_address.generate_public_announcement(&utxo_notification_payload);
+            public_announcements.push(public_announcement);
+        }
+
+        let fee = NativeCurrencyAmount::from_raw_i128(rng.random());
+        let coinbase = if rng.random() {
+            None
+        } else {
+            Some(NativeCurrencyAmount::from_raw_i128(rng.random()))
+        };
+        let timestamp = Timestamp::millis(rng.next_u64() >> 1);
+        let mutator_set_hash: Digest = rng.random();
+        let merge_bit: bool = rng.random();
+
+        TransactionKernelProxy {
+            inputs,
+            outputs,
+            public_announcements,
+            fee,
+            coinbase,
+            timestamp,
+            mutator_set_hash,
+            merge_bit,
+        }
+        .into_kernel()
+    }
+
+    #[ignore = "informational; not testing anything"]
+    #[test]
+    pub fn pseudorandom_transaction_kernel_sizes() {
+        // search for formula of the form
+        // transaction size = x * num_inputs + y * num_outputs + c
+        let n = 9;
+        let m = n * n;
+        let mut observations = DVector::from_vec(vec![0.0_f64; m]);
+        let mut data = DMatrix::from_vec(m, 3, vec![1.0_f64; m * 3]);
+
+        let mut row = 0;
+        for num_inputs in 1..(1 + n) {
+            for num_outputs in 1..(1 + n) {
+                let kernel = pseudorandom_transaction_kernel_with_num_inputs_and_outputs(
+                    num_inputs,
+                    num_outputs,
+                    rng().random(),
+                );
+                let size = kernel.encode().len() * 8;
+                println!(
+                    "Size of pseudorandom transaction kernel with \
+                    {num_inputs} inputs and {num_outputs} outputs: {}",
+                    ByteSize::b(size as u64)
+                );
+
+                *observations.get_mut(row).unwrap() = size as f64;
+                *data.get_mut((row, 0)).unwrap() = num_inputs as f64;
+                *data.get_mut((row, 1)).unwrap() = num_outputs as f64;
+                row += 1;
+            }
+        }
+
+        // let's solve the equation
+        // observations ^= data * coefficients
+        // for coefficients
+        let coefficients = lstsq(&data, &observations, 1e-14).unwrap().solution;
+
+        // sanity check
+        // observations - data*coefficients _|_ colspan data
+        let difference = observations - (data.clone() * coefficients.clone());
+        let projection = data.transpose() * difference;
+        assert!(projection.norm_squared() <= 1e-14);
+
+        println!(
+            "average size of input: {}",
+            ByteSize::b(coefficients[0].round() as u64)
+        );
+        println!(
+            "average size of output + public announcement: {}",
+            ByteSize::b(coefficients[1].round() as u64)
+        );
+        println!("average size of all the rest: {} bytes", coefficients[2]);
     }
 
     #[test]

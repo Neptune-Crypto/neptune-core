@@ -51,6 +51,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
@@ -306,7 +307,7 @@ mod wallet_tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds(amount, tip_digest, &ms_acc, now)
+                .allocate_sufficient_input_funds_nofilter(amount, tip_digest, &ms_acc, now)
                 .await
         };
         let num_utxos_in_allocation = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
@@ -408,7 +409,7 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .allocate_sufficient_input_funds(
+            .allocate_sufficient_input_funds_nofilter(
                 liquid_mining_reward.scalar_mul(2),
                 next_block.hash(),
                 &next_block.mutator_set_accumulator_after(),
@@ -547,20 +548,23 @@ mod wallet_tests {
 
         let receiver_data_to_alice: TxOutputList =
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
-        let (tx, _, _change_output) = bob
-            .create_transaction_with_prover_capability(
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let bob_change_key = bob_wallet.nth_generation_spending_key_for_tests(0).into();
+        let config_1 = TxCreationConfig::default()
+            .recover_change_on_chain(bob_change_key)
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx_1 = bob
+            .create_transaction(
                 receiver_data_to_alice.clone(),
-                bob_wallet.nth_generation_spending_key_for_tests(0).into(),
-                UtxoNotificationMedium::OnChain,
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config_1,
             )
             .await
             .unwrap();
 
-        let block_1 = invalid_block_with_transaction(&genesis_block, tx);
+        let block_1 = invalid_block_with_transaction(&genesis_block, tx_1.into());
 
         // Update wallet state with block_1
         assert!(
@@ -784,15 +788,16 @@ mod wallet_tests {
             false,
         );
 
-        let (tx_from_bob, _, _maybe_change_output) = bob
-            .create_transaction_with_prover_capability(
+        let config_2b = TxCreationConfig::default()
+            .recover_change_off_chain(bob_change_key)
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .use_job_queue(&dummy_queue);
+        let tx_from_bob = bob
+            .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
-                bob_wallet.nth_generation_spending_key_for_tests(0).into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config_2b,
             )
             .await
             .unwrap();
@@ -816,7 +821,7 @@ mod wallet_tests {
         .unwrap();
         let merged_tx = coinbase_tx
             .merge_with(
-                tx_from_bob,
+                tx_from_bob.into(),
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -996,20 +1001,18 @@ mod wallet_tests {
         let tx_output =
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletEntropy::devnet_wallet().nth_symmetric_key_for_tests(0);
-        let (sender_tx, _, _change_output) = bob
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxCreationConfig::default()
+            .recover_change_on_chain(change_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let sender_tx = bob
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
-                vec![tx_output].into(),
-                change_key.into(),
-                UtxoNotificationMedium::OffChain,
-                one_money,
-                in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
-            )
+            .create_transaction(vec![tx_output].into(), one_money, in_seven_months, config)
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         let tx_for_block = sender_tx
             .merge_with(
                 cbtx,

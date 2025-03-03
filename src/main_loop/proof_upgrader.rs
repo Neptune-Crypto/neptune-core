@@ -710,6 +710,7 @@ mod test {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -732,19 +733,17 @@ mod test {
         let mut state = state.lock_guard_mut().await;
         let change_key = state.wallet_state.next_unused_symmetric_key().await;
         let fee = NativeCurrencyAmount::from_nau(100);
+        let dummy = &TritonVmJobQueue::dummy();
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
-        let (tx, _, _) = state
-            .create_transaction_with_prover_capability(
-                tx_outputs,
-                change_key.into(),
-                UtxoNotificationMedium::OffChain,
-                fee,
-                timestamp,
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
-            )
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(change_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .use_job_queue(dummy);
+        let tx = state
+            .create_transaction(tx_outputs, fee, timestamp, config)
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         tx
     }
