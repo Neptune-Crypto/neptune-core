@@ -87,6 +87,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
@@ -1983,16 +1984,13 @@ impl NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let (mut transaction, transaction_details, maybe_change_output) = match state
-            .create_transaction_with_prover_capability(
-                tx_outputs.clone(),
-                change_key,
-                owned_utxo_notification_medium,
-                fee,
-                now,
-                tx_proving_capability,
-                self.state.vm_job_queue(),
-            )
+        let config = TxCreationConfig::default()
+            .recover_change(change_key, owned_utxo_notification_medium)
+            .with_prover_capability(tx_proving_capability)
+            .record_details()
+            .use_job_queue(self.state.vm_job_queue());
+        let transaction_creation_artifacts = match state
+            .create_transaction(tx_outputs.clone(), fee, now, config)
             .await
         {
             Ok(tx) => tx,
@@ -2001,6 +1999,11 @@ impl NeptuneRPCServer {
                 return Err(e.into());
             }
         };
+        let mut transaction = transaction_creation_artifacts.transaction;
+        let transaction_details = transaction_creation_artifacts
+            .details
+            .expect("details should be some when configured to track details");
+        let maybe_change_output = transaction_creation_artifacts.change_output;
         drop(state);
 
         if let Some(invalid_proof) = mocked_invalid_proof {

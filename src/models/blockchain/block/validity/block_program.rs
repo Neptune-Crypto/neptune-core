@@ -352,6 +352,7 @@ pub(crate) mod test {
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -509,20 +510,18 @@ pub(crate) mod test {
 
         let genesis_block = Block::genesis(network);
         let now = genesis_block.header().timestamp + Timestamp::months(12);
-        let (tx, _, _) = alice
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx = alice
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
-                vec![tx_output].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OffChain,
-                fee,
-                now,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
-            )
+            .create_transaction(vec![tx_output].into(), fee, now, config)
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
 
         // Update transaction, stick it into block 2, and verify that block 2

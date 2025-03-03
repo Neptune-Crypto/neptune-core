@@ -2085,7 +2085,7 @@ mod test {
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
-        use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+        use crate::models::state::tx_creation_config::TxCreationConfig;
 
         async fn tx_no_outputs(
             global_state_lock: &GlobalStateLock,
@@ -2107,20 +2107,17 @@ mod test {
                 .timestamp
                 + Timestamp::months(7);
 
+            let dummy_queue = TritonVmJobQueue::dummy();
+            let config = TxCreationConfig::default()
+                .recover_change_off_chain(change_key.into())
+                .with_prover_capability(tx_proof_type)
+                .use_job_queue(&dummy_queue);
             let global_state = global_state_lock.lock_guard().await;
             global_state
-                .create_transaction_with_prover_capability(
-                    vec![].into(),
-                    change_key.into(),
-                    UtxoNotificationMedium::OffChain,
-                    fee,
-                    in_seven_months,
-                    tx_proof_type,
-                    &TritonVmJobQueue::dummy(),
-                )
+                .create_transaction(vec![].into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
-                .0
+                .transaction
         }
 
         #[tokio::test]

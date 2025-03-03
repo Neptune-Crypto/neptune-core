@@ -1339,8 +1339,7 @@ fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
         if bip39::Language::English
             .wordlist()
             .get_words_by_prefix("")
-            .iter()
-            .any(|s| *s == word)
+            .contains(&word)
         {
             phrase.push(word.to_string());
             i += 1;
