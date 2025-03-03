@@ -1945,7 +1945,7 @@ mod test {
                 .lock_guard()
                 .await
                 .wallet_state
-                .wallet_secret
+                .wallet_entropy
                 .nth_generation_spending_key_for_tests(0);
             let in_seven_months = global_state_lock
                 .lock_guard()

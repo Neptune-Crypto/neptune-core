@@ -1925,7 +1925,7 @@ mod peer_loop_tests {
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::fake_valid_block_for_tests;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::get_dummy_handshake_data_for_genesis;
@@ -3332,7 +3332,7 @@ mod peer_loop_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_symmetric_key_for_tests(0);
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
@@ -3414,7 +3414,7 @@ mod peer_loop_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_symmetric_key_for_tests(0);
 
         let genesis_block = Block::genesis(network);
@@ -3615,7 +3615,7 @@ mod peer_loop_tests {
             network: Network,
             quality: TransactionProofQuality,
         ) -> Transaction {
-            let wallet_secret = WalletSecret::devnet_wallet();
+            let wallet_secret = WalletEntropy::devnet_wallet();
             let alice_key = wallet_secret.nth_generation_spending_key_for_tests(0);
             let alice =
                 mock_genesis_global_state(network, 1, wallet_secret, cli_args::Args::default())
