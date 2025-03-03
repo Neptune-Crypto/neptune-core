@@ -4205,61 +4205,52 @@ pub(crate) mod tests {
                 key_type: KeyType,
                 relative_index: usize,
                 absolute_index: u64,
-                utxo: Utxo,
-                sender_randomness: Digest,
-                receiver_preimage: Digest,
+                incoming_utxo: IncomingUtxo,
             }
             let mut public_announcements = kernel.public_announcements.clone();
             let mut addition_records = kernel.outputs.clone();
-            let all_utxos = future_generation_keys
+            let mut all_utxos = vec![];
+            for (key_type, relative_index, absolute_index, key) in future_generation_keys
                 .into_iter()
-                .chain(future_symmetric_keys.into_iter())
-                .map(|(kt, ri, ai, k)| {
-                    (
-                        rng.random::<bool>(),
-                        kt,
-                        ri,
-                        ai,
-                        Utxo::from((
-                            rng.random::<Digest>(),
-                            vec![Coin::new_native_currency(NativeCurrencyAmount::coins(
-                                rng.random::<u32>() >> 15,
-                            ))],
-                        )),
-                        rng.random::<Digest>(),
-                        k,
-                    )
-                })
-                .map(|(select, kt, ri, ai, utxo, sender_randomness, key)| {
-                    let receiver_preimage = key.privacy_preimage().unwrap();
-                    let utxo_notification_payload =
-                        UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
-                    let public_announcement = key
-                        .to_address()
-                        .unwrap()
-                        .generate_public_announcement(utxo_notification_payload);
-                    public_announcements.push(public_announcement);
+                .chain(future_symmetric_keys)
+            {
+                let coin = Coin::new_native_currency(NativeCurrencyAmount::coins(
+                    rng.random::<u32>() >> 15,
+                ));
+                let utxo = Utxo::from((rng.random::<Digest>(), vec![coin]));
+                let sender_randomness = rng.random::<Digest>();
 
-                    let addition_record = commit(
-                        Tip5::hash(&utxo),
-                        sender_randomness,
-                        receiver_preimage.hash(),
-                    );
-                    if select {
-                        addition_records.push(addition_record);
-                    }
+                let receiver_preimage = key.privacy_preimage().unwrap();
+                let utxo_notification_payload =
+                    UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
+                let public_announcement = key
+                    .to_address()
+                    .unwrap()
+                    .generate_public_announcement(utxo_notification_payload);
+                public_announcements.push(public_announcement);
 
-                    UtxoContext {
-                        select,
-                        key_type: kt,
-                        relative_index: ri,
-                        absolute_index: ai,
-                        utxo,
-                        sender_randomness,
-                        receiver_preimage,
-                    }
-                })
-                .collect_vec();
+                let incoming_utxo = IncomingUtxo {
+                    utxo,
+                    sender_randomness,
+                    receiver_preimage,
+                };
+
+                let addition_record = incoming_utxo.addition_record();
+                let select = rng.random::<bool>();
+                if select {
+                    addition_records.push(addition_record);
+                }
+
+                let utxo_context = UtxoContext {
+                    select,
+                    key_type,
+                    relative_index,
+                    absolute_index,
+                    incoming_utxo,
+                };
+
+                all_utxos.push(utxo_context);
+            }
 
             let new_kernel = TransactionKernelModifier::default()
                 .public_announcements(public_announcements)
@@ -4288,15 +4279,7 @@ pub(crate) mod tests {
                     );
                     continue;
                 }
-                let filtered_utxo = (
-                    uc.key_type,
-                    uc.absolute_index,
-                    IncomingUtxo {
-                        utxo: uc.utxo,
-                        sender_randomness: uc.sender_randomness,
-                        receiver_preimage: uc.receiver_preimage,
-                    },
-                );
+                let filtered_utxo = (uc.key_type, uc.absolute_index, uc.incoming_utxo);
                 filtered_utxos.push(filtered_utxo);
             }
 
