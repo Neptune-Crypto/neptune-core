@@ -1751,6 +1751,7 @@ mod test {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::invalid_empty_block;
     use crate::MINER_CHANNEL_CAPACITY;
 
     struct TestSetup {
@@ -1811,6 +1812,63 @@ mod test {
             task_join_handles,
             main_loop_handler,
             main_to_peer_rx,
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_self_guessed_block_new_tip() {
+        // A new tip is registered by main_loop. Verify correct state update.
+        let test_setup = setup(0).await;
+        let TestSetup {
+            task_join_handles,
+            mut main_loop_handler,
+            mut main_to_peer_rx,
+            ..
+        } = test_setup;
+        let network = main_loop_handler.global_state_lock.cli().network;
+        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+        let block1 = invalid_empty_block(&Block::genesis(network));
+
+        assert!(
+            main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .header()
+                .height
+                .is_genesis(),
+            "Tip must be genesis prior to handling of new block"
+        );
+
+        let block1 = Box::new(block1);
+        main_loop_handler
+            .handle_self_guessed_block(&mut mutable_main_loop_state, block1.clone())
+            .await
+            .unwrap();
+        let new_block_height: u64 = main_loop_handler
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height
+            .into();
+        assert_eq!(
+            1u64, new_block_height,
+            "Tip height must be 1 after handling of new block"
+        );
+        let msg_to_peer_loops = main_to_peer_rx.recv().await.unwrap();
+        if let MainToPeerTask::Block(block_to_peers) = msg_to_peer_loops {
+            assert_eq!(
+                block1, block_to_peers,
+                "Peer loops must have received block 1"
+            );
+        } else {
+            panic!("Must have sent block notification to peer loops")
         }
     }
 
