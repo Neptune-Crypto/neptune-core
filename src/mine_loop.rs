@@ -180,7 +180,7 @@ fn precalculate_kernel_ap(block_kernel: &BlockKernel) -> [Digest; BlockKernel::M
 ///
 /// Returns those MAST nodes that can be precalculated prior to PoW-guessing.
 /// This vastly reduces the amount of hashing needed for each PoW-guess.
-fn precalculate_block_auth_paths(
+pub(crate) fn precalculate_block_auth_paths(
     block_template: &Block,
 ) -> (
     [Digest; BlockKernel::MAST_HEIGHT],
