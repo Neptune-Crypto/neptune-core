@@ -340,7 +340,7 @@ mod test {
             let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
 
             // Update all membership proofs
-            for (mp, itm) in membership_proofs_and_items.iter_mut() {
+            for (mp, itm) in &mut membership_proofs_and_items {
                 let original_mp = mp.clone();
                 let changed_res = mp.update_from_addition(*itm, &mutator_set, &addition_record);
                 assert!(changed_res.is_ok());
@@ -494,7 +494,7 @@ mod test {
                 mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 
             // Update *all* membership proofs with newly added item
-            for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
+            for (updatee_item, mp) in &mut items_and_membership_proofs {
                 let original_mp = mp.clone();
                 assert!(mutator_set.verify(*updatee_item, mp));
                 let changed_res =

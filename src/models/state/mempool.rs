@@ -298,8 +298,8 @@ impl Mempool {
             .collect();
 
         let mut conflict_txs_in_mempool = vec![];
-        for (txid, tx) in self.tx_dictionary.iter() {
-            for mempool_tx_input in tx.transaction.kernel.inputs.iter() {
+        for (txid, tx) in &self.tx_dictionary {
+            for mempool_tx_input in &tx.transaction.kernel.inputs {
                 if tx_sbf_indices.contains(&mempool_tx_input.absolute_indices.to_array()) {
                     conflict_txs_in_mempool.push((*txid, &tx.transaction));
                 }
@@ -551,7 +551,7 @@ impl Mempool {
     {
         let mut victims = vec![];
 
-        for (&transaction_id, _fee_density) in self.queue.iter() {
+        for (&transaction_id, _fee_density) in &self.queue {
             let transaction = self.get(transaction_id).unwrap();
             if !predicate((transaction_id, transaction)) {
                 victims.push(transaction_id);
@@ -665,7 +665,7 @@ impl Mempool {
             predecessor_block.mutator_set_accumulator_after().clone();
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];
-        for (tx_id, tx) in self.tx_dictionary.iter_mut() {
+        for (tx_id, tx) in &mut self.tx_dictionary {
             if !(composing || tx.origin.is_own()) {
                 debug!(
                     "Not updating transaction {tx_id} since it's not \
@@ -869,7 +869,7 @@ mod tests {
 
         let remove_event = mempool.remove(transaction_digests[0]);
         assert_eq!(Some(MempoolEvent::RemoveTx(txs[0].clone())), remove_event);
-        for tx_id in transaction_digests.iter() {
+        for tx_id in &transaction_digests {
             assert!(!mempool.contains(*tx_id));
         }
 
@@ -1738,7 +1738,7 @@ mod tests {
             let expected_txs = expected_txs.iter().take(i).cloned().collect_vec();
 
             let mut mempool_iter = mempool.get_sorted_iter();
-            for expected_tx in expected_txs.iter() {
+            for expected_tx in &expected_txs {
                 let (txid, fee_density) = mempool_iter.next().unwrap();
                 assert_eq!(expected_tx, mempool.get(txid).unwrap());
                 assert_eq!(expected_tx.fee_density(), fee_density);

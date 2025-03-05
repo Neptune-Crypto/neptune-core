@@ -45,14 +45,14 @@ pub async fn get_all_indices_with_duplicates<
 ) -> Vec<u128> {
     let mut ret: Vec<u128> = vec![];
 
-    for index in archival_mutator_set.swbf_active.sbf.iter() {
+    for index in &archival_mutator_set.swbf_active.sbf {
         ret.push(*index as u128);
     }
 
     let chunk_count = archival_mutator_set.chunks.len().await;
     for chunk_index in 0..chunk_count {
         let chunk = archival_mutator_set.chunks.get(chunk_index).await;
-        for index in chunk.relative_indices.iter() {
+        for index in &chunk.relative_indices {
             ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index as u128);
         }
     }
@@ -329,7 +329,7 @@ pub fn pseudorandom_merkle_root_with_authentication_paths(
     let mut nodes: HashMap<u64, Digest> = HashMap::new();
 
     // populate nodes dictionary with leafs
-    for (leaf, index) in leafs_and_indices.iter() {
+    for (leaf, index) in leafs_and_indices {
         nodes.insert(*index, *leaf);
     }
 

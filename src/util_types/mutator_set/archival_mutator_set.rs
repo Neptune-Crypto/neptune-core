@@ -1028,7 +1028,7 @@ mod archival_mutator_set_tests {
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
-            for removal_record in removal_records.iter() {
+            for removal_record in &removal_records {
                 archival_mutator_set.revert_remove(removal_record).await;
             }
 

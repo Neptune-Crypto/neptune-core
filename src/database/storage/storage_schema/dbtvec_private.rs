@@ -308,7 +308,7 @@ where
     pub(super) async fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, V)> + Send) {
         let self_len = self.len().await;
 
-        for (index, value) in key_vals.into_iter() {
+        for (index, value) in key_vals {
             assert!(
                 index < self_len,
                 "Out-of-bounds. Got {index} but length was {}. persisted vector name: {}",

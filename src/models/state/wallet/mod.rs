@@ -720,7 +720,7 @@ mod wallet_tests {
         );
 
         // Verify that all monitored UTXOs (with synced MPs) have valid membership proofs
-        for monitored_utxo in alice_monitored_utxos_at_2b.iter() {
+        for monitored_utxo in &alice_monitored_utxos_at_2b {
             assert!(
                 block_2_b.mutator_set_accumulator_after().verify(
                     Hash::hash(&monitored_utxo.utxo),
@@ -761,7 +761,7 @@ mod wallet_tests {
         );
 
         // Verify that all monitored UTXOs have valid membership proofs
-        for monitored_utxo in alice_monitored_utxos_after_continued_spree.iter() {
+        for monitored_utxo in &alice_monitored_utxos_after_continued_spree {
             assert!(
                 first_block_continuing_spree
                     .mutator_set_accumulator_after()
@@ -940,7 +940,7 @@ mod wallet_tests {
             alice_monitored_utxos_after_second_block_after_spree.len(),
             "List of monitored UTXOs must be as expected after returning to bad fork"
         );
-        for monitored_utxo in alice_monitored_utxos_after_second_block_after_spree.iter() {
+        for monitored_utxo in &alice_monitored_utxos_after_second_block_after_spree {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
                     || second_block_continuing_spree

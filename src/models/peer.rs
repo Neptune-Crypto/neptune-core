@@ -892,7 +892,7 @@ impl SyncChallengeResponse {
     pub(crate) fn check_difficulty(&self, own_tip_difficulty: Difficulty) -> bool {
         let own_tip_difficulty = ProofOfWork::zero() + own_tip_difficulty;
         let mut fork_relative_cumpow = ProofOfWork::zero();
-        for (_parent, child) in self.blocks.iter() {
+        for (_parent, child) in &self.blocks {
             fork_relative_cumpow = fork_relative_cumpow + child.header.difficulty;
         }
 

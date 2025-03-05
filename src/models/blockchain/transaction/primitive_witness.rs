@@ -1243,8 +1243,8 @@ mod test {
                             input_lock_scripts_and_witnesses.try_into().unwrap();
 
                         let mut all_input_triples = vec![];
-                        for input_utxos in input_utxoss.iter() {
-                            for input_utxo in input_utxos.iter() {
+                        for input_utxos in &input_utxoss {
+                            for input_utxo in input_utxos {
                                 all_input_triples.push((
                                     Hash::hash(input_utxo),
                                     input_sender_randomnesses.pop().unwrap(),

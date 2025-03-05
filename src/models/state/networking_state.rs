@@ -177,7 +177,7 @@ impl NetworkingState {
             .collect();
 
         let mut batch = WriteBatchAsync::new();
-        for (ip, standing) in new_entries.into_iter() {
+        for (ip, standing) in new_entries {
             batch.op_write(ip, standing);
         }
 

@@ -186,7 +186,7 @@ impl MutatorSetAccumulator {
             return false;
         }
 
-        for inserted_index in removal_record.absolute_indices.to_vec().into_iter() {
+        for inserted_index in removal_record.absolute_indices.to_vec() {
             // determine if inserted index lives in active window
             let active_window_start =
                 (self.aocl.num_leafs() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
@@ -406,7 +406,7 @@ impl MutatorSetAccumulator {
             // These chunks are part of the removal records, so we fetch them there.
             let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof)> =
                 HashMap::new();
-            for removal_record in removal_records.iter_mut() {
+            for removal_record in &mut removal_records {
                 for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.iter_mut() {
                     let chunk_hash = Hash::hash(chunk);
                     let prev_val =
@@ -421,7 +421,7 @@ impl MutatorSetAccumulator {
             }
 
             // Apply the removal records: the new chunk is obtained by adding the chunk difference
-            for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
+            for (chunk_index, (chunk, _)) in &mut mutation_data_preimage {
                 **chunk = chunk
                     .clone()
                     .combine(chunkidx_to_chunk_difference_dict[chunk_index].clone())
@@ -761,7 +761,7 @@ mod ms_accumulator_tests {
                     let original_membership_proofs_sequential =
                         membership_proofs_sequential.clone();
                     let mut update_by_remove_return_values: Vec<bool> = vec![];
-                    for mp in membership_proofs_sequential.iter_mut() {
+                    for mp in &mut membership_proofs_sequential {
                         let update_res_seq = mp.update_from_remove(&removal_record);
                         update_by_remove_return_values.push(update_res_seq);
                     }
@@ -901,7 +901,7 @@ mod ms_accumulator_tests {
                 let index = rng.random_range(0..items_and_membership_proofs.len());
                 let (item, membership_proof) = items_and_membership_proofs.swap_remove(index);
                 let removal_record = msa.drop(item, &membership_proof);
-                for (_it, mp) in items_and_membership_proofs.iter_mut() {
+                for (_it, mp) in &mut items_and_membership_proofs {
                     mp.update_from_remove(&removal_record);
                 }
                 msa.remove(&removal_record);
@@ -911,7 +911,7 @@ mod ms_accumulator_tests {
                 let sender_randomness = rng.random::<Digest>();
                 let receiver_preimage = rng.random::<Digest>();
                 let addition_record = commit(item, sender_randomness, receiver_preimage);
-                for (it, mp) in items_and_membership_proofs.iter_mut() {
+                for (it, mp) in &mut items_and_membership_proofs {
                     mp.update_from_addition(*it, &msa, &addition_record)
                         .unwrap();
                 }

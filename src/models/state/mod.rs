@@ -1175,7 +1175,7 @@ impl GlobalState {
             let mut monitored_utxo = monitored_utxo.clone();
 
             // walk backwards, reverting
-            for revert_block_hash in backwards.into_iter() {
+            for revert_block_hash in backwards {
                 // Was the UTXO confirmed in this block? If so, there
                 // is nothing we can do except orphan the UTXO: that
                 // is, leave it without a synced membership proof.
@@ -1228,7 +1228,7 @@ impl GlobalState {
             }
 
             // walk forwards, applying
-            for apply_block_hash in forwards.into_iter() {
+            for apply_block_hash in forwards {
                 // Was the UTXO confirmed in this block?
                 // This can occur in some edge cases of forward-only
                 // resynchronization. In this case, assume the
@@ -1258,7 +1258,7 @@ impl GlobalState {
                 } = apply_block.mutator_set_update();
 
                 // apply additions
-                for addition_record in additions.iter() {
+                for addition_record in &additions {
                     membership_proof
                         .update_from_addition(
                             Hash::hash(&monitored_utxo.utxo),
@@ -1270,7 +1270,7 @@ impl GlobalState {
                 }
 
                 // apply removals
-                for removal_record in removals.iter() {
+                for removal_record in &removals {
                     membership_proof.update_from_remove(removal_record);
                     block_msa.remove(removal_record);
                 }
@@ -2375,7 +2375,7 @@ mod global_state_tests {
 
         // Add 60 blocks on top of 1, *not* mined by Alice
         let fork_a_block = a_blocks.last().unwrap().to_owned();
-        for branch_block in a_blocks.into_iter() {
+        for branch_block in a_blocks {
             alice.set_new_tip(branch_block).await.unwrap();
         }
 
@@ -2392,7 +2392,7 @@ mod global_state_tests {
 
         // Fork away from the "a" chain to the "b" chain, with block 1 as LUCA
         let fork_b_block = b_blocks.last().unwrap().to_owned();
-        for branch_block in b_blocks.into_iter() {
+        for branch_block in b_blocks {
             alice.set_new_tip(branch_block).await.unwrap();
         }
 
@@ -2433,7 +2433,7 @@ mod global_state_tests {
         // Make a new chain c with genesis block as LUCA. Verify that the genesis UTXO can be synced
         // to this new chain
         let fork_c_block = c_blocks.last().unwrap().to_owned();
-        for branch_block in c_blocks.into_iter() {
+        for branch_block in c_blocks {
             alice.set_new_tip(branch_block).await.unwrap();
         }
 
@@ -3303,7 +3303,7 @@ mod global_state_tests {
 
             let a_length = 12;
             let chain_a = chain_of_blocks_and_parents(network, a_length).await;
-            for (block, _) in chain_a.iter() {
+            for (block, _) in &chain_a {
                 alice.set_new_tip(block.to_owned()).await.unwrap();
             }
 
@@ -3373,7 +3373,7 @@ mod global_state_tests {
                 let chain_a = chain_of_blocks_and_parents(network, depth).await;
                 let chain_b = chain_of_blocks_and_parents(network, depth).await;
                 let blocks_and_parents = [chain_a, chain_b].concat();
-                for (block, _) in blocks_and_parents.iter() {
+                for (block, _) in &blocks_and_parents {
                     alice.store_block_not_tip(block.clone()).await.unwrap();
                     assert_eq!(
                         genesis_block.hash(),
@@ -3389,7 +3389,7 @@ mod global_state_tests {
 
                 // Loop over all blocks and verify that all can be marked as
                 // tip, resulting in a consistent, correct state.
-                for (block, parent) in blocks_and_parents.iter() {
+                for (block, parent) in &blocks_and_parents {
                     alice.set_new_tip(block.clone()).await.unwrap();
                     assert_correct_global_state(&alice, block.clone(), parent.to_owned(), 2, 0)
                         .await;

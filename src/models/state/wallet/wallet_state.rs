@@ -631,7 +631,7 @@ impl WalletState {
         &mut self,
         expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
     ) {
-        for expected_utxo in expected_utxos.into_iter() {
+        for expected_utxo in expected_utxos {
             self.add_expected_utxo(ExpectedUtxo::new(
                 expected_utxo.utxo,
                 expected_utxo.sender_randomness,
@@ -1522,7 +1522,7 @@ impl WalletState {
         }
 
         // write UTXO-recovery data to disk.
-        for item in incoming_utxo_recovery_data_list.into_iter() {
+        for item in incoming_utxo_recovery_data_list {
             self.store_utxo_ms_recovery_data(item).await?;
         }
 
@@ -1687,7 +1687,7 @@ impl WalletState {
             .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
             .map(|(_, absi, _)| *absi)
             .collect();
-        for (wallet_status_element, membership_proof) in wallet_status.synced_unspent.iter() {
+        for (wallet_status_element, membership_proof) in &wallet_status.synced_unspent {
             // Don't allocate more than needed
             if allocated_amount >= total_spend {
                 break;

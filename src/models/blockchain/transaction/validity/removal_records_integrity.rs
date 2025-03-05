@@ -147,7 +147,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         );
 
         let mut nd_stream: Vec<BFieldElement> = self.swbfa_hash.reversed().values().to_vec();
-        for msmp in self.membership_proofs.iter() {
+        for msmp in &self.membership_proofs {
             let mut u64_as_stream = msmp.aocl_leaf_index.encode();
             u64_as_stream.reverse();
             nd_stream.extend(&u64_as_stream);
@@ -201,7 +201,7 @@ impl RemovalRecordsIntegrityWitness {
         let mut nodes: HashMap<u64, Digest> = HashMap::new();
 
         // populate nodes dictionary with leafs
-        for (leaf, index) in leafs_and_indices.iter() {
+        for (leaf, index) in leafs_and_indices {
             nodes.insert(*index, *leaf);
         }
 

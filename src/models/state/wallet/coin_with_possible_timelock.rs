@@ -68,7 +68,7 @@ impl CoinWithPossibleTimeLock {
 
         let mut result = format!("# coins available\n{heading_without_release}\n");
         result = format!("{result}{}\n", "-".repeat(total_length));
-        for coin in coins.iter() {
+        for coin in coins {
             if coin.release_date.is_some() {
                 continue;
             }
@@ -78,7 +78,7 @@ impl CoinWithPossibleTimeLock {
 
         let mut result = format!("{result}# time-locked coins\n{heading_with_release}\n");
         result = format!("{result}{}\n", "-".repeat(total_length));
-        for coin in coins.iter() {
+        for coin in coins {
             if coin.release_date.is_none() {
                 continue;
             }

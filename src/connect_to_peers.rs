@@ -608,7 +608,7 @@ mod connect_tests {
     #[test]
     fn malformed_version_from_peer_doesnt_crash() {
         let version_numbers = ["potato", "&&&&"];
-        for b in version_numbers.iter() {
+        for b in version_numbers {
             assert!(!versions_are_compatible("0.1.0", b));
         }
     }
@@ -625,8 +625,8 @@ mod connect_tests {
             "3.2.0",
             "9999.99999.9999",
         ];
-        for a in version_numbers.iter() {
-            for b in version_numbers.iter() {
+        for a in version_numbers {
+            for b in version_numbers {
                 assert!(versions_are_compatible(a, b));
             }
         }

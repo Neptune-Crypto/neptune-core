@@ -996,7 +996,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     }
 
     let mut rng = StdRng::from_seed(shuffle_seed);
-    for tx_to_include in selected_mempool_txs.into_iter() {
+    for tx_to_include in selected_mempool_txs {
         block_transaction =
             fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
                 .await
@@ -1119,7 +1119,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     tip_block: &Block,
 ) -> bool {
     let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-    for monitored_utxo in monitored_utxos.get_all().await.iter() {
+    for monitored_utxo in &monitored_utxos.get_all().await {
         let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
         match current_mp {

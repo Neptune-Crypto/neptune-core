@@ -2578,7 +2578,7 @@ impl RPC for NeptuneRPCServer {
         let global_state = self.state.lock_guard().await;
 
         // Get all connected peers
-        for (socket_address, peer_info) in global_state.net.peer_map.iter() {
+        for (socket_address, peer_info) in &global_state.net.peer_map {
             if peer_info.standing().is_negative() {
                 sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
             }
@@ -4821,7 +4821,7 @@ mod rpc_server_tests {
                         state.set_new_tip(blocks[2].clone()).await?;
                     }
 
-                    for utxo_notification in alice_to_bob_utxo_notifications.into_iter() {
+                    for utxo_notification in alice_to_bob_utxo_notifications {
                         // Register the same UTXO multiple times to ensure that this does not
                         // change the balance.
                         let claim_was_new0 = bob_rpc_server

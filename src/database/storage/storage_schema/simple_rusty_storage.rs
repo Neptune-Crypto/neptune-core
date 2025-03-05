@@ -29,7 +29,7 @@ impl StorageWriter for SimpleRustyStorage {
         // in a single atomic operation.
         {
             let mut pending_writes = self.schema.pending_writes.lock_guard_mut().await;
-            for op in pending_writes.write_ops.iter() {
+            for op in &pending_writes.write_ops {
                 match op.clone() {
                     WriteOperation::Write(key, value) => write_ops.op_write(key, value),
                     WriteOperation::Delete(key) => write_ops.op_delete(key),
