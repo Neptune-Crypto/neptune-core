@@ -329,13 +329,12 @@ impl PeerLoopHandler {
                 .await?;
                 warn!("Failed to validate block: invalid block");
                 return Ok(None);
-            } else {
-                info!(
-                    "Block with height {} is valid. mined: {}",
-                    new_block.kernel.header.height,
-                    new_block.kernel.header.timestamp.standard_format()
-                );
             }
+            info!(
+                "Block with height {} is valid. mined: {}",
+                new_block.kernel.header.height,
+                new_block.kernel.header.timestamp.standard_format()
+            );
 
             previous_block = new_block;
         }

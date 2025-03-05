@@ -508,9 +508,8 @@ impl MainLoopHandler {
             warn!("Got new block from miner that was not child of tip. Discarding.");
             self.main_to_miner_tx.send(MainToMiner::Continue);
             return Ok(());
-        } else {
-            info!("Locally-mined block is new tip: {}", new_block.hash());
         }
+        info!("Locally-mined block is new tip: {}", new_block.hash());
 
         // Share block with peers first thing.
         info!("broadcasting new block to peers");
@@ -1115,13 +1114,8 @@ impl MainLoopHandler {
         while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
             let height = match own_tip_height.checked_sub(look_behind) {
                 None => break,
-                Some(height) => {
-                    if height.is_genesis() {
-                        break;
-                    } else {
-                        height
-                    }
-                }
+                Some(height) if height.is_genesis() => break,
+                Some(height) => height,
             };
 
             ret.push(height);
