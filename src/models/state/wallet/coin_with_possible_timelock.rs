@@ -10,7 +10,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
 /// release date. For reporting purposes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CoinWithPossibleTimeLock {
     pub amount: NativeCurrencyAmount,
     pub confirmed: Timestamp,

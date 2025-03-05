@@ -163,7 +163,7 @@ impl WalletFile {
     }
 
     pub fn entropy(&self) -> WalletEntropy {
-        WalletEntropy::new(self.secret_seed.clone())
+        WalletEntropy::new(self.secret_seed)
     }
 
     pub fn secret_key(&self) -> SecretKeyMaterial {

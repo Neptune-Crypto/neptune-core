@@ -406,7 +406,7 @@ impl Zero for NativeCurrencyAmount {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum FloatConversionError {
     NaN,
     Infinity,

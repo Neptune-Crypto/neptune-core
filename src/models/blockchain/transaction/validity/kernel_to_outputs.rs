@@ -105,7 +105,9 @@ impl SecretWitness for KernelToOutputsWitness {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
+#[derive(
+    Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec,
+)]
 pub struct KernelToOutputs;
 
 impl KernelToOutputs {

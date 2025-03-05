@@ -337,7 +337,7 @@ pub struct Mock<Item> {
 }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MockError {
     WrongSend,
     UnexpectedSend,

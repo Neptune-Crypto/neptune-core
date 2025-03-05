@@ -649,7 +649,7 @@ pub(crate) async fn mine(
                 (
                     !s.net.peer_map.is_empty(),
                     s.net.sync_anchor.is_some(),
-                    s.mining_state.mining_status.clone(),
+                    s.mining_state.mining_status,
                 )
             })
             .await;

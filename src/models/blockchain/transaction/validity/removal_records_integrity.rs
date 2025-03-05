@@ -186,7 +186,9 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
+#[derive(
+    Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec,
+)]
 pub struct RemovalRecordsIntegrity;
 
 impl RemovalRecordsIntegrityWitness {

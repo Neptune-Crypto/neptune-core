@@ -212,7 +212,7 @@ impl SecretWitness for SingleProofWitness {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct SingleProof;
 
 impl SingleProof {

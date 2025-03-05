@@ -44,7 +44,7 @@ impl fmt::Display for MembershipProofError {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MembershipProofError {
     AlreadyExistingChunk(u64),
     MissingChunkOnUpdateFromAdd(u64),

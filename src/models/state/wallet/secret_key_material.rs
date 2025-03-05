@@ -16,7 +16,7 @@ use tasm_lib::twenty_first::xfe;
 use zeroize::Zeroize;
 
 /// Holds the secret seed of a wallet.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecretKeyMaterial(pub(crate) XFieldElement);
 
 impl Zeroize for SecretKeyMaterial {
@@ -366,8 +366,7 @@ mod test {
             let mut selected_shares = (0..t - 1)
                 .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
                 .collect_vec();
-            let duplicate_share =
-                selected_shares[rng.random_range(0..selected_shares.len())].clone();
+            let duplicate_share = selected_shares[rng.random_range(0..selected_shares.len())];
             selected_shares.push(duplicate_share);
             println!("selected shares: {:?}", selected_shares);
             prop_assert_eq!(

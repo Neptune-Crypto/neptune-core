@@ -319,7 +319,7 @@ impl ArchivalState {
         let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
         let file_record_value: Option<FileRecord> = self
             .block_index_db
-            .get(file_record_key.clone())
+            .get(file_record_key)
             .await
             .map(|x| x.as_file_record());
         let file_record_value: FileRecord = match file_record_value {
@@ -352,7 +352,7 @@ impl ArchivalState {
 
         let height_record_key = BlockIndexKey::Height(new_block.header().height);
         let mut blocks_at_same_height: Vec<Digest> =
-            match self.block_index_db.get(height_record_key.clone()).await {
+            match self.block_index_db.get(height_record_key).await {
                 Some(rec) => rec.as_height_record(),
                 None => vec![],
             };

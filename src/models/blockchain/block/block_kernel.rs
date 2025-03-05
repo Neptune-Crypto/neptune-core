@@ -30,7 +30,7 @@ impl BlockKernel {
     }
 }
 
-#[derive(Debug, Clone, EnumCount)]
+#[derive(Debug, Copy, Clone, EnumCount)]
 pub enum BlockKernelField {
     Header,
     Body,
@@ -39,7 +39,7 @@ pub enum BlockKernelField {
 
 impl HasDiscriminant for BlockKernelField {
     fn discriminant(&self) -> usize {
-        self.clone() as usize
+        *self as usize
     }
 }
 
