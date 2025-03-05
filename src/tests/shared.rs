@@ -271,18 +271,17 @@ pub(crate) async fn get_test_genesis_setup(
     GlobalStateLock,
     HandshakeData,
 )> {
-    let (peer_broadcast_tx, mut _from_main_rx1) =
+    let (peer_broadcast_tx, from_main_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+    let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
     let devnet_wallet = WalletEntropy::devnet_wallet();
     let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
-        from_main_rx_clone,
+        from_main_rx,
         to_main_tx,
-        _to_main_rx1,
+        to_main_rx,
         state,
         get_dummy_handshake_data_for_genesis(network),
     ))

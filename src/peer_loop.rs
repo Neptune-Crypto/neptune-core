@@ -2101,7 +2101,7 @@ mod peer_loop_tests {
     {
         let args = cli_args::Args::default();
         let network = args.network;
-        let (_from_main_tx, from_main_rx, to_main_tx, _to_main_rx, state_lock, _) =
+        let (from_main_tx, from_main_rx, to_main_tx, to_main_rx, state_lock, _) =
             get_test_genesis_setup(network, 0, args).await?;
 
         let peer_address = get_dummy_socket_address(0);
@@ -2124,8 +2124,8 @@ mod peer_loop_tests {
             .last_disconnection_time_of_peer(peer_id)
             .is_none());
 
-        drop(_to_main_rx);
-        drop(_from_main_tx);
+        drop(to_main_rx);
+        drop(from_main_tx);
 
         Ok(())
     }

@@ -472,7 +472,7 @@ impl Mempool {
         only_single_proofs: bool,
     ) -> Vec<Transaction> {
         let mut transactions = vec![];
-        let mut _fee_acc = NativeCurrencyAmount::zero();
+        let mut fee_acc = NativeCurrencyAmount::zero();
 
         for (transaction_digest, _fee_density) in self.get_sorted_iter() {
             // No more transactions can possibly be packed
@@ -497,7 +497,7 @@ impl Mempool {
 
                 // Include transaction
                 remaining_storage -= transaction_size;
-                _fee_acc = _fee_acc + transaction_copy.kernel.fee;
+                fee_acc = fee_acc + transaction_copy.kernel.fee;
                 transactions.push(transaction_copy)
             }
         }
