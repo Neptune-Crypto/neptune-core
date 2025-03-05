@@ -163,7 +163,7 @@ impl Utxo {
 
     /// If the UTXO has a timelock, find out what the release date is.
     pub fn release_date(&self) -> Option<Timestamp> {
-        self.coins.iter().filter_map(Coin::release_date).next()
+        self.coins.iter().find_map(Coin::release_date)
     }
 
     /// Test the coins for state validity, relative to known type scripts.
