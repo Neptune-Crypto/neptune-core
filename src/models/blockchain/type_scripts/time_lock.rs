@@ -48,8 +48,7 @@ impl TimeLock {
     pub fn extract_release_date(utxo: &Utxo) -> Timestamp {
         utxo.coins()
             .iter()
-            .filter_map(Coin::release_date)
-            .next()
+            .find_map(Coin::release_date)
             .unwrap_or_else(Timestamp::zero)
     }
 }
