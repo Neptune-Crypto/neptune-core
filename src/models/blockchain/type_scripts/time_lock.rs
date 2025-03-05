@@ -906,7 +906,7 @@ pub mod neptune_arbitrary {
                         Some(
                             total_amount
                                 .checked_sub(
-                                    &input_amounts.iter().cloned().sum::<NativeCurrencyAmount>(),
+                                    &input_amounts.iter().copied().sum::<NativeCurrencyAmount>(),
                                 )
                                 .unwrap(),
                         )
@@ -915,7 +915,7 @@ pub mod neptune_arbitrary {
                             .iter()
                             .rev()
                             .skip(1)
-                            .cloned()
+                            .copied()
                             .sum::<NativeCurrencyAmount>();
                         *input_amounts.last_mut().unwrap() =
                             total_amount.checked_sub(&sum_of_all_but_last).unwrap();
@@ -935,7 +935,7 @@ pub mod neptune_arbitrary {
                         .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                         .collect_vec();
                     let total_outputs =
-                        output_amounts.iter().cloned().sum::<NativeCurrencyAmount>();
+                        output_amounts.iter().copied().sum::<NativeCurrencyAmount>();
                     let fee = total_amount.checked_sub(&total_outputs).unwrap();
 
                     let (mut input_utxos, input_lock_scripts_and_witnesses) =

@@ -211,6 +211,7 @@ name = "neptune-dashboard"
 name = "neptune-cli"
 
 [lints.clippy]
+cloned_instead_of_copied = "warn"
 copy_iterator = "warn"
 doc_link_with_quotes = "warn"
 enum_glob_use = "warn"

@@ -612,7 +612,7 @@ mod archival_mutator_set_tests {
             // Update all MPs
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
-                &items.iter().cloned().collect_vec(),
+                &items.iter().copied().collect_vec(),
                 &archival_mutator_set.accumulator().await,
                 &addition_record,
             )
