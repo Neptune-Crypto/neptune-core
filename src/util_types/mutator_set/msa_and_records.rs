@@ -118,7 +118,7 @@ pub mod neptune_arbitrary {
                             },
                         )
                         .collect_vec();
-                    let mut all_bloom_indices = all_index_sets.iter().flatten().cloned().collect_vec();
+                    let mut all_bloom_indices = all_index_sets.iter().flatten().copied().collect_vec();
                     all_bloom_indices.sort();
 
                     // assemble all chunk indices
@@ -134,7 +134,7 @@ pub mod neptune_arbitrary {
                     let swbf_mmr_size = aocl_mmra.num_leafs() / (BATCH_SIZE as u64);
                     let mmr_chunk_indices = all_chunk_indices
                         .iter()
-                        .cloned()
+                        .copied()
                         .filter(|ci| *ci < swbf_mmr_size)
                         .collect_vec();
 
@@ -173,7 +173,7 @@ pub mod neptune_arbitrary {
                                     let universal_chunk_dictionary: HashMap<u64, (MmrMembershipProof, Chunk)> =
                                         swbf_chunk_indices
                                             .iter()
-                                            .cloned()
+                                            .copied()
                                             .zip(
                                                 swbf_membership_proofs
                                                     .into_iter()

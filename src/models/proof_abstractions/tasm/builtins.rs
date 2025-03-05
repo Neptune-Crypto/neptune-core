@@ -272,7 +272,7 @@ impl Iterator for EnvironmentMemoryIter {
         let value = ND_MEMORY.with(|v| {
             v.borrow()
                 .get(&self.0)
-                .cloned()
+                .copied()
                 .unwrap_or_else(|| BFieldElement::new(0))
         });
         self.0.increment();

@@ -617,7 +617,7 @@ pub mod neptune_arbitrary {
                                     .iter()
                                     .rev()
                                     .skip(1)
-                                    .cloned()
+                                    .copied()
                                     .sum::<NativeCurrencyAmount>();
                                 if let Some(last_input) = input_amounts.last_mut() {
                                     *last_input =
@@ -648,7 +648,7 @@ pub mod neptune_arbitrary {
                             .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                             .collect_vec();
                         let total_outputs =
-                            output_amounts.iter().cloned().sum::<NativeCurrencyAmount>();
+                            output_amounts.iter().copied().sum::<NativeCurrencyAmount>();
                         let fee = total_amount.checked_sub(&total_outputs).unwrap();
                         let total_inputs = input_utxos
                             .iter()
@@ -954,7 +954,7 @@ pub mod neptune_arbitrary {
         );
             let mut total_output_amount = output_amounts_suggestion
                 .iter()
-                .cloned()
+                .copied()
                 .sum::<NativeCurrencyAmount>();
             let total_input_plus_coinbase =
                 total_input_amount + coinbase.unwrap_or_else(|| NativeCurrencyAmount::coins(0));
@@ -966,7 +966,7 @@ pub mod neptune_arbitrary {
                 }
                 total_output_amount = output_amounts_suggestion
                     .iter()
-                    .cloned()
+                    .copied()
                     .sum::<NativeCurrencyAmount>();
                 match total_input_plus_coinbase.checked_sub(&total_output_amount) {
                     Some(number) => {
@@ -1788,7 +1788,7 @@ mod test {
             total_input_amount.checked_add(&coinbase).unwrap()
                 == output_amounts
                     .iter()
-                    .cloned()
+                    .copied()
                     .sum::<NativeCurrencyAmount>()
                     .checked_add(&fee)
                     .unwrap()
@@ -1813,7 +1813,7 @@ mod test {
             total_input_amount
                 == output_amounts
                     .iter()
-                    .cloned()
+                    .copied()
                     .sum::<NativeCurrencyAmount>()
                     .checked_add(&fee)
                     .unwrap()

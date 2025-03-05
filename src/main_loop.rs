@@ -2493,7 +2493,7 @@ mod test {
                         .cmp(&r.1.connection_established())
                 })
                 .map(|(socket_address, _peer_info)| socket_address)
-                .cloned()
+                .copied()
                 .unwrap();
 
             // simulate incoming connection
