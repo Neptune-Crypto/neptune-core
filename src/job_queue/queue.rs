@@ -505,9 +505,8 @@ mod tests {
             //     because there are nine jobs per level.
             let mut prev = Box::new(DoubleJobResult(9999, 0, start_of_test));
             for (i, c) in results.into_iter().enumerate() {
-                let dyn_result = match c {
-                    Ok(JobCompletion::Finished(r)) => r,
-                    _ => panic!("A job did not finish"),
+                let Ok(JobCompletion::Finished(dyn_result)) = c else {
+                    panic!("A job did not finish");
                 };
 
                 let job_result = dyn_result.into_any().downcast::<DoubleJobResult>().unwrap();

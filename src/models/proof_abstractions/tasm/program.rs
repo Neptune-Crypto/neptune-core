@@ -285,10 +285,10 @@ pub mod test {
                 return fail("expected a failure in Triton VM, but it halted gracefully".into());
             };
 
-            let err = match err {
-                InstructionError::AssertionFailed(err)
-                | InstructionError::VectorAssertionFailed(_, err) => err,
-                _ => return fail(format!("expected an assertion failure, but got: {err}")),
+            let (InstructionError::AssertionFailed(err)
+            | InstructionError::VectorAssertionFailed(_, err)) = err
+            else {
+                return fail(format!("expected an assertion failure, but got: {err}"));
             };
 
             let ids_str = expected_error_ids.iter().join(", ");

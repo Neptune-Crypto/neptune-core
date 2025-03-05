@@ -839,9 +839,8 @@ impl ArchivalState {
     /// Returns false if either the block is not known, or if it's known but
     /// has been orphaned.
     pub(crate) async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
-        let block_header = match self.get_block_header(block_digest).await {
-            Some(bh) => bh,
-            None => return false,
+        let Some(block_header) = self.get_block_header(block_digest).await else {
+            return false;
         };
 
         let block_height: u64 = block_header.height.into();

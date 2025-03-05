@@ -635,9 +635,7 @@ mod archival_mutator_set_tests {
             }
         }
 
-        let saw_collision_at = if let Some(collision) = saw_collision_at {
-            collision
-        } else {
+        let Some(saw_collision_at) = saw_collision_at else {
             panic!("Collision must be generated with seeded RNG");
         };
 

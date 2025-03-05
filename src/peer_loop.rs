@@ -1081,17 +1081,14 @@ impl PeerLoopHandler {
 
                 let response = Self::batch_response(&state, returned_blocks, &anchor).await;
 
-                // issue 457. do not hold lock across a peer.send().  nor self.punish()
+                // issue 457. do not hold lock across a peer.send(), nor self.punish()
                 drop(state);
 
-                let response = match response {
-                    Some(response) => response,
-                    None => {
-                        warn!("Unable to satisfy batch-block request");
-                        self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
+                let Some(response) = response else {
+                    warn!("Unable to satisfy batch-block request");
+                    self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
                 debug!("Returning {} blocks in batch response", response.len());
