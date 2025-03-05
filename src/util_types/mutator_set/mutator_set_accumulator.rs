@@ -390,17 +390,17 @@ impl MutatorSetAccumulator {
             // `Chunk` but only represents the values which are set by the removal records
             // being handled.
             let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
-            all_removal_records_indices.iter().for_each(|index| {
-                if *index >= active_window_start {
+            for index in all_removal_records_indices {
+                if index >= active_window_start {
                     let relative_index = (index - active_window_start) as u32;
                     self.swbf_active.insert(relative_index);
                 } else {
                     chunkidx_to_chunk_difference_dict
                         .entry((index / CHUNK_SIZE as u128) as u64)
                         .or_insert_with(Chunk::empty_chunk)
-                        .insert((*index % CHUNK_SIZE as u128) as u32);
+                        .insert((index % CHUNK_SIZE as u128) as u32);
                 }
-            });
+            }
 
             // Collect all affected chunks as they look before these removal records are applied
             // These chunks are part of the removal records, so we fetch them there.
