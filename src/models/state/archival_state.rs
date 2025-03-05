@@ -806,15 +806,10 @@ impl ArchivalState {
             .get(BlockIndexKey::Block(block_digest))
             .await
             .map(|x| x.as_block_record());
-        let record: BlockRecord = match maybe_record {
-            Some(rec) => rec,
-            None => {
-                if self.genesis_block.hash() == block_digest {
-                    return Ok(Some(*self.genesis_block.clone()));
-                } else {
-                    return Ok(None);
-                }
-            }
+        let Some(record) = maybe_record else {
+            let maybe_genesis_block =
+                (self.genesis_block.hash() == block_digest).then_some(*self.genesis_block.clone());
+            return Ok(maybe_genesis_block);
         };
 
         // Fetch block from disk

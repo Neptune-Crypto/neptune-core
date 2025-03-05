@@ -270,11 +270,10 @@ impl NativeCurrencyAmount {
             while decimals[i] == 10 {
                 decimals[i] = 0;
                 decimals[i - 1] += 1;
-                if i - 1 == 0 {
+                if i == 1 {
                     break;
-                } else {
-                    i -= 1;
                 }
+                i -= 1;
             }
         }
 

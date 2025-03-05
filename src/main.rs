@@ -17,22 +17,25 @@ pub fn main() -> Result<()> {
         // Fetch the CLI arguments
         let args: cli_args::Args = cli_args::Args::parse();
 
+        #[expect(clippy::redundant_else)] // has problems with #[cfg(…)]
         if args.tokio_console {
             #[cfg(feature = "tokio-console")]
             console_subscriber::init();
 
             #[cfg(not(feature = "tokio-console"))]
-            anyhow::bail!("tokio-console support not included in this build.  try building with tokio-console feature-flag.");
-
+            anyhow::bail!(
+                "tokio-console support not included in this build. \
+                 Try building with tokio-console feature-flag."
+            );
         } else {
             // Set up logger.
             // Configure logger to use ISO-8601, of which rfc3339 is a subset.
-            // install global collector configured based on RUST_LOG env var.
+            // Install global collector configured based on RUST_LOG env var.
             // Accepted `RUST_LOG` values are `trace`, `debug`, `info`, `warn`,
             // and `error`.
 
-            let info_env_filter =
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn"));
+            let info_env_filter = EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,tarpc=warn"));
             let subscriber = FmtSubscriber::builder()
                 .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
                 .with_env_filter(info_env_filter)
