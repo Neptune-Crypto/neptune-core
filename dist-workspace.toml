@@ -4,7 +4,7 @@ members = ["cargo:."]
 # Config for 'dist'
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.25.1"
+cargo-dist-version = "0.28.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -18,3 +18,11 @@ install-updater = true
 # Whether to enable GitHub Attestations
 github-attestations = true
 github-build-setup = "build-workaround"
+
+# Work around the brownout and eventual removal of ubuntu runner image `20.04`
+# until the next upgrade of `dist`.
+# See also:
+# https://github.com/actions/runner-images/issues/11101
+# https://github.com/axodotdev/cargo-dist/issues/1760
+[dist.github-custom-runners]
+x86_64-unknown-linux-gnu = "ubuntu-22.04"
