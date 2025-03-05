@@ -143,7 +143,7 @@ impl ProofCollection {
 
         debug!("proving lock scripts");
         let mut lock_scripts_halt = vec![];
-        for lock_script_and_witness in primitive_witness.lock_scripts_and_witnesses.iter() {
+        for lock_script_and_witness in &primitive_witness.lock_scripts_and_witnesses {
             lock_scripts_halt.push(
                 lock_script_and_witness
                     .prove(

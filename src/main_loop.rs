@@ -465,7 +465,7 @@ impl MainLoopHandler {
         // Update mempool with updated transactions
         {
             let mut state = self.global_state_lock.lock_guard_mut().await;
-            for updated in updated_txs.iter() {
+            for updated in &updated_txs {
                 let txid = updated.kernel.txid();
                 if let Some(tx) = state.mempool.get_mut(txid) {
                     *tx = updated.to_owned();

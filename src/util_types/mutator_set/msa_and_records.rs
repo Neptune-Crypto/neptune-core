@@ -365,7 +365,7 @@ mod test {
         }
 
         let split_msa_and_records = original.split_by(split);
-        for elem in split_msa_and_records.iter() {
+        for elem in &split_msa_and_records {
             assert_eq!(
                 elem.mutator_set_accumulator,
                 original.mutator_set_accumulator

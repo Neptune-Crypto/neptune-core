@@ -429,7 +429,7 @@ mod tests {
             .into_iter()
             .map(|x| x % TEST_LIST_LENGTH as u64)
             .collect();
-        for index in mutate_indices.iter() {
+        for index in &mutate_indices {
             vector
                 .set(
                     *index,
@@ -582,7 +582,7 @@ mod tests {
             .collect();
 
         // Generate vals for mutation
-        for index in mutate_indices.iter() {
+        for index in &mutate_indices {
             let val = (index % TEST_LIST_LENGTH as u64 + 1) as u8;
             mutate_vals[*index as usize] = S(vec![val, val, val]);
         }
@@ -676,7 +676,7 @@ mod tests {
                     let values: Vec<u64> = (0..indices.len()).map(|_| rng.next_u64()).collect_vec();
                     let update: Vec<(u64, u64)> =
                         indices.into_iter().zip_eq(values.into_iter()).collect();
-                    for (key, val) in update.iter() {
+                    for (key, val) in &update {
                         normal_vector[*key as usize] = *val;
                     }
                     persisted_vector.set_many(update).await;

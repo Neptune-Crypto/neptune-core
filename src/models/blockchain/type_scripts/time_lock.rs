@@ -956,7 +956,7 @@ pub mod neptune_arbitrary {
                             None,
                         );
                     let mut counter = 0usize;
-                    for utxo in input_utxos.iter_mut() {
+                    for utxo in &mut input_utxos {
                         let release_date = release_dates[counter];
                         let time_lock = TimeLock::until(release_date);
                         let mut coins = utxo.coins().to_vec();
@@ -964,7 +964,7 @@ pub mod neptune_arbitrary {
                         *utxo = Utxo::from((utxo.lock_script_hash(), coins));
                         counter += 1;
                     }
-                    for utxo in output_utxos.iter_mut() {
+                    for utxo in &mut output_utxos {
                         let mut coins = utxo.coins().to_vec();
                         coins.push(TimeLock::until(release_dates[counter]));
                         *utxo = Utxo::from((utxo.lock_script_hash(), coins));

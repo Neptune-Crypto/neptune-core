@@ -789,7 +789,7 @@ impl Block {
         }
 
         // 2.a)
-        for removal_record in self.kernel.body.transaction_kernel.inputs.iter() {
+        for removal_record in &self.kernel.body.transaction_kernel.inputs {
             if !previous_block
                 .mutator_set_accumulator_after()
                 .can_remove(removal_record)

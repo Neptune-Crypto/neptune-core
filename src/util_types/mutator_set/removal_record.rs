@@ -223,7 +223,7 @@ impl RemovalRecord {
         // Find the removal records that have dictionary entry MMR membership proofs
         // that need to be updated because of the window sliding.
         let mut rrs_for_batch_append: HashSet<usize> = HashSet::new();
-        for (chunk_index, mp_indices) in chunk_index_to_rr_index.into_iter() {
+        for (chunk_index, mp_indices) in chunk_index_to_rr_index {
             if chunk_index < old_window_start_batch_index {
                 for mp_index in mp_indices {
                     rrs_for_batch_append.insert(mp_index);
@@ -235,7 +235,7 @@ impl RemovalRecord {
 
         // First insert the new entry into the chunk dictionary for the removal
         // record that need it.
-        for i in rrs_for_new_chunk_dictionary_entry.iter() {
+        for i in &rrs_for_new_chunk_dictionary_entry {
             removal_records.index_mut(*i).target_chunks.insert(
                 old_window_start_batch_index,
                 (new_swbf_auth_path.clone(), new_chunk.clone()),
@@ -296,7 +296,7 @@ impl RemovalRecord {
         // Collect all the MMR membership proofs from the chunk dictionaries.
         let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
         let mut leaf_indices = vec![];
-        for chunk_dict in chunk_dictionaries.iter_mut() {
+        for chunk_dict in &mut chunk_dictionaries {
             for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
                 own_mmr_mps.push(mp);
                 leaf_indices.push(*chunk_index);

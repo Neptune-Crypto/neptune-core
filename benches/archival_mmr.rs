@@ -110,7 +110,7 @@ mod append {
 
             bencher.bench_local(|| {
                 rt.block_on(async {
-                    for new_leaf in digests.iter() {
+                    for new_leaf in &digests {
                         ammr.append(*new_leaf).await;
                     }
                     if persist {

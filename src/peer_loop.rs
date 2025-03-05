@@ -294,7 +294,7 @@ impl PeerLoopHandler {
         let now = self.now();
         debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
-        for new_block in received_blocks.iter() {
+        for new_block in &received_blocks {
             let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
             let new_block_is_valid = new_block.is_valid(previous_block, now).await;
@@ -2728,7 +2728,7 @@ mod peer_loop_tests {
         let tip_height: u64 = block7.header().height.into();
         assert_eq!(7, tip_height);
 
-        for block in blocks.iter() {
+        for block in &blocks {
             state_lock.set_new_tip(block.to_owned()).await.unwrap();
         }
 
@@ -3778,7 +3778,7 @@ mod peer_loop_tests {
                 [0u8; 32],
             )
             .await;
-            for block in blocks.iter() {
+            for block in &blocks {
                 alice.set_new_tip(block.clone()).await.unwrap();
             }
 

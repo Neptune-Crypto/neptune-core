@@ -119,7 +119,7 @@ where
 
     fn batch_write(&mut self, entries: WriteBatchAsync<Key, Value>) {
         let batch = WriteBatch::new();
-        for op in entries.0.into_iter() {
+        for op in entries.0 {
             match op {
                 WriteBatchOpAsync::Write(key, value) => {
                     let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
