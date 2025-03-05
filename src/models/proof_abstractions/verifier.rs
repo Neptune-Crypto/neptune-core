@@ -14,7 +14,7 @@ static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::Ha
 /// in the `CLAIMS_CACHE` and if so returns true early (*i.e.*, without running
 /// the verifier). When the test flag is set and the cache does not contain the
 /// claim and verification succeeds, the claim is added to the cache. The only
-/// other way to populate the cache is through method [`cache_true_claim`].
+/// other way to populate the cache is through method `cache_true_claim`.
 pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
     #[cfg(test)]
     if CLAIMS_CACHE.lock().await.contains(&claim) {
@@ -35,7 +35,7 @@ pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
     verdict
 }
 
-/// Add a claim to the `CLAIMS_CACHE`.
+/// Add a claim to the [`CLAIMS_CACHE`].
 #[cfg(test)]
 pub(crate) async fn cache_true_claim(claim: Claim) {
     CLAIMS_CACHE.lock().await.insert(claim);

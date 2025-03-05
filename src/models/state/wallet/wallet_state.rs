@@ -692,9 +692,10 @@ impl WalletState {
     ///   n = number of ExpectedUtxo in database. (all-time)
     ///   m = number of transaction outputs.
     ///
-    /// Returns an iterator of [OwnUtxo], which in turn contains a UTXO, sender
-    /// randomness, receiver_preimage, and the addition record can be inferred
-    /// from these three fields.
+    /// Returns an iterator of [IncomingUtxo], which in turn contains a
+    /// [`Utxo`], [sender randomness](IncomingUtxo::sender_randomness),
+    /// [receiver preimage](IncomingUtxo::receiver_preimage), and the addition
+    /// record can be inferred from these three fields.
     pub(crate) async fn scan_for_expected_utxos<'a>(
         &'a self,
         addition_records: &'a [AdditionRecord],

@@ -306,7 +306,7 @@ impl Block {
         self.digest = Default::default();
     }
 
-    /// sets header header nonce.
+    /// sets header nonce.
     ///
     /// note: this causes block digest to change.
     #[inline]
@@ -858,7 +858,7 @@ impl Block {
         Ok(())
     }
 
-    /// Determine whether the the proof-of-work puzzle was solved correctly.
+    /// Determine whether the proof-of-work puzzle was solved correctly.
     ///
     /// Specifically, compare the hash of the current block against the
     /// target corresponding to the previous block;s difficulty and return true
@@ -903,13 +903,15 @@ impl Block {
     /// accumulated proof-of-work.
     ///
     /// This function is called exclusively in
-    /// [`GlobalState::incoming_block_is_more_canonical`], which is in turn
+    /// [`GlobalState::incoming_block_is_more_canonical`][1], which is in turn
     /// called in two places:
     ///  1. In `peer_loop`, when a peer sends a block. The `peer_loop` task only
     ///     sends the incoming block to the `main_loop` if it is more canonical.
     ///  2. In `main_loop`, when it receives a block from a `peer_loop` or from
     ///     the `mine_loop`. It is possible that despite (1), race conditions
-    ///     arise and they must be solved here.
+    ///     arise, and they must be solved here.
+    ///
+    /// [1]: crate::models::state::GlobalState::incoming_block_is_more_canonical
     pub(crate) fn fork_choice_rule<'a>(
         current_tip: &'a Self,
         incoming_block: &'a Self,

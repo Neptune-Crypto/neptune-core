@@ -211,7 +211,7 @@ impl NativeCurrencyAmount {
         )
     }
 
-    /// Add two [`NeptuneCoin`]s, of which at most one is negative.
+    /// Add two [`NativeCurrencyAmount`]s, of which at most one is negative.
     ///
     /// The following cases generate `None`:
     ///  - adding two negative numbers
@@ -346,7 +346,7 @@ impl Sub for NativeCurrencyAmount {
     type Output = NativeCurrencyAmount;
 
     fn sub(self, _rhs: Self) -> Self::Output {
-        panic!("Cannot subtract `NeptuneCoin`s; use `checked_sub` instead.")
+        panic!("Cannot subtract `NativeCurrencyAmount`s; use `checked_sub` instead.")
     }
 }
 

@@ -18,7 +18,7 @@ use super::LockType;
 /// # use neptune_cash::locks::std::{AtomicMutex, traits::*};
 /// struct Car {
 ///     year: u16,
-/// };
+/// }
 /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
 /// atomic_car.lock(|c| println!("year: {}", c.year));
 /// atomic_car.lock_mut(|mut c| c.year = 2023);
@@ -33,7 +33,7 @@ use super::LockType;
 /// # use neptune_cash::locks::std::{AtomicMutex, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
-/// };
+/// }
 ///
 /// pub fn log_lock_event(lock_event: LockEvent) {
 ///     let (event, info, acquisition) =
@@ -221,7 +221,7 @@ impl<T> AtomicMutex<T> {
     /// # use neptune_cash::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
-    /// };
+    /// }
     /// let atomic_car = AtomicMutex::from(Car{year: 2016});
     /// let year = atomic_car.lock_guard().year;
     /// ```
@@ -238,7 +238,7 @@ impl<T> AtomicMutex<T> {
     /// # use neptune_cash::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
-    /// };
+    /// }
     /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_guard_mut().year = 2022;
     /// ```
@@ -255,7 +255,7 @@ impl<T> AtomicMutex<T> {
     /// # use neptune_cash::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
-    /// };
+    /// }
     /// let atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock(|c| println!("year: {}", c.year));
     /// let year = atomic_car.lock(|c| c.year);
@@ -278,7 +278,7 @@ impl<T> AtomicMutex<T> {
     /// # use neptune_cash::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
-    /// };
+    /// }
     /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_mut(|mut c| {c.year = 2022});
     /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year});
@@ -369,9 +369,8 @@ impl<T> Atomic<T> for AtomicMutex<T> {
     }
 }
 
-/// A wrapper for [MutexGuard](std::sync::MutexGuard) that
-/// can optionally call a callback to notify when the
-/// lock event occurs
+/// A wrapper for [MutexGuard] that can optionally call a callback to notify
+/// when the lock event occurs
 pub struct AtomicMutexGuard<'a, T> {
     guard: MutexGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,

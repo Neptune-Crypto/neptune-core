@@ -22,9 +22,9 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 /// The UTXO must, at one point, have  been mined, although the block in which
 /// it was mined might have been abandoned.
 ///
-/// See also: [`AnnouncedUtxo`](super::announced_utxo::AnnouncedUtxo),
+/// See also: [`IncomingUtxo`](super::incoming_utxo::IncomingUtxo),
 /// [`ExpectedUtxo`](super::expected_utxo::ExpectedUtxo),
-/// [`OwnUtxo`](super::own_utxo::OwnUtxo).
+/// [`MonitoredUtxo`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MonitoredUtxo {
     pub utxo: Utxo,

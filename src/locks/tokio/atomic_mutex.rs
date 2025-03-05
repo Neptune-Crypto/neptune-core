@@ -451,9 +451,8 @@ impl<T> AtomicMutex<T> {
     }
 }
 
-/// A wrapper for [MutexGuard](tokio::sync::MutexGuard) that
-/// can optionally call a callback to notify when the
-/// lock event occurs.
+/// A wrapper for [MutexGuard] that can optionally call a callback to notify
+/// when the lock event occurs.
 pub struct AtomicMutexGuard<'a, T> {
     guard: MutexGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,

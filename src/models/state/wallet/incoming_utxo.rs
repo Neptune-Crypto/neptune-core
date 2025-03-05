@@ -19,7 +19,7 @@ use crate::util_types::mutator_set::commit;
 ///    (There is one exception to this rule: for guesser fee UTXOs, the unlock
 ///    key coincides with the receiver preimage.)
 ///
-/// See [crate::models::state::wallet::utxo_notification::UtxoNotificationPayload], [ExpectedUtxo]
+/// See [UtxoNotificationPayload], [ExpectedUtxo]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) struct IncomingUtxo {

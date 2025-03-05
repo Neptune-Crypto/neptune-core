@@ -41,7 +41,7 @@ pub enum ProverJobError {
 
 /// represents an error invoking external prover process
 ///
-/// provides additional details for [JobError::TritonVmProverFailed]
+/// provides additional details for [ProverJobError::TritonVmProverFailed]
 #[derive(Debug, thiserror::Error)]
 pub enum VmProcessError {
     #[error("parameter serialization failed")]
