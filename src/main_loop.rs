@@ -1432,11 +1432,11 @@ impl MainLoopHandler {
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
         // signals are only used on Unix systems.
-        let (_tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
-        let (_tx_int, mut rx_int): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_int, mut rx_int): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
-        let (_tx_quit, mut rx_quit): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_quit, mut rx_quit): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
         #[cfg(unix)]
         {
@@ -1450,7 +1450,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigterm.recv().await.is_some() {
                         info!("Received SIGTERM");
-                        _tx_term.send(()).await.unwrap();
+                        tx_term.send(()).await.unwrap();
                     }
                 })?;
 
@@ -1461,7 +1461,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigint.recv().await.is_some() {
                         info!("Received SIGINT");
-                        _tx_int.send(()).await.unwrap();
+                        tx_int.send(()).await.unwrap();
                     }
                 })?;
 
@@ -1472,10 +1472,13 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigquit.recv().await.is_some() {
                         info!("Received SIGQUIT");
-                        _tx_quit.send(()).await.unwrap();
+                        tx_quit.send(()).await.unwrap();
                     }
                 })?;
         }
+
+        #[cfg(not(unix))]
+        drop((tx_term, tx_int, tx_quit));
 
         let exit_code: i32 = loop {
             select! {

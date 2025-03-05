@@ -250,6 +250,7 @@ unchecked_duration_subtraction = "warn"
 unnecessary_box_returns = "warn"
 unnecessary_join = "warn"
 unnested_or_patterns = "warn"
+used_underscore_binding = "warn"
 verbose_bit_mask = "warn"
 
 ## We use harness = false on these so that the divan reports are output on stdout.
