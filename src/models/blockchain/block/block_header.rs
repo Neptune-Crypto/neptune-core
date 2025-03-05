@@ -176,7 +176,7 @@ impl BlockHeader {
     }
 }
 
-#[derive(Debug, Clone, EnumCount)]
+#[derive(Debug, Copy, Clone, EnumCount)]
 pub enum BlockHeaderField {
     Version,
     Height,
@@ -190,7 +190,7 @@ pub enum BlockHeaderField {
 
 impl HasDiscriminant for BlockHeaderField {
     fn discriminant(&self) -> usize {
-        self.clone() as usize
+        *self as usize
     }
 }
 
@@ -213,7 +213,7 @@ impl MastHash for BlockHeader {
 
 /// The data needed to calculate the block hash, apart from the data present
 /// in the block header.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HeaderToBlockHashWitness {
     /// The "body" leaf of the Merkle tree from which block hash is calculated.
     body_leaf: Digest,

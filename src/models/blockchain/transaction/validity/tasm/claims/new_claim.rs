@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 ///  - the output
 ///  - the input
 ///  - the program digest.
+#[derive(Debug, Copy, Clone)]
 pub struct NewClaim;
 
 impl BasicSnippet for NewClaim {

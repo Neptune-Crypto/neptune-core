@@ -69,7 +69,7 @@ impl SecretWitness for CollectLockScriptsWitness {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectLockScripts;
 
 impl CollectLockScripts {

@@ -210,6 +210,9 @@ name = "neptune-dashboard"
 [[bin]]
 name = "neptune-cli"
 
+[lints.rust]
+missing_copy_implementations = "warn"
+
 [lints.clippy]
 cloned_instead_of_copied = "warn"
 copy_iterator = "warn"

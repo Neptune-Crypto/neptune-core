@@ -2893,7 +2893,7 @@ impl RPC for NeptuneRPCServer {
         let peer_count = Some(state.net.peer_map.len());
         let max_num_peers = self.state.cli().max_num_peers;
 
-        let mining_status = Some(state.mining_state.mining_status.clone());
+        let mining_status = Some(state.mining_state.mining_status);
 
         let confirmations = {
             log_slow_scope!(fn_name!() + "::confirmations_internal()");

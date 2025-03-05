@@ -29,7 +29,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 
-#[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock;
 
 impl TimeLock {

@@ -36,7 +36,7 @@ impl fmt::Display for MutatorSetError {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MutatorSetError {
     RequestedAoclAuthPathOutOfBounds((u64, u64)),
     RequestedSwbfAuthPathOutOfBounds((u64, u64)),
