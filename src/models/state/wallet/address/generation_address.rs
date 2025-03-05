@@ -209,17 +209,15 @@ impl GenerationSpendingKey {
         let kem_ctxt_array: [BFieldElement; CIPHERTEXT_SIZE_IN_BFES] = kem_ctxt.try_into().unwrap();
 
         // decrypt
-        let shared_key = match lattice::kem::dec(self.decryption_key, kem_ctxt_array.into()) {
-            Some(sk) => sk,
-            None => bail!("Could not establish shared secret key."),
+        let Some(shared_key) = lattice::kem::dec(self.decryption_key, kem_ctxt_array.into()) else {
+            bail!("Could not establish shared secret key.");
         };
         let cipher = Aes256Gcm::new(&shared_key.into());
         let nonce_as_bytes = [nonce_ctxt[0].value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
         let ciphertext_bytes = common::bfes_to_bytes(dem_ctxt)?;
-        let plaintext = match cipher.decrypt(nonce, ciphertext_bytes.as_ref()) {
-            Ok(ptxt) => ptxt,
-            Err(_) => bail!("Failed to decrypt symmetric payload."),
+        let Ok(plaintext) = cipher.decrypt(nonce, ciphertext_bytes.as_ref()) else {
+            bail!("Failed to decrypt symmetric payload.");
         };
 
         // convert plaintext to utxo and digest

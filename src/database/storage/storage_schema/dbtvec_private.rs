@@ -199,9 +199,8 @@ where
             elements.into_iter().map(|(_, element)| element).collect()
         }
 
-        let max_index = match indices.iter().max() {
-            Some(i) => i,
-            None => return vec![],
+        let Some(max_index) = indices.iter().max() else {
+            return vec![];
         };
 
         assert!(

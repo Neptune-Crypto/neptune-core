@@ -1149,15 +1149,11 @@ impl GlobalState {
 
             // If the UTXO was not confirmed yet, there is no
             // point in synchronizing its membership proof.
-            let (confirming_block_digest, confirming_block_height) =
-                match monitored_utxo.confirmed_in_block {
-                    Some((confirmed_block_hash, _timestamp, block_height)) => {
-                        (confirmed_block_hash, block_height)
-                    }
-                    None => {
-                        continue;
-                    }
-                };
+            let Some((confirming_block_digest, _, confirming_block_height)) =
+                monitored_utxo.confirmed_in_block
+            else {
+                continue;
+            };
 
             // try latest (block hash, membership proof) entry
             let (block_hash, mut membership_proof) = monitored_utxo

@@ -1705,15 +1705,11 @@ impl WalletState {
                 continue;
             }
 
-            let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
-                Some(k) => k,
-                None => {
-                    warn!(
-                        "spending key not found for utxo: {:?}",
-                        wallet_status_element.utxo
-                    );
-                    continue;
-                }
+            let Some(spending_key) = self.find_spending_key_for_utxo(&wallet_status_element.utxo)
+            else {
+                let utxo = &wallet_status_element.utxo;
+                warn!("spending key not found for utxo: {utxo:?}");
+                continue;
             };
 
             input_funds.push(UnlockedUtxo::unlock(
