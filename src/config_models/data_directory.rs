@@ -16,9 +16,9 @@ use crate::models::state::networking_state::BANNED_IPS_DB_NAME;
 use crate::models::state::shared::BLOCK_FILENAME_EXTENSION;
 use crate::models::state::shared::BLOCK_FILENAME_PREFIX;
 use crate::models::state::shared::DIR_NAME_FOR_BLOCKS;
-use crate::models::state::wallet::WALLET_DB_NAME;
-use crate::models::state::wallet::WALLET_DIRECTORY;
-use crate::models::state::wallet::WALLET_OUTPUT_COUNT_DB_NAME;
+use crate::models::state::wallet::wallet_file::WALLET_DB_NAME;
+use crate::models::state::wallet::wallet_file::WALLET_DIRECTORY;
+use crate::models::state::wallet::wallet_file::WALLET_OUTPUT_COUNT_DB_NAME;
 
 const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.

@@ -33,7 +33,7 @@ use crate::BFieldElement;
 /// Enumerates available cryptographic key implementations for sending funds.
 ///
 /// In most (but not all) cases there is a matching address.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum KeyType {
     /// To unlock, prove knowledge of the preimage.

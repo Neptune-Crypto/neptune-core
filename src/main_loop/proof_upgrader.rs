@@ -33,7 +33,7 @@ use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
-use crate::models::state::wallet::WalletSecret;
+use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -288,10 +288,10 @@ impl UpgradeJob {
 
             // It's a important to *not* hold any locks when proving happens.
             // Otherwise, entire application freezes!!
-            let (wallet_secret, block_height) = {
+            let (wallet_entropy, block_height) = {
                 let state = global_state_lock.lock_guard().await;
                 (
-                    state.wallet_state.wallet_secret.clone(),
+                    state.wallet_state.wallet_entropy.clone(),
                     state.chain.light_state().header().height,
                 )
             };
@@ -301,7 +301,7 @@ impl UpgradeJob {
                 .upgrade(
                     triton_vm_job_queue,
                     job_options,
-                    &wallet_secret,
+                    &wallet_entropy,
                     block_height,
                 )
                 .await
@@ -415,7 +415,7 @@ impl UpgradeJob {
         self,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
-        own_wallet_secret: &WalletSecret,
+        own_wallet_entropy: &WalletEntropy,
         current_block_height: BlockHeight,
     ) -> anyhow::Result<(Transaction, Vec<ExpectedUtxo>)> {
         let gobbling_fee = self.gobbling_fee();
@@ -424,7 +424,7 @@ impl UpgradeJob {
 
         let (gobbler, expected_utxos) = if gobbling_fee.is_positive() {
             info!("Producing gobbler-transaction for a value of {gobbling_fee}");
-            let gobble_receiver = own_wallet_secret.nth_symmetric_key(0);
+            let gobble_receiver = own_wallet_entropy.nth_symmetric_key(0);
             let receiver_preimage = gobble_receiver.privacy_preimage();
             let gobble_receiver = SpendingKey::Symmetric(gobble_receiver);
             let gobble_receiver = gobble_receiver.to_address().expect(
@@ -432,7 +432,7 @@ impl UpgradeJob {
             );
             let gobbler = TransactionDetails::fee_gobbler(
                 gobbling_fee,
-                own_wallet_secret.generate_sender_randomness(
+                own_wallet_entropy.generate_sender_randomness(
                     current_block_height,
                     gobble_receiver.privacy_digest(),
                 ),
@@ -469,7 +469,7 @@ impl UpgradeJob {
         };
 
         let mut rng: StdRng =
-            SeedableRng::from_seed(own_wallet_secret.shuffle_seed(current_block_height.next()));
+            SeedableRng::from_seed(own_wallet_entropy.shuffle_seed(current_block_height.next()));
         let gobble_shuffle_seed: [u8; 32] = rng.random();
 
         match self {
