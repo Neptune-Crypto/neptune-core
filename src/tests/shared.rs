@@ -527,13 +527,12 @@ pub fn make_mock_transaction(
     make_mock_transaction_with_mutator_set_hash(inputs, outputs, Digest::default())
 }
 
-pub(crate) fn make_mock_transaction_with_mutator_set_hash(
+pub(crate) fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
     mutator_set_hash: Digest,
+    timestamp: Timestamp,
 ) -> Transaction {
-    let timestamp = Timestamp::now();
-
     Transaction {
         kernel: TransactionKernelProxy {
             inputs,
@@ -548,6 +547,21 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
         .into_kernel(),
         proof: TransactionProof::invalid(),
     }
+}
+
+pub(crate) fn make_mock_transaction_with_mutator_set_hash(
+    inputs: Vec<RemovalRecord>,
+    outputs: Vec<AdditionRecord>,
+    mutator_set_hash: Digest,
+) -> Transaction {
+    let timestamp = Timestamp::now();
+
+    make_mock_transaction_with_mutator_set_hash_and_timestamp(
+        inputs,
+        outputs,
+        mutator_set_hash,
+        timestamp,
+    )
 }
 
 pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
@@ -854,6 +868,19 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
         predecessor.mutator_set_accumulator_after().hash(),
     );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None)
+}
+
+pub(crate) fn invalid_empty_block_with_timestamp(
+    predecessor: &Block,
+    timestamp: Timestamp,
+) -> Block {
+    let tx = make_mock_transaction_with_mutator_set_hash_and_timestamp(
+        vec![],
+        vec![],
+        predecessor.mutator_set_accumulator_after().hash(),
+        timestamp,
+    );
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None)
 }
 
