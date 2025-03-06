@@ -521,7 +521,7 @@ pub(crate) async fn create_block_transaction_from(
         .lock_guard()
         .await
         .wallet_state
-        .wallet_secret
+        .wallet_entropy
         .nth_generation_spending_key(0);
     let composer_parameters = global_state_lock
         .lock_guard()
@@ -698,7 +698,7 @@ pub(crate) async fn mine(
                 .lock_guard()
                 .await
                 .wallet_state
-                .wallet_secret
+                .wallet_entropy
                 .guesser_spending_key(proposal.header().prev_block_digest);
 
             let latest_block_header = global_state_lock
@@ -960,6 +960,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
@@ -968,7 +969,6 @@ pub(crate) mod mine_loop_tests {
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
-    use crate::WalletSecret;
 
     /// Produce a transaction that allocates the given fraction of the block
     /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
@@ -997,7 +997,7 @@ pub(crate) mod mine_loop_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key(0);
         let receiving_address = coinbase_recipient_spending_key.to_address();
         let next_block_height: BlockHeight = latest_block.header().height.next();
@@ -1005,7 +1005,7 @@ pub(crate) mod mine_loop_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
         let vm_job_queue = global_state_lock.vm_job_queue();
 
@@ -1060,7 +1060,7 @@ pub(crate) mod mine_loop_tests {
         let global_state_lock = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1127,7 +1127,7 @@ pub(crate) mod mine_loop_tests {
         let global_state_lock = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1159,7 +1159,7 @@ pub(crate) mod mine_loop_tests {
         let mut alice = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1182,7 +1182,7 @@ pub(crate) mod mine_loop_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let output_to_alice = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(4),
@@ -1321,7 +1321,7 @@ pub(crate) mod mine_loop_tests {
         let mut alice = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1384,7 +1384,7 @@ pub(crate) mod mine_loop_tests {
         let global_state_lock = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1407,7 +1407,7 @@ pub(crate) mod mine_loop_tests {
             .lock_guard()
             .await
             .wallet_state
-            .wallet_secret
+            .wallet_entropy
             .guesser_spending_key(tip_block_orig.hash());
         let mut block =
             Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None);
@@ -1451,7 +1451,7 @@ pub(crate) mod mine_loop_tests {
         let global_state_lock = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1559,7 +1559,7 @@ pub(crate) mod mine_loop_tests {
         let global_state_lock = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;
@@ -1774,7 +1774,7 @@ pub(crate) mod mine_loop_tests {
         let global_state_lock = mock_genesis_global_state(
             network,
             2,
-            WalletSecret::devnet_wallet(),
+            WalletEntropy::devnet_wallet(),
             cli_args::Args::default(),
         )
         .await;

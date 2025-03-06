@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -8,6 +9,7 @@ use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
 use clap::builder::TypedValueParser;
 use clap::Parser;
+use itertools::Itertools;
 use num_traits::Zero;
 use sysinfo::System;
 
@@ -17,6 +19,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
 /// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]
@@ -272,6 +275,90 @@ pub struct Args {
     // to meaningfully suppress rapid reconnection attempts.
     #[clap(long, default_value = "1800", value_parser = duration_from_seconds_str)]
     pub reconnect_cooldown: Duration,
+
+    /// Scan incoming blocks for inbound transactions.
+    ///
+    /// Keys are generated deterministically from the secret seed and a
+    /// derivation index, and a counter recording the most recently used index
+    /// is stored. By default, incoming blocks are scanned for inbound
+    /// transactions tied to any key derived from indices smaller than this
+    /// counter.
+    ///
+    /// However, this counter can be lost, for instance after importing the
+    /// secret seed onto a new machine. In such cases, this subcommand will
+    /// instruct the client to scan incoming blocks for transactions tied to
+    /// future derivation indices --
+    /// [`ScanModeConfiguration`]`::default().num_future_keys()` by default, but
+    /// this parameter can be adjusted with the `--scan-keys` subcommand.
+    ///
+    /// The argument to this subcommand is the range of blocks where this extra-
+    /// ordinary scanning step takes place. If no argument is supplied, the step
+    /// takes place for every incoming block.
+    ///
+    /// Examples:
+    ///  - `neptune-core --scan-blocks ..` (scan all blocks; this is the
+    ///    default)
+    ///  - `neptune-core --scan-blocks ..1337` (everything up to 1337)
+    ///  - `neptune-core --scan-blocks 1337..` (1337 and everything after)
+    ///  - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in
+    ///    between)
+    ///  - `neptune-core --scan-blocks 13:37` (python index ranges also work)
+    //
+    // Everything above should constitute the help documentation for this
+    // command, with the exception of the concrete value for the default number
+    // of future indices. To present the user with that piece of information,
+    // we override this docstring by setting `long_help`, which allows us to
+    // invoke `format!` and embed the integer.
+    #[clap(long, value_parser = parse_range, action = clap::ArgAction::Set,
+        num_args = 0..=1, long_help = format!(
+            "\
+    Keys are generated deterministically from the secret seed and a\n\
+    derivation index, and a counter recording the most recently used index\n\
+    is stored. By default, incoming blocks are scanned for inbound\n\
+    transactions tied to any key derived from indices smaller than this\n\
+    counter.\n\
+    \n\
+    However, this counter can be lost, for instance after importing the\n\
+    secret seed onto a new machine. In such cases, this subcommand will\n\
+    instruct the client to scan incoming blocks for transactions tied to\n\
+    future derivation indices -- {} by default, but this parameter can be\n\
+    adjusted with the `--scan-keys` subcommand.\n\
+    \n\
+    The argument to this subcommand is the range of blocks where this extra-\n\
+    ordinary scanning step takes place. If no argument is supplied, the step\n\
+    takes place for every incoming block.\n\
+    \n\
+    Examples: \n\
+     - `neptune-core --scan-blocks ..` (scan all blocks; this is the default)\n\
+     - `neptune-core --scan-blocks ..1337` (everything up to 1337)\n\
+     - `neptune-core --scan-blocks 1337..` (1337 and everything after)\n\
+     - `neptune-core --scan-blocks 13..=37` (13, 37, and everything in\n\
+       between)\n\
+     - `neptune-core --scan-blocks 13:37` (python index ranges also work)",
+    ScanModeConfiguration::default().num_future_keys()
+        ))]
+    pub(crate) scan_blocks: Option<RangeInclusive<u64>>,
+
+    /// Scan incoming blocks for inbound transactions.
+    ///
+    /// Keys are generated deterministically from the secret seed and a
+    /// derivation index, and a counter recording the most recently used index
+    /// is stored. By default, incoming blocks are scanned for inbound
+    /// transactions tied to any key derived from indices smaller than this
+    /// counter.
+    ///
+    /// However, this counter can be lost, for instance after importing the
+    /// secret seed onto a new machine. In such cases, this subcommand will
+    /// instruct the client to scan incoming blocks for transactions tied to the
+    /// next k derivation indices, where k is the argument supplied.
+    ///
+    /// When this flag is set, by default all blocks will be scanned. The
+    /// subcommand `--scan-blocks` can be used to restrict the range of blocks
+    /// that undergo this scan.
+    ///
+    /// Example: `neptune-core --scan-keys 42`
+    #[clap(long)]
+    pub(crate) scan_keys: Option<usize>,
 }
 
 impl Default for Args {
@@ -294,6 +381,60 @@ fn fraction_validator(s: &str) -> Result<f64, String> {
 
 fn duration_from_seconds_str(s: &str) -> Result<Duration, std::num::ParseIntError> {
     Ok(Duration::from_secs(s.parse()?))
+}
+
+/// Parses strings that represent ranges of non-negative integers, in either
+/// rust or python (index-range) format.
+///
+/// Disallows empty ranges.
+fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
+    if unparsed_range.is_empty() {
+        return Ok(0..=u64::MAX);
+    }
+
+    let range_parts = if unparsed_range.contains("..") {
+        unparsed_range.split("..")
+    } else {
+        unparsed_range.split(":")
+    };
+
+    let Some((start, end)) = range_parts.collect_tuple() else {
+        let error_message = format!(
+            "Invalid range: \"{unparsed_range}\". \
+            Syntax: `start..end`, `start..=end`, or `start:end`"
+        );
+        return Err(error_message);
+    };
+
+    let start = start
+        .is_empty()
+        .then_some(Ok(0))
+        .or_else(|| Some(start.parse()))
+        .unwrap()
+        .map_err(|e| format!("Invalid start \"{start}\" in range \"{unparsed_range}\": {e:?}"))?;
+
+    let end = if end.is_empty() {
+        u64::MAX
+    } else {
+        let format_error =
+            |e| format!("Invalid end \"{end}\" in range \"{unparsed_range}\": {e:?}");
+        if let Some(end_inclusive) = end.strip_prefix('=') {
+            end_inclusive.parse().map_err(format_error)?
+        } else {
+            end.parse::<u64>()
+                .map_err(format_error)?
+                .checked_sub(1)
+                .ok_or_else(|| format!("Range upper bound \"{end}\" is invalid when excluded"))?
+        }
+    };
+
+    if start > end {
+        return Err(format!(
+            "Range \"{unparsed_range}\" is invalid: lower bound exceeds upper bound"
+        ));
+    }
+
+    Ok(start..=end)
 }
 
 impl Args {
@@ -392,6 +533,7 @@ impl Args {
 #[cfg(test)]
 mod cli_args_tests {
     use std::net::Ipv6Addr;
+    use std::ops::RangeBounds;
 
     use super::*;
 
@@ -451,5 +593,42 @@ mod cli_args_tests {
     #[test]
     fn cli_args_default_network_agrees_with_enum_default() {
         assert_eq!(Args::default().network, Network::default());
+    }
+
+    #[test]
+    fn test_parse_range() {
+        macro_rules! assert_range_eq {
+            ($left:expr, $right:expr) => {{
+                let left = $left;
+                let right = $right;
+                assert_eq!(
+                    left.start_bound(),
+                    right.start_bound(),
+                    "Range start values are not equal"
+                );
+                match (left.end_bound(), right.end_bound()) {
+                    (std::ops::Bound::Excluded(a), std::ops::Bound::Included(b)) => {
+                        assert_eq!(a, &(b + 1))
+                    }
+                    (std::ops::Bound::Included(a), std::ops::Bound::Excluded(b)) => {
+                        assert_eq!(&(a + 1), b)
+                    }
+                    (a, b) => assert_eq!(a, b),
+                }
+            }};
+        }
+
+        assert_range_eq!(5u64..10, parse_range("5..10").unwrap());
+        assert_range_eq!(5u64..=5, parse_range("5..=5").unwrap());
+        assert_range_eq!(5u64..=10, parse_range("5..=10").unwrap());
+        assert_range_eq!(0..10u64, parse_range("..10").unwrap());
+        assert_range_eq!(0..=10u64, parse_range("..=10").unwrap());
+        assert_range_eq!(5u64..=u64::MAX, parse_range("5..").unwrap());
+        assert_range_eq!(0u64..=u64::MAX, parse_range("..").unwrap());
+
+        assert_range_eq!(5u64..10, parse_range("5:10").unwrap());
+        assert_range_eq!(5u64..=u64::MAX, parse_range("5:").unwrap());
+        assert_range_eq!(0u64..10, parse_range(":10").unwrap());
+        assert_range_eq!(0u64..=u64::MAX, parse_range(":").unwrap());
     }
 }
