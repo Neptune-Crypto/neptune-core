@@ -242,7 +242,7 @@ impl ProverJob {
         {
             // avoid some 'unused' compiler warnings.
             let _dummy = rx;
-            let _cancelled = ProverProcessCompletion::Cancelled;
+            _ = ProverProcessCompletion::Cancelled;
 
             let proof = test::load_proof_or_produce_and_save(
                 &self.claim,
