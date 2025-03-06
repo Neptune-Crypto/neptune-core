@@ -298,6 +298,7 @@ impl UpgradeJob {
 
             // No locks may be held here!
             let (upgraded, expected_utxos) = match upgrade_job
+                .clone()
                 .upgrade(
                     triton_vm_job_queue,
                     job_options,
@@ -326,7 +327,7 @@ impl UpgradeJob {
                 }
             };
 
-            let new_update_job: UpdateMutatorSetDataJob = {
+            upgrade_job = {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
                 // Did we receive a new block while proving? If so, perform an
                 // update also, if this was requested (and we have a single proof)
@@ -375,11 +376,6 @@ impl UpgradeJob {
                     return;
                 }
 
-                let TransactionProof::SingleProof(single_proof) = upgraded.proof else {
-                    info!("Cannot perform update, as we don't have a SingleProof");
-                    return;
-                };
-
                 let Some(ms_update) = global_state
                     .chain
                     .archival_state_mut()
@@ -393,15 +389,38 @@ impl UpgradeJob {
                     return;
                 };
 
-                UpdateMutatorSetDataJob {
-                    old_kernel: upgraded.kernel,
-                    old_single_proof: single_proof,
-                    old_mutator_set: mutator_set_for_tx,
-                    mutator_set_update: ms_update,
+                if let TransactionProof::SingleProof(single_proof) = upgraded.proof {
+                    // Transaction is single-proof supported but MS data is deprecated. Create new
+                    // upgrade job to fix that.
+                    let ms_update_job = UpdateMutatorSetDataJob {
+                        old_kernel: upgraded.kernel,
+                        old_single_proof: single_proof,
+                        old_mutator_set: mutator_set_for_tx,
+                        mutator_set_update: ms_update,
+                    };
+                    UpgradeJob::UpdateMutatorSetData(ms_update_job)
+                } else {
+                    match upgrade_job {
+                        UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness } => {
+                            // Transaction is proof collection supported but MS data is deprecated.
+                            // Since proof collections cannot be updated, we instead update the
+                            // primitive witness and create a new job to upgrade the updated
+                            // primitive witness to a proof collection.
+                            let new_pw = PrimitiveWitness::update_with_new_ms_data(
+                                primitive_witness,
+                                ms_update,
+                            );
+                            UpgradeJob::PrimitiveWitnessToProofCollection {
+                                primitive_witness: new_pw,
+                            }
+                        }
+                        UpgradeJob::PrimitiveWitnessToSingleProof { .. } => unreachable!(),
+                        UpgradeJob::ProofCollectionToSingleProof { .. } => unreachable!(),
+                        UpgradeJob::Merge { .. } => unreachable!(),
+                        UpgradeJob::UpdateMutatorSetData(_) => unreachable!(),
+                    }
                 }
             };
-
-            upgrade_job = UpgradeJob::UpdateMutatorSetData(new_update_job);
         }
     }
 
@@ -683,4 +702,181 @@ pub(super) fn get_upgrade_task_from_mempool(
     jobs.sort_by_key(|(job, _)| job.profitability());
 
     jobs.first().cloned()
+}
+
+#[cfg(test)]
+mod test {
+    use tracing_test::traced_test;
+
+    use super::*;
+    use crate::config_models::cli_args;
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::block::Block;
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::invalid_empty_block_with_timestamp;
+
+    /// Returns a PrimitiveWitness-backed transaction initiated by the global state provided as
+    /// argument. Assumes balance is sufficient to make this transaction.
+    async fn pw_backed_tx(mut state: GlobalStateLock, seed: u64) -> Transaction {
+        let mut rng: StdRng = SeedableRng::seed_from_u64(seed);
+        let receiving_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+        let tx_outputs = vec![TxOutput::onchain_native_currency(
+            NativeCurrencyAmount::coins(1),
+            rng.random(),
+            receiving_address.into(),
+            false,
+        )]
+        .into();
+        let mut state = state.lock_guard_mut().await;
+        let change_key = state.wallet_state.next_unused_symmetric_key().await;
+        let fee = NativeCurrencyAmount::from_nau(100);
+        let timestamp = Network::Main.launch_date() + Timestamp::months(7);
+        let (tx, _, _) = state
+            .create_transaction_with_prover_capability(
+                tx_outputs,
+                change_key.into(),
+                UtxoNotificationMedium::OffChain,
+                fee,
+                timestamp,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
+            .await
+            .unwrap();
+
+        tx
+    }
+
+    #[tokio::test]
+    async fn pw_pc_happy_path() {
+        let network = Network::Main;
+
+        // Alice is premine recipient, so she can make a transaction (after
+        // expiry of timelock).
+        let (main_to_peer_tx, mut main_to_peer_rx, _, _, mut alice, _) =
+            get_test_genesis_setup(network, 2, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+        let pwtx = pw_backed_tx(alice.clone(), 512777439428).await;
+        alice
+            .lock_guard_mut()
+            .await
+            .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
+            .await;
+        let TransactionProof::Witness(pw) = &pwtx.proof else {
+            panic!("Expected PW-backed tx");
+        };
+
+        let pw_to_tx_upgrade_job =
+            UpgradeJob::from_primitive_witness(TxProvingCapability::ProofCollection, pw.to_owned());
+        pw_to_tx_upgrade_job
+            .handle_upgrade(
+                &TritonVmJobQueue::dummy(),
+                TransactionOrigin::Own,
+                true,
+                alice.clone(),
+                main_to_peer_tx,
+            )
+            .await;
+
+        let peer_msg = main_to_peer_rx.recv().await.unwrap();
+        let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
+            panic!("Proof upgrader must inform peer tasks about upgraded tx");
+        };
+
+        assert_eq!(
+            pwtx.kernel.txid(),
+            tx_notification.txid,
+            "TXID in peer msg must match that from transaction"
+        );
+
+        // Ensure PC-backed tx exists in mempool
+        let mempool_tx = alice
+            .lock_guard()
+            .await
+            .mempool
+            .get(pwtx.kernel.txid())
+            .unwrap()
+            .to_owned();
+        assert!(
+            matches!(mempool_tx.proof, TransactionProof::ProofCollection(_)),
+            "Tx in mempool must be PC backed after upgrade"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn pw_pc_race_condition_with_new_block() {
+        let network = Network::Main;
+
+        // Alice is premine recipient, so she can make a transaction (after
+        // expiry of timelock).
+        let (main_to_peer_tx, mut main_to_peer_rx, _, _, mut alice, _) =
+            get_test_genesis_setup(network, 2, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+        let pwtx = pw_backed_tx(alice.clone(), 512777439429).await;
+        alice
+            .lock_guard_mut()
+            .await
+            .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
+            .await;
+        let TransactionProof::Witness(pw) = &pwtx.proof else {
+            panic!("Expected PW-backed tx");
+        };
+
+        let pw_to_tx_upgrade_job =
+            UpgradeJob::from_primitive_witness(TxProvingCapability::ProofCollection, pw.to_owned());
+
+        // Before handle upgrade completes, a new block comes in. Making the
+        // method have to do more work.
+        let genesis_block = Block::genesis(network);
+        let block1 = invalid_empty_block_with_timestamp(&genesis_block, pwtx.kernel.timestamp);
+        alice.set_new_tip(block1).await.unwrap();
+        pw_to_tx_upgrade_job
+            .handle_upgrade(
+                &TritonVmJobQueue::dummy(),
+                TransactionOrigin::Own,
+                true,
+                alice.clone(),
+                main_to_peer_tx,
+            )
+            .await;
+
+        let peer_msg = main_to_peer_rx.recv().await.unwrap();
+        let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
+            panic!("Proof upgrader must inform peer tasks about upgraded tx");
+        };
+
+        assert_eq!(
+            pwtx.kernel.txid(),
+            tx_notification.txid,
+            "TXID in peer msg must match that from transaction"
+        );
+
+        // Ensure PC-backed tx exists in mempool
+        let mempool_tx = alice
+            .lock_guard()
+            .await
+            .mempool
+            .get(pwtx.kernel.txid())
+            .unwrap()
+            .to_owned();
+        assert!(
+            matches!(mempool_tx.proof, TransactionProof::ProofCollection(_)),
+            "Tx in mempool must be PC backed after upgrade"
+        );
+
+        // Ensure tx was update to latest mutator set
+        let mutator_set_accumulator_after = alice
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after();
+        assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
+    }
 }
