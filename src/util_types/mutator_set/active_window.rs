@@ -144,9 +144,7 @@ impl ActiveWindow {
         }
 
         // if not found, the indicated integer is zero
-        if !found {
-            panic!("Decremented integer is already zero.");
-        }
+        assert!(found, "Decremented integer is already zero.");
     }
 
     pub fn contains(&self, index: u32) -> bool {

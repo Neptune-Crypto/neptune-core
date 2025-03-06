@@ -3012,24 +3012,16 @@ mod peer_loop_tests {
             .await
             .unwrap();
 
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::NewBlocks(blocks)) => {
-                if blocks[0].hash() != block_2.hash() {
-                    panic!("1st received block by main loop must be block 1");
-                }
-                if blocks[1].hash() != block_3.hash() {
-                    panic!("2nd received block by main loop must be block 2");
-                }
-                if blocks[2].hash() != block_4.hash() {
-                    panic!("3rd received block by main loop must be block 3");
-                }
-            }
-            _ => panic!("Did not find msg sent to main task"),
+        let Some(PeerTaskToMain::NewBlocks(blocks)) = to_main_rx1.recv().await else {
+            panic!("Did not find msg sent to main task");
         };
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-            _ => panic!("Must receive remove of peer block max height"),
-        }
+        assert_eq!(blocks[0].hash(), block_2.hash());
+        assert_eq!(blocks[1].hash(), block_3.hash());
+        assert_eq!(blocks[2].hash(), block_4.hash());
+
+        let Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) = to_main_rx1.recv().await else {
+            panic!("Must receive remove of peer block max height");
+        };
 
         assert!(
             state_lock.lock_guard().await.net.peer_map.is_empty(),

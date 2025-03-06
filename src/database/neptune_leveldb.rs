@@ -372,9 +372,10 @@ pub(super) struct OptionsAsync {
 }
 impl From<&Options> for OptionsAsync {
     fn from(o: &Options) -> Self {
-        if o.cache.is_some() {
-            panic!("cache option not supported for NeptuneLevelDb");
-        }
+        assert!(
+            o.cache.is_none(),
+            "cache option not supported for NeptuneLevelDb"
+        );
 
         Self {
             create_if_missing: o.create_if_missing,
