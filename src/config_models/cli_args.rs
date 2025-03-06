@@ -272,6 +272,10 @@ pub struct Args {
     // to meaningfully suppress rapid reconnection attempts.
     #[clap(long, default_value = "1800", value_parser = duration_from_seconds_str)]
     pub reconnect_cooldown: Duration,
+
+    /// Enables the JSON/HTTP RPC API and listens on specified address and port.
+    #[clap(long)]
+    pub listen_rpc: Option<SocketAddr>,
 }
 
 impl Default for Args {

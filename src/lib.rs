@@ -19,6 +19,7 @@ pub mod mine_loop;
 pub mod models;
 pub mod peer_loop;
 pub mod prelude;
+pub mod rpc; // TBD: need to be renamed
 pub mod rpc_auth;
 #[allow(clippy::too_many_arguments)]
 // clippy  + tarpc workaround.  see https://github.com/google/tarpc/issues/502
@@ -323,7 +324,24 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
             .await;
     });
     task_join_handles.push(rpc_join_handle);
-    info!("Started RPC server");
+    info!("Started taRPC server");
+
+    // HTTP-JSON server
+
+    if let Some(addr) = global_state_lock.cli().listen_rpc.clone() {
+        let server = rpc::server::Server::new(global_state_lock.clone());
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let rpc_join_handle = tokio::spawn(async move {
+            server
+                .serve(listener)
+                .await
+                .unwrap_or_else(|e| panic!("HTTP-JSON RPC failed to start on {}: {}", addr, e));
+        });
+        task_join_handles.push(rpc_join_handle);
+        info!("HTTP-JSON RPC Listening on: {}.", addr.to_string());
+    }
 
     // Handle incoming connections, messages from peer tasks, and messages from the mining task
     info!("Starting main loop");
