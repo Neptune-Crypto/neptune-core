@@ -315,7 +315,7 @@ impl Widget for HistoryScreen {
                 .clone()
                 .into_iter()
                 .zip(vec!["│"; ncols].iter())
-                .map(|(h, b)| vec![h.to_string(), b.to_string()])
+                .map(|(h, &b)| vec![h.to_string(), b.to_string()])
                 .collect_vec()
                 .concat(),
         );
@@ -367,7 +367,7 @@ impl Widget for HistoryScreen {
                     &mut row
                         .iter()
                         .zip(vec!["│"; ncols].iter())
-                        .map(|(r, b)| vec![r.to_string(), b.to_string()])
+                        .map(|(r, &b)| vec![r.to_string(), b.to_string()])
                         .collect_vec()
                         .concat(),
                 );
