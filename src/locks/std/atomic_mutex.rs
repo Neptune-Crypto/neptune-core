@@ -427,14 +427,15 @@ impl<T> DerefMut for AtomicMutexGuard<'_, T> {
 mod tests {
     use super::*;
 
+    /// Verify (compile-time) that AtomicMutex::lock() and ::lock_mut() accept
+    /// mutable values. (FnMut)
     #[test]
-    // Verify (compile-time) that AtomicMutex::lock() and ::lock_mut() accept mutable values.  (FnMut)
     fn mutable_assignment() {
         let name = "Jim".to_string();
         let mut atomic_name = AtomicMutex::from(name);
 
-        let mut new_name: String = Default::default();
+        let mut new_name = String::new();
         atomic_name.lock(|n| new_name = n.to_string());
-        atomic_name.lock_mut(|n| new_name = n.to_string());
+        atomic_name.lock_mut(|n| new_name = (*n).to_string());
     }
 }

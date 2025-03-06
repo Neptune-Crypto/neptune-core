@@ -228,6 +228,7 @@ flat_map_option = "warn"
 fn_params_excessive_bools = "warn"
 from_iter_instead_of_collect = "warn"
 #if_not_else = "warn" # not always an improvement; should be upheld in spirit
+inefficient_to_string = "warn"
 invalid_upcast_comparisons = "warn"
 large_digit_groups = "warn"
 macro_use_imports = "warn"
