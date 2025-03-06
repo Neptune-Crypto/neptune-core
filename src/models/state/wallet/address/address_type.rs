@@ -270,7 +270,7 @@ impl ReceivingAddress {
     ///   12 end of address.
     /// ```
     pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
-        self.bech32m_abbreviate(self.to_bech32m(network)?, network)
+        Ok(self.bech32m_abbreviate(self.to_bech32m(network)?, network))
     }
 
     /// returns a bech32m string suitable for display purposes.
@@ -305,10 +305,10 @@ impl ReceivingAddress {
     ///   12 end of address.
     /// ```
     pub fn to_display_bech32m_abbreviated(&self, network: Network) -> Result<String> {
-        self.bech32m_abbreviate(self.to_display_bech32m(network)?, network)
+        Ok(self.bech32m_abbreviate(self.to_display_bech32m(network)?, network))
     }
 
-    fn bech32m_abbreviate(&self, bech32m: String, network: Network) -> Result<String> {
+    fn bech32m_abbreviate(&self, bech32m: String, network: Network) -> String {
         let first_len = self.get_hrp(network).len() + 12usize;
         let last_len = 12usize;
 
@@ -317,7 +317,7 @@ impl ReceivingAddress {
         let (first, _) = bech32m.split_at(first_len);
         let (_, last) = bech32m.split_at(bech32m.len() - last_len);
 
-        Ok(format!("{}...{}", first, last))
+        format!("{first}...{last}")
     }
 
     /// parses an address from its bech32m encoding
