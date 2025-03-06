@@ -193,7 +193,7 @@ impl SendScreen {
                         *n = "".to_string();
                     }
                 }
-                _ => {}
+                ResetType::None => {}
             }
             *reset_me_mutex_guard = ResetType::None;
         }
@@ -236,9 +236,9 @@ impl SendScreen {
                                             rpc_client, token, address, amount, fee, notice,
                                             reset_me, network, refresh_tx,
                                         ));
-                                        //                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                        // escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
-                                    _ => {
+                                    SendScreenWidget::Notice => {
                                         escalate_event = None;
                                     }
                                 }

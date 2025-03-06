@@ -471,7 +471,7 @@ impl NativeCurrencyAmount {
             match sign {
                 num_bigint::Sign::Minus => -nau_rational.numer(),
                 num_bigint::Sign::Plus => nau_rational.numer().to_owned(),
-                _ => unreachable!(),
+                num_bigint::Sign::NoSign => unreachable!(),
             }
         };
         if -BigInt::from(Self::MAX_NAU) > nau || nau > BigInt::from(Self::MAX_NAU) {

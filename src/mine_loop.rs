@@ -264,7 +264,7 @@ fn guess_worker(
             return;
         }
         GuessNonceResult::NonceFound { nonce } => nonce,
-        _ => unreachable!(),
+        GuessNonceResult::BlockNotFound => unreachable!(),
     };
 
     info!("Found valid block with nonce: ({nonce}).");

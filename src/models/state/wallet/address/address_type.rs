@@ -152,10 +152,11 @@ impl TryFrom<ReceivingAddress> for generation_address::GenerationReceivingAddres
     type Error = anyhow::Error;
 
     fn try_from(a: ReceivingAddress) -> Result<Self> {
-        match a {
-            ReceivingAddress::Generation(a) => Ok(*a),
-            _ => bail!("not a generation address"),
-        }
+        let ReceivingAddress::Generation(a) = a else {
+            bail!("not a generation address");
+        };
+
+        Ok(*a)
     }
 }
 
