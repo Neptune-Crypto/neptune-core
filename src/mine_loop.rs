@@ -1691,13 +1691,11 @@ pub(crate) mod mine_loop_tests {
             }
 
             let elapsed = start_instant.elapsed()?.as_millis();
-            if elapsed > max_test_time.0.value().into() {
-                panic!(
-                    "test time limit exceeded.  \
-                expected_duration: {expected_duration}, \
-                limit: {max_test_time}, actual: {elapsed}"
-                );
-            }
+            assert!(
+                elapsed <= max_test_time.0.value().into(),
+                "test time limit exceeded. \
+                 expected_duration: {expected_duration}, limit: {max_test_time}, actual: {elapsed}"
+            );
         }
 
         let actual_duration = start_instant.elapsed()?.as_millis() as u64;

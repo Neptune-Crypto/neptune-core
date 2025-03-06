@@ -107,9 +107,10 @@ impl NativeCurrencyAmount {
 
     /// Create an NativeCurrencyAmount object of the given number of whole coins.
     pub const fn coins(num_whole_coins: u32) -> NativeCurrencyAmount {
-        if num_whole_coins > 42_000_000 {
-            panic!("Number of coins must be less than 42000000");
-        }
+        assert!(
+            num_whole_coins <= 42_000_000,
+            "Number of coins must be less than 42000000"
+        );
         let number: i128 = num_whole_coins as i128;
         Self(Self::conversion_factor() * number)
     }

@@ -507,9 +507,10 @@ mod test {
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {
-            if bi.iter_u32_digits().count() > Self::NUM_LIMBS {
-                panic!("BigUint too large to convert to Difficulty");
-            }
+            assert!(
+                bi.iter_u32_digits().count() <= Self::NUM_LIMBS,
+                "BigUint too large to convert to Difficulty"
+            );
             Self(
                 bi.iter_u32_digits()
                     .take(Self::NUM_LIMBS)
