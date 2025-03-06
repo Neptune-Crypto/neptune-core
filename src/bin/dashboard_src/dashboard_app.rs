@@ -358,9 +358,7 @@ impl DashboardApp {
                             terminal = Self::enable_raw_mode()?;
                             draw = true;
                         }
-                        _ => {
-                            panic!("Should not get here.");
-                        }
+                        ConsoleIO::InputSupplied(_) => panic!("Should not get here."),
                     }
                     console_queue.remove(0);
                 }
@@ -628,8 +626,7 @@ impl DashboardApp {
                     screen_chunk,
                 );
             }
-            // MenuItem::Quit => todo!(),
-            _ => {
+            MenuItem::Quit => {
                 let messages: Vec<ListItem> = [
                     ListItem::new(Line::from(Span::raw("Press enter, `q`, or Esc to quit."))),
                     ListItem::new(Line::from(Span::raw("🌊"))),
