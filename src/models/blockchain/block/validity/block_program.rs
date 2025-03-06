@@ -65,6 +65,10 @@ impl BlockProgram {
 
 impl ConsensusProgram for BlockProgram {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+        // restrict proof size to avoid jumping backwards or to arbitrary
+        // place in memory.
+        const MAX_PROOF_SIZE: u64 = 4_000_000;
+
         let mut library = Library::new();
 
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
@@ -190,9 +194,6 @@ impl ConsensusProgram for BlockProgram {
 
         let verify_all_claims_loop = "verify_all_claims_loop".to_string();
 
-        // restrict proof size to avoid jumping backwards or to arbitrary
-        // place in memory.
-        const MAX_PROOF_SIZE: u64 = 4_000_000;
         let verify_all_claims_function = triton_asm! {
             // INVARIANT: _ *claim[i]_si *proof[i]_si N i
             {verify_all_claims_loop}:

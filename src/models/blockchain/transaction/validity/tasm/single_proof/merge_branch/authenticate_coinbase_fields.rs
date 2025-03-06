@@ -62,6 +62,8 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
+        const DISCRIMINANT_SIZE: usize = 1;
+
         let entrypoint = self.entrypoint();
 
         let kernel_field_coinbase_and_size = field_with_size!(TransactionKernel::coinbase);
@@ -70,7 +72,6 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
             TransactionKernelField::Coinbase,
         )));
 
-        const DISCRIMINANT_SIZE: usize = 1;
         let some_coinbase_field_size =
             NativeCurrencyAmount::static_length().unwrap() + DISCRIMINANT_SIZE;
         let compare_some_coinbases = DataType::compare_elem_of_stack_size(some_coinbase_field_size);

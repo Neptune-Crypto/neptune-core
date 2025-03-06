@@ -401,6 +401,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_dbtcvecs_get_many() {
+        const TEST_LIST_LENGTH: u8 = 105;
+
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
             .unwrap();
@@ -409,7 +411,6 @@ mod tests {
         let mut vector = rusty_storage.schema.new_vec::<S>("test-vector").await;
 
         // populate
-        const TEST_LIST_LENGTH: u8 = 105;
         for i in 0u8..TEST_LIST_LENGTH {
             vector.push(S(vec![i, i, i])).await;
         }
@@ -453,6 +454,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_dbtcvecs_set_many_get_many() {
+        const TEST_LIST_LENGTH: u8 = 105;
+
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
             .unwrap();
@@ -462,7 +465,6 @@ mod tests {
         let mut vector = rusty_storage.schema.new_vec::<S>("test-vector").await;
 
         // Generate initial index/value pairs.
-        const TEST_LIST_LENGTH: u8 = 105;
         let init_keyvals: Vec<(Index, S)> = (0u8..TEST_LIST_LENGTH)
             .map(|i| (i as Index, S(vec![i, i, i])))
             .collect();
@@ -537,6 +539,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_dbtcvecs_set_all_get_many() {
+        const TEST_LIST_LENGTH: u8 = 105;
+
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
             .unwrap();
@@ -546,7 +550,6 @@ mod tests {
         let mut vector = rusty_storage.schema.new_vec::<S>("test-vector").await;
 
         // Generate initial index/value pairs.
-        const TEST_LIST_LENGTH: u8 = 105;
         let init_vals: Vec<S> = (0u8..TEST_LIST_LENGTH)
             .map(|i| (S(vec![i, i, i])))
             .collect();

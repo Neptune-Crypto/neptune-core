@@ -92,6 +92,10 @@ const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
+    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
+        tokio::spawn(fut);
+    }
+
     info!("Starting client on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists
@@ -287,10 +291,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     rpc_listener.config_mut().max_frame_length(usize::MAX);
 
     let rpc_state_lock = global_state_lock.clone();
-
-    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
-        tokio::spawn(fut);
-    }
 
     // each time we start neptune-core a new RPC cookie is generated.
     let valid_tokens: Vec<rpc_auth::Token> =

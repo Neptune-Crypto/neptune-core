@@ -172,6 +172,12 @@ impl WalletState {
         &self,
         utxo_ms_recovery_data: IncomingUtxoRecoveryData,
     ) -> Result<()> {
+        // Create JSON string ending with a newline as this flushes the write
+        #[cfg(windows)]
+        const LINE_ENDING: &str = "\r\n";
+        #[cfg(not(windows))]
+        const LINE_ENDING: &str = "\n";
+
         #[cfg(test)]
         {
             tokio::fs::create_dir_all(self.configuration.wallet_files_directory_path()).await?;
@@ -184,12 +190,6 @@ impl WalletState {
             .open(self.configuration.incoming_secrets_path())
             .await?;
         let mut incoming_secrets_file = BufWriter::new(incoming_secrets_file);
-
-        // Create JSON string ending with a newline as this flushes the write
-        #[cfg(windows)]
-        const LINE_ENDING: &str = "\r\n";
-        #[cfg(not(windows))]
-        const LINE_ENDING: &str = "\n";
 
         let mut json_string = serde_json::to_string(&utxo_ms_recovery_data)?;
         json_string.push_str(LINE_ENDING);
@@ -258,6 +258,8 @@ impl WalletState {
         configuration: WalletConfiguration,
         wallet_entropy: WalletEntropy,
     ) -> Self {
+        const NUM_PREMINE_KEYS: usize = 10;
+
         let wallet_database_path = configuration.wallet_database_directory_path();
         DataDirectory::create_dir_if_not_exists(&wallet_database_path)
             .await
@@ -328,7 +330,6 @@ impl WalletState {
         // For premine UTXOs there is an additional complication: we do not know
         // the derivation index with which they were derived. So we derive a few
         // keys to have a bit of margin.
-        const NUM_PREMINE_KEYS: usize = 10;
         let premine_keys = (0..NUM_PREMINE_KEYS)
             .map(|n| {
                 wallet_state

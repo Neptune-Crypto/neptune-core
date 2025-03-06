@@ -42,11 +42,12 @@ impl Network {
     pub(crate) fn launch_date(&self) -> Timestamp {
         match self {
             Network::RegTest => {
+                const SEVEN_DAYS: u64 = 1000 * 60 * 60 * 24 * 7;
+
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_millis() as u64;
-                const SEVEN_DAYS: u64 = 1000 * 60 * 60 * 24 * 7;
                 let now_rounded = (now / SEVEN_DAYS) * SEVEN_DAYS;
                 Timestamp(BFieldElement::new(now_rounded))
             }

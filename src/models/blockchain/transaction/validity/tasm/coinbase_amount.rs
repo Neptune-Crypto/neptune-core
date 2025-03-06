@@ -163,6 +163,8 @@ mod test {
             stack: &mut Vec<BFieldElement>,
             memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
         ) {
+            type CoinbaseAmount = Option<NativeCurrencyAmount>;
+
             let coinbase_ptr = stack.pop().unwrap();
 
             let size = match memory[&coinbase_ptr].value() {
@@ -180,7 +182,6 @@ mod test {
                 );
             }
 
-            type CoinbaseAmount = Option<NativeCurrencyAmount>;
             let coinbase = *CoinbaseAmount::decode(&coinbase_encoded).unwrap();
 
             let coinbase_amount = coinbase.unwrap_or_else(NativeCurrencyAmount::zero);

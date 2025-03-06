@@ -370,6 +370,9 @@ impl RemovalRecordsIntegrityWitness {
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+        type MmrAccumulatorTip5 = MmrAccumulator;
+        const MAX_JUMP_LENGTH: usize = 2_000_000;
+
         let mut library = Library::new();
 
         let bag_peaks = library.import(Box::new(BagPeaks));
@@ -390,7 +393,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         let field_aocl = field!(RemovalRecordsIntegrityWitnessMemory::aocl);
         let field_swbfi = field!(RemovalRecordsIntegrityWitnessMemory::swbfi);
-        type MmrAccumulatorTip5 = MmrAccumulator;
         let field_peaks = field!(MmrAccumulatorTip5::peaks);
         let field_input_utxos = field!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
@@ -693,8 +695,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let receiver_preimage_alloc = library.kmalloc(digest_stack_size);
         let sender_randomness_alloc = library.kmalloc(digest_stack_size);
         let utxo_hash_alloc = library.kmalloc(digest_stack_size);
-
-        const MAX_JUMP_LENGTH: usize = 2_000_000;
 
         let for_all_utxos_loop = triton_asm! {
             // INVARIANT: _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
