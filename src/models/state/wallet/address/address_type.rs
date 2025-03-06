@@ -170,7 +170,7 @@ impl ReceivingAddress {
 
     /// generates a [PublicAnnouncement] for an output Utxo
     ///
-    /// The public announcement contains a Vec<BFieldElement> with fields:
+    /// The public announcement contains a [`Vec<BFieldElement>`] with fields:
     ///   0    --> type flag.  (flag of key type)
     ///   1    --> receiver_identifier  (fingerprint derived from seed)
     ///   2..n --> ciphertext (encrypted utxo + sender_randomness)
@@ -523,7 +523,7 @@ impl SpendingKey {
             // ... which can be decrypted with this key
             .filter_map(|c| self.ok_warn(self.decrypt(&c).expect("non-hash-lock key should have decryption option")))
 
-            // ... map to AnnouncedUtxo
+            // ... map to IncomingUtxo
             .map(move |(utxo, sender_randomness)| {
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.

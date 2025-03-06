@@ -1892,10 +1892,12 @@ impl PeerLoopHandler {
 
     /// Register graceful peer disconnection in the global state.
     ///
-    /// See also [`NetworkingState::register_peer_disconnection`].
+    /// See also [`NetworkingState::register_peer_disconnection`][1].
     ///
     /// # Locking:
     ///   * acquires `global_state_lock` for write
+    ///
+    /// [1]: crate::models::state::networking_state::NetworkingState::register_peer_disconnection
     async fn register_peer_disconnection(&mut self) {
         let peer_id = self.peer_handshake_data.instance_id;
         self.global_state_lock

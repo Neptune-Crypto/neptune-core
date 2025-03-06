@@ -879,104 +879,123 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// Perform peer discovery and (if necessary) reconnect to the peers listed
-    /// as CLI arguments. Peer discovery involves finding potential peers from
-    /// connected peers and attempts to establish connections with one of them.
+    /// If necessary, disconnect from peers.
+    ///
+    /// While a reasonable effort is made to never have more connections than
+    /// [`max_num_peers`](crate::config_models::cli_args::Args::max_num_peers),
+    /// this is not guaranteed. For example, bootstrap nodes temporarily allow a
+    /// surplus of incoming connections to provide their service more reliably.
+    ///
+    /// Never disconnects peers listed as CLI arguments.
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for read
-    async fn peer_discovery_and_reconnector(
-        &self,
-        main_loop_state: &mut MutableMainLoopState,
-    ) -> Result<()> {
-        let cli_args = self.global_state_lock.cli().clone();
-        let global_state = self.global_state_lock.lock_guard().await;
+    async fn prune_peers(&self) -> Result<()> {
+        // fetch all relevant info from global state; don't hold the lock
+        let cli_args = self.global_state_lock.cli();
+        let connected_peers = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .peer_map
+            .values()
+            .cloned()
+            .collect_vec();
 
-        let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
-
-        // Check if we are connected to too many peers
         let num_peers = connected_peers.len();
         let max_num_peers = cli_args.max_num_peers;
-        if num_peers > max_num_peers {
-            // If *all* peer connections were outgoing, then it's OK to exceed
-            // the max-peer count. But in that case we don't want to connect to
-            // more peers; stop execution here.
-            if connected_peers.iter().all(|x| x.connection_is_outbound()) {
-                return Ok(());
-            }
+        if num_peers <= max_num_peers {
+            debug!("No need to prune any peer connections.");
+            return Ok(());
+        }
+        warn!("Connected to {num_peers} peers, which exceeds the maximum ({max_num_peers}).");
 
-            // This would indicate a race-condition on the peer map field in the state which
-            // we unfortunately cannot exclude. So we just disconnect from a peer that the user
-            // didn't request a connection to.
-            warn!(
-                "Max peer parameter is exceeded. max is {max_num_peers} but we are connected \
-                to {num_peers}. Attempting to fix."
-            );
-
-            // pick peers that were not specified in the CLI arguments to disconnect from
-            let num_peers_to_disconnect = max_num_peers - num_peers;
-            let peers_to_disconnect = connected_peers
-                .into_iter()
-                .filter(|peer| !cli_args.peers.contains(&peer.connected_address()))
-                .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
-            match peers_to_disconnect.len() {
-                0 => warn!("Unable to resolve max peer constraint due to manual override."),
-                i => info!("Disconnecting from {i} peers."),
-            }
-            for peer in peers_to_disconnect {
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
-            }
-
+        // If all connections are outbound, it's OK to exceed the max.
+        if connected_peers.iter().all(|p| p.connection_is_outbound()) {
+            warn!("Not disconnecting from any peer because all connections are outbound.");
             return Ok(());
         }
 
-        // Check if we lost connection to any of the peers specified in the peers CLI list.
-        // If we did, attempt to reconnect.
-        let connected_peer_addresses = connected_peers
-            .iter()
-            .map(|x| x.connected_address())
+        let num_peers_to_disconnect = num_peers - max_num_peers;
+        let peers_to_disconnect = connected_peers
+            .into_iter()
+            .filter(|peer| !cli_args.peers.contains(&peer.connected_address()))
+            .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
+        match peers_to_disconnect.len() {
+            0 => warn!("Not disconnecting from any peer because of manual override."),
+            i => info!("Disconnecting from {i} peers."),
+        }
+        for peer in peers_to_disconnect {
+            self.main_to_peer_broadcast_tx
+                .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
+        }
+
+        Ok(())
+    }
+
+    /// If necessary, reconnect to the peers listed as CLI arguments.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for read
+    async fn reconnect(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
+        let connected_peers = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .peer_map
+            .keys()
+            .copied()
             .collect_vec();
-        let peers_with_lost_connection = cli_args
+        let peers_with_lost_connection = self
+            .global_state_lock
+            .cli()
             .peers
             .iter()
-            .filter(|peer| !connected_peer_addresses.contains(peer))
-            .cloned()
-            .collect_vec();
-        for peer_with_lost_connection in peers_with_lost_connection {
+            .filter(|peer| !connected_peers.contains(peer));
+
+        // If no connection was lost, there's nothing to do.
+        if peers_with_lost_connection.clone().count() == 0 {
+            return Ok(());
+        }
+
+        // Else, try to reconnect.
+        let own_handshake_data = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .get_own_handshakedata()
+            .await;
+        for &peer_with_lost_connection in peers_with_lost_connection {
             // Disallow reconnection if peer is in bad standing
-            let standing = global_state
+            let peer_standing = self
+                .global_state_lock
+                .lock_guard()
+                .await
                 .net
                 .get_peer_standing_from_database(peer_with_lost_connection.ip())
                 .await;
-
-            if standing.is_some_and(|standing| standing.is_bad()) {
-                info!(
-                    "Not reconnecting to peer with lost connection because it was banned: \
-                    {peer_with_lost_connection}"
-                );
-            } else {
-                info!(
-                    "Attempting to reconnect to peer with lost connection: \
-                    {peer_with_lost_connection}"
-                );
+            if peer_standing.is_some_and(|standing| standing.is_bad()) {
+                info!("Not reconnecting to peer in bad standing: {peer_with_lost_connection}");
+                continue;
             }
 
-            let own_handshake_data: HandshakeData = global_state.get_own_handshakedata().await;
+            info!("Attempting to reconnect to peer: {peer_with_lost_connection}");
+            let global_state_lock = self.global_state_lock.clone();
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
-            let global_state_lock_clone = self.global_state_lock.clone();
-            let peer_task_to_main_tx_clone = self.peer_task_to_main_tx.to_owned();
-
+            let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
+            let own_handshake_data = own_handshake_data.clone();
             let outgoing_connection_task = tokio::task::Builder::new()
                 .name("call_peer_wrapper_1")
                 .spawn(async move {
                     call_peer(
                         peer_with_lost_connection,
-                        global_state_lock_clone,
+                        global_state_lock,
                         main_to_peer_broadcast_rx,
-                        peer_task_to_main_tx_clone,
+                        peer_task_to_main_tx,
                         own_handshake_data,
-                        1, // All CLI-specified peers have distance 1 by definition
+                        1, // All CLI-specified peers have distance 1
                     )
                     .await;
                 })?;
@@ -984,56 +1003,70 @@ impl MainLoopHandler {
             main_loop_state.task_handles.retain(|th| !th.is_finished());
         }
 
-        // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
-        // one below the peer limit as we reserve this last slot for an ingoing connection.
-        if connected_peers.len() == cli_args.max_num_peers
-            || connected_peers.len() > 2 && connected_peers.len() - 1 == cli_args.max_num_peers
-        {
+        Ok(())
+    }
+
+    /// Perform peer discovery.
+    ///
+    /// Peer discovery involves finding potential peers from connected peers
+    /// and attempts to establish a connection with one of them.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for read
+    async fn discover_peers(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
+        // fetch all relevant info from global state, then release the lock
+        let cli_args = self.global_state_lock.cli();
+        let global_state = self.global_state_lock.lock_guard().await;
+        let connected_peers = global_state.net.peer_map.values().cloned().collect_vec();
+        let own_instance_id = global_state.net.instance_id;
+        let own_handshake_data = global_state.get_own_handshakedata().await;
+        drop(global_state);
+
+        let num_peers = connected_peers.len();
+        let max_num_peers = cli_args.max_num_peers;
+
+        // Don't make an outgoing connection if
+        // - the peer limit is reached (or exceeded), or
+        // - the peer limit is _almost_ reached; reserve the last slot for an
+        //   incoming connection.
+        if num_peers >= max_num_peers || num_peers > 2 && num_peers - 1 == max_num_peers {
+            info!("Connected to {num_peers} peers. The configured max is {max_num_peers} peers.");
+            info!("Skipping peer discovery.");
             return Ok(());
         }
 
         info!("Performing peer discovery");
-        // Potential procedure for peer discovery:
-        // 0) Ask all peers for their peer lists
-        // 1) Get peer candidate from these responses
-        // 2) Connect to one of those peers, A.
-        // 3) Ask this newly connected peer, A, for its peers.
-        // 4) Connect to one of those peers
-        // 5) Disconnect from A. (not yet implemented)
 
-        // 0)
+        // Ask all peers for their peer lists. This will eventually – once the
+        // responses have come in – update the list of potential peers.
         self.main_to_peer_broadcast_tx
             .send(MainToPeerTask::MakePeerDiscoveryRequest)?;
 
-        // 1)
-        let (peer_candidate, candidate_distance) = match main_loop_state
+        // Get a peer candidate from the list of potential peers. Generally,
+        // the peer lists requested in the previous step will not have come in
+        // yet. Therefore, the new candidate is selected based on somewhat
+        // (but not overly) old information.
+        let Some((peer_candidate, candidate_distance)) = main_loop_state
             .potential_peers
-            .get_candidate(&connected_peers, global_state.net.instance_id)
-        {
-            Some(candidate) => candidate,
-            None => {
-                debug!("Found no peer candidate to connect to. Not making new connection.");
-                return Ok(());
-            }
+            .get_candidate(&connected_peers, own_instance_id)
+        else {
+            info!("Found no peer candidate to connect to. Not making new connection.");
+            return Ok(());
         };
 
-        // 2)
-        info!(
-            "Connecting to peer {} with distance {}",
-            peer_candidate, candidate_distance
-        );
-        let own_handshake_data: HandshakeData = global_state.get_own_handshakedata().await;
+        // Try to connect to the selected candidate.
+        info!("Connecting to peer {peer_candidate} with distance {candidate_distance}");
+        let global_state_lock = self.global_state_lock.clone();
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
-        let global_state_lock_clone = self.global_state_lock.clone();
-        let peer_task_to_main_tx_clone = self.peer_task_to_main_tx.to_owned();
+        let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
         let outgoing_connection_task = tokio::task::Builder::new()
             .name("call_peer_wrapper_2")
             .spawn(async move {
                 call_peer(
                     peer_candidate,
-                    global_state_lock_clone,
+                    global_state_lock,
                     main_to_peer_broadcast_rx,
-                    peer_task_to_main_tx_clone,
+                    peer_task_to_main_tx,
                     own_handshake_data,
                     candidate_distance,
                 )
@@ -1042,14 +1075,13 @@ impl MainLoopHandler {
         main_loop_state.task_handles.push(outgoing_connection_task);
         main_loop_state.task_handles.retain(|th| !th.is_finished());
 
-        // 3
+        // Immediately request the new peer's peer list. This allows
+        // incorporating the new peer's peers into the list of potential peers,
+        // to be used in the next round of peer discovery.
         self.main_to_peer_broadcast_tx
             .send(MainToPeerTask::MakeSpecificPeerDiscoveryRequest(
                 peer_candidate,
             ))?;
-
-        // 4 is completed in the next call to this function provided that the in (3) connected
-        // peer responded to the peer list request.
 
         Ok(())
     }
@@ -1533,7 +1565,9 @@ impl MainLoopHandler {
                     // Check number of peers we are connected to and connect to more peers
                     // if needed.
                     debug!("Timer: peer discovery job");
-                    self.peer_discovery_and_reconnector(&mut main_loop_state).await?;
+                    self.prune_peers().await?;
+                    self.reconnect(&mut main_loop_state).await?;
+                    self.discover_peers(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in N seconds
                     peer_discovery_timer.as_mut().reset(tokio::time::Instant::now() + peer_discovery_timer_interval);
@@ -1722,6 +1756,7 @@ impl MainLoopHandler {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::time::UNIX_EPOCH;
 
     use tracing_test::traced_test;
@@ -1729,6 +1764,7 @@ mod test {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::tests::shared::get_dummy_peer_incoming;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::MINER_CHANNEL_CAPACITY;
 
@@ -1741,14 +1777,14 @@ mod test {
         main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
     }
 
-    async fn setup(num_init_peers_outgoing: u8) -> TestSetup {
+    async fn setup(num_init_peers_outgoing: u8, num_peers_incoming: u8) -> TestSetup {
         let network = Network::Main;
         let (
             main_to_peer_tx,
             main_to_peer_rx,
             peer_to_main_tx,
             peer_to_main_rx,
-            state,
+            mut state,
             _own_handshake_data,
         ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli_args::Args::default())
             .await
@@ -1763,6 +1799,17 @@ mod test {
                 .all(|(_addr, peer)| peer.connection_is_outbound()),
             "Test assumption: All initial peers must represent outgoing connections."
         );
+
+        for i in 0..num_peers_incoming {
+            let peer_address =
+                std::net::SocketAddr::from_str(&format!("255.254.253.{}:8080", i)).unwrap();
+            state
+                .lock_guard_mut()
+                .await
+                .net
+                .peer_map
+                .insert(peer_address, get_dummy_peer_incoming(peer_address));
+        }
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
 
@@ -1834,7 +1881,9 @@ mod test {
         #[tokio::test]
         #[traced_test]
         async fn sync_mode_abandoned_on_global_timeout() {
-            let test_setup = setup(0).await;
+            let num_outgoing_connections = 0;
+            let num_incoming_connections = 0;
+            let test_setup = setup(num_outgoing_connections, num_incoming_connections).await;
             let TestSetup {
                 task_join_handles,
                 mut main_loop_handler,
@@ -1975,7 +2024,9 @@ mod test {
         #[tokio::test]
         #[traced_test]
         async fn upgrade_proof_collection_to_single_proof_foreign_tx() {
-            let test_setup = setup(0).await;
+            let num_outgoing_connections = 0;
+            let num_incoming_connections = 0;
+            let test_setup = setup(num_outgoing_connections, num_incoming_connections).await;
             let TestSetup {
                 peer_to_main_rx,
                 miner_to_main_rx,
@@ -2117,20 +2168,72 @@ mod test {
 
         #[tokio::test]
         #[traced_test]
-        async fn no_warning_on_peer_exceeding_limit_if_connections_are_outgoing() {
-            let num_init_peers_outgoing = 2;
-            let test_setup = setup(num_init_peers_outgoing).await;
+        async fn prune_peers_too_many_connections() {
+            let num_init_peers_outgoing = 10;
+            let num_init_peers_incoming = 4;
+            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                peer_to_main_rx,
-                miner_to_main_rx,
-                rpc_server_to_main_rx,
-                task_join_handles,
+                mut main_to_peer_rx,
                 mut main_loop_handler,
-                main_to_peer_rx,
+                ..
             } = test_setup;
 
-            // Set CLI to ban incoming connections and all outgoing peer-discovery-
-            // initiated connections.
+            let mocked_cli = cli_args::Args {
+                max_num_peers: num_init_peers_outgoing as usize,
+                ..Default::default()
+            };
+
+            main_loop_handler
+                .global_state_lock
+                .set_cli(mocked_cli)
+                .await;
+
+            main_loop_handler.prune_peers().await.unwrap();
+            assert_eq!(4, main_to_peer_rx.len());
+            for _ in 0..4 {
+                let peer_msg = main_to_peer_rx.recv().await.unwrap();
+                assert!(matches!(peer_msg, MainToPeerTask::Disconnect(_)))
+            }
+        }
+
+        #[tokio::test]
+        #[traced_test]
+        async fn prune_peers_not_too_many_connections() {
+            let num_init_peers_outgoing = 10;
+            let num_init_peers_incoming = 1;
+            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
+            let TestSetup {
+                main_to_peer_rx,
+                mut main_loop_handler,
+                ..
+            } = test_setup;
+
+            let mocked_cli = cli_args::Args {
+                max_num_peers: 200,
+                ..Default::default()
+            };
+
+            main_loop_handler
+                .global_state_lock
+                .set_cli(mocked_cli)
+                .await;
+
+            main_loop_handler.prune_peers().await.unwrap();
+            assert!(main_to_peer_rx.is_empty());
+        }
+
+        #[tokio::test]
+        #[traced_test]
+        async fn skip_peer_discovery_if_peer_limit_is_exceeded() {
+            let num_init_peers_outgoing = 2;
+            let num_init_peers_incoming = 0;
+            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
+            let TestSetup {
+                task_join_handles,
+                mut main_loop_handler,
+                ..
+            } = test_setup;
+
             let mocked_cli = cli_args::Args {
                 max_num_peers: 0,
                 ..Default::default()
@@ -2139,53 +2242,26 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
-
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
-
             main_loop_handler
-                .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
+                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
                 .await
                 .unwrap();
 
-            logs_assert(|lines: &[&str]| {
-                if lines.iter().any(|line| line.contains("WARN"))
-                    || lines.iter().any(|line| line.contains("Max peer"))
-                {
-                    Err(format!(
-                        "No warnings allowed in situation where incoming connections are banned. Got:\n{}",
-                        lines.join("\n"),
-                    ))
-                } else if lines
-                    .iter()
-                    .any(|line| line.contains("Performing peer discovery"))
-                {
-                    Err("May not perform peer discovery when `max_peers` = 0.".to_owned())
-                } else {
-                    Ok(())
-                }
-            });
-
-            // These values are kept alive as the transmission-counterpart will
-            // otherwise fail on `send`.
-            drop(peer_to_main_rx);
-            drop(miner_to_main_rx);
-            drop(rpc_server_to_main_rx);
-            drop(main_to_peer_rx);
+            assert!(logs_contain("Skipping peer discovery."));
         }
 
         #[tokio::test]
         #[traced_test]
         async fn performs_peer_discovery_on_few_connections() {
             let num_init_peers_outgoing = 2;
-            let test_setup = setup(num_init_peers_outgoing).await;
+            let num_init_peers_incoming = 0;
             let TestSetup {
-                peer_to_main_rx,
-                miner_to_main_rx,
-                rpc_server_to_main_rx,
                 task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-            } = test_setup;
+                peer_to_main_rx: _keep_channel_open,
+                ..
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             // Set CLI to attempt to make more connections
             let mocked_cli = cli_args::Args {
@@ -2196,39 +2272,14 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
-
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
-
             main_loop_handler
-                .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
+                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
                 .await
                 .unwrap();
 
-            logs_assert(|lines: &[&str]| {
-                if lines
-                    .iter()
-                    .any(|line| line.contains("Performing peer discovery"))
-                {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "Must log that peer discovery is being performed. Got logs:\n{}",
-                        lines.join("\n"),
-                    ))
-                }
-            });
-
-            assert!(
-                main_to_peer_rx.try_recv().is_ok(),
-                "Peer channel must have received message as part of peer discovery process"
-            );
-
-            // These values are kept alive as the transmission-counterpart will
-            // otherwise fail on `send`.
-            drop(peer_to_main_rx);
-            drop(miner_to_main_rx);
-            drop(rpc_server_to_main_rx);
-            drop(main_to_peer_rx);
+            let peer_discovery_sent_messages_on_peer_channel = main_to_peer_rx.try_recv().is_ok();
+            assert!(peer_discovery_sent_messages_on_peer_channel);
+            assert!(logs_contain("Performing peer discovery"));
         }
     }
 
@@ -2270,7 +2321,8 @@ mod test {
 
             let network = Network::Main;
             let num_init_peers_outgoing = 5;
-            let test_setup = setup(num_init_peers_outgoing).await;
+            let num_init_peers_incoming = 0;
+            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
                 mut peer_to_main_rx,
                 miner_to_main_rx: _,

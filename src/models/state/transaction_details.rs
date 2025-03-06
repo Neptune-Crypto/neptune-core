@@ -44,8 +44,10 @@ impl TransactionDetails {
     /// The produced transaction has no inputs, sets a negative fee, and
     /// distributes it over two UTXOs (one time-locked and one liquid
     /// immediately) of which both are locked to the given lock script hash.
-    /// The produced transaction is supported by a [`PrimitiveWitness`], so
+    /// The produced transaction is supported by a [`PrimitiveWitness`][1], so
     /// the caller still needs a follow-up proving operation.
+    ///
+    /// [1]: crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness
     pub(crate) fn fee_gobbler(
         gobbled_fee: NativeCurrencyAmount,
         sender_randomness: Digest,

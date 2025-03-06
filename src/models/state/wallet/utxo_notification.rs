@@ -20,8 +20,6 @@ pub enum UtxoNotificationMedium {
 
 /// enumerates how utxos and spending information is communicated, including how
 /// to encrypt this information.
-///
-/// see also: [UtxoNotification]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub(crate) enum UtxoNotifyMethod {

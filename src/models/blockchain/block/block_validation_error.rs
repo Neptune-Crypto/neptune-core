@@ -1,4 +1,5 @@
-/// Enumerates the reasons why a [`Block`] can fail to be valid.
+/// The reasons why a [`Block`](crate::models::blockchain::block::Block) can be
+/// invalid.
 ///
 /// Conversely, defines what it means for a block to be "valid".
 #[derive(Debug, Clone, Copy, thiserror::Error)]

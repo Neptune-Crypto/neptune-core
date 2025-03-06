@@ -143,8 +143,20 @@ pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
     std::net::SocketAddr::from_str(&format!("127.0.0.{}:8080", count)).unwrap()
 }
 
+/// Get a dummy-peer representing an incoming connection.
+pub(crate) fn get_dummy_peer_incoming(address: SocketAddr) -> PeerInfo {
+    let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, true);
+    let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
+    PeerInfo::new(
+        peer_connection_info,
+        &peer_handshake,
+        SystemTime::now(),
+        cli_args::Args::default().peer_tolerance,
+    )
+}
+
 /// Get a dummy-peer representing an outgoing connection.
-pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
+pub(crate) fn get_dummy_peer_outgoing(address: SocketAddr) -> PeerInfo {
     let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, false);
     let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
     PeerInfo::new(
@@ -208,7 +220,7 @@ pub(crate) async fn mock_genesis_global_state(
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
-        peer_map.insert(peer_address, get_dummy_peer(peer_address));
+        peer_map.insert(peer_address, get_dummy_peer_outgoing(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db);
     let genesis_block = archival_state.get_tip().await;
