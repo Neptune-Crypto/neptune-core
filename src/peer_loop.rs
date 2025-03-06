@@ -630,6 +630,8 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotification(block_notification) => {
+                const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
+
                 let (tip_header, sync_anchor_is_set) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
@@ -647,7 +649,6 @@ impl PeerLoopHandler {
                 let time_since_latest_successful_challenge = peer_state_info
                     .successful_sync_challenge_response_time
                     .map(|then| now - then);
-                const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
                 let cooldown_expired = time_since_latest_successful_challenge
                     .is_none_or(|time_passed| time_passed > SYNC_CHALLENGE_COOLDOWN);
                 let exceeds_sync_mode_threshold = GlobalState::sync_mode_threshold_stateless(
@@ -746,6 +747,8 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
+
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
                 info!(
                     "Got sync challenge response from {}",
@@ -818,7 +821,6 @@ impl PeerLoopHandler {
                 }
 
                 // Did it come in time?
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
                 if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
                     self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
                         .await?;
@@ -1780,6 +1782,8 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
+
         let cli_args = self.global_state_lock.cli().clone();
         let global_state = self.global_state_lock.lock_guard().await;
 
@@ -1806,7 +1810,6 @@ impl PeerLoopHandler {
         .with_standing(standing);
 
         // If timestamps are different, we currently just log a warning.
-        const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
         let peer_clock_ahead_in_seconds = new_peer.time_difference_in_seconds();
         let own_clock_ahead_in_seconds = -peer_clock_ahead_in_seconds;
         if peer_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
@@ -3653,6 +3656,8 @@ mod peer_loop_tests {
             for (own_tx_pq, new_tx_pq) in
                 TransactionProofQuality::iter().cartesian_product(TransactionProofQuality::iter())
             {
+                use TransactionProofQuality::*;
+
                 let (
                     _peer_broadcast_tx,
                     from_main_rx_clone,
@@ -3664,7 +3669,6 @@ mod peer_loop_tests {
                     .await
                     .unwrap();
 
-                use TransactionProofQuality::*;
                 let (own_tx, new_tx) = match (own_tx_pq, new_tx_pq) {
                     (ProofCollection, ProofCollection) => {
                         (&proof_collection_tx, &proof_collection_tx)

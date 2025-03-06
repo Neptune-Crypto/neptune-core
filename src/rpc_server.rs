@@ -3229,11 +3229,12 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
     ) -> RpcResult<usize> {
+        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
+
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
-        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
         let prune_count_res = global_state_mut
             .prune_abandoned_monitored_utxos(DEFAULT_MUTXO_PRUNE_DEPTH)

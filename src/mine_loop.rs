@@ -506,6 +506,9 @@ pub(crate) async fn create_block_transaction_from(
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+    // TODO: Change this const to be defined through CLI arguments.
+    const MAX_NUM_TXS_TO_MERGE: usize = 7;
+
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
@@ -542,8 +545,6 @@ pub(crate) async fn create_block_transaction_from(
     .await?;
 
     // Get most valuable transactions from mempool.
-    // TODO: Change this const to be defined through CLI arguments.
-    const MAX_NUM_TXS_TO_MERGE: usize = 7;
     let only_merge_single_proofs = true;
     let mut transactions_to_merge = match tx_merge_origin {
         #[cfg(test)]
@@ -623,13 +624,15 @@ pub(crate) async fn mine(
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
     const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
-    tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
-    let cli_args = global_state_lock.cli().clone();
 
     // Set PoW guessing to restart every N seconds, if it has been started. Only
     // the guesser task may set this to actually resolve, as this will otherwise
     // abort e.g. the composer.
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
+
+    tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+    let cli_args = global_state_lock.cli().clone();
+
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
     let infinite = Duration::from_secs(u32::MAX as u64);
     let guess_restart_timer = time::sleep(infinite);
@@ -654,9 +657,9 @@ pub(crate) async fn mine(
             })
             .await;
         if !is_connected {
+            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             global_state_lock.set_mining_status_to_inactive().await;
             warn!("Not mining because client has no connections");
-            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
             continue;
         }

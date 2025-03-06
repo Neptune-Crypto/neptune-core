@@ -707,6 +707,8 @@ impl Block {
         target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
     ) -> Result<(), BlockValidationError> {
+        const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
+
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
@@ -755,7 +757,6 @@ impl Block {
         }
 
         // 0.g)
-        const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
         let future_limit = now + FUTUREDATING_LIMIT;
         if self.kernel.header.timestamp >= future_limit {
             return Err(BlockValidationError::FutureDating);
@@ -952,6 +953,8 @@ impl Block {
     ///
     /// The genesis block does not have a guesser reward.
     pub(crate) fn guesser_fee_utxos(&self) -> Vec<Utxo> {
+        const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
+
         if self.header().height.is_genesis() {
             return vec![];
         }
@@ -964,7 +967,6 @@ impl Block {
         value_locked.div_two();
         let value_unlocked = total_guesser_reward.checked_sub(&value_locked).unwrap();
 
-        const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
         let coins = vec![
             Coin::new_native_currency(value_locked),
             TimeLock::until(self.header().timestamp + MINER_REWARD_TIME_LOCK_PERIOD),

@@ -327,8 +327,9 @@ mod test {
         ///  1. Verify that HashSet contains 50 items.
         #[tokio::test]
         pub async fn try_new_unique() -> anyhow::Result<()> {
-            let data_dir = unit_test_data_directory(Network::RegTest)?;
             const NUM_COOKIES: usize = 50;
+
+            let data_dir = unit_test_data_directory(Network::RegTest)?;
 
             let mut set: HashSet<Cookie> = Default::default();
 
@@ -399,14 +400,6 @@ mod test {
         #[cfg(not(target_os = "windows"))]
         #[tokio::test]
         pub async fn concurrency() -> anyhow::Result<()> {
-            let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
-
-            let root = data_dir_orig.root_dir_path();
-            let tmp = root.join("tmp");
-            DataDirectory::create_dir_if_not_exists(&tmp).await?;
-
-            println!("tempfiles stored in {}", tmp.display());
-
             async fn add_cookie(data_dir: &DataDirectory, cookie: &Cookie) {
                 let path = data_dir.root_dir_path().join("tmp").join(cookie.as_hex());
                 tokio::fs::OpenOptions::new()
@@ -423,6 +416,14 @@ mod test {
                     .await
                     .unwrap()
             }
+
+            let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
+
+            let root = data_dir_orig.root_dir_path();
+            let tmp = root.join("tmp");
+            DataDirectory::create_dir_if_not_exists(&tmp).await?;
+
+            println!("tempfiles stored in {}", tmp.display());
 
             // ensure a cookie file has been written.
             let cookie_orig = Cookie::try_new(&data_dir_orig).await?;

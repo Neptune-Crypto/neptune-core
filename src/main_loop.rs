@@ -1106,11 +1106,12 @@ impl MainLoopHandler {
     /// build on top of by providing potential starting points all the way
     /// back to genesis.
     fn batch_request_uca_candidate_heights(own_tip_height: BlockHeight) -> Vec<BlockHeight> {
+        const FACTOR: f64 = 1.07f64;
+
         let mut look_behind = 0;
         let mut ret = vec![];
 
         // A factor of 1.07 can look back ~1m blocks in 200 digests.
-        const FACTOR: f64 = 1.07f64;
         while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
             let height = match own_tip_height.checked_sub(look_behind) {
                 None => break,
@@ -1823,6 +1824,8 @@ mod test {
     }
 
     async fn setup(num_init_peers_outgoing: u8, num_peers_incoming: u8) -> TestSetup {
+        const CHANNEL_CAPACITY_MINER_TO_MAIN: usize = 10;
+
         let network = Network::Main;
         let (
             main_to_peer_tx,
@@ -1858,12 +1861,12 @@ mod test {
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
 
-        const CHANNEL_CAPACITY: usize = 10;
         let (main_to_miner_tx, _main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
-        let (_miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY);
+        let (_miner_to_main_tx, miner_to_main_rx) =
+            mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
         let (_rpc_server_to_main_tx, rpc_server_to_main_rx) =
-            mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY);
+            mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
 
         let main_loop_handler = MainLoopHandler::new(
             incoming_peer_listener,
