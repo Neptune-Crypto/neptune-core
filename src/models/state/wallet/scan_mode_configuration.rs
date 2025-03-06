@@ -34,7 +34,7 @@ impl ScanModeConfiguration {
     /// Constructor for `ScanModeConfiguration`.
     ///
     /// Best used in conjunction with constructor-helpers
-    /// [`Self::for_future_keys`] and [`Self::blocks`], *e.g.*:
+    /// [`Self::for_many_future_keys`] and [`Self::blocks`], *e.g.*:
     ///
     /// ```notest
     /// let config = ScanModeConfiguration::scan().blocks(1..=2).for_many_future_keys(3);
