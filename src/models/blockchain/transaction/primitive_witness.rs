@@ -18,15 +18,18 @@ use tracing::warn;
 
 use super::lock_script::LockScriptAndWitness;
 use super::transaction_kernel::TransactionKernel;
+use super::transaction_kernel::TransactionKernelModifier;
 use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::TransactionDetails;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 
 /// A list of UTXOs with an associated salt.
@@ -290,10 +293,15 @@ impl PrimitiveWitness {
             })
             .await;
 
-            if let Err(e) = result {
-                warn!("Failed to verify lock script of transaction. Got: \"{e}\"");
+            let Ok(run_res) = result else {
+                warn!("Failed to spawn task for verifying lock script.");
                 return false;
             };
+
+            if let Err(e) = run_res {
+                warn!("Failed to verify lock script of transaction. Got: \"{e}\"");
+                return false;
+            }
         }
 
         // Verify correct computation of removal records. Also, collect the removal
@@ -344,26 +352,36 @@ impl PrimitiveWitness {
         }
 
         // verify type scripts
-        for type_script_hash in type_script_hashes {
-            let type_script = type_script_dictionary[&type_script_hash].clone();
-            let public_input = self.kernel.mast_hash().encode().into();
-            let secret_input = self
-                .kernel
-                .mast_sequences()
-                .into_iter()
-                .flatten()
-                .collect_vec()
-                .into();
+        for (j, type_script_hash) in type_script_hashes.iter().enumerate() {
+            let type_script = type_script_dictionary[type_script_hash].clone();
+            let nondeterminism = self.type_scripts_and_witnesses[j].nondeterminism();
+            let public_input = [
+                self.kernel.mast_hash(),
+                Tip5::hash(&self.input_utxos),
+                Tip5::hash(&self.output_utxos),
+            ]
+            .into_iter()
+            .flat_map(|d| d.reversed().values())
+            .collect_vec();
+            let public_input: PublicInput = public_input.into();
 
             // Like above: potentially lengthy, CPU intensive call, only thing that matters
             // is error-free completion.
             let result = tokio::task::spawn_blocking(move || {
-                VM::run(type_script, public_input, secret_input)
+                VM::run(type_script, public_input, nondeterminism)
             })
             .await;
 
-            if let Err(e) = result {
-                warn!("Type script {type_script_hash} not satisfied for transaction: {e}");
+            let Ok(run_res) = result else {
+                warn!("Failed to spawn task for verifying type script.");
+                return false;
+            };
+
+            if let Err(e) = run_res {
+                warn!(
+                    "Failed to verify type script {type_script_hash} of \
+                transaction. Got: \"{e}\""
+                );
                 return false;
             }
         }
@@ -941,8 +959,10 @@ mod test {
     use proptest::prelude::BoxedStrategy;
     use proptest::prop_assert;
     use proptest::strategy::Strategy;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
@@ -1544,6 +1564,53 @@ mod test {
                 )
                 .boxed()
         }
+    }
+
+
+    #[proptest(cases = 5, async = "tokio")]
+    async fn lock_script_failure_negative_test(
+        #[strategy(3usize..10)] _num_inputs: usize,
+        #[strategy(3usize..10)] _num_outputs: usize,
+        #[strategy(3usize..10)] _num_public_announcements: usize,
+        #[strategy(0usize..#_num_inputs)] mutated_lockscript_witness: usize,
+        #[strategy(arb())] bad_preimage: Digest,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        ))]
+        mut transaction_primitive_witness: PrimitiveWitness,
+    ) {
+        // Assumes that the witness for lock scripts live in `nd_tokens`
+        transaction_primitive_witness.lock_scripts_and_witnesses[mutated_lockscript_witness]
+            .set_nd_tokens(bad_preimage.values().to_vec());
+
+        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
+        prop_assert!(
+            !TransactionProof::Witness(transaction_primitive_witness)
+                .verify(kernel_hash)
+                .await
+        );
+    }
+
+    #[proptest(cases = 5, async = "tokio")]
+    async fn type_script_failure_negative_test(
+        #[strategy(3usize..10)] _num_inputs: usize,
+        #[strategy(3usize..10)] _num_outputs: usize,
+        #[strategy(3usize..10)] _num_public_announcements: usize,
+        #[strategy(arb())] rng_seed: u64,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        ))]
+        mut transaction_primitive_witness: PrimitiveWitness,
+    ) {
+        // Mess up witness data for one of the type scripts, assumed to be the
+        // native currency type script. But actually doesn't matter which one it
+        // is as the goal is simply to get one of the type scripts to fail.
+        transaction_primitive_witness.type_scripts_and_witnesses[0]
+            .scramble_non_determinism(rng_seed);
+        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
+        prop_assert!(
+            !TransactionProof::Witness(transaction_primitive_witness)
+                .verify(kernel_hash)
+                .await
+        );
     }
 
     #[proptest(cases = 5, async = "tokio")]

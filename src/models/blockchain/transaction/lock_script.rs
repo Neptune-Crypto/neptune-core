@@ -99,6 +99,11 @@ impl LockScriptAndWitness {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_nd_tokens(&mut self, tokens: Vec<BFieldElement>) {
+        self.nd_tokens = tokens;
+    }
+
     pub fn new(program: Program) -> Self {
         Self {
             program,
