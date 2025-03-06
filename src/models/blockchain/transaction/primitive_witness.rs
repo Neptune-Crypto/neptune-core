@@ -428,6 +428,111 @@ impl PrimitiveWitness {
 
         true
     }
+
+    /// Update a primitive witness to be valid under a new mutator set.
+    ///
+    /// Assumes initial primitive witness is valid, and that inputs were not
+    /// spent in the supplied mutator set update. Otherwise panics. Also
+    /// assumes that the lock script witnesses are still valid under the new
+    /// mutator set.
+    pub(crate) fn update_with_new_ms_data(self, mutator_set_update: MutatorSetUpdate) -> Self {
+        let new_addition_records = mutator_set_update.additions;
+        let mut new_removal_records = mutator_set_update.removals;
+
+        new_removal_records.reverse();
+        let mut block_removal_records: Vec<&mut RemovalRecord> =
+            new_removal_records.iter_mut().collect::<Vec<_>>();
+        let mut msa_state: MutatorSetAccumulator = self.mutator_set_accumulator.clone();
+        let mut transaction_removal_records: Vec<RemovalRecord> = self.kernel.inputs.clone();
+        let mut transaction_removal_records: Vec<&mut RemovalRecord> =
+            transaction_removal_records.iter_mut().collect();
+
+        let mut primitive_witness = self;
+
+        // Apply all addition records in the block
+        for block_addition_record in new_addition_records {
+            // Batch update block's removal records to keep them valid after next addition
+            RemovalRecord::batch_update_from_addition(&mut block_removal_records, &msa_state);
+
+            // Batch update transaction's removal records
+            RemovalRecord::batch_update_from_addition(&mut transaction_removal_records, &msa_state);
+
+            // Batch update primitive witness membership proofs
+            let membership_proofs = &mut primitive_witness
+                .input_membership_proofs
+                .iter_mut()
+                .collect_vec();
+            let own_items = primitive_witness
+                .input_utxos
+                .utxos
+                .iter()
+                .map(Tip5::hash)
+                .collect_vec();
+            MsMembershipProof::batch_update_from_addition(
+                membership_proofs,
+                &own_items,
+                &msa_state,
+                &block_addition_record,
+            )
+            .expect("MS MP update from add must succeed in wallet handler");
+
+            msa_state.add(&block_addition_record);
+        }
+
+        while let Some(removal_record) = block_removal_records.pop() {
+            // Batch update block's removal records to keep them valid after next removal
+            RemovalRecord::batch_update_from_remove(&mut block_removal_records, removal_record);
+
+            // batch update transaction's removal records
+            // Batch update block's removal records to keep them valid after next removal
+            RemovalRecord::batch_update_from_remove(
+                &mut transaction_removal_records,
+                removal_record,
+            );
+
+            // Batch update primitive witness membership proofs
+            let membership_proofs = &mut primitive_witness
+                .input_membership_proofs
+                .iter_mut()
+                .collect_vec();
+
+            MsMembershipProof::batch_update_from_remove(membership_proofs, removal_record)
+                .expect("MS MP update from add must succeed in wallet handler");
+
+            msa_state.remove(removal_record);
+        }
+
+        let kernel = TransactionKernelModifier::default()
+            .inputs(
+                transaction_removal_records
+                    .into_iter()
+                    .map(|x| x.to_owned())
+                    .collect_vec(),
+            )
+            .mutator_set_hash(msa_state.hash())
+            .clone_modify(&primitive_witness.kernel);
+
+        primitive_witness.kernel = kernel.clone();
+        primitive_witness.mutator_set_accumulator = msa_state.clone();
+
+        // Set type_scripts_and_witnesses field from other fields in primitive witness.
+        let type_scripts_and_witnesses = primitive_witness
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|ts_and_w| {
+                match_type_script_and_generate_witness(
+                    ts_and_w.program.hash(),
+                    kernel.clone(),
+                    primitive_witness.input_utxos.clone(),
+                    primitive_witness.output_utxos.clone(),
+                )
+                .expect("type script hash should be known.")
+            })
+            .collect_vec();
+        primitive_witness.type_scripts_and_witnesses = type_scripts_and_witnesses;
+
+        primitive_witness
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
@@ -1566,6 +1671,69 @@ mod test {
         }
     }
 
+    #[proptest(cases = 4, async = "tokio")]
+    async fn updating_primitive_witness_with_ms_data_works(
+        // Notice only SingleProof-backed txs need inputs to allow updating, not PW-backed ones.
+        #[strategy(0usize..20)] _num_inputs_own: usize,
+        #[strategy(0usize..20)] _num_outputs_own: usize,
+        #[strategy(0usize..20)] _num_public_announcements_own: usize,
+        #[strategy(0usize..20)] _num_inputs_mined: usize,
+        #[strategy(0usize..20)] _num_outputs_mined: usize,
+        #[strategy(0usize..20)] _num_public_announcements_mined: usize,
+        #[strategy(PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets(
+            [(#_num_inputs_own, #_num_outputs_own, #_num_public_announcements_own),
+            (#_num_inputs_mined, #_num_outputs_mined, #_num_public_announcements_mined),],
+    ))]
+        pws: [PrimitiveWitness; 2],
+    ) {
+        let [own_pw, mined_pw] = pws;
+
+        let kernel_hash = own_pw.kernel.mast_hash();
+        prop_assert!(
+            TransactionProof::Witness(own_pw.clone())
+                .verify(kernel_hash)
+                .await
+        );
+
+        let ms_update = MutatorSetUpdate::new(
+            mined_pw.kernel.inputs.clone(),
+            mined_pw.kernel.outputs.clone(),
+        );
+        let updated_pw = PrimitiveWitness::update_with_new_ms_data(own_pw, ms_update);
+
+        let new_kernel_hash = updated_pw.kernel.mast_hash();
+        prop_assert!(
+            TransactionProof::Witness(updated_pw)
+                .verify(new_kernel_hash)
+                .await
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn arb_is_valid_unit_test_small() {
+        for num_inputs in 0..=2 {
+            for num_outputs in 0..=2 {
+                for num_public_announcements in 0..=2 {
+                    let mut test_runner = TestRunner::deterministic();
+                    let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
+                        Some(num_inputs),
+                        num_outputs,
+                        num_public_announcements,
+                    )
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+                    let kernel_hash = primitive_witness.kernel.mast_hash();
+                    assert!(
+                        TransactionProof::Witness(primitive_witness)
+                            .verify(kernel_hash)
+                            .await
+                    );
+                }
+            }
+        }
+    }
 
     #[proptest(cases = 5, async = "tokio")]
     async fn lock_script_failure_negative_test(
@@ -1615,9 +1783,9 @@ mod test {
 
     #[proptest(cases = 5, async = "tokio")]
     async fn arbitrary_transaction_is_valid(
-        #[strategy(1usize..3)] _num_inputs: usize,
-        #[strategy(1usize..3)] _num_outputs: usize,
-        #[strategy(0usize..3)] _num_public_announcements: usize,
+        #[strategy(3usize..10)] _num_inputs: usize,
+        #[strategy(3usize..10)] _num_outputs: usize,
+        #[strategy(3usize..10)] _num_public_announcements: usize,
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
         ))]
         transaction_primitive_witness: PrimitiveWitness,

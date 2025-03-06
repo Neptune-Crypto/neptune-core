@@ -318,13 +318,11 @@ impl Transaction {
 #[cfg(test)]
 mod tests {
     use tasm_lib::prelude::Digest;
-    use tasm_lib::triton_vm::prelude::Tip5;
     use tests::primitive_witness::SaltedUtxos;
 
     use super::*;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl Transaction {
@@ -332,88 +330,15 @@ mod tests {
         pub(crate) fn new_with_primitive_witness_ms_data(
             old_primitive_witness: PrimitiveWitness,
             new_addition_records: Vec<AdditionRecord>,
-            mut new_removal_records: Vec<RemovalRecord>,
+            new_removal_records: Vec<RemovalRecord>,
         ) -> Transaction {
-            new_removal_records.reverse();
-            let mut block_removal_records: Vec<&mut RemovalRecord> =
-                new_removal_records.iter_mut().collect::<Vec<_>>();
-            let mut msa_state: MutatorSetAccumulator =
-                old_primitive_witness.mutator_set_accumulator.clone();
-            let mut transaction_removal_records: Vec<RemovalRecord> =
-                old_primitive_witness.kernel.inputs.clone();
-            let mut transaction_removal_records: Vec<&mut RemovalRecord> =
-                transaction_removal_records.iter_mut().collect();
-
-            let mut primitive_witness = old_primitive_witness.clone();
-
-            // Apply all addition records in the block
-            for block_addition_record in new_addition_records {
-                // Batch update block's removal records to keep them valid after next addition
-                RemovalRecord::batch_update_from_addition(&mut block_removal_records, &msa_state);
-
-                // Batch update transaction's removal records
-                RemovalRecord::batch_update_from_addition(
-                    &mut transaction_removal_records,
-                    &msa_state,
-                );
-
-                // Batch update primitive witness membership proofs
-                let membership_proofs = &mut primitive_witness
-                    .input_membership_proofs
-                    .iter_mut()
-                    .collect_vec();
-                let own_items = primitive_witness
-                    .input_utxos
-                    .utxos
-                    .iter()
-                    .map(Tip5::hash)
-                    .collect_vec();
-                MsMembershipProof::batch_update_from_addition(
-                    membership_proofs,
-                    &own_items,
-                    &msa_state,
-                    &block_addition_record,
-                )
-                .expect("MS MP update from add must succeed in wallet handler");
-
-                msa_state.add(&block_addition_record);
-            }
-
-            while let Some(removal_record) = block_removal_records.pop() {
-                // Batch update block's removal records to keep them valid after next removal
-                RemovalRecord::batch_update_from_remove(&mut block_removal_records, removal_record);
-
-                // batch update transaction's removal records
-                // Batch update block's removal records to keep them valid after next removal
-                RemovalRecord::batch_update_from_remove(
-                    &mut transaction_removal_records,
-                    removal_record,
-                );
-
-                // Batch update primitive witness membership proofs
-                let membership_proofs = &mut primitive_witness
-                    .input_membership_proofs
-                    .iter_mut()
-                    .collect_vec();
-
-                MsMembershipProof::batch_update_from_remove(membership_proofs, removal_record)
-                    .expect("MS MP update from add must succeed in wallet handler");
-
-                msa_state.remove(removal_record);
-            }
-
-            let kernel = TransactionKernelModifier::default()
-                .inputs(
-                    transaction_removal_records
-                        .into_iter()
-                        .map(|x| x.to_owned())
-                        .collect_vec(),
-                )
-                .mutator_set_hash(msa_state.hash())
-                .clone_modify(&primitive_witness.kernel);
-
-            primitive_witness.kernel = kernel.clone();
-            primitive_witness.mutator_set_accumulator = msa_state.clone();
+            let mutator_set_update =
+                MutatorSetUpdate::new(new_removal_records, new_addition_records);
+            let primitive_witness = PrimitiveWitness::update_with_new_ms_data(
+                old_primitive_witness,
+                mutator_set_update,
+            );
+            let kernel = primitive_witness.kernel.clone();
             let witness = TransactionProof::Witness(primitive_witness);
 
             Transaction {
@@ -549,9 +474,7 @@ mod transaction_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn primitive_witness_updaters_are_equivalent() {
-        // Verify that various ways of updating a primitive witness are
-        // equivalent, and that they all yield valid primitive witnesses.
+    async fn primitive_witness_update_properties() {
         fn update_with_block(
             to_be_updated: PrimitiveWitness,
             mined: PrimitiveWitness,
@@ -561,21 +484,11 @@ mod transaction_tests {
                 mined.mutator_set_accumulator,
                 Network::Main,
             );
-            Transaction::new_with_primitive_witness_ms_data(
-                to_be_updated.clone(),
-                block.body().transaction_kernel.outputs.clone(),
-                block.body().transaction_kernel.inputs.clone(),
-            )
-        }
-
-        fn update_with_ms_data(
-            to_be_updated: PrimitiveWitness,
-            mined: PrimitiveWitness,
-        ) -> Transaction {
+            let ms_update = block.mutator_set_update();
             Transaction::new_with_primitive_witness_ms_data(
                 to_be_updated,
-                mined.kernel.outputs.clone(),
-                mined.kernel.inputs.clone(),
+                ms_update.additions,
+                ms_update.removals,
             )
         }
 
@@ -598,27 +511,41 @@ mod transaction_tests {
         let updated_with_block = update_with_block(to_be_updated.clone(), mined.clone());
         assert_valid_as_pw(&updated_with_block).await;
 
-        let updated_with_ms_data = update_with_ms_data(to_be_updated.clone(), mined.clone());
-        assert_valid_as_pw(&updated_with_ms_data).await;
-
-        assert_eq!(updated_with_block, updated_with_ms_data);
-
+        // Asssert some properties of the updated transaction.
         assert_eq!(
             to_be_updated.kernel.coinbase,
-            updated_with_ms_data.kernel.coinbase
+            updated_with_block.kernel.coinbase
         );
-        assert_eq!(to_be_updated.kernel.fee, updated_with_ms_data.kernel.fee);
+        assert_eq!(to_be_updated.kernel.fee, updated_with_block.kernel.fee);
         assert_eq!(
             to_be_updated.kernel.outputs,
-            updated_with_ms_data.kernel.outputs
+            updated_with_block.kernel.outputs
         );
         assert_eq!(
             to_be_updated.kernel.public_announcements,
-            updated_with_ms_data.kernel.public_announcements
+            updated_with_block.kernel.public_announcements
+        );
+        assert_eq!(
+            to_be_updated.kernel.inputs.len(),
+            updated_with_block.kernel.inputs.len(),
+        );
+        assert_eq!(
+            to_be_updated
+                .kernel
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+                .collect_vec(),
+            updated_with_block
+                .kernel
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+                .collect_vec()
         );
         assert_ne!(
             to_be_updated.kernel.mutator_set_hash,
-            updated_with_ms_data.kernel.mutator_set_hash
+            updated_with_block.kernel.mutator_set_hash
         );
     }
 
