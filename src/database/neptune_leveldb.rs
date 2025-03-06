@@ -119,7 +119,7 @@ where
 
     fn batch_write(&mut self, entries: WriteBatchAsync<Key, Value>) {
         let batch = WriteBatch::new();
-        for op in entries.0.into_iter() {
+        for op in entries.0 {
             match op {
                 WriteBatchOpAsync::Write(key, value) => {
                     let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
@@ -372,9 +372,10 @@ pub(super) struct OptionsAsync {
 }
 impl From<&Options> for OptionsAsync {
     fn from(o: &Options) -> Self {
-        if o.cache.is_some() {
-            panic!("cache option not supported for NeptuneLevelDb");
-        }
+        assert!(
+            o.cache.is_none(),
+            "cache option not supported for NeptuneLevelDb"
+        );
 
         Self {
             create_if_missing: o.create_if_missing,

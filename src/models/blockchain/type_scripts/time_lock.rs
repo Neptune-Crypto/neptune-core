@@ -29,7 +29,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 
-#[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock;
 
 impl TimeLock {
@@ -48,8 +48,7 @@ impl TimeLock {
     pub fn extract_release_date(utxo: &Utxo) -> Timestamp {
         utxo.coins()
             .iter()
-            .filter_map(Coin::release_date)
-            .next()
+            .find_map(Coin::release_date)
             .unwrap_or_else(Timestamp::zero)
     }
 }
@@ -906,7 +905,7 @@ pub mod neptune_arbitrary {
                         Some(
                             total_amount
                                 .checked_sub(
-                                    &input_amounts.iter().cloned().sum::<NativeCurrencyAmount>(),
+                                    &input_amounts.iter().copied().sum::<NativeCurrencyAmount>(),
                                 )
                                 .unwrap(),
                         )
@@ -915,7 +914,7 @@ pub mod neptune_arbitrary {
                             .iter()
                             .rev()
                             .skip(1)
-                            .cloned()
+                            .copied()
                             .sum::<NativeCurrencyAmount>();
                         *input_amounts.last_mut().unwrap() =
                             total_amount.checked_sub(&sum_of_all_but_last).unwrap();
@@ -935,7 +934,7 @@ pub mod neptune_arbitrary {
                         .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                         .collect_vec();
                     let total_outputs =
-                        output_amounts.iter().cloned().sum::<NativeCurrencyAmount>();
+                        output_amounts.iter().copied().sum::<NativeCurrencyAmount>();
                     let fee = total_amount.checked_sub(&total_outputs).unwrap();
 
                     let (mut input_utxos, input_lock_scripts_and_witnesses) =
@@ -956,7 +955,7 @@ pub mod neptune_arbitrary {
                             None,
                         );
                     let mut counter = 0usize;
-                    for utxo in input_utxos.iter_mut() {
+                    for utxo in &mut input_utxos {
                         let release_date = release_dates[counter];
                         let time_lock = TimeLock::until(release_date);
                         let mut coins = utxo.coins().to_vec();
@@ -964,7 +963,7 @@ pub mod neptune_arbitrary {
                         *utxo = Utxo::from((utxo.lock_script_hash(), coins));
                         counter += 1;
                     }
-                    for utxo in output_utxos.iter_mut() {
+                    for utxo in &mut output_utxos {
                         let mut coins = utxo.coins().to_vec();
                         coins.push(TimeLock::until(release_dates[counter]));
                         *utxo = Utxo::from((utxo.lock_script_hash(), coins));

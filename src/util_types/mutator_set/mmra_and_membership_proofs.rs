@@ -52,7 +52,7 @@ pub mod neptune_arbitrary {
             let leafs_and_indices = leafs
                 .iter()
                 .copied()
-                .zip(index_sets.iter().cloned())
+                .zip(index_sets.iter().copied())
                 .collect_vec();
 
             // segregate by tree
@@ -66,7 +66,7 @@ pub mod neptune_arbitrary {
                             (_enumeration_index, _mt_node_index, _mmr_leaf_index, peak_index),
                         )| { *peak_index == tree },
                     )
-                    .cloned()
+                    .copied()
                     .map(
                         |(
                             leaf,

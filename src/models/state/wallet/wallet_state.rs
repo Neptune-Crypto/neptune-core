@@ -170,6 +170,12 @@ impl WalletState {
         &self,
         utxo_ms_recovery_data: IncomingUtxoRecoveryData,
     ) -> Result<()> {
+        // Create JSON string ending with a newline as this flushes the write
+        #[cfg(windows)]
+        const LINE_ENDING: &str = "\r\n";
+        #[cfg(not(windows))]
+        const LINE_ENDING: &str = "\n";
+
         #[cfg(test)]
         {
             tokio::fs::create_dir_all(self.wallet_directory_path.clone()).await?;
@@ -182,12 +188,6 @@ impl WalletState {
             .open(self.incoming_secrets_path())
             .await?;
         let mut incoming_secrets_file = BufWriter::new(incoming_secrets_file);
-
-        // Create JSON string ending with a newline as this flushes the write
-        #[cfg(windows)]
-        const LINE_ENDING: &str = "\r\n";
-        #[cfg(not(windows))]
-        const LINE_ENDING: &str = "\n";
 
         let mut json_string = serde_json::to_string(&utxo_ms_recovery_data)?;
         json_string.push_str(LINE_ENDING);
@@ -230,8 +230,9 @@ impl WalletState {
         wallet_secret: WalletSecret,
         cli_args: &Args,
     ) -> Self {
-        // Create or connect to wallet block DB
+        const NUM_PREMINE_KEYS: usize = 10;
 
+        // Create or connect to wallet block DB
         DataDirectory::create_dir_if_not_exists(&data_dir.wallet_database_dir_path())
             .await
             .unwrap();
@@ -301,7 +302,6 @@ impl WalletState {
         // For premine UTXOs there is an additional complication: we do not know
         // the derivation index with which they were derived. So we derive a few
         // keys to have a bit of margin.
-        const NUM_PREMINE_KEYS: usize = 10;
         let premine_keys = (0..NUM_PREMINE_KEYS)
             .map(|n| {
                 wallet_state
@@ -604,7 +604,7 @@ impl WalletState {
         &mut self,
         expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
     ) {
-        for expected_utxo in expected_utxos.into_iter() {
+        for expected_utxo in expected_utxos {
             self.add_expected_utxo(ExpectedUtxo::new(
                 expected_utxo.utxo,
                 expected_utxo.sender_randomness,
@@ -1340,7 +1340,7 @@ impl WalletState {
         }
 
         // write UTXO-recovery data to disk.
-        for item in incoming_utxo_recovery_data_list.into_iter() {
+        for item in incoming_utxo_recovery_data_list {
             self.store_utxo_ms_recovery_data(item).await?;
         }
 
@@ -1505,7 +1505,7 @@ impl WalletState {
             .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
             .map(|(_, absi, _)| *absi)
             .collect();
-        for (wallet_status_element, membership_proof) in wallet_status.synced_unspent.iter() {
+        for (wallet_status_element, membership_proof) in &wallet_status.synced_unspent {
             // Don't allocate more than needed
             if allocated_amount >= total_spend {
                 break;
@@ -1523,15 +1523,11 @@ impl WalletState {
                 continue;
             }
 
-            let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
-                Some(k) => k,
-                None => {
-                    warn!(
-                        "spending key not found for utxo: {:?}",
-                        wallet_status_element.utxo
-                    );
-                    continue;
-                }
+            let Some(spending_key) = self.find_spending_key_for_utxo(&wallet_status_element.utxo)
+            else {
+                let utxo = &wallet_status_element.utxo;
+                warn!("spending key not found for utxo: {utxo:?}");
+                continue;
             };
 
             input_funds.push(UnlockedUtxo::unlock(

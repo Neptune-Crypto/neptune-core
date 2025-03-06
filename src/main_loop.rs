@@ -87,6 +87,7 @@ const TX_UPDATER_CHANNEL_CAPACITY: usize = 1;
 ///  a) the miner might not exist in which case there would be no-one to empty
 ///     the channel; and
 ///  b) contrary to other channels, transmission failures here are not critical.
+#[derive(Debug, Clone)]
 struct MainToMinerChannel(Option<mpsc::Sender<MainToMiner>>);
 
 impl MainToMinerChannel {
@@ -105,6 +106,7 @@ impl MainToMinerChannel {
 }
 
 /// MainLoop is the immutable part of the input for the main loop function
+#[derive(Debug)]
 pub struct MainLoopHandler {
     incoming_peer_listener: TcpListener,
     global_state_lock: GlobalStateLock,
@@ -462,7 +464,7 @@ impl MainLoopHandler {
         // Update mempool with updated transactions
         {
             let mut state = self.global_state_lock.lock_guard_mut().await;
-            for updated in updated_txs.iter() {
+            for updated in &updated_txs {
                 let txid = updated.kernel.txid();
                 if let Some(tx) = state.mempool.get_mut(txid) {
                     *tx = updated.to_owned();
@@ -509,20 +511,17 @@ impl MainLoopHandler {
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
                     self.main_to_miner_tx.send(MainToMiner::Continue);
                     return Ok(None);
-                } else {
-                    info!(
-                        "Block from miner is new canonical tip: {}",
-                        new_block.hash(),
-                    );
                 }
+                info!(
+                    "Block from miner is new canonical tip: {}",
+                    new_block.hash()
+                );
 
                 // Share block with peers first thing.
                 info!("broadcasting new block to peers");
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::Block(new_block.clone()))
-                    .expect(
-                        "Peer handler broadcast channel prematurely closed. This should never happen.",
-                    );
+                    .expect("peer broadcast channel should be open");
 
                 let update_jobs = global_state_mut
                     .set_new_tip(new_block.as_ref().clone())
@@ -1095,21 +1094,17 @@ impl MainLoopHandler {
     /// build on top of by providing potential starting points all the way
     /// back to genesis.
     fn batch_request_uca_candidate_heights(own_tip_height: BlockHeight) -> Vec<BlockHeight> {
+        const FACTOR: f64 = 1.07f64;
+
         let mut look_behind = 0;
         let mut ret = vec![];
 
         // A factor of 1.07 can look back ~1m blocks in 200 digests.
-        const FACTOR: f64 = 1.07f64;
         while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
             let height = match own_tip_height.checked_sub(look_behind) {
                 None => break,
-                Some(height) => {
-                    if height.is_genesis() {
-                        break;
-                    } else {
-                        height
-                    }
-                }
+                Some(height) if height.is_genesis() => break,
+                Some(height) => height,
             };
 
             ret.push(height);
@@ -1426,11 +1421,11 @@ impl MainLoopHandler {
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
         // signals are only used on Unix systems.
-        let (_tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
-        let (_tx_int, mut rx_int): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_int, mut rx_int): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
-        let (_tx_quit, mut rx_quit): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_quit, mut rx_quit): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
         #[cfg(unix)]
         {
@@ -1444,7 +1439,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigterm.recv().await.is_some() {
                         info!("Received SIGTERM");
-                        _tx_term.send(()).await.unwrap();
+                        tx_term.send(()).await.unwrap();
                     }
                 })?;
 
@@ -1455,7 +1450,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigint.recv().await.is_some() {
                         info!("Received SIGINT");
-                        _tx_int.send(()).await.unwrap();
+                        tx_int.send(()).await.unwrap();
                     }
                 })?;
 
@@ -1466,10 +1461,13 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigquit.recv().await.is_some() {
                         info!("Received SIGQUIT");
-                        _tx_quit.send(()).await.unwrap();
+                        tx_quit.send(()).await.unwrap();
                     }
                 })?;
         }
+
+        #[cfg(not(unix))]
+        drop((tx_term, tx_int, tx_quit));
 
         let exit_code: i32 = loop {
             select! {
@@ -1778,6 +1776,8 @@ mod test {
     }
 
     async fn setup(num_init_peers_outgoing: u8, num_peers_incoming: u8) -> TestSetup {
+        const CHANNEL_CAPACITY: usize = 10;
+
         let network = Network::Main;
         let (
             main_to_peer_tx,
@@ -1813,7 +1813,6 @@ mod test {
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
 
-        const CHANNEL_CAPACITY: usize = 10;
         let (main_to_miner_tx, _main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
         let (_miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY);
@@ -2390,7 +2389,7 @@ mod test {
                         .cmp(&r.1.connection_established())
                 })
                 .map(|(socket_address, _peer_info)| socket_address)
-                .cloned()
+                .copied()
                 .unwrap();
 
             // simulate incoming connection

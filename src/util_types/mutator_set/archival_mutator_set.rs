@@ -22,6 +22,7 @@ use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::MutatorSetError;
 
+#[derive(Debug, Clone)]
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
 where
     MmrStorage: StorageVec<Digest> + Send + Sync,
@@ -612,7 +613,7 @@ mod archival_mutator_set_tests {
             // Update all MPs
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
-                &items.iter().cloned().collect_vec(),
+                &items.iter().copied().collect_vec(),
                 &archival_mutator_set.accumulator().await,
                 &addition_record,
             )
@@ -634,9 +635,7 @@ mod archival_mutator_set_tests {
             }
         }
 
-        let saw_collision_at = if let Some(collision) = saw_collision_at {
-            collision
-        } else {
+        let Some(saw_collision_at) = saw_collision_at else {
             panic!("Collision must be generated with seeded RNG");
         };
 
@@ -1027,7 +1026,7 @@ mod archival_mutator_set_tests {
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
-            for removal_record in removal_records.iter() {
+            for removal_record in &removal_records {
                 archival_mutator_set.revert_remove(removal_record).await;
             }
 

@@ -29,7 +29,7 @@ use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Sign {
     In,
     Out,

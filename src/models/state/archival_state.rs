@@ -249,7 +249,7 @@ impl ArchivalState {
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
         if archival_mutator_set.ams().aocl.is_empty().await {
-            for addition_record in genesis_block.kernel.body.transaction_kernel.outputs.iter() {
+            for addition_record in &genesis_block.kernel.body.transaction_kernel.outputs {
                 archival_mutator_set.ams_mut().add(addition_record).await;
             }
             let genesis_hash = genesis_block.hash();
@@ -319,7 +319,7 @@ impl ArchivalState {
         let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
         let file_record_value: Option<FileRecord> = self
             .block_index_db
-            .get(file_record_key.clone())
+            .get(file_record_key)
             .await
             .map(|x| x.as_file_record());
         let file_record_value: FileRecord = match file_record_value {
@@ -352,7 +352,7 @@ impl ArchivalState {
 
         let height_record_key = BlockIndexKey::Height(new_block.header().height);
         let mut blocks_at_same_height: Vec<Digest> =
-            match self.block_index_db.get(height_record_key.clone()).await {
+            match self.block_index_db.get(height_record_key).await {
                 Some(rec) => rec.as_height_record(),
                 None => vec![],
             };
@@ -428,7 +428,7 @@ impl ArchivalState {
         }
 
         let mut batch = WriteBatchAsync::new();
-        for (k, v) in block_index_entries.into_iter() {
+        for (k, v) in block_index_entries {
             batch.op_write(k, v);
         }
 
@@ -806,15 +806,10 @@ impl ArchivalState {
             .get(BlockIndexKey::Block(block_digest))
             .await
             .map(|x| x.as_block_record());
-        let record: BlockRecord = match maybe_record {
-            Some(rec) => rec,
-            None => {
-                if self.genesis_block.hash() == block_digest {
-                    return Ok(Some(*self.genesis_block.clone()));
-                } else {
-                    return Ok(None);
-                }
-            }
+        let Some(record) = maybe_record else {
+            let maybe_genesis_block =
+                (self.genesis_block.hash() == block_digest).then_some(*self.genesis_block.clone());
+            return Ok(maybe_genesis_block);
         };
 
         // Fetch block from disk
@@ -844,9 +839,8 @@ impl ArchivalState {
     /// Returns false if either the block is not known, or if it's known but
     /// has been orphaned.
     pub(crate) async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
-        let block_header = match self.get_block_header(block_digest).await {
-            Some(bh) => bh,
-            None => return false,
+        let Some(block_header) = self.get_block_header(block_digest).await else {
+            return false;
         };
 
         let block_height: u64 = block_header.height.into();
@@ -945,7 +939,7 @@ impl ArchivalState {
         // these changes are not persisted, as that would leave the archival
         // mutator set in a state incompatible with the tip.
         self.archival_mutator_set.persist().await;
-        for (additions, removals) in block_mutations.iter() {
+        for (additions, removals) in &block_mutations {
             for rr in removals.iter().rev() {
                 self.archival_mutator_set.ams_mut().revert_remove(rr).await;
             }
@@ -967,7 +961,7 @@ impl ArchivalState {
         let mut removal_records = removal_records.concat();
 
         let swbf_length = self.archival_mutator_set.ams().chunks.len().await;
-        for rr in removal_records.iter_mut() {
+        for rr in &mut removal_records {
             let mut removals = vec![];
             for (chkidx, (mp, chunk)) in rr
                 .target_chunks
@@ -1040,7 +1034,7 @@ impl ArchivalState {
             } = rollback_block.mutator_set_update();
 
             // Roll back all removal records contained in block
-            for removal_record in removals.iter() {
+            for removal_record in &removals {
                 self.archival_mutator_set
                     .ams_mut()
                     .revert_remove(removal_record)
@@ -2504,7 +2498,7 @@ mod archival_state_tests {
 
             // After each applied block, all AOCL leaf indices must match
             // expected values.
-            for block in blocks.iter() {
+            for block in &blocks {
                 let min_aocl_index_next = block.mutator_set_accumulator_after().aocl.num_leafs();
                 for aocl_index in min_aocl_index..min_aocl_index_next {
                     let found_block_digest = archival_state
@@ -2589,7 +2583,7 @@ mod archival_state_tests {
             .outputs
             .clone();
 
-        for ar in addition_records.iter() {
+        for ar in &addition_records {
             let found_block = archival_state
                 .find_canonical_block_with_output(*ar, None)
                 .await
@@ -3605,11 +3599,11 @@ mod archival_state_tests {
                 rng.random(),
             )
             .await;
-            for block in blocks.iter() {
+            for block in &blocks {
                 archival_state.write_block_as_tip(block).await.unwrap();
             }
 
-            for block in blocks.iter() {
+            for block in &blocks {
                 let block_digest = block.hash();
                 let stored_record = archival_state
                     .block_index_db

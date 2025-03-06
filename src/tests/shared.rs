@@ -271,18 +271,17 @@ pub(crate) async fn get_test_genesis_setup(
     GlobalStateLock,
     HandshakeData,
 )> {
-    let (peer_broadcast_tx, mut _from_main_rx1) =
+    let (peer_broadcast_tx, from_main_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+    let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
     let devnet_wallet = WalletSecret::devnet_wallet();
     let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
-        from_main_rx_clone,
+        from_main_rx,
         to_main_tx,
-        _to_main_rx1,
+        to_main_rx,
         state,
         get_dummy_handshake_data_for_genesis(network),
     ))
@@ -337,7 +336,7 @@ pub struct Mock<Item> {
 }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MockError {
     WrongSend,
     UnexpectedSend,
@@ -969,7 +968,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     }
 
     let mut rng = StdRng::from_seed(shuffle_seed);
-    for tx_to_include in selected_mempool_txs.into_iter() {
+    for tx_to_include in selected_mempool_txs {
         block_transaction =
             fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
                 .await
@@ -1092,7 +1091,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     tip_block: &Block,
 ) -> bool {
     let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-    for monitored_utxo in monitored_utxos.get_all().await.iter() {
+    for monitored_utxo in &monitored_utxos.get_all().await {
         let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
         match current_mp {

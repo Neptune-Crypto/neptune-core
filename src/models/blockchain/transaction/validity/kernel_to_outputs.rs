@@ -105,7 +105,9 @@ impl SecretWitness for KernelToOutputsWitness {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
+#[derive(
+    Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec,
+)]
 pub struct KernelToOutputs;
 
 impl KernelToOutputs {
@@ -115,6 +117,12 @@ impl KernelToOutputs {
 
 impl ConsensusProgram for KernelToOutputs {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+        const MAX_JUMP_LENGTH: usize = 2_000_000;
+
+        const SIZE_OF_SALT: usize = 3;
+        const SIZE_INDICATOR_SIZE: usize = 1;
+        const LENGTH_INDICATOR_SIZE: usize = 1;
+
         let mut library = Library::new();
 
         let new_list = library.import(Box::new(list::new::New));
@@ -138,11 +146,6 @@ impl ConsensusProgram for KernelToOutputs {
             KernelToOutputsWitnessMemory,
         >::default()));
 
-        const MAX_JUMP_LENGTH: usize = 2_000_000;
-
-        const SIZE_OF_SALT: usize = 3;
-        const SIZE_INDICATOR_SIZE: usize = 1;
-        const LENGTH_INDICATOR_SIZE: usize = 1;
         let tasm = triton_asm! {
             read_io 5       // _ [txkmh]
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}

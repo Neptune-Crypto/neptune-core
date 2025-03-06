@@ -401,6 +401,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_dbtcvecs_get_many() {
+        const TEST_LIST_LENGTH: u8 = 105;
+
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
             .unwrap();
@@ -409,7 +411,6 @@ mod tests {
         let mut vector = rusty_storage.schema.new_vec::<S>("test-vector").await;
 
         // populate
-        const TEST_LIST_LENGTH: u8 = 105;
         for i in 0u8..TEST_LIST_LENGTH {
             vector.push(S(vec![i, i, i])).await;
         }
@@ -429,7 +430,7 @@ mod tests {
             .into_iter()
             .map(|x| x % TEST_LIST_LENGTH as u64)
             .collect();
-        for index in mutate_indices.iter() {
+        for index in &mutate_indices {
             vector
                 .set(
                     *index,
@@ -453,6 +454,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_dbtcvecs_set_many_get_many() {
+        const TEST_LIST_LENGTH: u8 = 105;
+
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
             .unwrap();
@@ -462,7 +465,6 @@ mod tests {
         let mut vector = rusty_storage.schema.new_vec::<S>("test-vector").await;
 
         // Generate initial index/value pairs.
-        const TEST_LIST_LENGTH: u8 = 105;
         let init_keyvals: Vec<(Index, S)> = (0u8..TEST_LIST_LENGTH)
             .map(|i| (i as Index, S(vec![i, i, i])))
             .collect();
@@ -537,6 +539,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_dbtcvecs_set_all_get_many() {
+        const TEST_LIST_LENGTH: u8 = 105;
+
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
             .unwrap();
@@ -546,7 +550,6 @@ mod tests {
         let mut vector = rusty_storage.schema.new_vec::<S>("test-vector").await;
 
         // Generate initial index/value pairs.
-        const TEST_LIST_LENGTH: u8 = 105;
         let init_vals: Vec<S> = (0u8..TEST_LIST_LENGTH)
             .map(|i| (S(vec![i, i, i])))
             .collect();
@@ -582,7 +585,7 @@ mod tests {
             .collect();
 
         // Generate vals for mutation
-        for index in mutate_indices.iter() {
+        for index in &mutate_indices {
             let val = (index % TEST_LIST_LENGTH as u64 + 1) as u8;
             mutate_vals[*index as usize] = S(vec![val, val, val]);
         }
@@ -676,7 +679,7 @@ mod tests {
                     let values: Vec<u64> = (0..indices.len()).map(|_| rng.next_u64()).collect_vec();
                     let update: Vec<(u64, u64)> =
                         indices.into_iter().zip_eq(values.into_iter()).collect();
-                    for (key, val) in update.iter() {
+                    for (key, val) in &update {
                         normal_vector[*key as usize] = *val;
                     }
                     persisted_vector.set_many(update).await;

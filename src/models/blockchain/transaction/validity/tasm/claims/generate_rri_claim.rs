@@ -14,6 +14,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 ///
 /// Assumes the transaction kernel MAST hash is on the stack somewhere, but not
 /// necessarily immediately preceding the proof collection pointer.
+#[derive(Debug, Copy, Clone)]
 pub struct GenerateRriClaim;
 
 impl BasicSnippet for GenerateRriClaim {

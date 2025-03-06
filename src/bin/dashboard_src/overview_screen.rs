@@ -259,6 +259,7 @@ impl Screen for OverviewScreen {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct VerticalRectifier {
     container: Rect,
     inner_y: u16,
@@ -380,7 +381,7 @@ impl Widget for OverviewScreen {
 
         lines.push(format!(
             "mining status: {}",
-            dashifnotset!(data.mining_status.clone())
+            dashifnotset!(data.mining_status)
         ));
 
         let tip_digest_hex = data.tip_digest.map(|d| d.to_hex());

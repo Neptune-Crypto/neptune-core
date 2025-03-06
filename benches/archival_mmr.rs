@@ -26,8 +26,8 @@ fn main() {
 ///
 /// C++ docs:  (complete)
 ///   https://github.com/google/leveldb/blob/068d5ee1a3ac40dabd00d211d5013af44be55bea/include/leveldb/options.h
-fn db_options() -> Option<Options> {
-    Some(Options {
+fn db_options() -> Options {
+    Options {
         // default: false
         create_if_missing: true,
 
@@ -61,13 +61,13 @@ fn db_options() -> Option<Options> {
         // So Cache of 1024 bytes is 8% of total data set.
         // that seems reasonably realistic to get some
         // hits/misses.
-    })
+    }
 }
 
 async fn new_ammr(leaf_count: u64) -> (SimpleRustyStorage, ArchivalMmr<DbtVec<Digest>>) {
     let db = NeptuneLevelDb::open_new_test_database(
         false,
-        db_options(),
+        Some(db_options()),
         Some(ReadOptions {
             verify_checksums: false,
             fill_cache: false,
@@ -110,7 +110,7 @@ mod append {
 
             bencher.bench_local(|| {
                 rt.block_on(async {
-                    for new_leaf in digests.iter() {
+                    for new_leaf in &digests {
                         ammr.append(*new_leaf).await;
                     }
                     if persist {

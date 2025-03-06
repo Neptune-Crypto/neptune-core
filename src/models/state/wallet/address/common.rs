@@ -155,8 +155,9 @@ pub(super) mod test {
 
     #[test]
     fn test_conversion_fixed_length() {
-        let mut rng = rand::rng();
         const N: usize = 23;
+
+        let mut rng = rand::rng();
         let byte_array: [u8; N] = rng.random();
         let byte_vec = byte_array.to_vec();
         let bfes = bytes_to_bfes(&byte_vec);

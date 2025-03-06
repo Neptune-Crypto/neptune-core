@@ -319,7 +319,7 @@ impl TxOutputList {
     /// Returns all public announcement for this TxOutputList
     pub(crate) fn public_announcements(&self) -> Vec<PublicAnnouncement> {
         let mut public_announcements = vec![];
-        for tx_output in self.0.iter() {
+        for tx_output in &self.0 {
             if let Some(pa) = tx_output.public_announcement() {
                 public_announcements.push(pa);
             }
@@ -330,7 +330,7 @@ impl TxOutputList {
 
     pub(crate) fn private_notifications(&self, network: Network) -> Vec<PrivateNotificationData> {
         let mut private_utxo_notifications = vec![];
-        for tx_output in self.0.iter() {
+        for tx_output in &self.0 {
             if let Some((ciphertext, receiver_address)) = tx_output.private_notification(network) {
                 let notification_data = PrivateNotificationData {
                     cleartext: tx_output.notification_payload(),

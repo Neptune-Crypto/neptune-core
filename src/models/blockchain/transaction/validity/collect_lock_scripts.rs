@@ -69,7 +69,7 @@ impl SecretWitness for CollectLockScriptsWitness {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectLockScripts;
 
 impl CollectLockScripts {
@@ -78,6 +78,8 @@ impl CollectLockScripts {
 
 impl ConsensusProgram for CollectLockScripts {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+        const MAX_JUMP_LENGTH: usize = 2_000_000;
+
         let mut library = Library::new();
         let field_with_size_salted_input_utxos =
             field_with_size!(CollectLockScriptsWitness::salted_input_utxos);
@@ -93,9 +95,7 @@ impl ConsensusProgram for CollectLockScripts {
             CollectLockScriptsWitness,
         >::default()));
 
-        const MAX_JUMP_LENGTH: usize = 2_000_000;
         let payload = triton_asm! {
-
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             // _ *clsw
 

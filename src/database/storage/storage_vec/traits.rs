@@ -190,7 +190,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
         T: 'a,
     {
         stream! {
-            for i in indices.into_iter() {
+            for i in indices {
                 yield (i, self.get(i).await)
             }
         }
@@ -220,7 +220,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
         T: 'a,
     {
         stream! {
-            for i in indices.into_iter() {
+            for i in indices {
                 yield self.get(i).await
             }
         }
