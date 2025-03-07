@@ -2,12 +2,11 @@ use std::path::PathBuf;
 
 use tracing::info;
 
+use super::scan_mode_configuration::ScanModeConfiguration;
+use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
-
-use super::scan_mode_configuration::ScanModeConfiguration;
-use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 
 /// Configuration options for [`WalletState`](super::wallet_state::WalletState).
 ///
@@ -109,11 +108,10 @@ impl WalletConfiguration {
 #[cfg(test)]
 mod test {
 
+    use super::*;
     use crate::config_models::cli_args::Args;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::tests::shared::unit_test_data_directory;
-
-    use super::*;
     #[test]
     fn scan_mode_is_off_by_default() {
         let network = Network::Main;
