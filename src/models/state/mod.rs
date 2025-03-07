@@ -3,6 +3,7 @@ pub mod block_proposal;
 pub mod blockchain_state;
 pub mod light_state;
 pub mod mempool;
+pub mod mining_state;
 pub mod mining_status;
 pub mod networking_state;
 pub mod shared;
@@ -25,6 +26,7 @@ use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
 use mempool::Mempool;
 use mempool::TransactionOrigin;
+use mining_state::MiningState;
 use mining_status::ComposingWorkInfo;
 use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
@@ -181,7 +183,7 @@ impl GlobalStateLock {
 
     // check if mining
     pub async fn mining(&self) -> bool {
-        self.lock(|s| match s.mining_status {
+        self.lock(|s| match s.mining_state.mining_status {
             MiningStatus::Guessing(_) => true,
             MiningStatus::Composing(_) => true,
             MiningStatus::Inactive => false,
@@ -190,7 +192,7 @@ impl GlobalStateLock {
     }
 
     pub async fn set_mining_status_to_inactive(&mut self) {
-        self.lock_guard_mut().await.mining_status = MiningStatus::Inactive;
+        self.lock_guard_mut().await.mining_state.mining_status = MiningStatus::Inactive;
         tracing::debug!("set mining status: inactive");
     }
 
@@ -198,7 +200,7 @@ impl GlobalStateLock {
     pub async fn set_mining_status_to_guessing(&mut self, block: &Block) {
         let now = SystemTime::now();
         let block_info = GuessingWorkInfo::new(now, block);
-        self.lock_guard_mut().await.mining_status = MiningStatus::Guessing(block_info);
+        self.lock_guard_mut().await.mining_state.mining_status = MiningStatus::Guessing(block_info);
         tracing::debug!("set mining status: guessing");
     }
 
@@ -206,7 +208,7 @@ impl GlobalStateLock {
     pub async fn set_mining_status_to_composing(&mut self) {
         let now = SystemTime::now();
         let work_info = ComposingWorkInfo::new(now);
-        self.lock_guard_mut().await.mining_status = MiningStatus::Composing(work_info);
+        self.lock_guard_mut().await.mining_state.mining_status = MiningStatus::Composing(work_info);
         tracing::debug!("set mining status: composing");
     }
 
@@ -302,13 +304,8 @@ pub struct GlobalState {
     /// The `Mempool` may only be updated by the main task.
     pub mempool: Mempool,
 
-    /// The block proposal to which guessers contribute proof-of-work.
-    pub(crate) block_proposal: BlockProposal,
-
-    /// Indicates whether the guessing or composing task is running, and if so,
-    /// since when.
-    // Only the mining task should write to this, anyone can read.
-    pub(crate) mining_status: MiningStatus,
+    /// The `mining_state` can be updated by main task, mining task, or RPC server.
+    pub(crate) mining_state: MiningState,
 }
 
 impl GlobalState {
@@ -325,8 +322,7 @@ impl GlobalState {
             net,
             cli,
             mempool,
-            block_proposal: BlockProposal::default(),
-            mining_status: MiningStatus::Inactive,
+            mining_state: MiningState::default(),
         }
     }
 
@@ -436,7 +432,10 @@ impl GlobalState {
             });
         }
 
-        let maybe_existing_fee = self.block_proposal.map(|x| x.total_guesser_reward());
+        let maybe_existing_fee = self
+            .mining_state
+            .block_proposal
+            .map(|x| x.total_guesser_reward());
         if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
             || incoming_guesser_fee.is_zero()
         {
@@ -1507,8 +1506,9 @@ impl GlobalState {
         self.chain.light_state_mut().set_block(new_block);
 
         // Reset block proposal, as that field pertains to the block that
-        // was just set as new tip.
-        self.block_proposal = BlockProposal::none();
+        // was just set as new tip. Also reset set of exported block proposals.
+        self.mining_state.block_proposal = BlockProposal::none();
+        self.mining_state.exported_block_proposals.clear();
 
         // Flush databases
         self.flush_databases().await?;
@@ -1741,6 +1741,7 @@ mod global_state_tests {
     use crate::models::blockchain::block::Block;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::tests::shared::fake_valid_successor_for_tests;
+    use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
@@ -1810,6 +1811,35 @@ mod global_state_tests {
                 .await;
             assert!(handshake_data.listen_port.is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn set_new_tip_clears_block_proposal_related_data() {
+        let network = Network::Main;
+        let mut bob = mock_genesis_global_state(
+            network,
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+        let mut bob = bob.global_state_lock.lock_guard_mut().await;
+        let block1 = invalid_empty_block(&Block::genesis(network));
+
+        bob.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone());
+        bob.mining_state
+            .exported_block_proposals
+            .insert(random(), block1.clone());
+
+        bob.set_new_tip(block1).await.unwrap();
+        assert!(
+            bob.mining_state.block_proposal.is_none(),
+            "block proposal must be reset after setting new tip."
+        );
+        assert!(
+            bob.mining_state.exported_block_proposals.is_empty(),
+            "Set of exported block proposals must be empty after registering new block"
+        );
     }
 
     #[traced_test]
@@ -2954,7 +2984,8 @@ mod global_state_tests {
             "Must favor low guesser fee over none"
         );
 
-        state.block_proposal = BlockProposal::foreign_proposal(small_guesser_fraction.clone());
+        state.mining_state.block_proposal =
+            BlockProposal::foreign_proposal(small_guesser_fraction.clone());
         assert!(
             state
                 .favor_incoming_block_proposal(
@@ -2965,7 +2996,8 @@ mod global_state_tests {
             "Must favor big guesser fee over low"
         );
 
-        state.block_proposal = BlockProposal::foreign_proposal(big_guesser_fraction.clone());
+        state.mining_state.block_proposal =
+            BlockProposal::foreign_proposal(big_guesser_fraction.clone());
         assert_eq!(
             BlockProposalRejectError::InsufficientFee {
                 current: Some(big_guesser_fraction.total_guesser_reward()),

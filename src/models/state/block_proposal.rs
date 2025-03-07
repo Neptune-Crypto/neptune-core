@@ -32,7 +32,11 @@ impl BlockProposal {
     }
 
     pub(crate) fn is_some(&self) -> bool {
-        !matches!(self, BlockProposal::None)
+        !self.is_none()
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, BlockProposal::None)
     }
 
     pub(crate) fn unwrap(&self) -> &Block {
