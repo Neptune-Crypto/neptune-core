@@ -359,6 +359,10 @@ pub struct Args {
     /// Example: `neptune-core --scan-keys 42`
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
+
+    /// Enables the JSON/HTTP RPC API and listens on specified address and port.
+    #[clap(long)]
+    pub listen_rpc: Option<SocketAddr>,
 }
 
 impl Default for Args {
