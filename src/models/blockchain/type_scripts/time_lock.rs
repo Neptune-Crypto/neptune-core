@@ -1250,12 +1250,14 @@ mod test {
     }
 
     #[proptest(cases = 5)]
-    fn primitive_witness_with_timelocks_is_valid(
+    fn primitive_witness_with_active_timelocks_is_invalid(
         #[strategy(arb::<Timestamp>())] _now: Timestamp,
         #[strategy(arbitrary_primitive_witness_with_active_timelocks(2, 2, 2, #_now))]
         primitive_witness: PrimitiveWitness,
     ) {
-        prop_assert!(Runtime::new()
+        // Negative test: Primitive witness spending inputs that are timelocked
+        // must fail to validate.
+        prop_assert!(!Runtime::new()
             .unwrap()
             .block_on(primitive_witness.validate()));
     }
