@@ -1,5 +1,6 @@
 pub mod proof_upgrader;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -45,6 +46,8 @@ use crate::models::channel::RPCServerToMain;
 use crate::models::peer::handshake_data::HandshakeData;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::transaction_notification::TransactionNotification;
+use crate::models::peer::BootstrapStatus;
+use crate::models::peer::InstanceId;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
@@ -146,12 +149,12 @@ struct MutableMainLoopState {
 }
 
 impl MutableMainLoopState {
-    fn new(task_handles: Vec<JoinHandle<()>>) -> Self {
+    fn new(state_lock: GlobalStateLock, task_handles: Vec<JoinHandle<()>>) -> Self {
         let (_dummy_sender, dummy_receiver) =
             mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
         Self {
             sync_state: SyncState::default(),
-            potential_peers: PotentialPeersState::default(),
+            potential_peers: PotentialPeersState::new(state_lock),
             task_handles,
             proof_upgrader_task: None,
             update_mempool_txs_handle: None,
@@ -225,137 +228,157 @@ impl SyncState {
     }
 }
 
-/// holds information about a potential peer in the process of peer discovery
-struct PotentialPeerInfo {
-    _reported: SystemTime,
-    _reported_by: SocketAddr,
-    instance_id: u128,
+/// A potential peer in the process of peer discovery.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+struct PeerCandidate {
+    address: SocketAddr,
+    id: InstanceId,
     distance: u8,
 }
 
-impl PotentialPeerInfo {
-    fn new(reported_by: SocketAddr, instance_id: u128, distance: u8, now: SystemTime) -> Self {
+impl PeerCandidate {
+    fn new(address: SocketAddr, id: InstanceId, distance: u8) -> Self {
         Self {
-            _reported: now,
-            _reported_by: reported_by,
-            instance_id,
+            address,
+            id,
             distance,
         }
     }
 }
 
-/// holds information about a set of potential peers in the process of peer discovery
+/// The potential peers in the process of peer discovery.
+#[derive(Debug, Clone)]
 struct PotentialPeersState {
-    potential_peers: HashMap<SocketAddr, PotentialPeerInfo>,
+    global_state_lock: GlobalStateLock,
+    candidates: HashMap<SocketAddr, PeerCandidate>,
 }
 
 impl PotentialPeersState {
-    fn default() -> Self {
+    fn new(global_state_lock: GlobalStateLock) -> Self {
         Self {
-            potential_peers: HashMap::new(),
+            global_state_lock,
+            candidates: HashMap::new(),
         }
     }
 
-    fn add(
-        &mut self,
-        reported_by: SocketAddr,
-        potential_peer: (SocketAddr, u128),
-        max_peers: usize,
-        distance: u8,
-        now: SystemTime,
-    ) {
-        let potential_peer_socket_address = potential_peer.0;
-        let potential_peer_instance_id = potential_peer.1;
-
-        // This check *should* make it likely that a potential peer is always
-        // registered with the lowest observed distance.
-        if self
-            .potential_peers
-            .contains_key(&potential_peer_socket_address)
-        {
+    fn add(&mut self, candidate: PeerCandidate) {
+        // always use the lowest observed distance for a given candidate
+        if let Some(existing_candidate) = self.candidates.get_mut(&candidate.address) {
+            if candidate.distance < existing_candidate.distance {
+                *existing_candidate = candidate;
+            }
             return;
         }
 
-        // If this data structure is full, remove a random entry. Then add this.
-        if self.potential_peers.len()
-            > max_peers * POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS
-        {
-            let mut rng = rand::rng();
-            let random_potential_peer = self
-                .potential_peers
-                .keys()
-                .choose(&mut rng)
-                .unwrap()
-                .to_owned();
-            self.potential_peers.remove(&random_potential_peer);
+        // if the candidate list is full, remove random entries
+        let max_num_peers = self.global_state_lock.cli().max_num_peers;
+        let max_num_candidates = max_num_peers * POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS;
+        while self.candidates.len() > max_num_candidates {
+            let Some(&random_candidate) = self.candidates.keys().choose(&mut rand::rng()) else {
+                warn!("Failed to shrink full potential peer list: couldn't find element to remove");
+                break;
+            };
+            if self.candidates.remove(&random_candidate).is_none() {
+                warn!("Failed to shrink full potential peer list: couldn't remove chosen element");
+                break;
+            };
         }
 
-        let insert_value =
-            PotentialPeerInfo::new(reported_by, potential_peer_instance_id, distance, now);
-        self.potential_peers
-            .insert(potential_peer_socket_address, insert_value);
+        self.candidates.insert(candidate.address, candidate);
     }
 
-    /// Return a peer from the potential peer list that we aren't connected to
-    /// and  that isn't our own address.
+    /// Select a node that
+    /// - is not us,
+    /// - is no peer, and
+    /// - if we are well-connected, is not a bootstrap node.
     ///
-    /// Favors peers with a high distance and with IPs that we are not already
-    /// connected to.
+    /// Favors peers with a large distance and those with IP addresses we are
+    /// not already connected to.
     ///
-    /// Returns (socket address, peer distance)
-    fn get_candidate(
+    /// The decision whether a potential peer is identical to the current node
+    /// is made _only_ based on the [`InstanceId`]. This means that different
+    /// nodes that run on the same computer _can_ connect to each other.
+    ///
+    ///   * acquires `global_state_lock` for read
+    //
+    // A note on the design: The method first declares various relevant filters
+    // as well as a way to compare two peer candidates. The filters and the
+    // comparison function are then used in a simple iterator-combinator chain
+    // to select the candidate.
+    //
+    // The design's intention is to simplify future changes: declaring a new
+    // filter as well as modifying or dropping existing filters has little to no
+    // impact on other filters. Similarly, modifying the comparison function
+    // does not require changes to the filters.
+    async fn peer_candidate(
         &self,
-        connected_clients: &[PeerInfo],
-        own_instance_id: u128,
-    ) -> Option<(SocketAddr, u8)> {
-        let peers_instance_ids: Vec<u128> =
-            connected_clients.iter().map(|x| x.instance_id()).collect();
-
-        // Only pick those peers that report a listening port
-        let peers_listen_addresses: Vec<SocketAddr> = connected_clients
-            .iter()
-            .filter_map(|x| x.listen_address())
-            .collect();
-
-        // Find the appropriate candidates
-        let candidates = self
-            .potential_peers
-            .iter()
-            // Prevent connecting to self. Note that we *only* use instance ID to prevent this,
-            // meaning this will allow multiple nodes e.g. running on the same computer to form
-            // a complete graph.
-            .filter(|pp| pp.1.instance_id != own_instance_id)
-            // Prevent connecting to peer we already are connected to
-            .filter(|potential_peer| !peers_instance_ids.contains(&potential_peer.1.instance_id))
-            .filter(|potential_peer| !peers_listen_addresses.contains(potential_peer.0))
-            .collect::<Vec<_>>();
-
-        // Prefer candidates with IPs that we are not already connected to but
-        // connect to repeated IPs in case we don't have other options, as
-        // repeated IPs may just be multiple machines on the same NAT'ed IPv4
-        // address.
-        let mut connected_ips = peers_listen_addresses.into_iter().map(|x| x.ip());
-        let candidates = if candidates
-            .iter()
-            .any(|candidate| !connected_ips.contains(&candidate.0.ip()))
-        {
-            candidates
-                .into_iter()
-                .filter(|candidate| !connected_ips.contains(&candidate.0.ip()))
-                .collect()
-        } else {
-            candidates
+        current_peers: &[PeerInfo],
+        own_instance_id: InstanceId,
+    ) -> Option<PeerCandidate> {
+        let is_self = |candidate: &PeerCandidate| candidate.id == own_instance_id;
+        let is_peer = |candidate: &PeerCandidate| {
+            current_peers
+                .iter()
+                .any(|peer| candidate.id == peer.instance_id())
         };
 
-        // Get the candidate list with the highest distance
-        let max_distance_candidates = candidates.iter().max_by_key(|pp| pp.1.distance);
+        // trade-off: hold the lock for a while, or clone `bootstrap_status`?
+        let bootstrap_status = &self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .bootstrap_status;
+        let is_bootstrap_node = |candidate: &PeerCandidate| {
+            let candidate_bootstrap_status = bootstrap_status
+                .get(&candidate.address)
+                .copied()
+                .unwrap_or_default();
+            candidate_bootstrap_status == BootstrapStatus::Bootstrap
+        };
+        let self_is_well_connected = self.is_well_connected(current_peers.len());
 
-        // Pick a random candidate from the appropriate candidates
-        let mut rng = rand::rng();
-        max_distance_candidates
-            .iter()
-            .choose(&mut rng)
-            .map(|x| (x.0.to_owned(), x.1.distance))
+        self.candidates
+            .values()
+            .filter(|candidate| !is_self(candidate))
+            .filter(|candidate| !is_peer(candidate))
+            .filter(|candidate| !self_is_well_connected || !is_bootstrap_node(candidate))
+            .max_by(|l, r| Self::candidate_ordering(current_peers, l, r))
+            .copied()
+    }
+
+    fn is_well_connected(&self, num_peers: usize) -> bool {
+        /// A node with more peers than this ratio of its maximum number of
+        /// peers is considered well-connected.
+        const WELL_CONNECTED_RATIO: f32 = 0.8;
+
+        let max_num_peers = self.global_state_lock.cli().max_num_peers;
+
+        num_peers as f32 > WELL_CONNECTED_RATIO * max_num_peers as f32
+    }
+
+    /// Order candidates by connection status of their IP address and distance.
+    //
+    // This is not `impl Ord for PeerCandidate` because it depends on the
+    // current peers.
+    fn candidate_ordering(
+        current_peers: &[PeerInfo],
+        left: &PeerCandidate,
+        right: &PeerCandidate,
+    ) -> Ordering {
+        // Does a connection to the candidate's IP exist?
+        let ip_is_connected = |candidate: &PeerCandidate| {
+            current_peers
+                .iter()
+                .filter_map(|peer| peer.listen_address())
+                .any(|address| candidate.address.ip() == address.ip())
+        };
+
+        match (ip_is_connected(left), ip_is_connected(right)) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => left.distance.cmp(&right.distance),
+        }
     }
 }
 
@@ -765,18 +788,11 @@ impl MainLoopHandler {
                     }
                 }
             }
-            PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
+            PeerTaskToMain::PeerDiscoveryAnswer(potential_peers, distance) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::PeerDiscoveryAnswer");
-
-                let max_peers = self.global_state_lock.cli().max_num_peers;
-                for pot_peer in pot_peers {
-                    main_loop_state.potential_peers.add(
-                        reported_by,
-                        pot_peer,
-                        max_peers,
-                        distance,
-                        self.now(),
-                    );
+                for (address, id) in potential_peers {
+                    let candidate = PeerCandidate::new(address, id, distance);
+                    main_loop_state.potential_peers.add(candidate);
                 }
             }
             PeerTaskToMain::Transaction(pt2m_transaction) => {
@@ -1046,16 +1062,21 @@ impl MainLoopHandler {
         // the peer lists requested in the previous step will not have come in
         // yet. Therefore, the new candidate is selected based on somewhat
         // (but not overly) old information.
-        let Some((peer_candidate, candidate_distance)) = main_loop_state
+        let Some(peer_candidate) = main_loop_state
             .potential_peers
-            .get_candidate(&connected_peers, own_instance_id)
+            .peer_candidate(&connected_peers, own_instance_id)
+            .await
         else {
             info!("Found no peer candidate to connect to. Not making new connection.");
             return Ok(());
         };
 
         // Try to connect to the selected candidate.
-        info!("Connecting to peer {peer_candidate} with distance {candidate_distance}");
+        info!(
+            "Connecting to peer {address} with distance {distance}",
+            address = peer_candidate.address,
+            distance = peer_candidate.distance
+        );
         let global_state_lock = self.global_state_lock.clone();
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
         let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
@@ -1063,12 +1084,12 @@ impl MainLoopHandler {
             .name("call_peer_wrapper_2")
             .spawn(async move {
                 call_peer(
-                    peer_candidate,
+                    peer_candidate.address,
                     global_state_lock,
                     main_to_peer_broadcast_rx,
                     peer_task_to_main_tx,
                     own_handshake_data,
-                    candidate_distance,
+                    peer_candidate.distance,
                 )
                 .await;
             })?;
@@ -1080,7 +1101,7 @@ impl MainLoopHandler {
         // to be used in the next round of peer discovery.
         self.main_to_peer_broadcast_tx
             .send(MainToPeerTask::MakeSpecificPeerDiscoveryRequest(
-                peer_candidate,
+                peer_candidate.address,
             ))?;
 
         Ok(())
@@ -1389,7 +1410,8 @@ impl MainLoopHandler {
         task_handles: Vec<JoinHandle<()>>,
     ) -> Result<i32> {
         // Handle incoming connections, messages from peer tasks, and messages from the mining task
-        let mut main_loop_state = MutableMainLoopState::new(task_handles);
+        let mut main_loop_state =
+            MutableMainLoopState::new(self.global_state_lock.clone(), task_handles);
 
         // Set peer discovery to run every N seconds. All timers must be reset
         // every time they have run.
@@ -1890,7 +1912,8 @@ mod test {
                 ..
             } = test_setup;
 
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let state = main_loop_handler.global_state_lock.clone();
+            let mut mutable_main_loop_state = MutableMainLoopState::new(state, task_join_handles);
 
             main_loop_handler
                 .block_sync(&mut mutable_main_loop_state)
@@ -2049,7 +2072,8 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
             let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let state = main_loop_handler.global_state_lock.clone();
+            let mut mutable_main_loop_state = MutableMainLoopState::new(state, task_join_handles);
 
             assert!(
                 main_loop_handler
@@ -2150,7 +2174,7 @@ mod test {
                 Ok(MainToPeerTask::TransactionNotification(tx_noti)) => {
                     assert_eq!(merged_txid, tx_noti.txid);
                     assert_eq!(TransactionProofQuality::SingleProof, tx_noti.proof_quality);
-                },
+                }
                 other => panic!("Must have sent transaction notification to peer loop after successful proof upgrade. Got:\n{other:?}"),
             }
 
@@ -2242,8 +2266,9 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
+            let state = main_loop_handler.global_state_lock.clone();
             main_loop_handler
-                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
+                .discover_peers(&mut MutableMainLoopState::new(state, task_join_handles))
                 .await
                 .unwrap();
 
@@ -2272,8 +2297,9 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
+            let state = main_loop_handler.global_state_lock.clone();
             main_loop_handler
-                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
+                .discover_peers(&mut MutableMainLoopState::new(state, task_join_handles))
                 .await
                 .unwrap();
 
@@ -2301,8 +2327,8 @@ mod test {
             instants.iter().copied().min_by(|l, r| l.cmp(r)).unwrap()
         );
     }
-    mod bootstrapper_mode {
 
+    mod bootstrap_mode {
         use rand::Rng;
 
         use super::*;
@@ -2314,7 +2340,7 @@ mod test {
         #[tokio::test]
         #[traced_test]
         async fn disconnect_from_oldest_peer_upon_connection_request() {
-            // Set up a node in bootstrapper mode and connected to a given
+            // Set up a node in bootstrap mode and connected to a given
             // number of peers, which is one less than the maximum. Initiate a
             // connection request. Verify that the oldest of the existing
             // connections is dropped.
@@ -2343,7 +2369,8 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
 
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let state = main_loop_handler.global_state_lock.clone();
+            let mut mutable_main_loop_state = MutableMainLoopState::new(state, task_join_handles);
 
             // check sanity: at startup, we are connected to the initial number of peers
             assert_eq!(
