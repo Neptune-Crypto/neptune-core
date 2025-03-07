@@ -1,9 +1,14 @@
+use std::collections::HashMap;
+
 use tasm_lib::prelude::Digest;
 
 use super::mining_status::MiningStatus;
 use crate::models::state::BlockProposal;
 use crate::Block;
-use std::collections::HashMap;
+
+/// Cap to prevent cached block proposals from eating up all RAM. Should never
+/// be reached unless node is under some form of attack.
+pub const MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED: usize = 10_000;
 
 #[derive(Debug, Default)]
 pub(crate) struct MiningState {
