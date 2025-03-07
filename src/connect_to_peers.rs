@@ -103,7 +103,7 @@ async fn check_if_connection_is_allowed(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some_and(|standing| standing.is_bad()) {
+    if standing.is_some_and(|s| s.is_bad()) {
         let ip = peer_address.ip();
         warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
@@ -301,7 +301,7 @@ where
 
     let peer_distance = 1; // All incoming connections have distance 1
     let mut peer_loop_handler = PeerLoopHandler::new(
-        peer_task_to_main_tx,
+        peer_task_to_main_tx.clone(),
         state,
         peer_address,
         peer_handshake_data,
@@ -310,7 +310,7 @@ where
     );
 
     peer_loop_handler
-        .run_wrapper(peer, main_to_peer_task_rx)
+        .run_wrapper(peer, peer_task_to_main_tx, main_to_peer_task_rx)
         .await?;
 
     Ok(())
@@ -472,7 +472,7 @@ where
     peer.send(PeerMessage::PeerListRequest).await?;
 
     let mut peer_loop_handler = PeerLoopHandler::new(
-        peer_task_to_main_tx,
+        peer_task_to_main_tx.clone(),
         state,
         peer_address,
         other_handshake,
@@ -480,7 +480,7 @@ where
         peer_distance,
     );
     peer_loop_handler
-        .run_wrapper(peer, main_to_peer_task_rx)
+        .run_wrapper(peer, peer_task_to_main_tx, main_to_peer_task_rx)
         .await?;
 
     Ok(())
@@ -501,7 +501,9 @@ pub(crate) async fn close_peer_connected_callback(
     let mut global_state_mut = global_state_lock.lock_guard_mut().await;
 
     // Store any new peer-standing to database
+    let old_count = global_state_mut.net.peer_map.len();
     let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_address);
+    let new_count = global_state_mut.net.peer_map.len();
     let new_standing = if let Some(new) = peer_info_writeback {
         new.standing()
     } else {
@@ -524,6 +526,14 @@ pub(crate) async fn close_peer_connected_callback(
         .await;
     drop(global_state_mut); // avoid holding across mpsc::Sender::send()
     debug!("Stored peer info standing {new_standing} for peer {peer_address}");
+
+    to_main_tx
+        .send(PeerTaskToMain::ConnectionCountChange {
+            old_count,
+            new_count,
+        })
+        .await
+        .unwrap();
 
     // This message is used to determine if we are to exit synchronization mode
     to_main_tx

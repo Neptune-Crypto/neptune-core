@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -12,6 +13,7 @@ use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::peer::transaction_notification::TransactionNotification;
 use super::proof_abstractions::mast_hash::MastHash;
+use super::state::mining_status::MiningStatus;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 use super::state::wallet::monitored_utxo::MonitoredUtxo;
 
@@ -23,7 +25,7 @@ pub(crate) enum MainToMiner {
     Shutdown,
 
     /// Communicates to miner that it should work on a new block proposal
-    NewBlockProposal,
+    NewBlockProposal(Arc<Block>),
 
     /// Main has received a new block or block proposal, and the miner should
     /// stop all work until it receives a [MainToMiner::Continue] message.
@@ -33,12 +35,14 @@ pub(crate) enum MainToMiner {
     /// proposal from the miner, and that miner can start a new task.
     Continue,
 
-    StopMining,
-    StartMining,
+    PauseByRpc,
+    UnPauseByRpc,
 
-    StartSyncing,
-    StopSyncing,
-    // SetCoinbasePubkey,
+    PauseBySyncBlocks,
+    UnPauseBySyncBlocks,
+
+    PauseByNeedConnection,
+    UnPauseByNeedConnection,
 }
 
 impl MainToMiner {
@@ -46,26 +50,30 @@ impl MainToMiner {
         match self {
             MainToMiner::NewBlock => "new block",
             MainToMiner::Shutdown => "shutdown",
-            MainToMiner::NewBlockProposal => "new block proposal",
+            MainToMiner::NewBlockProposal(_) => "new block proposal",
             MainToMiner::WaitForContinue => "wait for continue",
             MainToMiner::Continue => "continue",
-            MainToMiner::StopMining => "stop mining",
-            MainToMiner::StartMining => "start mining",
-            MainToMiner::StartSyncing => "start syncing",
-            MainToMiner::StopSyncing => "stop syncing",
+            MainToMiner::PauseByRpc => "pause mining (rpc)",
+            MainToMiner::UnPauseByRpc => "unpause mining (rpc)",
+            MainToMiner::PauseBySyncBlocks => "pause mining (syncing blocks)",
+            MainToMiner::UnPauseBySyncBlocks => "unpause mining (synced blocks)",
+            MainToMiner::PauseByNeedConnection => "pause mining (need connection)",
+            MainToMiner::UnPauseByNeedConnection => "unpause mining (got connection)",
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct NewBlockFound {
-    pub block: Box<Block>,
+    pub block: Arc<Block>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum MinerToMain {
     NewBlockFound(NewBlockFound),
     BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
+
+    StatusChange(MiningStatus),
 
     /// Request main loop to shut down entire application and return the
     /// indicated exit code.
@@ -106,7 +114,7 @@ impl From<&Block> for BlockProposalNotification {
 
 #[derive(Clone, Debug)]
 pub(crate) enum MainToPeerTask {
-    Block(Box<Block>),
+    Block(Arc<Block>),
     BlockProposalNotification(BlockProposalNotification),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
 
@@ -162,11 +170,16 @@ pub(crate) enum PeerTaskToMain {
     },
     RemovePeerMaxBlockHeight(SocketAddr),
 
+    ConnectionCountChange {
+        old_count: usize,
+        new_count: usize,
+    },
+
     /// (\[(peer_listen_address)\], reported_by, distance)
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
 
     Transaction(Box<PeerTaskToMainTransaction>),
-    BlockProposal(Box<Block>),
+    BlockProposal(Arc<Block>),
     DisconnectFromLongestLivedPeer,
 }
 
@@ -185,6 +198,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
+            PeerTaskToMain::ConnectionCountChange { .. } => "connection count change",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
         }
         .to_string()
@@ -206,6 +220,6 @@ pub(crate) struct ClaimUtxoData {
 pub(crate) enum RPCServerToMain {
     BroadcastTx(Box<Transaction>),
     Shutdown,
-    PauseMiner,
-    RestartMiner,
+    MinerPauseByRpc,
+    MinerUnPauseByRpc,
 }

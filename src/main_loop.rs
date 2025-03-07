@@ -2,6 +2,7 @@ pub mod proof_upgrader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -532,6 +533,11 @@ impl MainLoopHandler {
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
                     .await;
             }
+            MinerToMain::StatusChange(mining_status) => {
+                self.global_state_lock
+                    .set_mining_status(mining_status)
+                    .await;
+            }
             MinerToMain::BlockProposal(boxed_proposal) => {
                 let (block, expected_utxos) = *boxed_proposal;
 
@@ -570,18 +576,21 @@ impl MainLoopHandler {
                     );
                 }
 
+                let arc_block = Arc::new(block);
                 {
-                    // Use block proposal and add expected UTXOs from this
-                    // proposal.
+                    // Use block proposal and add expected UTXOs from this proposal.
                     let mut state = self.global_state_lock.lock_guard_mut().await;
-                    state.block_proposal =
-                        BlockProposal::own_proposal(block.clone(), expected_utxos.clone());
+                    state.block_proposal = Some(BlockProposal::own_proposal(
+                        arc_block.clone(),
+                        expected_utxos.clone(),
+                    ));
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
 
                 // Indicate to miner that block proposal was successfully
                 // received by main-loop.
-                self.main_to_miner_tx.send(MainToMiner::Continue);
+                self.main_to_miner_tx
+                    .send(MainToMiner::NewBlockProposal(arc_block));
             }
             MinerToMain::Shutdown(exit_code) => {
                 return Ok(Some(exit_code));
@@ -604,14 +613,14 @@ impl MainLoopHandler {
             PeerTaskToMain::NewBlocks(blocks) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
 
-                let last_block = blocks.last().unwrap().to_owned();
+                let arc_last_block = Arc::new(blocks.last().unwrap().to_owned());
                 let update_jobs = {
                     // The peer tasks also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer (or from own miner).
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let new_canonical =
-                        global_state_mut.incoming_block_is_more_canonical(&last_block);
+                        global_state_mut.incoming_block_is_more_canonical(&arc_last_block);
 
                     if !new_canonical {
                         // The blocks are not canonical, but: if we are in sync
@@ -625,13 +634,13 @@ impl MainLoopHandler {
                         };
                         if sync_anchor
                             .champion
-                            .is_some_and(|(height, _)| height >= last_block.header().height)
+                            .is_some_and(|(height, _)| height >= arc_last_block.header().height)
                         {
                             warn!("Repeated blocks received in sync mode, not storing");
                             return Ok(());
                         }
 
-                        sync_anchor.catch_up(last_block.header().height, last_block.hash());
+                        sync_anchor.catch_up(arc_last_block.header().height, arc_last_block.hash());
 
                         for block in blocks {
                             global_state_mut.store_block_not_tip(block).await?;
@@ -642,8 +651,8 @@ impl MainLoopHandler {
 
                     info!(
                         "Last block from peer is new canonical tip: {}; height: {}",
-                        last_block.hash(),
-                        last_block.header().height
+                        arc_last_block.hash(),
+                        arc_last_block.header().height
                     );
 
                     // Ask miner to stop work until state update is completed
@@ -652,14 +661,14 @@ impl MainLoopHandler {
                     // Get out of sync mode if needed
                     if global_state_mut.net.sync_anchor.is_some() {
                         let stay_in_sync_mode = stay_in_sync_mode(
-                            &last_block.kernel.header,
+                            &arc_last_block.kernel.header,
                             &main_loop_state.sync_state,
                             cli_args.sync_mode_threshold,
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
                             global_state_mut.net.sync_anchor = None;
-                            self.main_to_miner_tx.send(MainToMiner::StopSyncing);
+                            self.main_to_miner_tx.send(MainToMiner::UnPauseBySyncBlocks);
                         }
                     }
 
@@ -690,7 +699,7 @@ impl MainLoopHandler {
 
                 // Inform all peers about new block
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Block(Box::new(last_block.clone())))
+                    .send(MainToPeerTask::Block(arc_last_block.clone()))
                     .expect("Peer handler broadcast was closed. This should never happen");
 
                 // Spawn task to handle mempool tx-updating after new blocks.
@@ -735,7 +744,19 @@ impl MainLoopHandler {
                     );
                     global_state_mut.net.sync_anchor =
                         Some(SyncAnchor::new(claimed_cumulative_pow, claimed_block_mmra));
-                    self.main_to_miner_tx.send(MainToMiner::StartSyncing);
+                    self.main_to_miner_tx.send(MainToMiner::PauseBySyncBlocks);
+                }
+            }
+            PeerTaskToMain::ConnectionCountChange {
+                old_count,
+                new_count,
+            } => {
+                if new_count == 0 {
+                    self.main_to_miner_tx
+                        .send(MainToMiner::PauseByNeedConnection);
+                } else if old_count == 0 && new_count > 0 {
+                    self.main_to_miner_tx
+                        .send(MainToMiner::UnPauseByNeedConnection);
                 }
             }
             PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -762,6 +783,8 @@ impl MainLoopHandler {
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
                         global_state_mut.net.sync_anchor = None;
+
+                        self.main_to_miner_tx.send(MainToMiner::UnPauseBySyncBlocks);
                     }
                 }
             }
@@ -826,7 +849,7 @@ impl MainLoopHandler {
                 // validity, since that was done in peer loop.
                 // To ensure atomicity, a write-lock must be held over global
                 // state while we check if this proposal is favorable.
-                {
+                let proposal_notification = {
                     info!("Received new favorable block proposal for mining operation.");
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
@@ -838,15 +861,21 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
+                    let proposal_notification =
+                        MainToPeerTask::BlockProposalNotification((&*block).into());
+
+                    // note: block is an Arc<Block>
                     global_state_mut.block_proposal =
-                        BlockProposal::foreign_proposal(*block.clone());
-                }
+                        Some(BlockProposal::foreign_proposal(block.clone()));
+
+                    proposal_notification
+                };
 
                 // Notify all peers of the block proposal we just accepted
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::BlockProposalNotification((&*block).into()))?;
+                self.main_to_peer_broadcast_tx.send(proposal_notification)?;
 
-                self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
+                self.main_to_miner_tx
+                    .send(MainToMiner::NewBlockProposal(block));
             }
             PeerTaskToMain::DisconnectFromLongestLivedPeer => {
                 let global_state = self.global_state_lock.lock_guard().await;
@@ -1162,6 +1191,8 @@ impl MainLoopHandler {
                 .await
                 .net
                 .sync_anchor = None;
+
+            self.main_to_miner_tx.send(MainToMiner::UnPauseBySyncBlocks);
 
             let peers_to_punish = main_loop_state
                 .sync_state
@@ -1707,15 +1738,15 @@ impl MainLoopHandler {
                 // do not shut down
                 Ok(false)
             }
-            RPCServerToMain::PauseMiner => {
-                info!("Received RPC request to stop miner");
+            RPCServerToMain::MinerPauseByRpc => {
+                info!("Received RPC request to pause miner");
 
-                self.main_to_miner_tx.send(MainToMiner::StopMining);
+                self.main_to_miner_tx.send(MainToMiner::PauseByRpc);
                 Ok(false)
             }
-            RPCServerToMain::RestartMiner => {
-                info!("Received RPC request to start miner");
-                self.main_to_miner_tx.send(MainToMiner::StartMining);
+            RPCServerToMain::MinerUnPauseByRpc => {
+                info!("Received RPC request to unpause miner");
+                self.main_to_miner_tx.send(MainToMiner::UnPauseByRpc);
                 Ok(false)
             }
             RPCServerToMain::Shutdown => {

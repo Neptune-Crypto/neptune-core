@@ -736,6 +736,27 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     (block, composer_expected_utxos)
 }
 
+/// Build a fake and invalid block where the caller can specify the
+/// guesser fraction.  The composer-key, seed, and guesser-preimage
+/// are randomly generated.
+///
+/// Returns (block, composer's expected UTXOs).
+pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction_random(
+    previous_block: &Block,
+    block_timestamp: Option<Timestamp>,
+    guesser_fraction: f64,
+) -> (Block, Vec<ExpectedUtxo>) {
+    make_mock_block_guesser_preimage_and_guesser_fraction(
+        previous_block,
+        block_timestamp,
+        generation_address::GenerationSpendingKey::derive_from_seed(rand::random()),
+        rand::random(),
+        guesser_fraction,
+        rand::random(),
+    )
+    .await
+}
+
 /// Build a fake block with a random hash, containing *two* outputs for the
 /// composer.
 ///
