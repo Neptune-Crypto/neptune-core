@@ -34,6 +34,7 @@ use crate::macros::log_slow_scope;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
@@ -485,6 +486,45 @@ impl MainLoopHandler {
         self.main_to_miner_tx.send(MainToMiner::Continue);
     }
 
+    /// Process a block whose PoW solution was solved by this client (or an
+    /// external program) and has not been seen by the rest of the network yet.
+    ///
+    /// Shares block with all connected peers, updates own state, and updates
+    /// any mempool transactions to be valid under this new block.
+    ///
+    /// Locking:
+    ///  * acquires `global_state_lock` for write
+    async fn handle_self_guessed_block(
+        &mut self,
+        main_loop_state: &mut MutableMainLoopState,
+        new_block: Box<Block>,
+    ) -> Result<()> {
+        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+
+        if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
+            drop(global_state_mut); // don't hold across send()
+            warn!("Got new block from miner that was not child of tip. Discarding.");
+            self.main_to_miner_tx.send(MainToMiner::Continue);
+            return Ok(());
+        } else {
+            info!("Locally-mined block is new tip: {}", new_block.hash());
+        }
+
+        // Share block with peers first thing.
+        info!("broadcasting new block to peers");
+        self.main_to_peer_broadcast_tx
+            .send(MainToPeerTask::Block(new_block.clone()))
+            .expect("Peer handler broadcast channel prematurely closed.");
+
+        let update_jobs = global_state_mut.set_new_tip(*new_block).await?;
+        drop(global_state_mut);
+
+        self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
+            .await;
+
+        Ok(())
+    }
+
     /// Locking:
     ///   * acquires `global_state_lock` for write
     async fn handle_miner_task_message(
@@ -499,38 +539,8 @@ impl MainLoopHandler {
                 let new_block = new_block_info.block;
 
                 info!("Miner found new block: {}", new_block.kernel.header.height);
-
-                // Store block in database
-                // This block spans global state write lock for updating.
-                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-
-                if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
-                    drop(global_state_mut); // don't hold across send()
-                    warn!("Got new block from miner task that was not child of tip. Discarding.");
-                    self.main_to_miner_tx.send(MainToMiner::Continue);
-                    return Ok(None);
-                } else {
-                    info!(
-                        "Block from miner is new canonical tip: {}",
-                        new_block.hash(),
-                    );
-                }
-
-                // Share block with peers first thing.
-                info!("broadcasting new block to peers");
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Block(new_block.clone()))
-                    .expect(
-                        "Peer handler broadcast channel prematurely closed. This should never happen.",
-                    );
-
-                let update_jobs = global_state_mut
-                    .set_new_tip(new_block.as_ref().clone())
+                self.handle_self_guessed_block(main_loop_state, new_block)
                     .await?;
-                drop(global_state_mut);
-
-                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
-                    .await;
             }
             MinerToMain::BlockProposal(boxed_proposal) => {
                 let (block, expected_utxos) = *boxed_proposal;
@@ -574,7 +584,7 @@ impl MainLoopHandler {
                     // Use block proposal and add expected UTXOs from this
                     // proposal.
                     let mut state = self.global_state_lock.lock_guard_mut().await;
-                    state.block_proposal =
+                    state.mining_state.block_proposal =
                         BlockProposal::own_proposal(block.clone(), expected_utxos.clone());
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
@@ -838,7 +848,7 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
-                    global_state_mut.block_proposal =
+                    global_state_mut.mining_state.block_proposal =
                         BlockProposal::foreign_proposal(*block.clone());
                 }
 
@@ -1552,7 +1562,7 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server task
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone()).await?;
+                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone(), &mut main_loop_state).await?;
                     if shutdown_after_execution {
                         break SUCCESS_EXIT_CODE
                     }
@@ -1644,7 +1654,11 @@ impl MainLoopHandler {
 
     /// Handle messages from the RPC server. Returns `true` iff the client should shut down
     /// after handling this message.
-    async fn handle_rpc_server_message(&mut self, msg: RPCServerToMain) -> Result<bool> {
+    async fn handle_rpc_server_message(
+        &mut self,
+        msg: RPCServerToMain,
+        main_loop_state: &mut MutableMainLoopState,
+    ) -> Result<bool> {
         match msg {
             RPCServerToMain::BroadcastTx(transaction) => {
                 debug!(
@@ -1707,6 +1721,13 @@ impl MainLoopHandler {
                 // do not shut down
                 Ok(false)
             }
+            RPCServerToMain::ProofOfWorkSolution(new_block) => {
+                info!("Handling PoW solution from RPC call");
+
+                self.handle_self_guessed_block(main_loop_state, new_block)
+                    .await?;
+                Ok(false)
+            }
             RPCServerToMain::PauseMiner => {
                 info!("Received RPC request to stop miner");
 
@@ -1766,6 +1787,7 @@ mod test {
     use crate::config_models::network::Network;
     use crate::tests::shared::get_dummy_peer_incoming;
     use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::invalid_empty_block;
     use crate::MINER_CHANNEL_CAPACITY;
 
     struct TestSetup {
@@ -1837,6 +1859,63 @@ mod test {
             task_join_handles,
             main_loop_handler,
             main_to_peer_rx,
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_self_guessed_block_new_tip() {
+        // A new tip is registered by main_loop. Verify correct state update.
+        let test_setup = setup(1, 0).await;
+        let TestSetup {
+            task_join_handles,
+            mut main_loop_handler,
+            mut main_to_peer_rx,
+            ..
+        } = test_setup;
+        let network = main_loop_handler.global_state_lock.cli().network;
+        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+        let block1 = invalid_empty_block(&Block::genesis(network));
+
+        assert!(
+            main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .header()
+                .height
+                .is_genesis(),
+            "Tip must be genesis prior to handling of new block"
+        );
+
+        let block1 = Box::new(block1);
+        main_loop_handler
+            .handle_self_guessed_block(&mut mutable_main_loop_state, block1.clone())
+            .await
+            .unwrap();
+        let new_block_height: u64 = main_loop_handler
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height
+            .into();
+        assert_eq!(
+            1u64, new_block_height,
+            "Tip height must be 1 after handling of new block"
+        );
+        let msg_to_peer_loops = main_to_peer_rx.recv().await.unwrap();
+        if let MainToPeerTask::Block(block_to_peers) = msg_to_peer_loops {
+            assert_eq!(
+                block1, block_to_peers,
+                "Peer loops must have received block 1"
+            );
+        } else {
+            panic!("Must have sent block notification to peer loops")
         }
     }
 

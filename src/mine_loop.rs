@@ -180,7 +180,7 @@ fn precalculate_kernel_ap(block_kernel: &BlockKernel) -> [Digest; BlockKernel::M
 ///
 /// Returns those MAST nodes that can be precalculated prior to PoW-guessing.
 /// This vastly reduces the amount of hashing needed for each PoW-guess.
-fn precalculate_block_auth_paths(
+pub(crate) fn precalculate_block_auth_paths(
     block_template: &Block,
 ) -> (
     [Digest; BlockKernel::MAST_HEIGHT],
@@ -649,7 +649,7 @@ pub(crate) async fn mine(
                 (
                     !s.net.peer_map.is_empty(),
                     s.net.sync_anchor.is_some(),
-                    s.mining_status.clone(),
+                    s.mining_state.mining_status.clone(),
                 )
             })
             .await;
@@ -664,7 +664,12 @@ pub(crate) async fn mine(
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
 
-        let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
+        let maybe_proposal = global_state_lock
+            .lock_guard()
+            .await
+            .mining_state
+            .block_proposal
+            .clone();
         let guess = cli_args.guess;
 
         let should_guess = !wait_for_confirmation

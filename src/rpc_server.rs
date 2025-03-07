@@ -66,11 +66,14 @@ use twenty_first::math::digest::Digest;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::mine_loop::precalculate_block_auth_paths;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
+use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -79,6 +82,7 @@ use crate::models::channel::RPCServerToMain;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
@@ -196,6 +200,49 @@ impl MempoolTransactionInfo {
     pub fn synced(mut self) -> Self {
         self.synced = true;
         self
+    }
+}
+
+/// Data required to attempt to solve the proof-of-work puzzle that allows the
+/// minting of the next block.
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+pub struct ProofOfWorkPuzzle {
+    kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
+    header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
+
+    /// The threshold digest that defines when a PoW solution is valid. The
+    /// block's hash must be less than or equal to this value.
+    threshold: Digest,
+
+    /// The total reward, timelocked plus liquid, for a successful guess
+    total_guesser_reward: NativeCurrencyAmount,
+
+    /// An identifier for the puzzle. Needed since more than one block proposal
+    /// may be known for the next block. A commitment to the entire block
+    /// kernel, apart from the nonce.
+    id: Digest,
+}
+
+impl ProofOfWorkPuzzle {
+    fn new(
+        mut block_proposal: Block,
+        guesser_key_after_image: Digest,
+        latest_block_header: BlockHeader,
+    ) -> Self {
+        block_proposal.set_header_guesser_digest(guesser_key_after_image);
+        let guesser_reward = block_proposal.total_guesser_reward();
+        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block_proposal);
+        let threshold = latest_block_header.difficulty.target();
+
+        let id = Tip5::hash(&(kernel_auth_path, header_auth_path));
+
+        Self {
+            kernel_auth_path,
+            header_auth_path,
+            threshold,
+            total_guesser_reward: guesser_reward,
+            id,
+        }
     }
 }
 
@@ -1294,6 +1341,11 @@ pub trait RPC {
     /// ```
     async fn cpu_temp(token: rpc_auth::Token) -> RpcResult<Option<f32>>;
 
+    /// Get the proof-of-work puzzle for the current block proposal.
+    ///
+    /// Returns `None` if no block proposal for the next block is known yet.
+    async fn pow_puzzle(token: rpc_auth::Token) -> RpcResult<Option<ProofOfWorkPuzzle>>;
+
     /******** BLOCKCHAIN STATISTICS ********/
     // Place all endpoints that relate to statistics of the blockchain here
 
@@ -1695,6 +1747,17 @@ pub trait RPC {
     /// # }
     /// ```
     async fn restart_miner(token: rpc_auth::Token) -> RpcResult<()>;
+
+    /// Provide a PoW-solution to the current block proposal.
+    ///
+    /// If the solution is considered valid by the running node, the new block
+    /// is broadcast to all peers on the network, and `true` is returned.
+    /// Otherwise the provided solution is ignored, and `false` is returned.
+    async fn provide_pow_solution(
+        token: rpc_auth::Token,
+        nonce: Digest,
+        proposal_id: Digest,
+    ) -> RpcResult<bool>;
 
     /// mark MUTXOs as abandoned
     ///
@@ -2782,7 +2845,7 @@ impl RPC for NeptuneRPCServer {
         let peer_count = Some(state.net.peer_map.len());
         let max_num_peers = self.state.cli().max_num_peers;
 
-        let mining_status = Some(state.mining_status.clone());
+        let mining_status = Some(state.mining_state.mining_status.clone());
 
         let confirmations = {
             log_slow_scope!(fn_name!() + "::confirmations_internal()");
@@ -3065,6 +3128,68 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn provide_pow_solution(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        nonce: Digest,
+        proposal_id: Digest,
+    ) -> RpcResult<bool> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Find proposal from list of exported proposals.
+        let Some(mut proposal) = self
+            .state
+            .lock_guard()
+            .await
+            .mining_state
+            .exported_block_proposals
+            .get(&proposal_id)
+            .map(|x| x.to_owned())
+        else {
+            warn!(
+                "Got claimed PoW solution but no challenge was known. \
+                Did solution come in too late?"
+            );
+            return Ok(false);
+        };
+
+        // A proposal was found. Check if solution works.
+        let (guesser_key_after_image, latest_block_header) = {
+            let state = self.state.lock_guard().await;
+            let guesser_key = state
+                .wallet_state
+                .wallet_entropy
+                .guesser_spending_key(proposal.header().prev_block_digest);
+            let latest_block_header = *state.chain.light_state().header();
+
+            (guesser_key.after_image(), latest_block_header)
+        };
+
+        proposal.set_header_guesser_digest(guesser_key_after_image);
+        proposal.set_header_nonce(nonce);
+        let threshold = latest_block_header.difficulty.target();
+        let solution_digest = proposal.hash();
+        if solution_digest > threshold {
+            warn!(
+                "Got claimed PoW solution but PoW threshold was not met.\n\
+            Claimed solution: {solution_digest};\nthreshold: {threshold}"
+            );
+            return Ok(false);
+        }
+
+        // No time to waste! Inform main_loop!
+        let solution = Box::new(proposal);
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::ProofOfWorkSolution(solution))
+            .await;
+
+        Ok(true)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn prune_abandoned_monitored_utxos(
         mut self,
         _context: tarpc::context::Context,
@@ -3127,6 +3252,56 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         Ok(Self::cpu_temp_inner())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn pow_puzzle(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let Some(proposal) = self
+            .state
+            .lock_guard()
+            .await
+            .mining_state
+            .block_proposal
+            .map(|x| x.to_owned())
+        else {
+            return Ok(None);
+        };
+
+        let (guesser_key_after_image, latest_block_header) = {
+            let state = self.state.lock_guard().await;
+            let guesser_key = state
+                .wallet_state
+                .wallet_entropy
+                .guesser_spending_key(proposal.header().prev_block_digest);
+            let latest_block_header = *state.chain.light_state().header();
+
+            (guesser_key.after_image(), latest_block_header)
+        };
+
+        let puzzle = ProofOfWorkPuzzle::new(
+            proposal.clone(),
+            guesser_key_after_image,
+            latest_block_header,
+        );
+
+        // Record block proposal in case of guesser-success, for later
+        // retrieval.
+        self.state
+            .lock_mut(|s| {
+                s.mining_state
+                    .exported_block_proposals
+                    .insert(puzzle.id, proposal)
+            })
+            .await;
+
+        Ok(Some(puzzle))
     }
 
     // documented in trait. do not add doc-comment.
@@ -3403,12 +3578,12 @@ mod rpc_server_tests {
 
     async fn test_rpc_server(
         network: Network,
-        wallet_secret: WalletEntropy,
+        wallet_entropy: WalletEntropy,
         peer_count: u8,
         cli: cli_args::Args,
     ) -> NeptuneRPCServer {
         let global_state_lock =
-            mock_genesis_global_state(network, peer_count, wallet_secret, cli).await;
+            mock_genesis_global_state(network, peer_count, wallet_entropy, cli).await;
         let (dummy_tx, mut dummy_rx) =
             tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
 
@@ -3526,6 +3701,11 @@ mod rpc_server_tests {
                 "Not a valid address".to_owned(),
                 Network::Testnet,
             )
+            .await;
+        let _ = rpc_server.clone().pow_puzzle(ctx, token).await;
+        let _ = rpc_server
+            .clone()
+            .provide_pow_solution(ctx, token, rng.random(), rng.random())
             .await;
         let _ = rpc_server
             .clone()
@@ -4183,6 +4363,170 @@ mod rpc_server_tests {
             .is_err());
     }
 
+    mod pow_puzzle_tests {
+        use rand::random;
+
+        use super::*;
+        use crate::mine_loop::fast_kernel_mast_hash;
+        use crate::models::state::block_proposal::BlockProposal;
+        use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+        use crate::tests::shared::invalid_empty_block;
+
+        #[test]
+        fn pow_puzzle_is_consistent_with_block_hash() {
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let mut block1 = invalid_empty_block(&genesis);
+            let hash_lock_key = HashLockKey::from_preimage(random());
+            let guess_challenge = ProofOfWorkPuzzle::new(
+                block1.clone(),
+                hash_lock_key.after_image(),
+                *genesis.header(),
+            );
+            let nonce = random();
+            let resulting_block_hash = fast_kernel_mast_hash(
+                guess_challenge.kernel_auth_path,
+                guess_challenge.header_auth_path,
+                nonce,
+            );
+
+            block1.set_header_guesser_digest(hash_lock_key.after_image());
+            block1.set_header_nonce(nonce);
+
+            assert_eq!(block1.hash(), resulting_block_hash);
+        }
+
+        #[tokio::test]
+        async fn provide_solution_when_no_proposal_known() {
+            let network = Network::Main;
+            let bob = test_rpc_server(
+                network,
+                WalletEntropy::new_random(),
+                2,
+                cli_args::Args::default(),
+            )
+            .await;
+            let bob_token = cookie_token(&bob).await;
+            assert!(!bob
+                .state
+                .lock_guard()
+                .await
+                .mining_state
+                .block_proposal
+                .is_some());
+            let accepted = bob
+                .clone()
+                .provide_pow_solution(context::current(), bob_token, random(), random())
+                .await
+                .unwrap();
+            assert!(
+                !accepted,
+                "Must reject PoW solution when no proposal exists"
+            );
+        }
+
+        #[tokio::test]
+        async fn exported_pow_puzzle_is_consistent_with_block_hash() {
+            let network = Network::Main;
+            let bob = WalletEntropy::new_random();
+            let mut bob = test_rpc_server(network, bob.clone(), 2, cli_args::Args::default()).await;
+            let bob_token = cookie_token(&bob).await;
+
+            let genesis = Block::genesis(network);
+            let mut block1 = invalid_empty_block(&genesis);
+            bob.state
+                .lock_mut(|x| {
+                    x.mining_state.block_proposal =
+                        BlockProposal::ForeignComposition(block1.clone())
+                })
+                .await;
+
+            let pow_puzzle = bob
+                .clone()
+                .pow_puzzle(context::current(), bob_token)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                bob.state
+                    .lock_guard()
+                    .await
+                    .mining_state
+                    .exported_block_proposals
+                    .contains_key(&pow_puzzle.id),
+                "Must have stored exported block proposal"
+            );
+
+            let mock_nonce = random();
+            let mut resulting_block_hash = fast_kernel_mast_hash(
+                pow_puzzle.kernel_auth_path,
+                pow_puzzle.header_auth_path,
+                mock_nonce,
+            );
+
+            block1.set_header_nonce(mock_nonce);
+
+            let expected_guesser_digest = bob
+                .state
+                .lock(|x| {
+                    x.wallet_state
+                        .wallet_entropy
+                        .guesser_spending_key(genesis.hash())
+                })
+                .await
+                .after_image();
+            block1.set_header_guesser_digest(expected_guesser_digest);
+            assert_eq!(block1.hash(), resulting_block_hash);
+            assert_eq!(
+                block1.total_guesser_reward(),
+                pow_puzzle.total_guesser_reward
+            );
+
+            // Check that succesful guess is accepted by endpoint.
+            let actual_threshold = genesis.header().difficulty.target();
+            let mut actual_nonce = mock_nonce;
+            while resulting_block_hash > actual_threshold {
+                actual_nonce = random();
+                resulting_block_hash = fast_kernel_mast_hash(
+                    pow_puzzle.kernel_auth_path,
+                    pow_puzzle.header_auth_path,
+                    actual_nonce,
+                );
+            }
+
+            block1.set_header_nonce(actual_nonce);
+            let good_is_accepted = bob
+                .clone()
+                .provide_pow_solution(context::current(), bob_token, actual_nonce, pow_puzzle.id)
+                .await
+                .unwrap();
+            assert!(
+                good_is_accepted,
+                "Actual PoW-puzzle solution must be accepted by RPC endpoint."
+            );
+
+            // Check that bad guess is rejected by endpoint.
+            let mut bad_nonce: Digest = actual_nonce;
+            while resulting_block_hash <= actual_threshold {
+                bad_nonce = random();
+                resulting_block_hash = fast_kernel_mast_hash(
+                    pow_puzzle.kernel_auth_path,
+                    pow_puzzle.header_auth_path,
+                    bad_nonce,
+                );
+            }
+            let bad_is_accepted = bob
+                .clone()
+                .provide_pow_solution(context::current(), bob_token, bad_nonce, pow_puzzle.id)
+                .await
+                .unwrap();
+            assert!(
+                !bad_is_accepted,
+                "Bad PoW solution must be rejected by RPC endpoint."
+            );
+        }
+    }
+
     mod claim_utxo_tests {
         use super::*;
 
@@ -4259,9 +4603,9 @@ mod rpc_server_tests {
 
                 // alice's node
                 let (blocks, alice_to_bob_utxo_notifications, bob_amount) = {
-                    let wallet_secret = WalletEntropy::new_random();
+                    let wallet_entropy = WalletEntropy::new_random();
                     let mut rpc_server =
-                        test_rpc_server(network, wallet_secret.clone(), 2, Args::default()).await;
+                        test_rpc_server(network, wallet_entropy.clone(), 2, Args::default()).await;
 
                     let genesis_block = Block::genesis(network);
                     let mut blocks = vec![];
@@ -4273,7 +4617,7 @@ mod rpc_server_tests {
 
                     // Mine block 1 to get some coins
 
-                    let cb_key = wallet_secret.nth_generation_spending_key(0);
+                    let cb_key = wallet_entropy.nth_generation_spending_key(0);
                     let (block1, composer_expected_utxos) =
                         make_mock_block(&genesis_block, None, cb_key, Default::default()).await;
                     blocks.push(block1.clone());

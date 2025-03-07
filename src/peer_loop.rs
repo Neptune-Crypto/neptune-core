@@ -1478,6 +1478,7 @@ impl PeerLoopHandler {
                     .global_state_lock
                     .lock_guard()
                     .await
+                    .mining_state
                     .block_proposal
                     .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash)
                     .map(|x| x.to_owned());
