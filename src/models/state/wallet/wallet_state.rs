@@ -3935,12 +3935,11 @@ pub(crate) mod tests {
         use rand::prelude::*;
         use rand::rng;
 
+        use super::*;
         use crate::job_queue::JobQueue;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
-
-        use super::*;
 
         /// Test scan mode.
         ///
