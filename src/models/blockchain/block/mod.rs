@@ -1031,9 +1031,7 @@ pub(crate) mod block_tests {
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::mine_loop::fast_kernel_mast_hash;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
-    use crate::mine_loop::precalculate_block_auth_paths;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
@@ -1817,8 +1815,13 @@ pub(crate) mod block_tests {
         let mut blocks = vec![genesis_block];
 
         now += Timestamp::months(6);
+        let mut amount = NativeCurrencyAmount::coins(1);
         for i in 1..100 {
             now += TARGET_BLOCK_INTERVAL;
+
+            if (i + 1) % 20 == 0 {
+                amount = amount.lossy_f64_fraction_mul(0.5);
+            }
 
             // create coinbase transaction
             let (mut transaction, _) = make_coinbase_transaction_from_state(
@@ -1889,7 +1892,7 @@ pub(crate) mod block_tests {
             }
 
             // compose block
-            let mut block = Block::compose(
+            let block = Block::compose(
                 blocks.last().unwrap(),
                 transaction,
                 now,
@@ -1901,14 +1904,18 @@ pub(crate) mod block_tests {
             .unwrap();
 
             // guess block
-            let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
-            let mut nonce = rng.random();
-            while fast_kernel_mast_hash(kernel_auth_path, header_auth_path, nonce)
-                > blocks.last().unwrap().header().difficulty.target()
-            {
-                nonce = rng.random();
-            }
-            block.set_header_nonce(nonce);
+            // let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
+            // let mut nonce = rng.random();
+            // while fast_kernel_mast_hash(kernel_auth_path, header_auth_path, nonce)
+            //     > blocks.last().unwrap().header().difficulty.target()
+            // {
+            //     nonce = rng.random();
+            // }
+            // block.set_header_nonce(nonce);
+            //
+            // Actually, guessing is not necessary! What is tested in `is_valid`
+            // is that the difficulty was updated correctly. Proof of work is
+            // *not* tested, so the block will be valid with *any* nonce.
 
             // report size statistics
             println!("Mined block {i} with {i} inputs and {i} outputs:");
