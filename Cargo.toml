@@ -136,6 +136,8 @@ assert2 = "0.3"
 blake3 = "1.5.4"
 clienter = "0.1.1"
 divan = "0.1.14"
+nalgebra = "0.33.2"
+lstsq = "0.6.0"
 pin-project-lite = "0.2.14"
 proptest = { version = "1.5" }
 proptest-arbitrary-interop = { version = "0.1" }
