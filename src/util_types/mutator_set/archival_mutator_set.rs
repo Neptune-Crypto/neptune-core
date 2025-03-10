@@ -22,6 +22,7 @@ use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::MutatorSetError;
 
+#[derive(Debug, Clone)]
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
 where
     MmrStorage: StorageVec<Digest> + Send + Sync,
@@ -426,17 +427,15 @@ where
             // If chunk index is not in the active part, insert the index into the relevant chunk
             let new_target_chunks_clone = new_target_chunks.clone();
             let count_leaves = self.aocl.num_leafs().await;
-            let relevant_chunk = new_target_chunks
-                .get_mut(&chunk_index)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
-                        new_target_chunks_clone,
-                        count_leaves,
-                        batch_index,
-                        removal_record
-                    )
-                });
+            let relevant_chunk = new_target_chunks.get_mut(&chunk_index).unwrap_or_else(|| {
+                panic!(
+                    "Can't get chunk index {chunk_index} from removal record dictionary! \
+                    dictionary: {new_target_chunks_clone:?}\n\
+                    AOCL size: {count_leaves}\n\
+                    batch index: {batch_index}\n\
+                    Removal record: {removal_record:?}"
+                )
+            });
             for index in indices {
                 let relative_index = (index % CHUNK_SIZE as u128) as u32;
                 relevant_chunk.1.insert(relative_index);
@@ -504,10 +503,9 @@ mod archival_mutator_set_tests {
                 .restore_membership_proof(item, sender_randomness, receiver_preimage, i)
                 .await
             {
-                Err(err) => panic!(
-                    "Failed to get membership proof from archival mutator set: {}",
-                    err
-                ),
+                Err(err) => {
+                    panic!("Failed to get membership proof from archival mutator set: {err}")
+                }
                 Ok(mp) => mp,
             };
             assert_eq!(
@@ -612,7 +610,7 @@ mod archival_mutator_set_tests {
             // Update all MPs
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
-                &items.iter().cloned().collect_vec(),
+                &items.iter().copied().collect_vec(),
                 &archival_mutator_set.accumulator().await,
                 &addition_record,
             )
@@ -634,9 +632,7 @@ mod archival_mutator_set_tests {
             }
         }
 
-        let saw_collision_at = if let Some(collision) = saw_collision_at {
-            collision
-        } else {
+        let Some(saw_collision_at) = saw_collision_at else {
             panic!("Collision must be generated with seeded RNG");
         };
 
@@ -872,7 +868,7 @@ mod archival_mutator_set_tests {
         for (idx, (item, _addition_record, expired_membership_proof)) in
             records.into_iter().rev().enumerate()
         {
-            println!("revert_remove() #{}", idx);
+            println!("revert_remove() #{idx}");
             let restored_membership_proof = archival_mutator_set
                 .restore_membership_proof(
                     item,
@@ -1027,7 +1023,7 @@ mod archival_mutator_set_tests {
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
-            for removal_record in removal_records.iter() {
+            for removal_record in &removal_records {
                 archival_mutator_set.revert_remove(removal_record).await;
             }
 

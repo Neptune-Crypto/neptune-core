@@ -63,7 +63,7 @@ impl DataDirectory {
     pub async fn open_ensure_parent_dir_exists(file_path: &Path) -> Result<tokio::fs::File> {
         let parent_dir = file_path
             .parent()
-            .with_context(|| format!("The parent directory of {:?}", file_path))?;
+            .with_context(|| format!("The parent directory of {file_path:?}"))?;
         Self::create_dir_if_not_exists(parent_dir).await?;
 
         tokio::fs::OpenOptions::new()

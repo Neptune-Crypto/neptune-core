@@ -52,7 +52,10 @@ pub mod neptune_arbitrary {
                 vec_digest_strategy,
             )
                 .prop_map(|(tree_height, indices_and_leafs, mut digests)| {
-                    assert!(indices_and_leafs.iter().all(|(i, _l)| (*i as u128) < (1u128 << tree_height)), "indices too large for tree of height: {}", tree_height);
+                    assert!(
+                        indices_and_leafs.iter().all(|(i, _l)| (*i as u128) < (1 << tree_height)),
+                        "indices too large for tree of height: {tree_height}",
+                    );
                     // populate nodes dictionary with leafs
                     let mut nodes = HashMap::new();
                     for &(index, leaf) in &indices_and_leafs {

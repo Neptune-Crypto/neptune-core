@@ -46,7 +46,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> OrdinaryVe
 
     #[inline]
     pub(super) fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, T)>) {
-        for (key, val) in key_vals.into_iter() {
+        for (key, val) in key_vals {
             self.set(key, val);
         }
     }

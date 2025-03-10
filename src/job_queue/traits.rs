@@ -28,7 +28,7 @@ impl std::fmt::Display for JobCompletion {
             Self::Cancelled => "Cancelled",
         };
 
-        write!(f, "{}", str)
+        write!(f, "{str}")
     }
 }
 impl<T: JobResult> From<T> for JobCompletion {

@@ -339,7 +339,7 @@ impl DashboardApp {
                             Self::disable_raw_mode(terminal)?;
 
                             sleep(Duration::from_millis(200)).await;
-                            println!("{}", string);
+                            println!("{string}");
                             let mut str = "".to_string();
                             io::stdin().read_line(&mut str)?;
 
@@ -350,7 +350,7 @@ impl DashboardApp {
                             Self::disable_raw_mode(terminal)?;
 
                             sleep(Duration::from_millis(200)).await;
-                            println!("{}", string);
+                            println!("{string}");
                             let mut str = "".to_string();
                             io::stdin().read_line(&mut str)?;
                             console_input = Some(str);
@@ -358,9 +358,7 @@ impl DashboardApp {
                             terminal = Self::enable_raw_mode()?;
                             draw = true;
                         }
-                        _ => {
-                            panic!("Should not get here.");
-                        }
+                        ConsoleIO::InputSupplied(_) => panic!("Should not get here."),
                     }
                     console_queue.remove(0);
                 }
@@ -434,10 +432,10 @@ impl DashboardApp {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => {
-                            if self.current_menu_item != MenuItem::Quit {
-                                self.current_menu_item = MenuItem::Quit;
-                            } else {
+                            if self.current_menu_item == MenuItem::Quit {
                                 self.running = false;
+                            } else {
+                                self.current_menu_item = MenuItem::Quit;
                             }
                         }
                         KeyCode::Enter => {
@@ -628,8 +626,7 @@ impl DashboardApp {
                     screen_chunk,
                 );
             }
-            // MenuItem::Quit => todo!(),
-            _ => {
+            MenuItem::Quit => {
                 let messages: Vec<ListItem> = [
                     ListItem::new(Line::from(Span::raw("Press enter, `q`, or Esc to quit."))),
                     ListItem::new(Line::from(Span::raw("🌊"))),
@@ -645,5 +642,16 @@ impl DashboardApp {
                 f.render_widget(messages, screen_chunk);
             }
         };
+    }
+}
+
+impl fmt::Debug for DashboardApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DashboardApp")
+            .field("running", &self.running)
+            .field("current_menu_item", &self.current_menu_item)
+            .field("menu_in_focus", &self.menu_in_focus)
+            .field("network", &self.network)
+            .finish()
     }
 }

@@ -180,7 +180,7 @@ impl From<SecretKeyMaterial> for WalletEntropy {
 
 impl From<WalletEntropy> for SecretKeyMaterial {
     fn from(value: WalletEntropy) -> Self {
-        value.secret_seed.clone()
+        value.secret_seed
     }
 }
 

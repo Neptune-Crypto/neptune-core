@@ -15,6 +15,8 @@ use crate::util_types::archival_mmr::ArchivalMmr;
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
+
+#[derive(Debug)]
 pub struct RustyArchivalMutatorSet {
     ams: ArchivalMutatorSet<AmsMmrStorage, AmsChunkStorage>,
     storage: SimpleRustyStorage,
@@ -65,8 +67,8 @@ impl RustyArchivalMutatorSet {
     }
 
     #[inline]
-    pub async fn get_sync_label(&self) -> Digest {
-        self.sync_label.get().await
+    pub fn get_sync_label(&self) -> Digest {
+        self.sync_label.get()
     }
 
     #[inline]
@@ -81,7 +83,7 @@ impl RustyArchivalMutatorSet {
         self.ams_mut().swbf_inactive.fix_dummy_async().await;
 
         // populate active window
-        self.ams_mut().swbf_active.sbf = self.active_window_storage.get().await;
+        self.ams_mut().swbf_active.sbf = self.active_window_storage.get();
     }
 }
 
@@ -95,7 +97,7 @@ impl StorageWriter for RustyArchivalMutatorSet {
     }
 
     async fn drop_unpersisted(&mut self) {
-        self.ams_mut().swbf_active.sbf = self.active_window_storage.get().await;
+        self.ams_mut().swbf_active.sbf = self.active_window_storage.get();
         self.storage.drop_unpersisted().await;
         self.ams_mut().aocl.delete_cache().await;
         self.ams_mut().swbf_inactive.delete_cache().await;
@@ -235,11 +237,11 @@ mod tests {
         for (index, (mp, &item)) in removed_mps.iter().zip(removed_items.iter()).enumerate() {
             assert!(
                 !new_rusty_mutator_set.ams().verify(item, mp).await,
-                "membership proof of non-member {index} still valid"
+                "membership proof of non-member {index} still valid",
             );
         }
 
-        let retrieved_sync_label = new_rusty_mutator_set.get_sync_label().await;
+        let retrieved_sync_label = new_rusty_mutator_set.get_sync_label();
         assert_eq!(sync_label, retrieved_sync_label);
 
         let active_window_after = new_rusty_mutator_set.ams().swbf_active.clone();

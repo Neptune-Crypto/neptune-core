@@ -72,6 +72,7 @@ use crate::locks::tokio::LockCallbackFn;
 /// It works equally well to put them in a `struct`.  If the tables
 /// are all of the same type (including generics), they could be
 /// placed in a collection type such as `Vec`, or `HashMap`.
+#[derive(Debug)]
 pub struct DbtSchema {
     /// Pending writes for all tables in this Schema.
     /// These get written/cleared by StorageWriter::persist()

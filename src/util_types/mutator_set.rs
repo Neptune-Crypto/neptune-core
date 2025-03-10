@@ -31,11 +31,11 @@ impl Error for MutatorSetError {}
 
 impl fmt::Display for MutatorSetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MutatorSetError {
     RequestedAoclAuthPathOutOfBounds((u64, u64)),
     RequestedSwbfAuthPathOutOfBounds((u64, u64)),
@@ -113,8 +113,7 @@ mod test {
             assert_eq!(
                 0,
                 mutator_set.get_batch_index(),
-                "Batch index must be 0 after adding {} elements",
-                i
+                "Batch index must be 0 after adding {i} elements"
             );
         }
 
@@ -324,14 +323,11 @@ mod test {
         let mut mutator_set = MutatorSetAccumulator::default();
 
         let num_additions = rng.random_range(0..=100i32);
-        println!(
-            "running multiple additions test for {} additions",
-            num_additions
-        );
+        println!("running multiple additions test for {num_additions} additions");
 
         let mut membership_proofs_and_items: Vec<(MsMembershipProof, Digest)> = vec![];
         for i in 0..num_additions {
-            println!("loop iteration {}", i);
+            println!("loop iteration {i}");
 
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
@@ -339,7 +335,7 @@ mod test {
             let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
 
             // Update all membership proofs
-            for (mp, itm) in membership_proofs_and_items.iter_mut() {
+            for (mp, itm) in &mut membership_proofs_and_items {
                 let original_mp = mp.clone();
                 let changed_res = mp.update_from_addition(*itm, &mutator_set, &addition_record);
                 assert!(changed_res.is_ok());
@@ -493,7 +489,7 @@ mod test {
                 mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 
             // Update *all* membership proofs with newly added item
-            for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
+            for (updatee_item, mp) in &mut items_and_membership_proofs {
                 let original_mp = mp.clone();
                 assert!(mutator_set.verify(*updatee_item, mp));
                 let changed_res =
@@ -581,7 +577,7 @@ mod test {
         let mut mutator_set = MutatorSetAccumulator::default();
 
         let json_empty = serde_json::to_string(&mutator_set).unwrap();
-        println!("json = \n{}", json_empty);
+        println!("json = \n{json_empty}");
         let s_back = serde_json::from_str::<MutatorSetAccumulator>(&json_empty).unwrap();
         assert!(s_back.aocl.is_empty());
         assert!(s_back.swbf_inactive.is_empty());
@@ -590,7 +586,7 @@ mod test {
         // Add an item, verify correct serialization
         let (mp, item) = insert_mock_item(&mut mutator_set);
         let json_one_add = serde_json::to_string(&mutator_set).unwrap();
-        println!("json_one_add = \n{}", json_one_add);
+        println!("json_one_add = \n{json_one_add}");
         let s_back_one_add = serde_json::from_str::<MutatorSetAccumulator>(&json_one_add).unwrap();
         assert_eq!(1, s_back_one_add.aocl.num_leafs());
         assert!(s_back_one_add.swbf_inactive.is_empty());
@@ -600,7 +596,7 @@ mod test {
         // Remove an item, verify correct serialization
         remove_mock_item(&mut mutator_set, item, &mp);
         let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
-        println!("json_one_add = \n{}", json_one_add_one_remove);
+        println!("json_one_add = \n{json_one_add_one_remove}");
         let s_back_one_add_one_remove =
             serde_json::from_str::<MutatorSetAccumulator>(&json_one_add_one_remove).unwrap();
         assert_eq!(

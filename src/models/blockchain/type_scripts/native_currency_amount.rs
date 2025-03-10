@@ -107,9 +107,10 @@ impl NativeCurrencyAmount {
 
     /// Create an NativeCurrencyAmount object of the given number of whole coins.
     pub const fn coins(num_whole_coins: u32) -> NativeCurrencyAmount {
-        if num_whole_coins > 42_000_000 {
-            panic!("Number of coins must be less than 42000000");
-        }
+        assert!(
+            num_whole_coins <= 42_000_000,
+            "Number of coins must be less than 42000000"
+        );
         let number: i128 = num_whole_coins as i128;
         Self(Self::conversion_factor() * number)
     }
@@ -270,11 +271,10 @@ impl NativeCurrencyAmount {
             while decimals[i] == 10 {
                 decimals[i] = 0;
                 decimals[i - 1] += 1;
-                if i - 1 == 0 {
+                if i == 1 {
                     break;
-                } else {
-                    i -= 1;
                 }
+                i -= 1;
             }
         }
 
@@ -367,11 +367,9 @@ impl CheckedAdd for NativeCurrencyAmount {
     /// smaller than the maximum number of nau.
     fn checked_add(&self, v: &Self) -> Option<Self> {
         self.0.checked_add(v.0).and_then(|sum| {
-            if !(-Self::MAX_NAU..=Self::MAX_NAU).contains(&sum) {
-                None
-            } else {
-                Some(Self(sum))
-            }
+            (-Self::MAX_NAU..=Self::MAX_NAU)
+                .contains(&sum)
+                .then_some(Self(sum))
         })
     }
 }
@@ -406,7 +404,7 @@ impl Zero for NativeCurrencyAmount {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum FloatConversionError {
     NaN,
     Infinity,
@@ -473,7 +471,7 @@ impl NativeCurrencyAmount {
             match sign {
                 num_bigint::Sign::Minus => -nau_rational.numer(),
                 num_bigint::Sign::Plus => nau_rational.numer().to_owned(),
-                _ => unreachable!(),
+                num_bigint::Sign::NoSign => unreachable!(),
             }
         };
         if -BigInt::from(Self::MAX_NAU) > nau || nau > BigInt::from(Self::MAX_NAU) {
@@ -727,7 +725,7 @@ pub(crate) mod test {
         let fixed = -(NativeCurrencyAmount::from_nau(cf) + NativeCurrencyAmount::coins(10));
         assert_eq!(parsed.clone(), fixed);
         assert!(parsed.is_negative());
-        println!("parsed: {}", parsed);
+        println!("parsed: {parsed}");
 
         for s in [
             "-12387.4382975",
@@ -747,7 +745,7 @@ pub(crate) mod test {
             "-42000000",
         ] {
             let nc = NativeCurrencyAmount::coins_from_str(s)
-                .unwrap_or_else(|e| panic!("cannot decode {} because {}", s, e));
+                .unwrap_or_else(|e| panic!("cannot decode {s} because {e}"));
             println!("{s}: {nc}");
         }
 

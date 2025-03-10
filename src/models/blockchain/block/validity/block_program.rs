@@ -65,6 +65,10 @@ impl BlockProgram {
 
 impl ConsensusProgram for BlockProgram {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+        // restrict proof size to avoid jumping backwards or to arbitrary
+        // place in memory.
+        const MAX_PROOF_SIZE: u64 = 4_000_000;
+
         let mut library = Library::new();
 
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
@@ -190,9 +194,6 @@ impl ConsensusProgram for BlockProgram {
 
         let verify_all_claims_loop = "verify_all_claims_loop".to_string();
 
-        // restrict proof size to avoid jumping backwards or to arbitrary
-        // place in memory.
-        const MAX_PROOF_SIZE: u64 = 4_000_000;
         let verify_all_claims_function = triton_asm! {
             // INVARIANT: _ *claim[i]_si *proof[i]_si N i
             {verify_all_claims_loop}:
@@ -422,12 +423,8 @@ pub(crate) mod test {
                 .values()
                 .to_vec(),
         );
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _guard = rt.enter();
 
-        let block_proof_witness = rt
-            .block_on(BlockProofWitness::produce(block_primitive_witness))
-            .unwrap();
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness);
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
         let rust_output = BlockProgram
@@ -573,12 +570,7 @@ pub(crate) mod test {
         )
         .unwrap();
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _guard = rt.enter();
-
-        let block_proof_witness = rt
-            .block_on(BlockProofWitness::produce(block_primitive_witness))
-            .unwrap()
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness)
             .with_claim_test(halt_claim, halt_proof);
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();

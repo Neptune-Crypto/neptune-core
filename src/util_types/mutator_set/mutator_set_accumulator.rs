@@ -186,7 +186,7 @@ impl MutatorSetAccumulator {
             return false;
         }
 
-        for inserted_index in removal_record.absolute_indices.to_vec().into_iter() {
+        for inserted_index in removal_record.absolute_indices.to_vec() {
             // determine if inserted index lives in active window
             let active_window_start =
                 (self.aocl.num_leafs() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
@@ -390,23 +390,23 @@ impl MutatorSetAccumulator {
             // `Chunk` but only represents the values which are set by the removal records
             // being handled.
             let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
-            all_removal_records_indices.iter().for_each(|index| {
-                if *index >= active_window_start {
+            for index in all_removal_records_indices {
+                if index >= active_window_start {
                     let relative_index = (index - active_window_start) as u32;
                     self.swbf_active.insert(relative_index);
                 } else {
                     chunkidx_to_chunk_difference_dict
                         .entry((index / CHUNK_SIZE as u128) as u64)
                         .or_insert_with(Chunk::empty_chunk)
-                        .insert((*index % CHUNK_SIZE as u128) as u32);
+                        .insert((index % CHUNK_SIZE as u128) as u32);
                 }
-            });
+            }
 
             // Collect all affected chunks as they look before these removal records are applied
             // These chunks are part of the removal records, so we fetch them there.
             let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof)> =
                 HashMap::new();
-            for removal_record in removal_records.iter_mut() {
+            for removal_record in &mut removal_records {
                 for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.iter_mut() {
                     let chunk_hash = Hash::hash(chunk);
                     let prev_val =
@@ -421,7 +421,7 @@ impl MutatorSetAccumulator {
             }
 
             // Apply the removal records: the new chunk is obtained by adding the chunk difference
-            for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
+            for (chunk_index, (chunk, _)) in &mut mutation_data_preimage {
                 **chunk = chunk
                     .clone()
                     .combine(chunkidx_to_chunk_difference_dict[chunk_index].clone())
@@ -693,7 +693,7 @@ mod ms_accumulator_tests {
                     archival_after_remove.add(&addition_record).await;
                     archival_before_remove.add(&addition_record).await;
 
-                    println!("{}: Inserted", i);
+                    println!("{i}: Inserted");
                     for j in 0..items.len() {
                         if indices_of_updated_mps.contains(&j) {
                             assert_ne!(
@@ -761,7 +761,7 @@ mod ms_accumulator_tests {
                     let original_membership_proofs_sequential =
                         membership_proofs_sequential.clone();
                     let mut update_by_remove_return_values: Vec<bool> = vec![];
-                    for mp in membership_proofs_sequential.iter_mut() {
+                    for mp in &mut membership_proofs_sequential {
                         let update_res_seq = mp.update_from_remove(&removal_record);
                         update_by_remove_return_values.push(update_res_seq);
                     }
@@ -826,7 +826,7 @@ mod ms_accumulator_tests {
                         assert!(item_verifies_iff_not_updated);
                     }
 
-                    println!("{}: Removed", i);
+                    println!("{i}: Removed");
                 }
 
                 // Verify that all membership proofs are valid after these additions and removals
@@ -875,8 +875,8 @@ mod ms_accumulator_tests {
         // and then print the size of the mutator set accumulator, in bytes
         let mut rng = rand::rng();
         println!(
-            "profiling Mutator Set (w, b, s, k) = ({}, {}, {}, {}) ...",
-            WINDOW_SIZE, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS
+            "profiling Mutator Set \
+            (w, b, s, k) = ({WINDOW_SIZE}, {BATCH_SIZE}, {CHUNK_SIZE}, {NUM_TRIALS}) ..."
         );
         let mut msa = MutatorSetAccumulator::default();
         let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
@@ -885,7 +885,7 @@ mod ms_accumulator_tests {
 
         for i in 0..num_iterations {
             if i % 100 == 0 {
-                println!("{}/{}", i, num_iterations);
+                println!("{i}/{num_iterations}");
             }
             let operation = if items_and_membership_proofs.len()
                 > (1.25 * target_set_size as f64) as usize
@@ -901,7 +901,7 @@ mod ms_accumulator_tests {
                 let index = rng.random_range(0..items_and_membership_proofs.len());
                 let (item, membership_proof) = items_and_membership_proofs.swap_remove(index);
                 let removal_record = msa.drop(item, &membership_proof);
-                for (_it, mp) in items_and_membership_proofs.iter_mut() {
+                for (_it, mp) in &mut items_and_membership_proofs {
                     mp.update_from_remove(&removal_record);
                 }
                 msa.remove(&removal_record);
@@ -911,7 +911,7 @@ mod ms_accumulator_tests {
                 let sender_randomness = rng.random::<Digest>();
                 let receiver_preimage = rng.random::<Digest>();
                 let addition_record = commit(item, sender_randomness, receiver_preimage);
-                for (it, mp) in items_and_membership_proofs.iter_mut() {
+                for (it, mp) in &mut items_and_membership_proofs {
                     mp.update_from_addition(*it, &msa, &addition_record)
                         .unwrap();
                 }

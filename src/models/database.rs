@@ -15,7 +15,7 @@ use crate::prelude::twenty_first;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct BlockFileLocation {
     pub file_index: u32,
     pub offset: u64,
@@ -47,7 +47,7 @@ impl BlockRecord {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct FileRecord {
     pub blocks_in_file_count: u32,
     pub file_size: u64,
@@ -98,7 +98,7 @@ pub struct LastFileRecord {
     pub last_file: u32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum BlockIndexKey {
     Block(Digest),       // points to block headers and file locations
     File(u32),           // points to file information
@@ -123,35 +123,35 @@ impl BlockIndexValue {
     pub fn as_block_record(&self) -> BlockRecord {
         match self {
             BlockIndexValue::Block(rec) => *rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_file_record(&self) -> FileRecord {
         match self {
             BlockIndexValue::File(rec) => rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_height_record(&self) -> Vec<Digest> {
         match self {
             BlockIndexValue::Height(rec) => rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_last_file_record(&self) -> LastFileRecord {
         match self {
             BlockIndexValue::LastFile(rec) => rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_tip_digest(&self) -> Digest {
         match self {
             BlockIndexValue::BlockTipDigest(digest) => digest.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 }

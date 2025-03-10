@@ -140,7 +140,7 @@ pub async fn unit_test_databases(
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
-    std::net::SocketAddr::from_str(&format!("127.0.0.{}:8080", count)).unwrap()
+    std::net::SocketAddr::from_str(&format!("127.0.0.{count}:8080")).unwrap()
 }
 
 /// Get a dummy-peer representing an incoming connection.
@@ -219,7 +219,7 @@ pub(crate) async fn mock_genesis_global_state(
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
-            std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
+            std::net::SocketAddr::from_str(&format!("123.123.123.{i}:8080")).unwrap();
         peer_map.insert(peer_address, get_dummy_peer_outgoing(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db);
@@ -271,18 +271,17 @@ pub(crate) async fn get_test_genesis_setup(
     GlobalStateLock,
     HandshakeData,
 )> {
-    let (peer_broadcast_tx, mut _from_main_rx1) =
+    let (peer_broadcast_tx, from_main_rx) =
         broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+    let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
     let devnet_wallet = WalletEntropy::devnet_wallet();
     let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
-        from_main_rx_clone,
+        from_main_rx,
         to_main_tx,
-        _to_main_rx1,
+        to_main_rx,
         state,
         get_dummy_handshake_data_for_genesis(network),
     ))
@@ -313,7 +312,7 @@ pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory
     let mut rng = rand::rng();
     let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
     let tmp_root: PathBuf = env::temp_dir()
-        .join(format!("neptune-unit-tests-{}", user))
+        .join(format!("neptune-unit-tests-{user}"))
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
     DataDirectory::get(Some(tmp_root), network)
@@ -337,7 +336,7 @@ pub struct Mock<Item> {
 }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MockError {
     WrongSend,
     UnexpectedSend,
@@ -870,9 +869,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     let body = primitive_witness.body().to_owned();
     let header = primitive_witness.header(timestamp, None);
     let (appendix, proof) = {
-        let block_proof_witness = BlockProofWitness::produce(primitive_witness)
-            .await
-            .expect("producing block proof witness from block primitive witness should succeed");
+        let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();
         let claim = BlockProgram::claim(&body, &appendix);
         cache_true_claim(claim).await;
@@ -969,7 +966,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     }
 
     let mut rng = StdRng::from_seed(shuffle_seed);
-    for tx_to_include in selected_mempool_txs.into_iter() {
+    for tx_to_include in selected_mempool_txs {
         block_transaction =
             fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
                 .await
@@ -1092,7 +1089,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     tip_block: &Block,
 ) -> bool {
     let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-    for monitored_utxo in monitored_utxos.get_all().await.iter() {
+    for monitored_utxo in &monitored_utxos.get_all().await {
         let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
         match current_mp {

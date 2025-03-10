@@ -13,6 +13,7 @@ use crate::locks::tokio::LockCallbackFn;
 /// You probably want to implement your own storage class after this example so
 /// that you can hardcode the schema in new(). But it is nevertheless possible
 /// to use this struct and add to the schema.
+#[derive(Debug)]
 pub struct SimpleRustyStorage {
     /// dynamic DB Schema.  (new tables may be added)
     pub schema: DbtSchema,
@@ -28,7 +29,7 @@ impl StorageWriter for SimpleRustyStorage {
         // in a single atomic operation.
         {
             let mut pending_writes = self.schema.pending_writes.lock_guard_mut().await;
-            for op in pending_writes.write_ops.iter() {
+            for op in &pending_writes.write_ops {
                 match op.clone() {
                     WriteOperation::Write(key, value) => write_ops.op_write(key, value),
                     WriteOperation::Delete(key) => write_ops.op_delete(key),

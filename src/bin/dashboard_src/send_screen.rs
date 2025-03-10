@@ -34,7 +34,7 @@ use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SendScreenWidget {
     Address,
     Amount,
@@ -101,6 +101,8 @@ impl SendScreen {
         network: Network,
         refresh_tx: tokio::sync::mpsc::Sender<()>,
     ) {
+        const SEND_DEADLINE_IN_SECONDS: u64 = 40;
+
         //        *focus_arc.lock().await = SendScreenWidget::Notice;
 
         *notice_arc.lock().await = "sending ...".to_string();
@@ -109,7 +111,7 @@ impl SendScreen {
         let valid_amount = match NativeCurrencyAmount::coins_from_str(&amount) {
             Ok(a) => a,
             Err(e) => {
-                *notice_arc.lock().await = format!("amount: {}", e);
+                *notice_arc.lock().await = format!("amount: {e}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
@@ -119,13 +121,13 @@ impl SendScreen {
         let valid_fee = match NativeCurrencyAmount::coins_from_str(&fee) {
             Ok(a) if !a.is_negative() => a,
             Ok(a) => {
-                *notice_arc.lock().await = format!("fee: {}", a);
+                *notice_arc.lock().await = format!("fee: {a}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
             }
             Err(e) => {
-                *notice_arc.lock().await = format!("fee: {}", e);
+                *notice_arc.lock().await = format!("fee: {e}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
@@ -135,7 +137,7 @@ impl SendScreen {
         let valid_address = match ReceivingAddress::from_bech32m(&address, network) {
             Ok(a) => a,
             Err(e) => {
-                *notice_arc.lock().await = format!("address: {}", e);
+                *notice_arc.lock().await = format!("address: {e}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
@@ -144,7 +146,6 @@ impl SendScreen {
 
         // Allow the generation of proves to take some time...
         let mut send_ctx = context::current();
-        const SEND_DEADLINE_IN_SECONDS: u64 = 40;
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
         let send_result = rpc_client
             .send(
@@ -193,7 +194,7 @@ impl SendScreen {
                         *n = "".to_string();
                     }
                 }
-                _ => {}
+                ResetType::None => {}
             }
             *reset_me_mutex_guard = ResetType::None;
         }
@@ -236,9 +237,9 @@ impl SendScreen {
                                             rpc_client, token, address, amount, fee, notice,
                                             reset_me, network, refresh_tx,
                                         ));
-                                        //                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                        // escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
-                                    _ => {
+                                    SendScreenWidget::Notice => {
                                         escalate_event = None;
                                     }
                                 }

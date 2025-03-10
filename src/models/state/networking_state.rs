@@ -138,7 +138,7 @@ impl NetworkingState {
     }
 
     /// Return a list of peer sanctions stored in the database.
-    pub async fn all_peer_sanctions_in_database(&self) -> HashMap<IpAddr, PeerStanding> {
+    pub fn all_peer_sanctions_in_database(&self) -> HashMap<IpAddr, PeerStanding> {
         let mut sanctions = HashMap::default();
 
         let mut dbiterator = self.peer_databases.peer_standings.iter();
@@ -177,7 +177,7 @@ impl NetworkingState {
             .collect();
 
         let mut batch = WriteBatchAsync::new();
-        for (ip, standing) in new_entries.into_iter() {
+        for (ip, standing) in new_entries {
             batch.op_write(ip, standing);
         }
 

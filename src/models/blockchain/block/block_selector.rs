@@ -26,7 +26,7 @@ use crate::twenty_first::error::TryFromHexDigestError;
 use crate::twenty_first::math::digest::Digest;
 
 /// Provides alternatives for looking up a block.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BlockSelector {
     Digest(Digest),      // Identifies block by Digest (hash)
     Height(BlockHeight), // Identifies block by Height (count from genesis)
@@ -47,8 +47,8 @@ pub enum BlockSelector {
 impl std::fmt::Display for BlockSelector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Digest(d) => write!(f, "digest/{}", d),
-            Self::Height(h) => write!(f, "height/{}", h),
+            Self::Digest(d) => write!(f, "digest/{d}"),
+            Self::Height(h) => write!(f, "height/{h}"),
             Self::Genesis => write!(f, "genesis"),
             Self::Tip => write!(f, "tip"),
         }

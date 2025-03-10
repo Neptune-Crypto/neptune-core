@@ -21,6 +21,7 @@ use crate::prelude::twenty_first;
 ///
 /// Merkle Mountain Ranges only know about hashes. When values are to be associated with
 /// MMRs, these values must be stored by the caller, or in a wrapper to this data structure.
+#[derive(Debug, Clone)]
 pub struct ArchivalMmr<Storage: StorageVec<Digest>> {
     digests: Storage,
 }
@@ -129,7 +130,7 @@ where
             "Duplicated leaves are not allowed in membership proof updater"
         );
 
-        for (leaf_index, digest) in mutation_data.iter() {
+        for (leaf_index, digest) in &mutation_data {
             self.mutate_leaf(*leaf_index, *digest).await;
         }
 
@@ -801,7 +802,7 @@ pub(crate) mod mmr_test {
                 mock::get_ammr_from_digests(leaf_hashes_tip5.clone()).await;
             let mut accumulator_iterative = MmrAccumulator::new_from_leafs(vec![]);
             let accumulator_batch = MmrAccumulator::new_from_leafs(leaf_hashes_tip5.clone());
-            for leaf_hash in leaf_hashes_tip5.clone().into_iter() {
+            for leaf_hash in leaf_hashes_tip5.clone() {
                 let leaf_index = archival_iterative.num_leafs().await;
                 let archival_membership_proof = archival_iterative.append(leaf_hash).await;
                 let accumulator_membership_proof = accumulator_iterative.append(leaf_hash);

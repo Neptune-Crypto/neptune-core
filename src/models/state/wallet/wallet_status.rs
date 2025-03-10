@@ -28,7 +28,7 @@ impl WalletStatusElement {
 impl Display for WalletStatusElement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string: String = format!("({}, {:?})", self.aocl_leaf_index, self.utxo);
-        write!(f, "{}", string)
+        write!(f, "{string}")
     }
 }
 

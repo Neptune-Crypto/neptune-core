@@ -234,7 +234,7 @@ impl Cookie {
         use core::fmt::Write;
         let mut s = String::with_capacity(2 * 32);
         for byte in self.0 {
-            write!(s, "{:02X}", byte).unwrap()
+            write!(s, "{byte:02X}").unwrap()
         }
         s
     }
@@ -327,8 +327,9 @@ mod test {
         ///  1. Verify that HashSet contains 50 items.
         #[tokio::test]
         pub async fn try_new_unique() -> anyhow::Result<()> {
-            let data_dir = unit_test_data_directory(Network::RegTest)?;
             const NUM_COOKIES: usize = 50;
+
+            let data_dir = unit_test_data_directory(Network::RegTest)?;
 
             let mut set: HashSet<Cookie> = Default::default();
 
@@ -399,14 +400,6 @@ mod test {
         #[cfg(not(target_os = "windows"))]
         #[tokio::test]
         pub async fn concurrency() -> anyhow::Result<()> {
-            let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
-
-            let root = data_dir_orig.root_dir_path();
-            let tmp = root.join("tmp");
-            DataDirectory::create_dir_if_not_exists(&tmp).await?;
-
-            println!("tempfiles stored in {}", tmp.display());
-
             async fn add_cookie(data_dir: &DataDirectory, cookie: &Cookie) {
                 let path = data_dir.root_dir_path().join("tmp").join(cookie.as_hex());
                 tokio::fs::OpenOptions::new()
@@ -423,6 +416,14 @@ mod test {
                     .await
                     .unwrap()
             }
+
+            let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
+
+            let root = data_dir_orig.root_dir_path();
+            let tmp = root.join("tmp");
+            DataDirectory::create_dir_if_not_exists(&tmp).await?;
+
+            println!("tempfiles stored in {}", tmp.display());
 
             // ensure a cookie file has been written.
             let cookie_orig = Cookie::try_new(&data_dir_orig).await?;
@@ -450,12 +451,12 @@ mod test {
                                 match Cookie::try_new_with_secret(&data_dir, secret).await {
                                     Ok(c) => add_cookie(&data_dir, &c).await,
                                     Err(e) => {
-                                        println!("write thread error: {}, {:?}", e, e);
-                                        panic!("write thread error: {}, {:?}", e, e);
+                                        println!("write thread error: {e}, {e:?}");
+                                        panic!("write thread error: {e}, {e:?}");
                                     }
                                 };
                                 if i % 10 == 0 {
-                                    println!("write thread {}, cookie file writes {}", x, i);
+                                    println!("write thread {x}, cookie file writes {i}");
                                 }
                             }
                         });
@@ -484,12 +485,12 @@ mod test {
                                         );
                                     }
                                     Err(e) => {
-                                        println!("read thread error: {}, {:?}", e, e);
-                                        panic!("read thread error: {}, {:?}", e, e);
+                                        println!("read thread error: {e}, {e:?}");
+                                        panic!("read thread error: {e}, {e:?}");
                                     }
                                 };
                                 if i % 10 == 0 {
-                                    println!("read thread {}, cookie file reads {}", x, i);
+                                    println!("read thread {x}, cookie file reads {i}");
                                 }
                             }
                         });
@@ -499,7 +500,7 @@ mod test {
 
                 for jh in handles {
                     if let Err(e) = jh.join() {
-                        panic!("got join error: {:?}", e);
+                        panic!("got join error: {e:?}");
                     }
                 }
             });

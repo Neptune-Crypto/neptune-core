@@ -92,6 +92,10 @@ const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
+    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
+        tokio::spawn(fut);
+    }
+
     info!("Starting client on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists
@@ -190,11 +194,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
         // Print the stack trace
         if let Some(location) = panic_info.location() {
-            msg += &format!("  location: {}\n", location);
+            msg += &format!("  location: {location}\n");
         }
 
         if let Some(payload) = panic_info.payload().downcast_ref::<&str>() {
-            msg += &format!("  message: {}\n", payload);
+            msg += &format!("  message: {payload}\n");
         }
 
         msg += &format!("  backtrace:\n{}", std::backtrace::Backtrace::capture());
@@ -226,11 +230,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("UTXO restoration check complete");
 
     // Connect to peers, and provide each peer task with a thread-safe copy of the state
-    let own_handshake_data: HandshakeData = global_state_lock
-        .lock_guard()
-        .await
-        .get_own_handshakedata()
-        .await;
+    let own_handshake_data: HandshakeData =
+        global_state_lock.lock_guard().await.get_own_handshakedata();
     info!(
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height
@@ -287,10 +288,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     rpc_listener.config_mut().max_frame_length(usize::MAX);
 
     let rpc_state_lock = global_state_lock.clone();
-
-    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
-        tokio::spawn(fut);
-    }
 
     // each time we start neptune-core a new RPC cookie is generated.
     let valid_tokens: Vec<rpc_auth::Token> =
@@ -527,6 +524,7 @@ const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event
 /// for convenience see macros:
 ///  crate::macros::log_slow_scope,
 ///  crate::macros::log_scope_duration,
+#[derive(Debug, Clone)]
 pub struct ScopeDurationLogger<'a> {
     start: Instant,
     description: &'a str,
