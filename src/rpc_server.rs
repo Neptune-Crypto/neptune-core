@@ -209,20 +209,26 @@ impl MempoolTransactionInfo {
 /// minting of the next block.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct ProofOfWorkPuzzle {
-    kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
-    header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
+    // All fields public since used downstream by mining pool software.
+    pub kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
+    pub header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
 
     /// The threshold digest that defines when a PoW solution is valid. The
     /// block's hash must be less than or equal to this value.
-    threshold: Digest,
+    pub threshold: Digest,
 
-    /// The total reward, timelocked plus liquid, for a successful guess
-    total_guesser_reward: NativeCurrencyAmount,
+    /// The total reward, timelocked plus liquid, for a successful guess.
+    pub total_guesser_reward: NativeCurrencyAmount,
 
     /// An identifier for the puzzle. Needed since more than one block proposal
     /// may be known for the next block. A commitment to the entire block
     /// kernel, apart from the nonce.
-    id: Digest,
+    pub id: Digest,
+
+    /// Indicates whether template is invalid due to the presence of a new tip.
+    /// Can be used to reset templates in pools that perform local checks before
+    /// submitting a solution to the node.
+    pub prev_block: Digest,
 }
 
 impl ProofOfWorkPuzzle {
@@ -232,6 +238,7 @@ impl ProofOfWorkPuzzle {
         let guesser_reward = block_proposal.total_guesser_reward();
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block_proposal);
         let threshold = latest_block_header.difficulty.target();
+        let prev_block = block_proposal.header().prev_block_digest;
 
         let id = Tip5::hash(&(kernel_auth_path, header_auth_path));
 
@@ -241,6 +248,7 @@ impl ProofOfWorkPuzzle {
             threshold,
             total_guesser_reward: guesser_reward,
             id,
+            prev_block,
         }
     }
 }
@@ -4566,7 +4574,10 @@ mod rpc_server_tests {
             let mut block1 = invalid_empty_block(&genesis);
             let hash_lock_key = HashLockKey::from_preimage(random());
             block1.set_header_guesser_digest(hash_lock_key.after_image());
+
             let guess_challenge = ProofOfWorkPuzzle::new(block1.clone(), *genesis.header());
+            assert_eq!(guess_challenge.prev_block, genesis.hash());
+
             let nonce = random();
             let resulting_block_hash = fast_kernel_mast_hash(
                 guess_challenge.kernel_auth_path,
