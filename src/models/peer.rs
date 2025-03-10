@@ -97,6 +97,17 @@ pub enum NegativePeerSanction {
     UnwantedMessage,
 
     NoStandingFoundMaybeCrash,
+
+    /// Nodes can change their bootstrap status and notify their peers about
+    /// such updates. Under normal circumstances, these updates are rare.
+    /// Frequent updates are an indicator of malicious behavior.
+    BootstrapStatusUpdateSpam,
+
+    /// It is valid for a peer to update its bootstrap status. However, each
+    /// update requires write-access to the global state lock, which is to be
+    /// avoided. In order to disincentivize updates, they cause a mild
+    /// punishment.
+    BootstrapStatusUpdate,
 }
 
 /// The reason for improving a peer's standing
@@ -164,6 +175,8 @@ impl Display for NegativePeerSanction {
             }
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => "fishy pow evolution",
             NegativePeerSanction::FishyDifficultiesChallengeResponse => "fishy difficulties",
+            NegativePeerSanction::BootstrapStatusUpdateSpam => "bootstrap status update spam",
+            NegativePeerSanction::BootstrapStatusUpdate => "bootstrap status update",
         };
         write!(f, "{string}")
     }
@@ -238,6 +251,8 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => -51,
             NegativePeerSanction::FishyDifficultiesChallengeResponse => -51,
+            NegativePeerSanction::BootstrapStatusUpdateSpam => -20,
+            NegativePeerSanction::BootstrapStatusUpdate => -2,
         }
     }
 }
@@ -285,6 +300,7 @@ pub struct PeerStanding {
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
     peer_tolerance: i32,
 }
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct StandingExceedsBanThreshold;
 
@@ -365,6 +381,50 @@ impl Display for PeerStanding {
 pub enum TransferConnectionStatus {
     Refused(ConnectionRefusedReason),
     Accepted,
+}
+
+/// Does the node help bootstrapping the network?
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) enum BootstrapStatus {
+    /// The node is not a bootstrap node.
+    ///
+    /// If no further information is known about a peer, it is assumed that it is an
+    /// ordinary node.
+    #[default]
+    Ordinary,
+
+    /// The node _is_ a bootstrap node.
+    Bootstrap,
+}
+
+impl Display for BootstrapStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let display = match self {
+            Self::Ordinary => "ordinary node",
+            Self::Bootstrap => "bootstrap node",
+        };
+
+        write!(f, "{display}")
+    }
+}
+
+/// A node's [BootstrapStatus] and some metadata.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) struct BootstrapInfo {
+    pub status: BootstrapStatus,
+
+    /// The time when the status was last set.
+    pub last_set: SystemTime,
+}
+
+impl BootstrapInfo {
+    /// Create new [BootstrapInfo] right [now](SystemTime::now).
+    pub fn new(status: BootstrapStatus) -> Self {
+        Self {
+            status,
+            last_set: SystemTime::now(),
+        }
+    }
 }
 
 /// A success code for internal use, pertaining to the establishment
@@ -467,6 +527,7 @@ pub(crate) enum PeerMessage {
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),
+    BootstrapStatus(BootstrapStatus),
 }
 
 impl PeerMessage {
@@ -493,6 +554,7 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => "unable to satisfy batch request",
             PeerMessage::SyncChallenge(_) => "sync challenge",
             PeerMessage::SyncChallengeResponse(_) => "sync challenge response",
+            PeerMessage::BootstrapStatus(_) => "bootstrap status",
         }
         .to_string()
     }
@@ -520,6 +582,7 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => true,
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
+            PeerMessage::BootstrapStatus(_) => false,
         }
     }
 
@@ -547,6 +610,7 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => false,
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
+            PeerMessage::BootstrapStatus(_) => false,
         }
     }
 }

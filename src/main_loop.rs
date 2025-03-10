@@ -2301,8 +2301,8 @@ mod test {
             instants.iter().copied().min_by(|l, r| l.cmp(r)).unwrap()
         );
     }
-    mod bootstrapper_mode {
 
+    mod bootstrap_mode {
         use rand::Rng;
 
         use super::*;
@@ -2314,7 +2314,7 @@ mod test {
         #[tokio::test]
         #[traced_test]
         async fn disconnect_from_oldest_peer_upon_connection_request() {
-            // Set up a node in bootstrapper mode and connected to a given
+            // Set up a node in bootstrap mode and connected to a given
             // number of peers, which is one less than the maximum. Initiate a
             // connection request. Verify that the oldest of the existing
             // connections is dropped.

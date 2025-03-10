@@ -23,6 +23,7 @@ use tracing::warn;
 
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
+use crate::models::peer::BootstrapStatus;
 use crate::models::peer::ConnectionRefusedReason;
 use crate::models::peer::InternalConnectionStatus;
 use crate::models::peer::NegativePeerSanction;
@@ -292,12 +293,23 @@ where
     info!("Connection accepted from {peer_address}");
 
     // If necessary, disconnect from another, existing peer.
-    if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
+    let self_is_bootstrap = state.cli().bootstrap;
+    if connection_status == InternalConnectionStatus::AcceptedMaxReached && self_is_bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
         peer_task_to_main_tx
             .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
             .await?;
     }
+
+    // inform the new peer about our bootstrap status
+    let bootstrap_status = if self_is_bootstrap {
+        BootstrapStatus::Bootstrap
+    } else {
+        BootstrapStatus::Ordinary
+    };
+    peer.send(PeerMessage::BootstrapStatus(bootstrap_status))
+        .await?;
+    info!("Informing {peer_address} of our bootstrap status: {bootstrap_status}");
 
     let peer_distance = 1; // All incoming connections have distance 1
     let mut peer_loop_handler = PeerLoopHandler::new(
