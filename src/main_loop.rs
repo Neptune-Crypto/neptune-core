@@ -88,6 +88,7 @@ const TX_UPDATER_CHANNEL_CAPACITY: usize = 1;
 ///  a) the miner might not exist in which case there would be no-one to empty
 ///     the channel; and
 ///  b) contrary to other channels, transmission failures here are not critical.
+#[derive(Debug)]
 struct MainToMinerChannel(Option<mpsc::Sender<MainToMiner>>);
 
 impl MainToMinerChannel {
@@ -106,6 +107,7 @@ impl MainToMinerChannel {
 }
 
 /// MainLoop is the immutable part of the input for the main loop function
+#[derive(Debug)]
 pub struct MainLoopHandler {
     incoming_peer_listener: TcpListener,
     global_state_lock: GlobalStateLock,

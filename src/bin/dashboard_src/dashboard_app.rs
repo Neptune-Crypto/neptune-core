@@ -647,3 +647,14 @@ impl DashboardApp {
         };
     }
 }
+
+impl fmt::Debug for DashboardApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DashboardApp")
+            .field("running", &self.running)
+            .field("current_menu_item", &self.current_menu_item)
+            .field("menu_in_focus", &self.menu_in_focus)
+            .field("network", &self.network)
+            .finish()
+    }
+}

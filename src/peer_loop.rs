@@ -75,6 +75,7 @@ pub type PeerStandingNumber = i32;
 ///
 /// also handles messages from main task over the main-to-peer-tasks broadcast
 /// channel.
+#[derive(Debug, Clone)]
 pub struct PeerLoopHandler {
     to_main_tx: mpsc::Sender<PeerTaskToMain>,
     global_state_lock: GlobalStateLock,

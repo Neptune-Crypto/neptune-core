@@ -12,6 +12,7 @@ use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
 
+#[derive(Debug)]
 pub struct RustyWalletDatabase {
     storage: SimpleRustyStorage,
 

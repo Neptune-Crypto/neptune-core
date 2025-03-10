@@ -21,6 +21,7 @@ use crate::prelude::twenty_first;
 ///
 /// Merkle Mountain Ranges only know about hashes. When values are to be associated with
 /// MMRs, these values must be stored by the caller, or in a wrapper to this data structure.
+#[derive(Debug, Clone)]
 pub struct ArchivalMmr<Storage: StorageVec<Digest>> {
     digests: Storage,
 }

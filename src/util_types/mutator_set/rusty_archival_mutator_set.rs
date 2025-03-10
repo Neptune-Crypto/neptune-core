@@ -15,6 +15,8 @@ use crate::util_types::archival_mmr::ArchivalMmr;
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
+
+#[derive(Debug)]
 pub struct RustyArchivalMutatorSet {
     ams: ArchivalMutatorSet<AmsMmrStorage, AmsChunkStorage>,
     storage: SimpleRustyStorage,
