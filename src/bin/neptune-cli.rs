@@ -271,6 +271,10 @@ enum Command {
         max_num_blocks: Option<usize>,
     },
 
+    /******** PEER INTERACTIONS ********/
+    /// Broadcast transaction notifications for all transactions in mempool.
+    BroadCastMempoolTransactions,
+
     /******** CHANGE STATE ********/
     /// shutdown neptune-core
     Shutdown,
@@ -1024,6 +1028,12 @@ async fn main() -> Result<()> {
             println!(
                 "Greatest difficulty in specified range:\n{difficulty} at block height {height}."
             )
+        }
+
+        /******** PEER INTERACTIONS ********/
+        Command::BroadCastMempoolTransactions => {
+            println!("Broadcasting transaction-notifications for all transactions in mempool.");
+            client.broadcast_all_mempool_txs(ctx, token).await??;
         }
 
         /******** CHANGE STATE ********/

@@ -1721,6 +1721,30 @@ impl MainLoopHandler {
                 // do not shut down
                 Ok(false)
             }
+            RPCServerToMain::BroadcastMempoolTransactions => {
+                info!("Broadcasting transaction notifications for all shareable transactions in mempool");
+                let state = self.global_state_lock.lock_guard().await;
+                let txs = state.mempool.get_sorted_iter().collect_vec();
+                for (txid, _) in txs {
+                    // Since a read-lock is held over global state, the
+                    // transaction must exist in the mempool.
+                    let tx = state
+                        .mempool
+                        .get(txid)
+                        .expect("Transaction from iter must exist in mempool");
+                    let notification = TransactionNotification::try_from(tx);
+                    match notification {
+                        Ok(notification) => {
+                            self.main_to_peer_broadcast_tx
+                                .send(MainToPeerTask::TransactionNotification(notification))?;
+                        }
+                        Err(error) => {
+                            warn!("{error}");
+                        }
+                    };
+                }
+                Ok(false)
+            }
             RPCServerToMain::ProofOfWorkSolution(new_block) => {
                 info!("Handling PoW solution from RPC call");
 

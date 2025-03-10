@@ -1418,6 +1418,12 @@ pub trait RPC {
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Vec<(u64, Difficulty)>>;
 
+    /******** PEER INTERACTIONS ********/
+
+    /// Broadcast transaction notifications for all transactions in this node's
+    /// mempool.
+    async fn broadcast_all_mempool_txs(token: rpc_auth::Token) -> RpcResult<()>;
+
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
@@ -3433,6 +3439,25 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn broadcast_all_mempool_txs(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // If this sending fails, it means `main_loop` is no longer running,
+        // and node is crashed. No reason to log anything additional.
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::BroadcastMempoolTransactions)
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn mempool_overview(
         self,
         _context: ::tarpc::context::Context,
@@ -3760,6 +3785,10 @@ mod rpc_server_tests {
         let _ = rpc_server
             .clone()
             .block_difficulties(ctx, token, BlockSelector::Tip, None)
+            .await;
+        let _ = rpc_server
+            .clone()
+            .broadcast_all_mempool_txs(ctx, token)
             .await;
         let _ = rpc_server.clone().mempool_overview(ctx, token, 0, 20).await;
         let _ = rpc_server.clone().clear_all_standings(ctx, token).await;
