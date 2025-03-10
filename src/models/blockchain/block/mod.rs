@@ -1725,6 +1725,7 @@ pub(crate) mod block_tests {
                 .apply_to_accumulator_and_records(
                     &mut ms,
                     &mut mutator_set_update_tx.removals.iter_mut().collect_vec(),
+                    &mut [],
                 )
                 .expect(reason);
             mutator_set_update_tx

@@ -160,6 +160,7 @@ impl Transaction {
             .apply_to_accumulator_and_records(
                 &mut calculated_new_mutator_set,
                 &mut new_inputs.iter_mut().collect_vec(),
+                &mut [],
             )
             .unwrap_or_else(|_| panic!("Could not apply mutator set update."));
 

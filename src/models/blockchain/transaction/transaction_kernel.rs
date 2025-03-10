@@ -522,6 +522,7 @@ pub mod transaction_kernel_tests {
             .apply_to_accumulator_and_records(
                 &mut msa,
                 &mut removal_records.iter_mut().collect_vec(),
+                &mut [],
             )
             .unwrap();
         let new_tx = TransactionKernelModifier::default()

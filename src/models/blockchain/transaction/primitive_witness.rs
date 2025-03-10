@@ -27,6 +27,7 @@ use crate::models::blockchain::type_scripts::known_type_scripts::match_type_scri
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
+use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -436,12 +437,6 @@ impl PrimitiveWitness {
     /// assumes that the lock script witnesses are still valid under the new
     /// mutator set.
     pub(crate) fn update_with_new_ms_data(self, mutator_set_update: MutatorSetUpdate) -> Self {
-        let new_addition_records = mutator_set_update.additions;
-        let mut new_removal_records = mutator_set_update.removals;
-
-        new_removal_records.reverse();
-        let mut block_removal_records: Vec<&mut RemovalRecord> =
-            new_removal_records.iter_mut().collect::<Vec<_>>();
         let mut msa_state: MutatorSetAccumulator = self.mutator_set_accumulator.clone();
         let mut transaction_removal_records: Vec<RemovalRecord> = self.kernel.inputs.clone();
         let mut transaction_removal_records: Vec<&mut RemovalRecord> =
@@ -449,58 +444,34 @@ impl PrimitiveWitness {
 
         let mut primitive_witness = self;
 
-        // Apply all addition records in the block
-        for block_addition_record in new_addition_records {
-            // Batch update block's removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(&mut block_removal_records, &msa_state);
+        let old_membership_proofs = primitive_witness.input_membership_proofs.clone();
+        let own_items = primitive_witness
+            .input_utxos
+            .utxos
+            .iter()
+            .map(Tip5::hash)
+            .collect_vec();
+        let mut authenticated_items = own_items
+            .into_iter()
+            .zip(old_membership_proofs)
+            .map(|(item, msmp)| AuthenticatedItem {
+                item,
+                ms_membership_proof: msmp,
+            })
+            .collect_vec();
 
-            // Batch update transaction's removal records
-            RemovalRecord::batch_update_from_addition(&mut transaction_removal_records, &msa_state);
-
-            // Batch update primitive witness membership proofs
-            let membership_proofs = &mut primitive_witness
-                .input_membership_proofs
-                .iter_mut()
-                .collect_vec();
-            let own_items = primitive_witness
-                .input_utxos
-                .utxos
-                .iter()
-                .map(Tip5::hash)
-                .collect_vec();
-            MsMembershipProof::batch_update_from_addition(
-                membership_proofs,
-                &own_items,
-                &msa_state,
-                &block_addition_record,
-            )
-            .expect("MS MP update from add must succeed in wallet handler");
-
-            msa_state.add(&block_addition_record);
-        }
-
-        while let Some(removal_record) = block_removal_records.pop() {
-            // Batch update block's removal records to keep them valid after next removal
-            RemovalRecord::batch_update_from_remove(&mut block_removal_records, removal_record);
-
-            // batch update transaction's removal records
-            // Batch update block's removal records to keep them valid after next removal
-            RemovalRecord::batch_update_from_remove(
-                &mut transaction_removal_records,
-                removal_record,
-            );
-
-            // Batch update primitive witness membership proofs
-            let membership_proofs = &mut primitive_witness
-                .input_membership_proofs
-                .iter_mut()
-                .collect_vec();
-
-            MsMembershipProof::batch_update_from_remove(membership_proofs, removal_record)
-                .expect("MS MP update from add must succeed in wallet handler");
-
-            msa_state.remove(removal_record);
-        }
+        // Don't need to check return value because we assume inputs are not
+        // spent in supplied mutator set update.
+        let _ = mutator_set_update.apply_to_accumulator_and_records(
+            &mut msa_state,
+            &mut transaction_removal_records,
+            &mut authenticated_items.iter_mut().collect_vec(),
+        );
+        let new_membership_proofs = authenticated_items
+            .into_iter()
+            .map(|x| x.ms_membership_proof)
+            .collect_vec();
+        primitive_witness.input_membership_proofs = new_membership_proofs;
 
         let kernel = TransactionKernelModifier::default()
             .inputs(
@@ -1671,7 +1642,7 @@ mod test {
         }
     }
 
-    #[proptest(cases = 4, async = "tokio")]
+    #[proptest(cases = 10, async = "tokio")]
     async fn updating_primitive_witness_with_ms_data_works(
         // Notice only SingleProof-backed txs need inputs to allow updating, not PW-backed ones.
         #[strategy(0usize..20)] _num_inputs_own: usize,
