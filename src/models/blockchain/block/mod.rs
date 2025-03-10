@@ -1720,12 +1720,12 @@ pub(crate) mod block_tests {
 
     fn block_size_statistics(block: &Block) -> HashMap<String, (usize, f64)> {
         let mut dictionary = HashMap::new();
-        let total_size = bincode::serialize(block).unwrap().len();
+        let total_size = block.size() * 8;
         dictionary.insert("_total".to_string(), (total_size, 1.0));
 
         macro_rules! insert_statistic {
             ($field_expr:expr, $label:expr) => {{
-                let size = bincode::serialize($field_expr).unwrap().len();
+                let size = $field_expr.encode().len() * 8;
                 dictionary.insert(
                     $label.to_string(),
                     (size, (size as f64) / (total_size as f64)),

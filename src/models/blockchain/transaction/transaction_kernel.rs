@@ -545,7 +545,7 @@ pub mod transaction_kernel_tests {
                     num_outputs,
                     rng().random(),
                 );
-                let size = bincode::serialize(&kernel).unwrap().len();
+                let size = kernel.encode().len() * 8;
                 println!(
                     "Size of pseudorandom transaction kernel with \
                     {num_inputs} inputs and {num_outputs} outputs: {}",
@@ -564,6 +564,12 @@ pub mod transaction_kernel_tests {
         // for coefficients
         let coefficients = lstsq(&data, &observations, 1e-14).unwrap().solution;
 
+        // sanity check
+        // observations - data*coefficients _|_ colspan data
+        let difference = observations - (data.clone() * coefficients.clone());
+        let projection = data.transpose() * difference;
+        assert!(projection.norm_squared() <= 1e-14);
+
         println!(
             "average size of input: {}",
             ByteSize::b(coefficients[0].round() as u64)
@@ -572,10 +578,7 @@ pub mod transaction_kernel_tests {
             "average size of output + public announcement: {}",
             ByteSize::b(coefficients[1].round() as u64)
         );
-        println!(
-            "average size of all the rest: {}",
-            ByteSize::b(coefficients[2].round() as u64)
-        );
+        println!("average size of all the rest: {} bytes", coefficients[2]);
     }
 
     #[test]
