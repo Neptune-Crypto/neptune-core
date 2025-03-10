@@ -425,6 +425,7 @@ impl<T> AtomicRw<T> {
 
 /// A wrapper for [RwLockReadGuard] that can optionally call a callback to
 /// notify when the lock event occurs.
+#[derive(Debug)]
 pub struct AtomicRwReadGuard<'a, T> {
     guard: RwLockReadGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
@@ -493,6 +494,7 @@ impl<T> Deref for AtomicRwReadGuard<'_, T> {
 
 /// A wrapper for [RwLockWriteGuard] that can optionally call a callback to
 /// notify when the lock event occurs.
+#[derive(Debug)]
 pub struct AtomicRwWriteGuard<'a, T> {
     guard: RwLockWriteGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,

@@ -527,6 +527,7 @@ const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event
 /// for convenience see macros:
 ///  crate::macros::log_slow_scope,
 ///  crate::macros::log_scope_duration,
+#[derive(Debug, Clone)]
 pub struct ScopeDurationLogger<'a> {
     start: Instant,
     description: &'a str,

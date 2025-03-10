@@ -212,6 +212,7 @@ name = "neptune-cli"
 
 [lints.rust]
 missing_copy_implementations = "warn"
+missing_debug_implementations = "warn"
 
 [lints.clippy]
 cloned_instead_of_copied = "warn"

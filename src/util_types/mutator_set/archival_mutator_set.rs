@@ -22,6 +22,7 @@ use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::MutatorSetError;
 
+#[derive(Debug, Clone)]
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
 where
     MmrStorage: StorageVec<Digest> + Send + Sync,

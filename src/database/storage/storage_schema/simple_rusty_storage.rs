@@ -13,6 +13,7 @@ use crate::locks::tokio::LockCallbackFn;
 /// You probably want to implement your own storage class after this example so
 /// that you can hardcode the schema in new(). But it is nevertheless possible
 /// to use this struct and add to the schema.
+#[derive(Debug)]
 pub struct SimpleRustyStorage {
     /// dynamic DB Schema.  (new tables may be added)
     pub schema: DbtSchema,
