@@ -1525,10 +1525,10 @@ impl PeerLoopHandler {
                         }
                     } else {
                         // Verify validity and that proposal is child of current tip
-                        if !block.is_valid(&tip, self.now()).await {
-                            Some(NegativePeerSanction::InvalidBlockProposal)
-                        } else {
+                        if block.is_valid(&tip, self.now()).await {
                             None // all is well, no punishment.
+                        } else {
+                            Some(NegativePeerSanction::InvalidBlockProposal)
                         }
                     }
                 };

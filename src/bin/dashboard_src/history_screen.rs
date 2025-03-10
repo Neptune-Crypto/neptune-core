@@ -287,11 +287,7 @@ impl Widget for HistoryScreen {
                 vec![
                     height.to_string(),
                     timestamp.standard_format(),
-                    if !amount.is_negative() {
-                        "⭸".to_string()
-                    } else {
-                        "⭷".to_string()
-                    },
+                    if amount.is_negative() { "⭷" } else { "⭸" }.to_string(),
                     amount.to_string(),
                     balance.to_string(),
                 ]
