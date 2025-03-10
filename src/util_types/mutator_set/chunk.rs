@@ -29,9 +29,8 @@ impl Chunk {
     pub fn insert(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE,
-            "index cannot exceed chunk size in `insert`. CHUNK_SIZE = {}, got index = {}",
-            CHUNK_SIZE,
-            index
+            "index cannot exceed chunk size in `insert`. \
+            CHUNK_SIZE = {CHUNK_SIZE}, got index = {index}"
         );
         self.relative_indices.push(index);
         self.relative_indices.sort();
@@ -40,9 +39,8 @@ impl Chunk {
     pub fn remove_once(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE,
-            "index cannot exceed chunk size in `remove`. CHUNK_SIZE = {}, got index = {}",
-            CHUNK_SIZE,
-            index
+            "index cannot exceed chunk size in `remove`. \
+            CHUNK_SIZE = {CHUNK_SIZE}, got index = {index}"
         );
         let mut drop = None;
         for i in 0..self.relative_indices.len() {
@@ -59,9 +57,8 @@ impl Chunk {
     pub fn contains(&self, index: u32) -> bool {
         assert!(
             index < CHUNK_SIZE,
-            "index cannot exceed chunk size in `contains`. CHUNK_SIZE = {}, got index = {}",
-            CHUNK_SIZE,
-            index
+            "index cannot exceed chunk size in `contains`. \
+            CHUNK_SIZE = {CHUNK_SIZE}, got index = {index}"
         );
 
         self.relative_indices.contains(&index)
@@ -196,7 +193,7 @@ mod chunk_tests {
 
         // Encoded chunk is prepended with its length.
         let zero_chunk_preimage = zero_chunk.encode();
-        println!("zero chunk preimage: {:?}", zero_chunk_preimage);
+        println!("zero chunk preimage: {zero_chunk_preimage:?}");
         assert!(zero_chunk_preimage
             .iter()
             .skip(1)

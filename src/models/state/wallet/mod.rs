@@ -1130,7 +1130,7 @@ mod wallet_tests {
             );
 
             for (index, known_addr) in known_addrs {
-                println!("index: {}", index);
+                println!("index: {index}");
                 let derived_addr = devnet_wallet
                     .nth_generation_spending_key(index)
                     .to_address()

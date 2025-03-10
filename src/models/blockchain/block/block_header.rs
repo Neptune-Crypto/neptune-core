@@ -106,7 +106,7 @@ impl Display for BlockHeader {
             self.version
         );
 
-        write!(f, "{}", string)
+        write!(f, "{string}")
     }
 }
 

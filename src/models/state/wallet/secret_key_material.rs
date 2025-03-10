@@ -368,7 +368,7 @@ mod test {
                 .collect_vec();
             let duplicate_share = selected_shares[rng.random_range(0..selected_shares.len())];
             selected_shares.push(duplicate_share);
-            println!("selected shares: {:?}", selected_shares);
+            println!("selected shares: {selected_shares:?}");
             prop_assert_eq!(
                 SecretKeyMaterial::combine_shamir(t, selected_shares),
                 Err(ShamirSecretSharingError::DuplicateIndex)

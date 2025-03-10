@@ -342,8 +342,8 @@ impl Widget for OverviewScreen {
             dashifnotset!(data.confirmed_total_balance),
             dashifnotset!(data.confirmed_available_balance),
             match data.confirmations {
-                Some(c) if c == 1.into() => format!("({} confirmation)", c),
-                Some(c) => format!("({} confirmations)", c),
+                Some(c) if c == 1.into() => format!("({c} confirmation)"),
+                Some(c) => format!("({c} confirmations)"),
                 None => " ".to_string(),
             },
         ));
@@ -364,7 +364,7 @@ impl Widget for OverviewScreen {
         lines.push(format!(
             "synchronization: {}",
             match data.synchronization_percentage {
-                Some(s) => format!("{}%", s),
+                Some(s) => format!("{s}%"),
                 None => "-".to_string(),
             }
         ));
@@ -424,7 +424,7 @@ impl Widget for OverviewScreen {
         lines.push(format!(
             "coverage: {}",
             match data.archive_coverage {
-                Some(percentage) => format!("{}%", percentage),
+                Some(percentage) => format!("{percentage}%"),
                 None => "-".to_string(),
             }
         ));
@@ -475,7 +475,7 @@ impl Widget for OverviewScreen {
         } else {
             "-".to_string()
         };
-        lines.push(format!("uptime: {}", uptime_string));
+        lines.push(format!("uptime: {uptime_string}"));
         lines.push(format!(
             "cpu load: {}% / {}%",
             dashifnotset!(data.cpu_load),

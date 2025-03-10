@@ -1823,7 +1823,7 @@ mod test {
 
         for i in 0..num_peers_incoming {
             let peer_address =
-                std::net::SocketAddr::from_str(&format!("255.254.253.{}:8080", i)).unwrap();
+                std::net::SocketAddr::from_str(&format!("255.254.253.{i}:8080")).unwrap();
             state
                 .lock_guard_mut()
                 .await

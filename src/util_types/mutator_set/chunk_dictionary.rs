@@ -287,7 +287,7 @@ mod chunk_dict_tests {
         // to me so far.
         let s_empty: ChunkDictionary = ChunkDictionary::empty();
         let json = serde_json::to_string(&s_empty).unwrap();
-        println!("json = {}", json);
+        println!("json = {json}");
         let s_back = serde_json::from_str::<ChunkDictionary>(&json).unwrap();
         assert!(s_back.is_empty());
 
@@ -302,7 +302,7 @@ mod chunk_dict_tests {
 
         let s_non_empty = ChunkDictionary::new(vec![(key, (mp.clone(), chunk.clone()))]);
         let json_non_empty = serde_json::to_string(&s_non_empty).unwrap();
-        println!("json_non_empty = {}", json_non_empty);
+        println!("json_non_empty = {json_non_empty}");
         let s_back_non_empty = serde_json::from_str::<ChunkDictionary>(&json_non_empty).unwrap();
         assert!(!s_back_non_empty.is_empty());
         assert!(s_back_non_empty.contains_key(&key));

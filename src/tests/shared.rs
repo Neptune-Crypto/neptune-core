@@ -140,7 +140,7 @@ pub async fn unit_test_databases(
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
-    std::net::SocketAddr::from_str(&format!("127.0.0.{}:8080", count)).unwrap()
+    std::net::SocketAddr::from_str(&format!("127.0.0.{count}:8080")).unwrap()
 }
 
 /// Get a dummy-peer representing an incoming connection.
@@ -219,7 +219,7 @@ pub(crate) async fn mock_genesis_global_state(
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
-            std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
+            std::net::SocketAddr::from_str(&format!("123.123.123.{i}:8080")).unwrap();
         peer_map.insert(peer_address, get_dummy_peer_outgoing(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db);
@@ -312,7 +312,7 @@ pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory
     let mut rng = rand::rng();
     let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
     let tmp_root: PathBuf = env::temp_dir()
-        .join(format!("neptune-unit-tests-{}", user))
+        .join(format!("neptune-unit-tests-{user}"))
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
     DataDirectory::get(Some(tmp_root), network)

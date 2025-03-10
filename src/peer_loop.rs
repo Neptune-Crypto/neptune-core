@@ -1558,7 +1558,7 @@ impl PeerLoopHandler {
         line: u32,
     ) -> Result<(), tokio::sync::mpsc::error::SendError<PeerTaskToMain>> {
         // we measure across the send() in case the channel ever fills up.
-        log_slow_scope!(fn_name!() + &format!("peer_loop.rs:{}", line));
+        log_slow_scope!(fn_name!() + &format!("peer_loop.rs:{line}"));
 
         self.to_main_tx.send(msg).await
     }
@@ -3951,10 +3951,7 @@ mod peer_loop_tests {
                 alice_rng_clone.random(),
             );
 
-            println!(
-                "sync challenge from alice:\n{:?}",
-                sync_challenge_from_alice
-            );
+            println!("sync challenge from alice:\n{sync_challenge_from_alice:?}");
 
             let sync_challenge_response_from_bob = bob
                 .lock_guard()

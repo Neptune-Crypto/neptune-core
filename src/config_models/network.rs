@@ -62,13 +62,13 @@ impl Network {
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let string = match self {
-            Network::Alpha => "alpha".to_string(),
-            Network::Testnet => "testnet".to_string(),
-            Network::RegTest => "regtest".to_string(),
-            Network::Beta => "beta".to_string(),
-            Network::Main => "main".to_string(),
+            Network::Alpha => "alpha",
+            Network::Testnet => "testnet",
+            Network::RegTest => "regtest",
+            Network::Beta => "beta",
+            Network::Main => "main",
         };
-        write!(f, "{}", string)
+        write!(f, "{string}")
     }
 }
 
@@ -81,7 +81,7 @@ impl FromStr for Network {
             "regtest" => Ok(Network::RegTest),
             "beta" => Ok(Network::Beta),
             "main" => Ok(Network::Main),
-            _ => Err(format!("Failed to parse {} as network", input)),
+            _ => Err(format!("Failed to parse {input} as network")),
         }
     }
 }

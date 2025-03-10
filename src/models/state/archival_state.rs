@@ -2942,8 +2942,7 @@ mod archival_state_tests {
                 archival_state
                     .block_belongs_to_canonical_chain(block.hash())
                     .await,
-                "block {} does not belong to canonical chain",
-                i
+                "block {i} does not belong to canonical chain",
             );
             dag_walker_leash_prop(block.hash(), mock_block_4_a.hash(), &archival_state).await;
             dag_walker_leash_prop(mock_block_4_a.hash(), block.hash(), &archival_state).await;
@@ -2953,7 +2952,7 @@ mod archival_state_tests {
             archival_state
                 .block_belongs_to_canonical_chain(genesis.hash())
                 .await,
-            "Genesis block is always part of the canonical chain, block height is four"
+            "Genesis block is always part of the canonical chain, block height is four",
         );
 
         // Make a tree and verify that the correct parts of the tree are identified as
@@ -2984,8 +2983,7 @@ mod archival_state_tests {
                 archival_state
                     .block_belongs_to_canonical_chain(block.hash())
                     .await,
-                "canonical chain {} is canonical",
-                i
+                "canonical chain {i} is canonical",
             );
             dag_walker_leash_prop(block.hash(), mock_block_5_b.hash(), &archival_state).await;
             dag_walker_leash_prop(mock_block_5_b.hash(), block.hash(), &archival_state).await;
@@ -3003,8 +3001,7 @@ mod archival_state_tests {
                 !archival_state
                     .block_belongs_to_canonical_chain(block.hash())
                     .await,
-                "Stale chain {} is not canonical",
-                i
+                "Stale chain {i} is not canonical",
             );
         }
 
@@ -3084,8 +3081,7 @@ mod archival_state_tests {
                 archival_state
                     .block_belongs_to_canonical_chain(block.hash())
                     .await,
-                "canonical chain {} is canonical, complicated",
-                i
+                "canonical chain {i} is canonical, complicated",
             );
             dag_walker_leash_prop(mock_block_6_d.hash(), block.hash(), &archival_state).await;
             dag_walker_leash_prop(block.hash(), mock_block_6_d.hash(), &archival_state).await;
@@ -3115,8 +3111,7 @@ mod archival_state_tests {
                 !archival_state
                     .block_belongs_to_canonical_chain(block.hash())
                     .await,
-                "Stale chain {} is not canonical",
-                i
+                "Stale chain {i} is not canonical",
             );
             dag_walker_leash_prop(mock_block_6_d.hash(), block.hash(), &archival_state).await;
             dag_walker_leash_prop(block.hash(), mock_block_6_d.hash(), &archival_state).await;
@@ -3151,8 +3146,7 @@ mod archival_state_tests {
                 !archival_state
                     .block_belongs_to_canonical_chain(block.hash())
                     .await,
-                "Stale chain {} is not canonical",
-                i
+                "Stale chain {i} is not canonical",
             );
             dag_walker_leash_prop(mock_block_6_d.hash(), block.hash(), &archival_state).await;
             dag_walker_leash_prop(block.hash(), mock_block_6_d.hash(), &archival_state).await;
@@ -3174,8 +3168,7 @@ mod archival_state_tests {
                 archival_state
                     .block_belongs_to_canonical_chain(block.hash())
                     .await,
-                "canonical chain {} is canonical, complicated",
-                i
+                "canonical chain {i} is canonical, complicated",
             );
             dag_walker_leash_prop(mock_block_6_b.hash(), block.hash(), &archival_state).await;
             dag_walker_leash_prop(block.hash(), mock_block_6_b.hash(), &archival_state).await;
@@ -3204,7 +3197,7 @@ mod archival_state_tests {
                 mock_block_6_b.hash(),
             ],
             forwards,
-            "find_path forwards return value must match expected value"
+            "find_path forwards return value must match expected value",
         );
         assert_eq!(
             vec![
@@ -3214,7 +3207,7 @@ mod archival_state_tests {
                 mock_block_2_a.hash()
             ],
             backwards,
-            "find_path backwards return value must match expected value"
+            "find_path backwards return value must match expected value",
         );
         assert_eq!(block1.hash(), luca, "Luca must be block 1");
 

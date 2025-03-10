@@ -123,35 +123,35 @@ impl BlockIndexValue {
     pub fn as_block_record(&self) -> BlockRecord {
         match self {
             BlockIndexValue::Block(rec) => *rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_file_record(&self) -> FileRecord {
         match self {
             BlockIndexValue::File(rec) => rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_height_record(&self) -> Vec<Digest> {
         match self {
             BlockIndexValue::Height(rec) => rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_last_file_record(&self) -> LastFileRecord {
         match self {
             BlockIndexValue::LastFile(rec) => rec.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 
     pub fn as_tip_digest(&self) -> Digest {
         match self {
             BlockIndexValue::BlockTipDigest(digest) => digest.to_owned(),
-            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+            _ => panic!("Requested BlockTipDigest, found {self:?}"),
         }
     }
 }

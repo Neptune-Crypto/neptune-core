@@ -725,7 +725,7 @@ pub(crate) mod test {
         let fixed = -(NativeCurrencyAmount::from_nau(cf) + NativeCurrencyAmount::coins(10));
         assert_eq!(parsed.clone(), fixed);
         assert!(parsed.is_negative());
-        println!("parsed: {}", parsed);
+        println!("parsed: {parsed}");
 
         for s in [
             "-12387.4382975",
@@ -745,7 +745,7 @@ pub(crate) mod test {
             "-42000000",
         ] {
             let nc = NativeCurrencyAmount::coins_from_str(s)
-                .unwrap_or_else(|e| panic!("cannot decode {} because {}", s, e));
+                .unwrap_or_else(|e| panic!("cannot decode {s} because {e}"));
             println!("{s}: {nc}");
         }
 

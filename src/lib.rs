@@ -194,11 +194,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
         // Print the stack trace
         if let Some(location) = panic_info.location() {
-            msg += &format!("  location: {}\n", location);
+            msg += &format!("  location: {location}\n");
         }
 
         if let Some(payload) = panic_info.payload().downcast_ref::<&str>() {
-            msg += &format!("  message: {}\n", payload);
+            msg += &format!("  message: {payload}\n");
         }
 
         msg += &format!("  backtrace:\n{}", std::backtrace::Backtrace::capture());

@@ -58,7 +58,7 @@ impl std::fmt::Display for BlockInfo {
                 self.sibling_blocks.iter().map(|d| d.to_hex()).join(",")
             );
 
-        write!(f, "{}", buf)
+        write!(f, "{buf}")
     }
 }
 

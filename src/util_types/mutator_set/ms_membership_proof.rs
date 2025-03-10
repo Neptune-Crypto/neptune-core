@@ -40,7 +40,7 @@ impl Error for MembershipProofError {}
 
 impl fmt::Display for MembershipProofError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -1370,8 +1370,7 @@ mod ms_proof_tests {
                                 }
                             }
                             println!(
-                                "{i}. (set size {}) reversion ({})",
-                                set_size_was, records_abbreviation
+                                "{i}. (set size {set_size_was}) reversion ({records_abbreviation})"
                             );
                         }
                     }

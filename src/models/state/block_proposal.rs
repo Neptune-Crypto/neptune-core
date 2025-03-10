@@ -100,21 +100,17 @@ pub(crate) enum BlockProposalRejectError {
 
 impl fmt::Display for BlockProposalRejectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BlockProposalRejectError::Composing => write!(f, "Making own composition"),
-            BlockProposalRejectError::WrongHeight { received, expected } => write!(
-                f,
-                "Expected block height: {}\nProposal block height: {}",
-                expected, received
-            ),
-            BlockProposalRejectError::InsufficientFee { current, received } => write!(
-                f,
-                "Insufficient fee. Proposal was {};\ncurrent fee is: {}",
-                received,
-                current
-                    .map(|c| format!("{}", c))
-                    .unwrap_or("None".to_string())
-            ),
-        }
+        let error_message = match self {
+            BlockProposalRejectError::Composing => "Making own composition".to_string(),
+            BlockProposalRejectError::WrongHeight { received, expected } => {
+                format!("Expected block height: {expected}\nProposal block height: {received}")
+            }
+            BlockProposalRejectError::InsufficientFee { current, received } => {
+                let current = current.map(|c| c.to_string()).unwrap_or("None".to_string());
+                format!("Insufficient fee. Proposal was {received};\ncurrent fee is: {current}")
+            }
+        };
+
+        write!(f, "{error_message}")
     }
 }

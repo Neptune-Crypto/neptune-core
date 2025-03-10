@@ -47,8 +47,8 @@ pub enum BlockSelector {
 impl std::fmt::Display for BlockSelector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Digest(d) => write!(f, "digest/{}", d),
-            Self::Height(h) => write!(f, "height/{}", h),
+            Self::Digest(d) => write!(f, "digest/{d}"),
+            Self::Height(h) => write!(f, "height/{h}"),
             Self::Genesis => write!(f, "genesis"),
             Self::Tip => write!(f, "tip"),
         }

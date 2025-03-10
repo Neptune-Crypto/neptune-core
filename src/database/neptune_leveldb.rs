@@ -144,7 +144,7 @@ where
 
         match status {
             Ok(_) => value_object, // could be None, if record is not present
-            Err(err) => panic!("database failure: {}", err),
+            Err(err) => panic!("database failure: {err}"),
         }
     }
 

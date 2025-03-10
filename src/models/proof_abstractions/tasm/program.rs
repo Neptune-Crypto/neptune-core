@@ -420,7 +420,7 @@ pub mod test {
     fn test_load_servers() {
         let servers = load_servers();
         for server in servers {
-            println!("read server: {}", server);
+            println!("read server: {server}");
         }
     }
 
@@ -486,7 +486,7 @@ pub mod test {
             let filename_ = filename.clone();
             let headers_ = headers.clone();
             let handle = std::thread::spawn(move || {
-                let url = format!("{}{}", server_, filename_);
+                let url = format!("{server_}{filename_}");
 
                 debug!("requesting: <{url}>");
 
@@ -499,11 +499,7 @@ pub mod test {
 
                 // note: send() blocks
                 let Ok(mut response) = http_client.send(&request) else {
-                    println!(
-                        "server '{}' failed for file '{}'; trying next ...",
-                        server_.clone(),
-                        filename_
-                    );
+                    println!("server '{server_}' failed for file '{filename_}'; trying next ...");
 
                     return None;
                 };
@@ -532,8 +528,7 @@ pub mod test {
 
             let Ok(file_contents) = body else {
                 eprintln!(
-                    "error reading file '{}' from server '{}'; trying next ...",
-                    filename, server
+                    "error reading file '{filename}' from server '{server}'; trying next ..."
                 );
 
                 continue;
@@ -555,7 +550,7 @@ pub mod test {
             return Some((proof, server));
         }
 
-        println!("No known servers serve file `{}`", filename);
+        println!("No known servers serve file `{filename}`");
 
         None
     }

@@ -112,9 +112,8 @@ impl ActiveWindow {
     pub fn insert(&mut self, index: u32) {
         assert!(
             index < WINDOW_SIZE,
-            "index cannot exceed window size in `insert`. WINDOW_SIZE = {}, got index = {}",
-            WINDOW_SIZE,
-            index
+            "index cannot exceed window size in `insert`. \
+            WINDOW_SIZE = {WINDOW_SIZE}, got index = {index}"
         );
         self.sbf.push(index);
         self.sbf.sort();
@@ -123,9 +122,8 @@ impl ActiveWindow {
     pub fn remove(&mut self, index: u32) {
         assert!(
             index < WINDOW_SIZE,
-            "index cannot exceed window size in `remove`. WINDOW_SIZE = {}, got index = {}",
-            WINDOW_SIZE,
-            index
+            "index cannot exceed window size in `remove`. \
+            WINDOW_SIZE = {WINDOW_SIZE}, got index = {index}"
         );
 
         // locate last match
@@ -150,9 +148,8 @@ impl ActiveWindow {
     pub fn contains(&self, index: u32) -> bool {
         assert!(
             index < WINDOW_SIZE,
-            "index cannot exceed window size in `contains`. WINDOW_SIZE = {}, got index = {}",
-            WINDOW_SIZE,
-            index
+            "index cannot exceed window size in `contains`. \
+            WINDOW_SIZE = {WINDOW_SIZE}, got index = {index}"
         );
 
         for loc in &self.sbf {

@@ -693,7 +693,7 @@ mod ms_accumulator_tests {
                     archival_after_remove.add(&addition_record).await;
                     archival_before_remove.add(&addition_record).await;
 
-                    println!("{}: Inserted", i);
+                    println!("{i}: Inserted");
                     for j in 0..items.len() {
                         if indices_of_updated_mps.contains(&j) {
                             assert_ne!(
@@ -826,7 +826,7 @@ mod ms_accumulator_tests {
                         assert!(item_verifies_iff_not_updated);
                     }
 
-                    println!("{}: Removed", i);
+                    println!("{i}: Removed");
                 }
 
                 // Verify that all membership proofs are valid after these additions and removals
@@ -875,8 +875,8 @@ mod ms_accumulator_tests {
         // and then print the size of the mutator set accumulator, in bytes
         let mut rng = rand::rng();
         println!(
-            "profiling Mutator Set (w, b, s, k) = ({}, {}, {}, {}) ...",
-            WINDOW_SIZE, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS
+            "profiling Mutator Set \
+            (w, b, s, k) = ({WINDOW_SIZE}, {BATCH_SIZE}, {CHUNK_SIZE}, {NUM_TRIALS}) ..."
         );
         let mut msa = MutatorSetAccumulator::default();
         let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
@@ -885,7 +885,7 @@ mod ms_accumulator_tests {
 
         for i in 0..num_iterations {
             if i % 100 == 0 {
-                println!("{}/{}", i, num_iterations);
+                println!("{i}/{num_iterations}");
             }
             let operation = if items_and_membership_proofs.len()
                 > (1.25 * target_set_size as f64) as usize

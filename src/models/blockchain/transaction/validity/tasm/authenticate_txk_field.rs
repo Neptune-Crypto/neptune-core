@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn test() {
         for &field in TransactionKernelField::VARIANTS {
-            println!("testing txk field {} ...", field);
+            println!("testing txk field {field} ...");
             ShadowedReadOnlyAlgorithm::new(AuthenticateTxkField(field)).test();
         }
     }

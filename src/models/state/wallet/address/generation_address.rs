@@ -356,7 +356,7 @@ impl GenerationReceivingAddress {
         let (first, _) = bech32.split_at(first_len);
         let (_, last) = bech32.split_at(bech32.len() - last_len);
 
-        Ok(format!("{}...{}", first, last))
+        Ok(format!("{first}...{last}"))
     }
 
     /// generates a lock script from the spending lock.

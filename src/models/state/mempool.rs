@@ -1758,13 +1758,10 @@ mod tests {
             .unwrap()
             .len();
         assert!(size_gs_small >= size_serialized_small);
+        println!("size of mempool with {tx_count_small} empty txs reported as: {size_gs_small}");
         println!(
-            "size of mempool with {tx_count_small} empty txs reported as: {}",
-            size_gs_small
-        );
-        println!(
-            "actual size of mempool with {tx_count_small} empty txs when serialized: {}",
-            size_serialized_small
+            "actual size of mempool with {tx_count_small} empty txs when serialized: \
+            {size_serialized_small}"
         );
 
         let tx_count_big = 6;

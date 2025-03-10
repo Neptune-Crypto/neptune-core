@@ -515,7 +515,7 @@ async fn main() -> Result<()> {
                 }
                 Ok(result) => result,
             };
-            println!("Seed phrase for {}.", network);
+            println!("Seed phrase for {network}.");
             println!("Read from file `{}`.", wallet_file.display());
             print_seed_phrase_dialog(wallet_secret.secret_key());
             return Ok(());
@@ -566,7 +566,7 @@ async fn main() -> Result<()> {
                 let i = match usize::from_str(before_slash) {
                     Ok(i) => i,
                     Err(_e) => {
-                        println!("Failed to parse `{}`. Please try again.", before_slash);
+                        println!("Failed to parse `{before_slash}`. Please try again.");
                         continue;
                     }
                 };
@@ -574,7 +574,7 @@ async fn main() -> Result<()> {
                 let n = match usize::from_str(after_slash) {
                     Ok(i) => i,
                     Err(_e) => {
-                        println!("Failed to parse `{}`. Please try again.", after_slash);
+                        println!("Failed to parse `{after_slash}`. Please try again.");
                         continue;
                     }
                 };
@@ -688,7 +688,7 @@ async fn main() -> Result<()> {
                 Ok(result) => result,
             };
             let wallet_secret = wallet_file.secret_key();
-            println!("Wallet for {}.", network);
+            println!("Wallet for {network}.");
             println!("Read from file `{}`.\n", wallet_file_name.display());
 
             let mut rng = rand::rng();
@@ -703,7 +703,7 @@ async fn main() -> Result<()> {
 
             let n = shamir_shares.len();
             for (i, secret_key) in shamir_shares {
-                println!("Key share {i}/{}:", n);
+                println!("Key share {i}/{n}:");
                 let wallet_secret = WalletFile::new(secret_key);
                 print_seed_phrase_dialog(wallet_secret.secret_key());
                 println!();
@@ -741,7 +741,7 @@ async fn main() -> Result<()> {
     let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory).await {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("Unable to load RPC auth cookie. error = {}", e);
+            eprintln!("Unable to load RPC auth cookie. error = {e}");
             std::process::exit(2)
         }
     }
@@ -782,12 +782,12 @@ async fn main() -> Result<()> {
         }
         Command::BlockHeight => {
             let block_height = client.block_height(ctx, token).await??;
-            println!("Block height: {}", block_height)
+            println!("Block height: {block_height}")
         }
         Command::BlockInfo { block_selector } => {
             let data = client.block_info(ctx, token, block_selector).await??;
             match data {
-                Some(block_info) => println!("{}", block_info),
+                Some(block_info) => println!("{block_info}"),
                 None => println!("Not found"),
             }
         }
@@ -817,10 +817,7 @@ async fn main() -> Result<()> {
                     Some((sanction, _timestamp)) => sanction.to_string(),
                     None => String::default(),
                 };
-                println!(
-                    "{ip}\nstanding: {standing}\nlatest sanction: {} \n\n",
-                    latest_sanction_str
-                );
+                println!("{ip}\nstanding: {standing}\nlatest sanction: {latest_sanction_str}\n\n");
             }
         }
         Command::TipDigest => {
@@ -828,7 +825,7 @@ async fn main() -> Result<()> {
                 .block_digest(ctx, token, BlockSelector::Tip)
                 .await??
                 .unwrap_or_default();
-            println!("{}", head_hash);
+            println!("{head_hash}");
         }
         Command::LatestTipDigests { n } => {
             let head_hashes = client.latest_tip_digests(ctx, token, n).await??;
@@ -884,11 +881,11 @@ async fn main() -> Result<()> {
         }
         Command::MempoolTxCount => {
             let count: usize = client.mempool_tx_count(ctx, token).await??;
-            println!("{}", count);
+            println!("{count}");
         }
         Command::MempoolSize => {
             let size_in_bytes: usize = client.mempool_size(ctx, token).await??;
-            println!("{} bytes", size_in_bytes);
+            println!("{size_in_bytes} bytes");
         }
 
         /******** BLOCKCHAIN STATISTICS ********/
@@ -1036,7 +1033,7 @@ async fn main() -> Result<()> {
         }
         Command::ClearStandingByIp { ip } => {
             client.clear_standing_by_ip(ctx, token, ip).await??;
-            println!("Cleared standing of {}", ip);
+            println!("Cleared standing of {ip}");
         }
         Command::ClaimUtxo {
             format,
@@ -1092,7 +1089,7 @@ async fn main() -> Result<()> {
             let (txid, private_notifications) = match resp {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!("{e}");
                     bail!("Failed to create transaction.");
                 }
             };
@@ -1126,7 +1123,7 @@ async fn main() -> Result<()> {
                 Ok((txid, _offchain_notifications)) => {
                     println!("Successfully created transaction: {txid}")
                 }
-                Err(e) => eprintln!("{}", e),
+                Err(e) => eprintln!("{e}"),
             }
         }
         Command::PauseMiner => {
@@ -1218,8 +1215,7 @@ fn get_nth_receiving_address(
         Ok(s) => s,
         Err(e) => {
             eprintln!(
-                "Could not export address as bech32m; got error:{e}\nRaw address:\n{:?}",
-                nth_receiving_address
+                "Could not export address as bech32m; got error:{e}\nRaw address:\n{nth_receiving_address:?}"
             );
             return Ok(());
         }
@@ -1319,7 +1315,7 @@ fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
     let mut phrase = vec![];
     let mut i = 1;
     loop {
-        print!("{}. ", i);
+        print!("{i}. ");
         io::stdout().flush()?;
         let mut buffer = "".to_string();
         std::io::stdin()
@@ -1338,7 +1334,7 @@ fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
                 break;
             }
         } else {
-            println!("Did not recognize word \"{}\"; please try again.", word);
+            println!("Did not recognize word \"{word}\"; please try again.");
         }
     }
     match SecretKeyMaterial::from_phrase(&phrase) {

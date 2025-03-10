@@ -124,7 +124,7 @@ where
     type Value = [T; N];
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str(&format!("an array of length {}", N))
+        formatter.write_str(&format!("an array of length {N}"))
     }
 
     #[inline]
@@ -667,8 +667,7 @@ mod removal_record_tests {
                 );
                 assert!(
                     update_res_mp.is_ok(),
-                    "batch update must return OK, i = {}",
-                    i
+                    "batch update must return OK, i = {i}"
                 );
                 accumulator.add(&addition_record);
                 mps.push(mp.clone());
@@ -677,13 +676,11 @@ mod removal_record_tests {
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
                         removal_record.validate(&accumulator),
-                        "removal records must validate, i = {}",
-                        i
+                        "removal records must validate, i = {i}"
                     );
                     assert!(
                         accumulator.can_remove(removal_record),
-                        "removal records must return true on `can_remove`, i = {}",
-                        i
+                        "removal records must return true on `can_remove`, i = {i}"
                     );
                 }
 
@@ -751,8 +748,7 @@ mod removal_record_tests {
             );
             assert!(
                 update_res_mp.is_ok(),
-                "batch update must return OK, i = {}",
-                i
+                "batch update must return OK, i = {i}"
             );
             accumulator.add(&addition_record);
             mps.push(mp.clone());
@@ -761,13 +757,11 @@ mod removal_record_tests {
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
                     removal_record.validate(&accumulator),
-                    "removal records must validate, i = {}",
-                    i
+                    "removal records must validate, i = {i}"
                 );
                 assert!(
                     accumulator.can_remove(removal_record),
-                    "removal records must return true on `can_remove`, i = {}",
-                    i
+                    "removal records must return true on `can_remove`, i = {i}"
                 );
             }
 
@@ -795,8 +789,7 @@ mod removal_record_tests {
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
                     removal_record.validate(&accumulator),
-                    "removal records must validate, i = {}",
-                    i
+                    "removal records must validate, i = {i}"
                 );
                 assert!(accumulator.can_remove(removal_record));
             }

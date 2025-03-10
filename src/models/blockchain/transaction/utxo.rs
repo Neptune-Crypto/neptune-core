@@ -50,7 +50,7 @@ impl Display for Coin {
             "Unknown type script hash".to_owned()
         };
 
-        write!(f, "{}", output)
+        write!(f, "{output}")
     }
 }
 

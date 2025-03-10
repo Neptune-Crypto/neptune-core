@@ -339,7 +339,7 @@ impl DashboardApp {
                             Self::disable_raw_mode(terminal)?;
 
                             sleep(Duration::from_millis(200)).await;
-                            println!("{}", string);
+                            println!("{string}");
                             let mut str = "".to_string();
                             io::stdin().read_line(&mut str)?;
 
@@ -350,7 +350,7 @@ impl DashboardApp {
                             Self::disable_raw_mode(terminal)?;
 
                             sleep(Duration::from_millis(200)).await;
-                            println!("{}", string);
+                            println!("{string}");
                             let mut str = "".to_string();
                             io::stdin().read_line(&mut str)?;
                             console_input = Some(str);

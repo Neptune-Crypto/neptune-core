@@ -1657,8 +1657,7 @@ pub mod test {
         assert_eq!(
             NativeCurrency::TIME_LOCK_HASH,
             calculated,
-            "Timelock.hash():\n{}",
-            calculated
+            "Timelock.hash():\n{calculated}"
         );
     }
 

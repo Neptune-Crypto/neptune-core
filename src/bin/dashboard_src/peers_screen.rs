@@ -311,15 +311,9 @@ impl Widget for PeersScreen {
         let num_peers = self.data.lock().unwrap().len();
 
         let peer_count_buf = if self.in_focus {
-            format!(
-                "Peers connected: {}           sort-keys: i, v, c, s, p, r",
-                num_peers
-            )
+            format!("Peers connected: {num_peers}           sort-keys: i, v, c, s, p, r")
         } else {
-            format!(
-                "Peers connected: {}           press enter for options",
-                num_peers
-            )
+            format!("Peers connected: {num_peers}           press enter for options")
         };
 
         let peer_count = Line::from(vec![Span::from(peer_count_buf)]);

@@ -1212,7 +1212,7 @@ impl WalletState {
 
                         if let Some(replaced) = replaced {
                             panic!(
-                                "Strong key must be unique in wallet DB. addition record: {addition_record:?}; ms_mp.aocl_leaf_index: {}.\n\n Existing value was: {replaced:?}", aocl_leaf_index
+                                "Strong key must be unique in wallet DB. addition record: {addition_record:?}; ms_mp.aocl_leaf_index: {aocl_leaf_index}.\n\n Existing value was: {replaced:?}"
                             );
                         }
                     }
@@ -1720,9 +1720,8 @@ impl WalletState {
         // check that also takes mempool into account.
         assert!(
             allocated_amount >= total_spend,
-            "UTXO allocation failed. This should not be possible. Requested: {}, Available: {}",
-            total_spend,
-            confirmed_available_amount_without_mempool_spends,
+            "UTXO allocation failed. This should not be possible. Requested: {total_spend}, \
+            Available: {confirmed_available_amount_without_mempool_spends}",
         );
 
         Ok(input_funds)

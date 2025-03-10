@@ -1595,7 +1595,7 @@ pub(crate) mod mine_loop_tests {
         let num_outputs = 0;
         let hash_rate =
             estimate_own_hash_rate(Some(target_block_interval), sleepy_guessing, num_outputs).await;
-        println!("estimating hash rate at {} per millisecond", hash_rate);
+        println!("estimating hash rate at {hash_rate} per millisecond");
         let prepare_time = estimate_block_preparation_time_invalid_proof().await;
         println!("estimating block preparation time at {prepare_time} ms");
         if 1.5 * prepare_time > target_block_interval.0.value() as f64 {
@@ -1608,7 +1608,7 @@ pub(crate) mod mine_loop_tests {
 
         let guessing_time = (target_block_interval.to_millis() as f64) - prepare_time;
         let initial_difficulty = BigUint::from((hash_rate * guessing_time) as u128);
-        println!("initial difficulty: {}", initial_difficulty);
+        println!("initial difficulty: {initial_difficulty}");
         prev_block.set_header_timestamp_and_difficulty(
             prev_block.header().timestamp,
             Difficulty::from_biguint(initial_difficulty),
