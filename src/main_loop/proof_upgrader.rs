@@ -330,9 +330,7 @@ impl UpgradeJob {
             upgrade_job = {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
                 // Did we receive a new block while proving? If so, perform an
-                // update also, if this was requested (and we have a single proof)
-                // if we only have a ProofCollection, then we throw away the work
-                // regardless.
+                // update also, if this was requested.
 
                 let transaction_is_deprecated = upgraded.kernel.mutator_set_hash
                     != global_state
@@ -718,9 +716,10 @@ mod test {
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::invalid_empty_block_with_timestamp;
 
-    /// Returns a PrimitiveWitness-backed transaction initiated by the global state provided as
-    /// argument. Assumes balance is sufficient to make this transaction.
-    async fn pw_backed_tx(mut state: GlobalStateLock, seed: u64) -> Transaction {
+    /// Returns a PrimitiveWitness-backed transaction initiated by the global
+    /// state provided as argument. Assumes balance is sufficient to make this
+    /// transaction.
+    async fn primitive_witness_backed_tx(mut state: GlobalStateLock, seed: u64) -> Transaction {
         let mut rng: StdRng = SeedableRng::seed_from_u64(seed);
         let receiving_address = GenerationReceivingAddress::derive_from_seed(rng.random());
         let tx_outputs = vec![TxOutput::onchain_native_currency(
@@ -760,7 +759,7 @@ mod test {
             get_test_genesis_setup(network, 2, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
-        let pwtx = pw_backed_tx(alice.clone(), 512777439428).await;
+        let pwtx = primitive_witness_backed_tx(alice.clone(), 512777439428).await;
         alice
             .lock_guard_mut()
             .await
@@ -818,7 +817,7 @@ mod test {
             get_test_genesis_setup(network, 2, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
-        let pwtx = pw_backed_tx(alice.clone(), 512777439429).await;
+        let pwtx = primitive_witness_backed_tx(alice.clone(), 512777439429).await;
         alice
             .lock_guard_mut()
             .await
