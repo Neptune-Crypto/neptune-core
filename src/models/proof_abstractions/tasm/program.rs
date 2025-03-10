@@ -106,9 +106,7 @@ pub(crate) async fn prove_consensus_program(
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
-    let job_handle = triton_vm_job_queue
-        .add_job(Box::new(job), proof_job_options.job_priority)
-        .await?;
+    let job_handle = triton_vm_job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
 
     // satisfy borrow checker.
     // instead of calling job_handle.cancel() inside select!()

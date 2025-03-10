@@ -520,8 +520,7 @@ impl MainLoopHandler {
         let update_jobs = global_state_mut.set_new_tip(*new_block).await?;
         drop(global_state_mut);
 
-        self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
-            .await;
+        self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
         Ok(())
     }
@@ -707,8 +706,7 @@ impl MainLoopHandler {
                 // Spawn task to handle mempool tx-updating after new blocks.
                 // TODO: Do clever trick to collapse all jobs relating to the same transaction,
                 //       identified by transaction-ID, into *one* update job.
-                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
-                    .await;
+                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
@@ -976,8 +974,7 @@ impl MainLoopHandler {
             .global_state_lock
             .lock_guard()
             .await
-            .get_own_handshakedata()
-            .await;
+            .get_own_handshakedata();
         for &peer_with_lost_connection in peers_with_lost_connection {
             // Disallow reconnection if peer is in bad standing
             let peer_standing = self
@@ -1030,7 +1027,7 @@ impl MainLoopHandler {
         let global_state = self.global_state_lock.lock_guard().await;
         let connected_peers = global_state.net.peer_map.values().cloned().collect_vec();
         let own_instance_id = global_state.net.instance_id;
-        let own_handshake_data = global_state.get_own_handshakedata().await;
+        let own_handshake_data = global_state.get_own_handshakedata();
         drop(global_state);
 
         let num_peers = connected_peers.len();
@@ -1350,7 +1347,7 @@ impl MainLoopHandler {
     /// Post-processing when new block has arrived. Spawn a task to update
     /// transactions in the mempool. Only when the spawned task has completed,
     /// should the miner continue.
-    async fn spawn_mempool_txs_update_job(
+    fn spawn_mempool_txs_update_job(
         &self,
         main_loop_state: &mut MutableMainLoopState,
         update_jobs: Vec<UpdateMutatorSetDataJob>,
@@ -1514,7 +1511,7 @@ impl MainLoopHandler {
                     let state = self.global_state_lock.lock_guard().await;
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = self.peer_task_to_main_tx.clone();
-                    let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
+                    let own_handshake_data: HandshakeData = state.get_own_handshakedata();
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
                     let incoming_peer_task_handle = tokio::task::Builder::new()
                         .name("answer_peer_wrapper")
@@ -2505,8 +2502,7 @@ mod test {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .get_own_handshakedata()
-                .await;
+                .get_own_handshakedata();
             assert_eq!(peer_handshake_data.network, own_handshake_data.network,);
             assert_eq!(peer_handshake_data.version, own_handshake_data.version,);
             let mock_stream = tokio_test::io::Builder::new()

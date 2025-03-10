@@ -106,19 +106,19 @@ mod tests {
         assert_eq!(2, Arc::strong_count(&rusty_storage.schema.reader));
 
         // test
-        assert_eq!(singleton.get().await, S([].to_vec()));
+        assert_eq!(singleton.get(), S([].to_vec()));
 
         // set
         singleton.set(singleton_value.clone()).await;
 
         // test
-        assert_eq!(singleton.get().await, singleton_value);
+        assert_eq!(singleton.get(), singleton_value);
 
         // persist
         rusty_storage.persist().await;
 
         // test
-        assert_eq!(singleton.get().await, singleton_value);
+        assert_eq!(singleton.get(), singleton_value);
 
         assert_eq!(2, Arc::strong_count(&rusty_storage.schema.reader));
 
@@ -147,7 +147,7 @@ mod tests {
             .await;
 
         // test
-        assert_eq!(new_singleton.get().await, singleton_value);
+        assert_eq!(new_singleton.get(), singleton_value);
     }
 
     #[tokio::test]
@@ -846,7 +846,7 @@ mod tests {
             vec![vector2.get(2).await, vector2.get(1).await]
         );
         assert_eq!(vector2.len().await, 4);
-        assert_eq!(singleton.get().await, singleton_value);
+        assert_eq!(singleton.get(), singleton_value);
         assert_eq!(
             vec![
                 S([8u8].to_vec()),
@@ -903,7 +903,7 @@ mod tests {
         assert_eq!(new_vector2.get(2).await, S([3u8].to_vec()));
         assert_eq!(new_vector2.get(3).await, S([7u8].to_vec()));
         assert_eq!(new_vector2.len().await, 4);
-        assert_eq!(new_singleton.get().await, singleton_value);
+        assert_eq!(new_singleton.get(), singleton_value);
 
         // Test `get_many` for a restored NeptuneLevelDb
         assert_eq!(

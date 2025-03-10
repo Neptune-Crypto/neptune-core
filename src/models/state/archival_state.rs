@@ -997,7 +997,7 @@ impl ArchivalState {
     pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         let (forwards, backwards) = {
             // Get the block digest that the mutator set was most recently synced to
-            let ms_block_sync_digest = self.archival_mutator_set.get_sync_label().await;
+            let ms_block_sync_digest = self.archival_mutator_set.get_sync_label();
 
             // Find path from mutator set sync digest to new block. Optimize for the common case,
             // where the new block is the child block of block that the mutator set is synced to.
@@ -1239,13 +1239,13 @@ mod archival_state_tests {
                 .aocl
                 .num_leafs()
                 .await,
-            "Archival mutator set must be populated with premine outputs"
+            "Archival mutator set must be populated with premine outputs",
         );
 
         assert_eq!(
             Block::genesis(network).hash(),
-            archival_state.archival_mutator_set.get_sync_label().await,
-            "AMS must be synced to genesis block after initialization from genesis block"
+            archival_state.archival_mutator_set.get_sync_label(),
+            "AMS must be synced to genesis block after initialization from genesis block",
         );
 
         for (i, tx_output) in Block::genesis(network)
@@ -1300,9 +1300,8 @@ mod archival_state_tests {
             mock_block_1.hash(),
             restored_archival_state
                 .archival_mutator_set
-                .get_sync_label()
-                .await,
-            "sync_label of restored archival mutator set must be digest of latest block"
+                .get_sync_label(),
+            "sync_label of restored archival mutator set must be digest of latest block",
         );
 
         Ok(())
@@ -1423,7 +1422,7 @@ mod archival_state_tests {
         // 5. Experience rollback
         assert_eq!(
             mock_block_1b.hash(),
-            archival_state.archival_mutator_set.get_sync_label().await
+            archival_state.archival_mutator_set.get_sync_label(),
         );
         assert_eq!(mock_block_1b.hash(), archival_state.get_tip().await.hash());
 

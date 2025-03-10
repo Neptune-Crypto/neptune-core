@@ -896,9 +896,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     let body = primitive_witness.body().to_owned();
     let header = primitive_witness.header(timestamp, None);
     let (appendix, proof) = {
-        let block_proof_witness = BlockProofWitness::produce(primitive_witness)
-            .await
-            .expect("producing block proof witness from block primitive witness should succeed");
+        let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();
         let claim = BlockProgram::claim(&body, &appendix);
         cache_true_claim(claim).await;

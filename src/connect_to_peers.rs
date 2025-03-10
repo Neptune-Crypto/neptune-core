@@ -973,7 +973,7 @@ mod connect_tests {
                 .await
                 .unwrap();
         let state = state_lock.lock_guard().await;
-        let mut own_handshake = state.get_own_handshakedata().await;
+        let mut own_handshake = state.get_own_handshakedata();
 
         // Set reported versions to something incompatible
         VersionString::try_from_str("0.0.3")

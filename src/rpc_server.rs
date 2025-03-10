@@ -2581,7 +2581,7 @@ impl RPC for NeptuneRPCServer {
             }
         }
 
-        let sanctions_in_db = global_state.net.all_peer_sanctions_in_database().await;
+        let sanctions_in_db = global_state.net.all_peer_sanctions_in_database();
 
         // Combine result for currently connected peers and previously connected peers but
         // use result for currently connected peer if there is an overlap

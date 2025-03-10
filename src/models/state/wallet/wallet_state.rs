@@ -279,15 +279,15 @@ impl WalletState {
 
         let rusty_wallet_database = RustyWalletDatabase::connect(wallet_db).await;
 
-        let sync_label = rusty_wallet_database.get_sync_label().await;
+        let sync_label = rusty_wallet_database.get_sync_label();
 
         // generate and cache all used generation keys
-        let known_generation_keys = (0..rusty_wallet_database.get_generation_key_counter().await)
+        let known_generation_keys = (0..rusty_wallet_database.get_generation_key_counter())
             .map(|idx| wallet_entropy.nth_generation_spending_key(idx).into())
             .collect_vec();
 
         // generate and cache all used symmetric keys
-        let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter().await)
+        let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter())
             .map(|idx| wallet_entropy.nth_symmetric_key(idx).into())
             .collect_vec();
 
@@ -589,7 +589,7 @@ impl WalletState {
         let len = list.len().await;
 
         // iterate over list in reverse order (newest blocks first)
-        let stream = list.stream_many_values((0..len).rev()).await;
+        let stream = list.stream_many_values((0..len).rev());
         pin_mut!(stream); // needed for iteration
 
         let mut count: usize = 0;
@@ -716,14 +716,13 @@ impl WalletState {
     /// Scan the given transaction for announced UTXOs as recognized by *future*
     /// keys, *i.e.*, keys that will be derived by the next n derivation
     /// indices.
-    async fn scan_for_utxos_announced_to_future_keys<'a>(
+    fn scan_for_utxos_announced_to_future_keys<'a>(
         &'a self,
         num_future_keys: usize,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = (KeyType, u64, IncomingUtxo)> + 'a {
-        self.get_future_spending_keys(num_future_keys)
-            .await
-            .flat_map(|(key_type, derivation_index, key)| {
+        self.get_future_spending_keys(num_future_keys).flat_map(
+            |(key_type, derivation_index, key)| {
                 key.scan_for_announced_utxos(tx_kernel)
                     .into_iter()
                     .filter(|au| {
@@ -739,7 +738,8 @@ impl WalletState {
                         transaction_contains_addition_record
                     })
                     .map(move |au| (key_type, derivation_index, au))
-            })
+            },
+        )
     }
 
     /// Scan the given list of addition records for items that match with list
@@ -808,7 +808,6 @@ impl WalletState {
         self.wallet_db
             .expected_utxos()
             .stream_many_values((0..len).rev())
-            .await
             .any(|eu| futures::future::ready(eu.addition_record == addition_record))
             .await
     }
@@ -828,8 +827,7 @@ impl WalletState {
         let stream = self
             .wallet_db
             .monitored_utxos()
-            .stream_many_values((0..len).rev())
-            .await;
+            .stream_many_values((0..len).rev());
         pin_mut!(stream); // needed for iteration
 
         while let Some(mu) = stream.next().await {
@@ -940,17 +938,15 @@ impl WalletState {
     /// index, spending key) for the next `num_future_keys` to be derived, for
     /// key types "Generation" and "Symmetric Key". This function does **not**
     /// increment the derivation counter.
-    pub(crate) async fn get_future_spending_keys(
+    pub(crate) fn get_future_spending_keys(
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (KeyType, u64, SpendingKey)> + '_ {
         let future_generation_keys = self
             .get_future_generation_spending_keys(num_future_keys)
-            .await
             .map(|(i, gsk)| (KeyType::Generation, i, SpendingKey::from(gsk)));
         let future_symmetric_keys = self
             .get_future_symmetric_keys(num_future_keys)
-            .await
             .map(|(i, sk)| (KeyType::Symmetric, i, SpendingKey::from(sk)));
         future_generation_keys.chain(future_symmetric_keys)
     }
@@ -1014,7 +1010,6 @@ impl WalletState {
         let new_counter = max_used_index + 1;
         if self
             .spending_key_counter(key_type)
-            .await
             .is_some_and(|current_counter| new_counter > current_counter)
         {
             match key_type {
@@ -1026,10 +1021,10 @@ impl WalletState {
     }
 
     /// Get index of the next unused spending key of a given type.
-    pub async fn spending_key_counter(&self, key_type: KeyType) -> Option<u64> {
+    pub fn spending_key_counter(&self, key_type: KeyType) -> Option<u64> {
         match key_type {
-            KeyType::Generation => Some(self.wallet_db.get_generation_key_counter().await),
-            KeyType::Symmetric => Some(self.wallet_db.get_symmetric_key_counter().await),
+            KeyType::Generation => Some(self.wallet_db.get_generation_key_counter()),
+            KeyType::Symmetric => Some(self.wallet_db.get_symmetric_key_counter()),
             KeyType::RawHashLock => None,
         }
     }
@@ -1057,7 +1052,7 @@ impl WalletState {
     async fn next_unused_generation_spending_key(
         &mut self,
     ) -> generation_address::GenerationSpendingKey {
-        let index = self.wallet_db.get_generation_key_counter().await;
+        let index = self.wallet_db.get_generation_key_counter();
         self.wallet_db.set_generation_key_counter(index + 1).await;
         let key = self.wallet_entropy.nth_generation_spending_key(index);
         self.known_generation_keys.push(key.into());
@@ -1072,7 +1067,7 @@ impl WalletState {
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
     pub async fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
-        let index = self.wallet_db.get_symmetric_key_counter().await;
+        let index = self.wallet_db.get_symmetric_key_counter();
         self.wallet_db.set_symmetric_key_counter(index + 1).await;
         let key = self.wallet_entropy.nth_symmetric_key(index);
         self.known_symmetric_keys.push(key.into());
@@ -1081,22 +1076,22 @@ impl WalletState {
 
     /// Get the next n generation spending keys (with derivation indices)
     /// without modifying the counter.
-    pub(crate) async fn get_future_generation_spending_keys(
+    pub(crate) fn get_future_generation_spending_keys(
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (u64, generation_address::GenerationSpendingKey)> + use<'_> {
-        let index = self.wallet_db.get_generation_key_counter().await;
+        let index = self.wallet_db.get_generation_key_counter();
         (index..index + (num_future_keys as u64))
             .map(|i| (i, self.wallet_entropy.nth_generation_spending_key(i)))
     }
 
     /// Get the next n symmetric spending keys (with derivation indices)
     /// without modifying the counter.
-    pub(crate) async fn get_future_symmetric_keys(
+    pub(crate) fn get_future_symmetric_keys(
         &self,
         num_future_keys: usize,
     ) -> impl Iterator<Item = (u64, symmetric_key::SymmetricKey)> + use<'_> {
-        let index = self.wallet_db.get_symmetric_key_counter().await;
+        let index = self.wallet_db.get_symmetric_key_counter();
         (index..index + (num_future_keys as u64))
             .map(|i| (i, self.wallet_entropy.nth_symmetric_key(i)))
     }
@@ -1140,7 +1135,6 @@ impl WalletState {
                 scan_mode_configuration.num_future_keys(),
                 &new_block.body().transaction_kernel,
             )
-            .await
         {
             if max_counters
                 .get(&key_type)
@@ -1581,7 +1575,7 @@ impl WalletState {
     }
 
     pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
-        let db_sync_digest = self.wallet_db.get_sync_label().await;
+        let db_sync_digest = self.wallet_db.get_sync_label();
         if db_sync_digest != tip_hash {
             return false;
         }
@@ -2687,7 +2681,7 @@ pub(crate) mod tests {
 
         // are we synchronized to the genesis block?
         assert_eq!(
-            wallet_state.wallet_db.get_sync_label().await,
+            wallet_state.wallet_db.get_sync_label(),
             genesis_block.hash()
         );
 
@@ -3443,7 +3437,7 @@ pub(crate) mod tests {
                     wallet.wallet_db.persist().await;
 
                     (
-                        wallet.spending_key_counter(key_type).await,
+                        wallet.spending_key_counter(key_type),
                         wallet.get_known_spending_keys(key_type).collect_vec(),
                     )
                 };
@@ -3456,7 +3450,7 @@ pub(crate) mod tests {
                 )
                 .await;
 
-                let persisted_counter = wallet.spending_key_counter(key_type).await;
+                let persisted_counter = wallet.spending_key_counter(key_type);
                 let persisted_known_keys = wallet.get_known_spending_keys(key_type).collect_vec();
 
                 // 6. verify counter persisted between wallet instantiations
@@ -4055,20 +4049,11 @@ pub(crate) mod tests {
                     assert_eq!(NativeCurrencyAmount::coins(1), balance);
                     assert_eq!(
                         21,
-                        alice_wallet_state
-                            .wallet_db
-                            .get_generation_key_counter()
-                            .await
+                        alice_wallet_state.wallet_db.get_generation_key_counter()
                     );
                 } else {
                     assert_eq!(NativeCurrencyAmount::coins(0), balance);
-                    assert_eq!(
-                        1,
-                        alice_wallet_state
-                            .wallet_db
-                            .get_generation_key_counter()
-                            .await
-                    );
+                    assert_eq!(1, alice_wallet_state.wallet_db.get_generation_key_counter());
                 }
             }
         }
@@ -4087,28 +4072,26 @@ pub(crate) mod tests {
             .await;
 
             // generate iterators for future keys
-            let generation_counter = wallet_state.wallet_db.get_generation_key_counter().await;
-            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter().await;
+            let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
+            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
 
             // don't just generate the iterators; run through them also
             let num_future_keys = 100;
             let future_generation_keys = wallet_state
                 .get_future_generation_spending_keys(num_future_keys)
-                .await
                 .collect_vec();
             let future_symmetric_keys = wallet_state
                 .get_future_symmetric_keys(num_future_keys)
-                .await
                 .collect_vec();
 
             // verify that the counters haven't changed
             assert_eq!(
                 generation_counter,
-                wallet_state.wallet_db.get_generation_key_counter().await
+                wallet_state.wallet_db.get_generation_key_counter(),
             );
             assert_eq!(
                 symmetric_counter,
-                wallet_state.wallet_db.get_symmetric_key_counter().await
+                wallet_state.wallet_db.get_symmetric_key_counter(),
             );
 
             // make sure passing over the iterators is not being optimized away
@@ -4154,8 +4137,8 @@ pub(crate) mod tests {
             .await;
             println!("(ignore all log messages above 😆)");
 
-            let generation_counter = wallet_state.wallet_db.get_generation_key_counter().await;
-            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter().await;
+            let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
+            let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
 
             let num_future_keys = 20;
             let mut future_generation_relative_indices = (0..num_future_keys)
@@ -4256,7 +4239,6 @@ pub(crate) mod tests {
             // scan
             let caught_utxos = wallet_state
                 .scan_for_utxos_announced_to_future_keys(num_future_keys, &new_kernel)
-                .await
                 .collect_vec();
 
             // filter master list according to expectation

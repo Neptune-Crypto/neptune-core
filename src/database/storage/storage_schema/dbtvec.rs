@@ -135,14 +135,14 @@ impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> St
     where
         T: 'a,
     {
-        self.stream_many(0..self.len().await).await
+        self.stream_many(0..self.len().await)
     }
 
     async fn stream_values<'a>(&'a self) -> impl Stream<Item = T> + 'a
     where
         T: 'a,
     {
-        self.stream_many_values(0..self.len().await).await
+        self.stream_many_values(0..self.len().await)
     }
 }
 
