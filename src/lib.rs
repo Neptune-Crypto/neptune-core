@@ -230,11 +230,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("UTXO restoration check complete");
 
     // Connect to peers, and provide each peer task with a thread-safe copy of the state
-    let own_handshake_data: HandshakeData = global_state_lock
-        .lock_guard()
-        .await
-        .get_own_handshakedata()
-        .await;
+    let own_handshake_data: HandshakeData =
+        global_state_lock.lock_guard().await.get_own_handshakedata();
     info!(
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height

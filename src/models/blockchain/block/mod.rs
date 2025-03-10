@@ -218,7 +218,7 @@ impl Block {
         let body = primitive_witness.body().to_owned();
         let header = primitive_witness.header(timestamp, target_block_interval);
         let (appendix, proof) = {
-            let block_proof_witness = BlockProofWitness::produce(primitive_witness).await?;
+            let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
             let proof = BlockProgram

@@ -423,12 +423,8 @@ pub(crate) mod test {
                 .values()
                 .to_vec(),
         );
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _guard = rt.enter();
 
-        let block_proof_witness = rt
-            .block_on(BlockProofWitness::produce(block_primitive_witness))
-            .unwrap();
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness);
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
         let rust_output = BlockProgram
@@ -574,12 +570,7 @@ pub(crate) mod test {
         )
         .unwrap();
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _guard = rt.enter();
-
-        let block_proof_witness = rt
-            .block_on(BlockProofWitness::produce(block_primitive_witness))
-            .unwrap()
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness)
             .with_claim_test(halt_claim, halt_proof);
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();

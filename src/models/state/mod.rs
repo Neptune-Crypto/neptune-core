@@ -495,9 +495,7 @@ impl GlobalState {
         // of stream_values() we use stream_many_values() and supply
         // an iterator of indexes that are already reversed.
 
-        let stream = monitored_utxos
-            .stream_many_values((0..monitored_utxos.len().await).rev())
-            .await;
+        let stream = monitored_utxos.stream_many_values((0..monitored_utxos.len().await).rev());
         pin_mut!(stream); // needed for iteration
 
         while let Some(mutxo) = stream.next().await {
@@ -924,7 +922,7 @@ impl GlobalState {
         Ok(Transaction { kernel, proof })
     }
 
-    pub(crate) async fn get_own_handshakedata(&self) -> HandshakeData {
+    pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
         let listen_port = self.cli().own_listen_port();
         HandshakeData {
             tip_header: *self.chain.light_state().header(),
@@ -955,7 +953,7 @@ impl GlobalState {
         let tip_hash = self.chain.light_state().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
-        let asm_sync_label = ams_ref.get_sync_label().await;
+        let asm_sync_label = ams_ref.get_sync_label();
         assert_eq!(
             tip_hash, asm_sync_label,
             "Error: sync label in archival mutator set database disagrees with \
@@ -1757,8 +1755,7 @@ mod global_state_tests {
             .await
             .lock_guard()
             .await
-            .get_own_handshakedata()
-            .await;
+            .get_own_handshakedata();
         }
 
         #[traced_test]
@@ -1777,8 +1774,7 @@ mod global_state_tests {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .get_own_handshakedata()
-                .await;
+                .get_own_handshakedata();
             assert!(handshake_data.listen_port.is_some());
         }
 
@@ -1803,8 +1799,7 @@ mod global_state_tests {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .get_own_handshakedata()
-                .await;
+                .get_own_handshakedata();
             assert!(handshake_data.listen_port.is_none());
         }
     }
@@ -3032,9 +3027,8 @@ mod global_state_tests {
                     .chain
                     .archival_state()
                     .archival_mutator_set
-                    .get_sync_label()
-                    .await,
-                "Archival state must have expected sync-label"
+                    .get_sync_label(),
+                "Archival state must have expected sync-label",
             );
             assert_eq!(
                 expected_tip.mutator_set_accumulator_after(),

@@ -39,7 +39,7 @@ where
 
     /// returns singleton value
     #[inline]
-    pub async fn get(&self) -> V {
+    pub fn get(&self) -> V {
         self.inner.get()
     }
 

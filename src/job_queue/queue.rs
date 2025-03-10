@@ -252,11 +252,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     ///
     /// job-results can be obtained by via JobHandle::results().await
     /// The job can be cancelled by JobHandle::cancel()
-    pub async fn add_job(
-        &self,
-        job: Box<dyn Job>,
-        priority: P,
-    ) -> Result<JobHandle, JobQueueError> {
+    pub fn add_job(&self, job: Box<dyn Job>, priority: P) -> Result<JobHandle, JobQueueError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
 
@@ -461,22 +457,15 @@ mod tests {
                 });
 
                 // process job and print results.
+                handles.push(job_queue.add_job(job1, DoubleJobPriority::Low)?.result_rx());
                 handles.push(
                     job_queue
-                        .add_job(job1, DoubleJobPriority::Low)
-                        .await?
+                        .add_job(job2, DoubleJobPriority::Medium)?
                         .result_rx(),
                 );
                 handles.push(
                     job_queue
-                        .add_job(job2, DoubleJobPriority::Medium)
-                        .await?
-                        .result_rx(),
-                );
-                handles.push(
-                    job_queue
-                        .add_job(job3, DoubleJobPriority::High)
-                        .await?
+                        .add_job(job3, DoubleJobPriority::High)?
                         .result_rx(),
                 );
             }
@@ -542,8 +531,7 @@ mod tests {
                 });
 
                 let result = job_queue
-                    .add_job(job, DoubleJobPriority::Low)
-                    .await?
+                    .add_job(job, DoubleJobPriority::Low)?
                     .result()
                     .await?;
 
@@ -568,7 +556,7 @@ mod tests {
                 duration,
                 is_async,
             });
-            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low).await?;
+            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
 
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
@@ -613,7 +601,7 @@ mod tests {
                     duration,
                     is_async,
                 });
-                let _rx = job_queue.add_job(job, DoubleJobPriority::Low).await?;
+                let _rx = job_queue.add_job(job, DoubleJobPriority::Low)?;
 
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 println!("finished scope");
@@ -663,7 +651,7 @@ mod tests {
                     is_async,
                 });
 
-                let rx_handle = job_queue.add_job(job, DoubleJobPriority::Low).await?;
+                let rx_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
                 drop(rx_handle);
 
                 // sleep 50 ms to let job get started.
@@ -726,7 +714,7 @@ mod tests {
                         is_async,
                     });
 
-                    let result = job_queue_cloned.add_job(job, DoubleJobPriority::Low).await;
+                    let result = job_queue_cloned.add_job(job, DoubleJobPriority::Low);
 
                     // an assert on result.is_ok() would panic, but that panic would be
                     // printed and swallowed by tokio runtime, so the test would succeed
@@ -767,7 +755,7 @@ mod tests {
                 is_async: true,
             });
 
-            let rx_handle = jq1.add_job(job, DoubleJobPriority::Low).await?;
+            let rx_handle = jq1.add_job(job, DoubleJobPriority::Low)?;
 
             assert!(!jq1.tx.is_closed());
 

@@ -885,7 +885,7 @@ mod tests {
     }
 
     /// Create a mempool with n transactions.
-    async fn setup_mock_mempool(
+    fn setup_mock_mempool(
         transactions_count: usize,
         network: Network,
         origin: TransactionOrigin,
@@ -935,7 +935,7 @@ mod tests {
     async fn get_densest_transactions_no_tx_cap() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
         let num_txs = 10;
-        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign).await;
+        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign);
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -954,7 +954,7 @@ mod tests {
     async fn get_densest_transactions_with_tx_cap() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
         let num_txs = 12;
-        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign).await;
+        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign);
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -973,7 +973,7 @@ mod tests {
     #[tokio::test]
     async fn most_dense_proof_collection_test() {
         let network = Network::Main;
-        let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+        let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
         let genesis_block = Block::genesis(network);
         let bob_wallet_secret = WalletEntropy::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -1025,7 +1025,7 @@ mod tests {
     #[tokio::test]
     async fn get_sorted_iter() {
         // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
-        let mempool = setup_mock_mempool(10, Network::Main, TransactionOrigin::Foreign).await;
+        let mempool = setup_mock_mempool(10, Network::Main, TransactionOrigin::Foreign);
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1041,7 +1041,7 @@ mod tests {
     #[tokio::test]
     async fn max_num_transactions_is_respected() {
         let num_txs = 12;
-        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign).await;
+        let mempool = setup_mock_mempool(num_txs, Network::Main, TransactionOrigin::Foreign);
         for i in 0..num_txs {
             assert_eq!(
                 i,
@@ -1752,8 +1752,7 @@ mod tests {
         // Verify that the `get_size` method on mempool returns sane results
         let network = Network::Main;
         let tx_count_small = 2;
-        let mempool_small =
-            setup_mock_mempool(tx_count_small, network, TransactionOrigin::Foreign).await;
+        let mempool_small = setup_mock_mempool(tx_count_small, network, TransactionOrigin::Foreign);
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small = bincode::serialize(&mempool_small.tx_dictionary)
             .unwrap()
@@ -1769,8 +1768,7 @@ mod tests {
         );
 
         let tx_count_big = 6;
-        let mempool_big =
-            setup_mock_mempool(tx_count_big, network, TransactionOrigin::Foreign).await;
+        let mempool_big = setup_mock_mempool(tx_count_big, network, TransactionOrigin::Foreign);
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big = bincode::serialize(&mempool_big.tx_dictionary)
             .unwrap()
@@ -1834,7 +1832,7 @@ mod tests {
                 NativeCurrencyAmount::coins(15),
             )
             .await;
-            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
             mempool.insert(pw_high_fee, TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
@@ -1864,7 +1862,7 @@ mod tests {
                 NativeCurrencyAmount::coins(15),
             )
             .await;
-            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
             mempool.insert(pc_high_fee, TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
@@ -1894,7 +1892,7 @@ mod tests {
                 NativeCurrencyAmount::coins(15),
             )
             .await;
-            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
             mempool.insert(pc_high_fee, TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 

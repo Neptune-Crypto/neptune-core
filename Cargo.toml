@@ -256,6 +256,7 @@ unnecessary_box_returns = "warn"
 unnecessary_join = "warn"
 unnecessary_wraps = "warn"
 unnested_or_patterns = "warn"
+unused_async = "warn"
 used_underscore_binding = "warn"
 verbose_bit_mask = "warn"
 
