@@ -434,10 +434,10 @@ impl DashboardApp {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => {
-                            if self.current_menu_item != MenuItem::Quit {
-                                self.current_menu_item = MenuItem::Quit;
-                            } else {
+                            if self.current_menu_item == MenuItem::Quit {
                                 self.running = false;
+                            } else {
+                                self.current_menu_item = MenuItem::Quit;
                             }
                         }
                         KeyCode::Enter => {

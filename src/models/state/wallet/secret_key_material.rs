@@ -393,18 +393,16 @@ mod test {
 
             // Make a random selection of t+1 shares such that both sharings are
             // represented. There can be no duplicate indices so n > t.
-            let mut selected_shares = vec![];
-            let insert_unique_index =
-                |collection: &mut Vec<_>, share: (usize, SecretKeyMaterial)| {
-                    if !collection.iter().any(|(i, _)| *i == share.0) {
-                        collection.push(share);
-                        false
-                    } else {
-                        true
-                    }
-                };
+            let insert_unique_index = |collection: &mut Vec<_>, share: (_, _)| {
+                let is_share_in_collection = collection.iter().any(|(i, _)| *i == share.0);
+                if !is_share_in_collection {
+                    collection.push(share);
+                }
+                is_share_in_collection
+            };
 
             // add one share a, randomly selected
+            let mut selected_shares = vec![];
             insert_unique_index(
                 &mut selected_shares,
                 shares_a.swap_remove(rng.random_range(0..shares_a.len())),
