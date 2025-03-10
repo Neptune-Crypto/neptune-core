@@ -162,8 +162,8 @@ pub(crate) enum PeerTaskToMain {
     },
     RemovePeerMaxBlockHeight(SocketAddr),
 
-    /// (\[(peer_listen_address)\], reported_by, distance)
-    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
+    /// list of peer's peers, and their distance from “self”
+    PeerDiscoveryAnswer(Vec<(SocketAddr, u128)>, u8),
 
     Transaction(Box<PeerTaskToMainTransaction>),
     BlockProposal(Box<Block>),
@@ -182,7 +182,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::NewBlocks(_) => "new blocks",
             PeerTaskToMain::AddPeerMaxBlockHeight { .. } => "add peer max block height",
             PeerTaskToMain::RemovePeerMaxBlockHeight(_) => "remove peer max block height",
-            PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
+            PeerTaskToMain::PeerDiscoveryAnswer(..) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
