@@ -1,6 +1,7 @@
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -39,6 +40,8 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
+use crate::models::peer::bootstrap_info::BootstrapInfo;
+use crate::models::peer::bootstrap_info::BootstrapStatus;
 use crate::models::peer::handshake_data::HandshakeData;
 use crate::models::peer::peer_info::PeerConnectionInfo;
 use crate::models::peer::peer_info::PeerInfo;
@@ -201,6 +204,87 @@ impl PeerLoopHandler {
         }
 
         sanction_result.map_err(|err| anyhow::anyhow!("Cannot reward banned peer: {err}"))
+    }
+
+    /// Potentially update a peer's bootstrap status.
+    ///
+    /// Per connection, the bootstrap status can be set once without
+    /// incurring [punishment](Self::punish). After a cooldown period, the
+    /// bootstrap status can be set again. The cooldown exists to prevent peers
+    /// from forcing many write-lock acquisition of the global state lock.
+    ///
+    /// This method only acquires a write lock for the global state lock if
+    /// necessary.
+    ///
+    /// # Locking:
+    ///   * acquires `global_state_lock` for read
+    ///   * might acquire `global_state_lock` for write
+    async fn handle_bootstrap_status_message(&mut self, status: BootstrapStatus) -> Result<()> {
+        const BOOTSTRAP_STATUS_UPDATE_COOLDOWN_PERIOD: Duration = Duration::from_secs(5 * 60);
+
+        let peer_address = self.peer_address;
+        let Some(connection_start_time) = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .peer_map
+            .get(&peer_address)
+            .map(|info| info.own_timestamp_connection_established)
+        else {
+            warn!("Peer {peer_address} not found in peer map when updating bootstrap status.");
+            return Ok(()); // not great, not ban-worthy
+        };
+        let last_update_time = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .bootstrap_status
+            .get(&peer_address)
+            .map(|info| info.last_set)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+
+        if last_update_time < connection_start_time {
+            debug!("Setting bootstrap status of peer {peer_address} to \"{status}\"");
+            self.global_state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .bootstrap_status
+                .insert(peer_address, BootstrapInfo::new(status));
+            return Ok(());
+        }
+
+        let Ok(duration_since_last_update) = SystemTime::now().duration_since(last_update_time)
+        else {
+            warn!("Last bootstrap update of peer {peer_address} is in the future.");
+            return Ok(()); // not great, not ban-worthy
+        };
+        if duration_since_last_update < BOOTSTRAP_STATUS_UPDATE_COOLDOWN_PERIOD {
+            info!(
+                "Punishing peer {peer_address} for bootstrap update within cooldown period. \
+                Update received after {duration} seconds of last update, \
+                cooldown period is {cooldown} seconds.",
+                duration = duration_since_last_update.as_secs(),
+                cooldown = BOOTSTRAP_STATUS_UPDATE_COOLDOWN_PERIOD.as_secs(),
+            );
+            self.punish(NegativePeerSanction::BootstrapStatusUpdateSpam)
+                .await?;
+            return Ok(());
+        }
+
+        debug!("Updating bootstrap status of peer {peer_address} to \"{status}\"");
+        self.global_state_lock
+            .lock_guard_mut()
+            .await
+            .net
+            .bootstrap_status
+            .insert(peer_address, BootstrapInfo::new(status));
+        self.punish(NegativePeerSanction::BootstrapStatusUpdate)
+            .await?;
+
+        Ok(())
     }
 
     /// Construct a batch response, with blocks and their MMR membership proofs
@@ -1542,6 +1626,10 @@ impl PeerLoopHandler {
                     self.reward(PositivePeerSanction::NewBlockProposal).await?;
                 }
 
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BootstrapStatus(status) => {
+                self.handle_bootstrap_status_message(status).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }

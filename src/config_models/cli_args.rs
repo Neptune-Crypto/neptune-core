@@ -82,13 +82,21 @@ pub struct Args {
     #[clap(long)]
     pub(crate) max_connections_per_ip: Option<usize>,
 
-    /// Whether to act as bootstrapper node.
+    /// Whether to act as a bootstrap node.
     ///
-    /// Bootstrapper nodes ensure that the maximum number of peers is never
-    /// reached by disconnecting from existing peers when the maximum is about
-    /// to be reached. As a result, they will respond with high likelihood to
-    /// incoming connection requests -- in contrast to regular nodes, which
-    /// refuse incoming connections when the max is reached.
+    /// Bootstrap nodes almost always accept new connections. This gives newcomers
+    /// to the network a chance to discover other nodes on the network through the
+    /// automatic peer discovery process.
+    ///
+    /// The differences between bootstrap nodes and non-bootstrap nodes are:
+    ///
+    /// - If the maximum number of peers is reached, non-bootstrap nodes refuse
+    ///   additional connection attempts, while bootstrap nodes terminate the
+    ///   longest-standing connection and accept the new connection.
+    /// - If a node that got disconnected recently tries to re-establish the same
+    ///   connection immediately, a non-bootstrap node might accept (depending on
+    ///   its current and maximum number of peers), while a bootstrap node will
+    ///   certainly refuse until the reconnect cooldown has expired.
     #[clap(long)]
     pub(crate) bootstrap: bool,
 
