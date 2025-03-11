@@ -634,7 +634,7 @@ pub(crate) async fn mine(
     let cli_args = global_state_lock.cli().clone();
 
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
-    let infinite = Duration::from_secs(u32::MAX as u64);
+    let infinite = Duration::from_secs(u32::MAX.into());
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
@@ -1618,9 +1618,9 @@ pub(crate) mod mine_loop_tests {
         let stddev = (guessing_time.pow(2.0_f64) / (NUM_BLOCKS as f64)).sqrt();
         let allowed_standard_deviations = 4;
         let min_duration = (expected_duration.0.value() as f64)
-            - (allowed_standard_deviations as f64) * stddev * (NUM_BLOCKS as f64);
+            - f64::from(allowed_standard_deviations) * stddev * (NUM_BLOCKS as f64);
         let max_duration = (expected_duration.0.value() as f64)
-            + (allowed_standard_deviations as f64) * stddev * (NUM_BLOCKS as f64);
+            + f64::from(allowed_standard_deviations) * stddev * (NUM_BLOCKS as f64);
         let max_test_time = expected_duration * 3;
 
         // we ignore the first 2 blocks after genesis because they are
@@ -1837,7 +1837,7 @@ pub(crate) mod mine_loop_tests {
         // after k trials, so this quantity must be less than 0.0001.
         // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
         // Difficulty 100 sets k = 917.
-        let cofactor = (1.0 - (1.0 / (difficulty as f64))).log10();
+        let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
         let k = (-4.0 / cofactor).ceil() as usize;
 
         let mut predecessor_header = random_block_header();

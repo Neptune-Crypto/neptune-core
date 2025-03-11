@@ -417,7 +417,7 @@ mod tests {
 
         let read_indices: Vec<u64> = random_elements::<u64>(30)
             .into_iter()
-            .map(|x| x % TEST_LIST_LENGTH as u64)
+            .map(|x| x % u64::from(TEST_LIST_LENGTH))
             .collect();
         let values = vector.get_many(&read_indices).await;
         assert!(read_indices
@@ -428,7 +428,7 @@ mod tests {
         // Mutate some indices
         let mutate_indices: Vec<u64> = random_elements::<u64>(30)
             .into_iter()
-            .map(|x| x % TEST_LIST_LENGTH as u64)
+            .map(|x| x % u64::from(TEST_LIST_LENGTH))
             .collect();
         for index in &mutate_indices {
             vector
@@ -466,7 +466,7 @@ mod tests {
 
         // Generate initial index/value pairs.
         let init_keyvals: Vec<(Index, S)> = (0u8..TEST_LIST_LENGTH)
-            .map(|i| (i as Index, S(vec![i, i, i])))
+            .map(|i| (Index::from(i), S(vec![i, i, i])))
             .collect();
 
         // set_many() does not grow the list, so we must first push
@@ -481,7 +481,7 @@ mod tests {
         // generate some random indices to read
         let read_indices: Vec<u64> = random_elements::<u64>(30)
             .into_iter()
-            .map(|x| x % TEST_LIST_LENGTH as u64)
+            .map(|x| x % u64::from(TEST_LIST_LENGTH))
             .collect();
 
         // perform read, and validate as expected
@@ -494,14 +494,14 @@ mod tests {
         // Generate some random indices for mutation
         let mutate_indices: Vec<u64> = random_elements::<u64>(30)
             .iter()
-            .map(|x| x % TEST_LIST_LENGTH as u64)
+            .map(|x| x % u64::from(TEST_LIST_LENGTH))
             .collect();
 
         // Generate keyvals for mutation
         let mutate_keyvals: Vec<(Index, S)> = mutate_indices
             .iter()
             .map(|index| {
-                let val = (index % TEST_LIST_LENGTH as u64 + 1) as u8;
+                let val = (index % u64::from(TEST_LIST_LENGTH) + 1) as u8;
                 (*index, S(vec![val, val, val]))
             })
             .collect();
@@ -550,9 +550,7 @@ mod tests {
         let mut vector = rusty_storage.schema.new_vec::<S>("test-vector").await;
 
         // Generate initial index/value pairs.
-        let init_vals: Vec<S> = (0u8..TEST_LIST_LENGTH)
-            .map(|i| (S(vec![i, i, i])))
-            .collect();
+        let init_vals: Vec<S> = (0u8..TEST_LIST_LENGTH).map(|i| S(vec![i, i, i])).collect();
 
         let mut mutate_vals = init_vals.clone(); // for later
 
@@ -568,7 +566,7 @@ mod tests {
         // generate some random indices to read
         let read_indices: Vec<u64> = random_elements::<u64>(30)
             .into_iter()
-            .map(|x| x % TEST_LIST_LENGTH as u64)
+            .map(|x| x % u64::from(TEST_LIST_LENGTH))
             .collect();
 
         // perform read, and validate as expected
@@ -581,12 +579,12 @@ mod tests {
         // Generate some random indices for mutation
         let mutate_indices: Vec<u64> = random_elements::<u64>(30)
             .iter()
-            .map(|x| x % TEST_LIST_LENGTH as u64)
+            .map(|x| x % u64::from(TEST_LIST_LENGTH))
             .collect();
 
         // Generate vals for mutation
         for index in &mutate_indices {
-            let val = (index % TEST_LIST_LENGTH as u64 + 1) as u8;
+            let val = (index % u64::from(TEST_LIST_LENGTH) + 1) as u8;
             mutate_vals[*index as usize] = S(vec![val, val, val]);
         }
 

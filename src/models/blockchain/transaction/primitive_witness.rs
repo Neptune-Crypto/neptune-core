@@ -1836,10 +1836,10 @@ mod test {
                 .iter()
                 .map(|b| b.value() as u32)
                 .collect_vec();
-            let amount = u32s[0] as u128
-                | ((u32s[1] as u128) << 32)
-                | ((u32s[2] as u128) << 64)
-                | ((u32s[3] as u128) << 96);
+            let amount = u128::from(u32s[0])
+                | (u128::from(u32s[1]) << 32)
+                | (u128::from(u32s[2]) << 64)
+                | (u128::from(u32s[3]) << 96);
             total = total + NativeCurrencyAmount::from_nau(amount.try_into().unwrap());
         }
         prop_assert!(total <= NativeCurrencyAmount::coins(42000000));

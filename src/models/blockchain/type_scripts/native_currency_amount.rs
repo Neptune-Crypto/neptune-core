@@ -155,7 +155,7 @@ impl NativeCurrencyAmount {
     ///
     /// Crashes in case of overflow.
     pub fn scalar_mul(&self, factor: u32) -> Self {
-        let factor_as_i128 = factor as i128;
+        let factor_as_i128 = i128::from(factor);
         let (res, overflow) = self.0.overflowing_mul(factor_as_i128);
         assert!(!overflow, "Overflow on scalar multiplication not allowed.");
         NativeCurrencyAmount(res)
@@ -685,7 +685,7 @@ pub(crate) mod test {
         let mut rng = rand::rng();
         let mut a = 6481;
         let mut b = 6481;
-        while (a as u64) * (b as u64) > 42000000 {
+        while u64::from(a) * u64::from(b) > 42000000 {
             a = rng.random_range(0..42000000);
             b = rng.random_range(0..42000000);
         }

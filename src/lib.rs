@@ -346,7 +346,7 @@ pub fn time_fn_call<O>(f: impl FnOnce() -> O) -> (O, f64) {
     let start = Instant::now();
     let output = f();
     let elapsed = start.elapsed();
-    let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
+    let total_time = elapsed.as_secs() as f64 + f64::from(elapsed.subsec_nanos()) / 1e9;
     (output, total_time)
 }
 
@@ -358,7 +358,7 @@ where
     let start = Instant::now();
     let output = f.await;
     let elapsed = start.elapsed();
-    let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
+    let total_time = elapsed.as_secs() as f64 + f64::from(elapsed.subsec_nanos()) / 1e9;
     (output, total_time)
 }
 

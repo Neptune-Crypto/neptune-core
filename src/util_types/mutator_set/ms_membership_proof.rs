@@ -136,7 +136,7 @@ impl MsMembershipProof {
         let new_item_index2 = mutator_set.aocl.num_leafs();
 
         // window does slide
-        let batch_index = new_item_index2 / BATCH_SIZE as u64;
+        let batch_index = new_item_index2 / u64::from(BATCH_SIZE);
         let old_window_start_batch_index = batch_index - 1;
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
@@ -168,7 +168,7 @@ impl MsMembershipProof {
                 for chunk_index in absolute_indices
                     .to_array()
                     .iter()
-                    .map(|x| (*x / CHUNK_SIZE as u128) as u64)
+                    .map(|x| (*x / u128::from(CHUNK_SIZE)) as u64)
                     .unique()
                 {
                     chunk_index_to_mp_index
@@ -306,7 +306,7 @@ impl MsMembershipProof {
         );
         let chunk_indices_set: HashSet<u64> = all_indices
             .into_iter()
-            .map(|bi| (bi / CHUNK_SIZE as u128) as u64)
+            .map(|bi| (bi / u128::from(CHUNK_SIZE)) as u64)
             .collect::<HashSet<u64>>();
 
         // Insert the new SWBF leaf into a duplicate of the SWBFI MMRA to get
@@ -317,7 +317,7 @@ impl MsMembershipProof {
             swbfi_mmra.append(new_chunk_digest);
 
         let mut swbf_chunk_dictionary_updated = false;
-        let batch_index = new_item_aocl_index / (BATCH_SIZE as u64);
+        let batch_index = new_item_aocl_index / u64::from(BATCH_SIZE);
         let old_window_start_batch_index = batch_index - 1;
 
         // Sanity check: assert that the new SWBFI leaf index agrees with the
@@ -389,7 +389,7 @@ impl MsMembershipProof {
             "Cannot revert a membership proof for an item to back its state before the item was added to the mutator set."
         );
         let aocl_discrepancies = self.aocl_leaf_index ^ previous_leaf_count;
-        let aocl_mt_height = (aocl_discrepancies as u128).ilog2();
+        let aocl_mt_height = u128::from(aocl_discrepancies).ilog2();
 
         // trim to length
         while self.auth_path_aocl.authentication_path.len() > aocl_mt_height as usize {
@@ -404,7 +404,7 @@ impl MsMembershipProof {
         for (k, (mp, _chnk)) in self.target_chunks.iter_mut() {
             // calculate length
             let chunk_discrepancies = swbfi_leaf_count ^ *k;
-            let chunk_mt_height = (chunk_discrepancies as u128).ilog2();
+            let chunk_mt_height = u128::from(chunk_discrepancies).ilog2();
 
             // trim to length
             while mp.authentication_path.len() > chunk_mt_height as usize {
@@ -1411,7 +1411,7 @@ mod ms_proof_tests {
         let aocl_peaks = (0..aocl_leaf_count.count_ones())
             .map(|_| rng.random::<Digest>())
             .collect_vec();
-        let swbfi_leaf_count = (aocl_leaf_count / (BATCH_SIZE as u64)) + 1;
+        let swbfi_leaf_count = (aocl_leaf_count / u64::from(BATCH_SIZE)) + 1;
         let swbfi_peaks = (0..swbfi_leaf_count.count_ones())
             .map(|_| rng.random::<Digest>())
             .collect_vec();

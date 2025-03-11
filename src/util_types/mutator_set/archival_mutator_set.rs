@@ -208,12 +208,12 @@ where
             get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_leaf_index);
 
         let batch_index = self.get_batch_index_async().await;
-        let window_start = batch_index * CHUNK_SIZE as u128;
+        let window_start = batch_index * u128::from(CHUNK_SIZE);
 
         let chunk_indices: Vec<u64> = swbf_indices
             .iter()
             .filter(|bi| **bi < window_start)
-            .map(|bi| (*bi / CHUNK_SIZE as u128) as u64)
+            .map(|bi| (*bi / u128::from(CHUNK_SIZE)) as u64)
             .collect();
         let mut target_chunks: ChunkDictionary = ChunkDictionary::default();
 
@@ -247,7 +247,7 @@ where
     pub async fn revert_remove(&mut self, removal_record: &RemovalRecord) {
         let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
         let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
         let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
 
         // Populate the dictionary by iterating over all the removal
@@ -259,8 +259,8 @@ where
                 let relative_index = (rr_index - active_window_start) as u32;
                 self.swbf_active.remove(relative_index);
             } else {
-                let chunkidx = (rr_index / CHUNK_SIZE as u128) as u64;
-                let relative_index = (rr_index % CHUNK_SIZE as u128) as u32;
+                let chunkidx = (rr_index / u128::from(CHUNK_SIZE)) as u64;
+                let relative_index = (rr_index % u128::from(CHUNK_SIZE)) as u32;
                 chunkidx_to_difference_dict
                     .entry(chunkidx)
                     .or_insert_with(Chunk::empty_chunk)
@@ -323,14 +323,14 @@ where
     /// filter, whether in the active window, or in some chunk.
     pub async fn bloom_filter_contains(&mut self, index: u128) -> bool {
         let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
 
         if index >= active_window_start {
             let relative_index = (index - active_window_start) as u32;
             self.swbf_active.contains(relative_index)
         } else {
-            let chunk_index = (index / CHUNK_SIZE as u128) as u64;
-            let relative_index = (index % CHUNK_SIZE as u128) as u32;
+            let chunk_index = (index / u128::from(CHUNK_SIZE)) as u64;
+            let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
             let relevant_chunk = self.chunks.get(chunk_index).await;
             relevant_chunk.contains(relative_index)
         }
@@ -350,7 +350,7 @@ where
     pub async fn get_batch_index_async(&self) -> u128 {
         match self.aocl.num_leafs().await {
             0 => 0,
-            n => (n - 1) as u128 / BATCH_SIZE as u128,
+            n => u128::from(n - 1) / u128::from(BATCH_SIZE),
         }
     }
 
@@ -394,7 +394,7 @@ where
     /// Determine if the window slides before absorbing an item,
     /// given the index of the to-be-added item.
     pub fn window_slides(added_index: u64) -> bool {
-        added_index != 0 && added_index % BATCH_SIZE as u64 == 0
+        added_index != 0 && added_index % u64::from(BATCH_SIZE) == 0
 
         // example cases:
         //  - index == 0 we don't care about
@@ -406,7 +406,7 @@ where
     /// after applying the update. Does not mutate the removal record.
     pub async fn remove_helper(&mut self, removal_record: &RemovalRecord) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
 
         // insert all indices
         let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
@@ -439,7 +439,7 @@ where
                     )
                 });
             for index in indices {
-                let relative_index = (index % CHUNK_SIZE as u128) as u32;
+                let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
                 relevant_chunk.1.insert(relative_index);
             }
         }

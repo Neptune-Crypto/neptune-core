@@ -99,9 +99,9 @@ impl Mul<usize> for Timestamp {
     ///
     /// Panics if there is overflow mod P = 2^64 - 2^32 + 1.
     fn mul(self, rhs: usize) -> Self::Output {
-        let value: u128 = (self.0.value() as u128) * (u128::try_from(rhs).unwrap());
+        let value: u128 = u128::from(self.0.value()) * (u128::try_from(rhs).unwrap());
 
-        assert!(value < BFieldElement::P as u128);
+        assert!(value < u128::from(BFieldElement::P));
 
         Self(BFieldElement::new(value as u64))
     }

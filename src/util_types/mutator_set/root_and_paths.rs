@@ -38,7 +38,7 @@ pub mod neptune_arbitrary {
             assert!(
                 indices_and_leafs_proper
                     .iter()
-                    .all(|(i, _l)| (*i as u128) < 1u128 << tree_height_proper),
+                    .all(|(i, _l)| u128::from(*i) < 1u128 << tree_height_proper),
                 "some or all indices are too large; don't fit in a tree of height {tree_height_proper}"
             );
             let upper_bound_num_digests = tree_height_proper * indices_and_leafs_proper.len() + 1;
@@ -52,11 +52,11 @@ pub mod neptune_arbitrary {
                 vec_digest_strategy,
             )
                 .prop_map(|(tree_height, indices_and_leafs, mut digests)| {
-                    assert!(indices_and_leafs.iter().all(|(i, _l)| (*i as u128) < (1u128 << tree_height)), "indices too large for tree of height: {}", tree_height);
+                    assert!(indices_and_leafs.iter().all(|(i, _l)| u128::from(*i) < (1u128 << tree_height)), "indices too large for tree of height: {}", tree_height);
                     // populate nodes dictionary with leafs
                     let mut nodes = HashMap::new();
                     for &(index, leaf) in &indices_and_leafs {
-                        let node_index = (index as u128) + (1u128 << tree_height);
+                        let node_index = u128::from(index) + (1u128 << tree_height);
                         nodes.insert(node_index, leaf);
                     }
 
@@ -97,7 +97,7 @@ pub mod neptune_arbitrary {
                     // read out paths
                     let paths = indices_and_leafs
                         .iter()
-                        .map(|(leaf_idx, _)| (*leaf_idx as u128) + (1u128 << tree_height))
+                        .map(|(leaf_idx, _)| u128::from(*leaf_idx) + (1u128 << tree_height))
                         .map(|node_idx| {
                             (0..tree_height)
                                 .map(|layer_idx| {

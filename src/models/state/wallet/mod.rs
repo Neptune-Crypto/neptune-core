@@ -1248,8 +1248,8 @@ mod wallet_tests {
                     1024,
                     2048,
                     4096,
-                    (u16::MAX / 2) as u64,
-                    u16::MAX as u64,
+                    u64::from(u16::MAX / 2),
+                    u64::from(u16::MAX),
                 ]
             }
 

@@ -212,9 +212,7 @@ impl RemovalRecordsIntegrityWitness {
             let mut working_indices = nodes
                 .keys()
                 .copied()
-                .filter(|i| {
-                    (*i as u128) < (1u128 << (depth)) && (*i as u128) >= (1u128 << (depth - 1))
-                })
+                .filter(|&i| u128::from(i) < (1 << depth) && u128::from(i) >= (1 << (depth - 1)))
                 .collect_vec();
             working_indices.sort();
             working_indices.dedup();
@@ -303,8 +301,9 @@ impl RemovalRecordsIntegrityWitness {
             }
 
             // generate root and authentication paths
-            let tree_height = (*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128)
-                .ilog2() as usize;
+            let tree_height =
+                u128::from(*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap()).ilog2()
+                    as usize;
             let (root, authentication_paths) =
                 Self::pseudorandom_merkle_root_with_authentication_paths(
                     rng.random(),

@@ -2522,7 +2522,7 @@ mod archival_state_tests {
             2,
             100,
             10_000,
-            u32::MAX as u64,
+            u64::from(u32::MAX),
             u64::MAX - min_aocl_index,
         ] {
             let aocl_index = min_aocl_index + term;

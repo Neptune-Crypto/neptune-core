@@ -571,7 +571,7 @@ pub mod transaction_kernel_tests {
         let mut rng = rand::rng();
         let absolute_indices = AbsoluteIndexSet::new(
             &(0..NUM_TRIALS as usize)
-                .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+                .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
                 .collect_vec()
                 .try_into()
                 .unwrap(),

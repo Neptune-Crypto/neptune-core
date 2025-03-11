@@ -236,13 +236,13 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
             while merkle_tree_index > 1 {
                 let is_left_sibling = merkle_tree_index & 1 == 0;
                 let height_pow = 1u64 << (height + 1);
-                let as_1_or_minus_1: u64 = (2 * (is_left_sibling as i64) - 1) as u64;
+                let as_1_or_minus_1: u64 = (2 * i64::from(is_left_sibling) - 1) as u64;
                 let signed_height_pow = height_pow.wrapping_mul(as_1_or_minus_1);
                 let sibling = node_index
                     .wrapping_add(signed_height_pow)
                     .wrapping_sub(as_1_or_minus_1);
 
-                node_index += 1 << ((height + 1) * is_left_sibling as u32);
+                node_index += 1 << ((height + 1) * u32::from(is_left_sibling));
 
                 ret.push(sibling);
                 merkle_tree_index >>= 1;
@@ -303,7 +303,7 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
 
         let node_index = self.digests.len().await - 1;
         let (_, height) = shared_advanced::right_lineage_length_and_own_height(node_index);
-        let node_index = node_index - height as u64;
+        let node_index = node_index - u64::from(height);
 
         Some(self.digests.get(node_index).await)
     }

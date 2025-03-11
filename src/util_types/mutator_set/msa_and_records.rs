@@ -124,14 +124,14 @@ pub mod neptune_arbitrary {
                     // assemble all chunk indices
                     let mut all_chunk_indices = all_bloom_indices
                         .iter()
-                        .map(|index| *index / (CHUNK_SIZE as u128))
+                        .map(|index| *index / u128::from(CHUNK_SIZE))
                         .map(|index| index as u64)
                         .collect_vec();
                     all_chunk_indices.sort();
                     all_chunk_indices.dedup();
 
                     // filter by swbf mmr size
-                    let swbf_mmr_size = aocl_mmra.num_leafs() / (BATCH_SIZE as u64);
+                    let swbf_mmr_size = aocl_mmra.num_leafs() / u64::from(BATCH_SIZE);
                     let mmr_chunk_indices = all_chunk_indices
                         .iter()
                         .copied()
@@ -160,7 +160,7 @@ pub mod neptune_arbitrary {
                             let all_index_sets = all_index_sets.clone();
                             let aocl_membership_proofs = aocl_membership_proofs.clone();
                             let removables = removables.clone();
-                            let swbf_mmr_leaf_count = (aocl_mmra.num_leafs() / (BATCH_SIZE as u64)).saturating_sub(1);
+                            let swbf_mmr_leaf_count = (aocl_mmra.num_leafs() / u64::from(BATCH_SIZE)).saturating_sub(1);
                             let aocl_leaf_indices = aocl_leaf_indices.clone();
 
                             // unwrap random swbf mmra and membership proofs
@@ -185,7 +185,7 @@ pub mod neptune_arbitrary {
                                         .map(|index_set| {
                                             let mut is = index_set
                                                 .iter()
-                                                .map(|index| *index / (CHUNK_SIZE as u128))
+                                                .map(|index| *index / u128::from(CHUNK_SIZE))
                                                 .map(|index| index as u64)
                                                 .collect_vec();
                                             is.sort();

@@ -54,8 +54,8 @@ pub fn get_swbf_indices(
     receiver_preimage: Digest,
     aocl_leaf_index: u64,
 ) -> [u128; NUM_TRIALS as usize] {
-    let batch_index: u128 = aocl_leaf_index as u128 / BATCH_SIZE as u128;
-    let batch_offset: u128 = batch_index * CHUNK_SIZE as u128;
+    let batch_index: u128 = u128::from(aocl_leaf_index) / u128::from(BATCH_SIZE);
+    let batch_offset: u128 = batch_index * u128::from(CHUNK_SIZE);
     let leaf_index_bfes = aocl_leaf_index.encode();
     let input = [
         item.encode(),
@@ -69,7 +69,7 @@ pub fn get_swbf_indices(
     Hash::pad_and_absorb_all(&mut sponge, &input);
     Hash::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
         .into_iter()
-        .map(|sample_index| sample_index as u128 + batch_offset)
+        .map(|sample_index| u128::from(sample_index) + batch_offset)
         .collect_vec()
         .try_into()
         .unwrap()
@@ -188,7 +188,7 @@ mod test {
         let ret: [u128; NUM_TRIALS as usize] =
             get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
         assert_eq!(NUM_TRIALS as usize, ret.len());
-        assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
+        assert!(ret.iter().all(|&x| x < u128::from(WINDOW_SIZE)));
     }
 
     #[test]
@@ -201,7 +201,7 @@ mod test {
             let ret: [u128; NUM_TRIALS as usize] =
                 get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
             assert_eq!(NUM_TRIALS as usize, ret.len());
-            assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
+            assert!(ret.iter().all(|&x| x < u128::from(WINDOW_SIZE)));
         }
 
         for _ in 0..1000 {
@@ -210,7 +210,7 @@ mod test {
                 item,
                 sender_randomness,
                 receiver_preimage,
-                (17 * BATCH_SIZE) as u64,
+                u64::from(17 * BATCH_SIZE),
             );
             assert_eq!(NUM_TRIALS as usize, ret.len());
             assert!(ret
