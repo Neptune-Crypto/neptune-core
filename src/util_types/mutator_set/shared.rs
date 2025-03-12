@@ -94,7 +94,6 @@ pub fn get_batch_mutation_argument_for_removal_record(
                         None => {
                             // This should mean that the index is in the active part of the
                             // SWBF. But we have no way of checking that AFAIK. So we just continue.
-                            continue;
                         }
                         Some((mp, chunk)) => {
                             // Since the chunk does not exist in the membership proof, we do not need
@@ -195,7 +194,6 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
                         None => {
                             // This should mean that the index is in the active part of the
                             // SWBF. But we have no way of checking that AFAIK. So we just continue.
-                            continue;
                         }
                         Some((mp, chunk)) => {
                             // Since the chunk does not exist in the membership proof, we do not need

@@ -1791,14 +1791,14 @@ pub(crate) mod block_tests {
         let percentage_string = |(_abs, rs)| format!("{:.2}%", 100.0 * rs);
         let max_size_string = dictionary
             .values()
-            .cloned()
+            .copied()
             .map(byte_size_string)
             .map(|s| s.len())
             .max()
             .unwrap();
         let max_percentage_string = dictionary
             .values()
-            .cloned()
+            .copied()
             .map(percentage_string)
             .map(|p| p.len())
             .max()
