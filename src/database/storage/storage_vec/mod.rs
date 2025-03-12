@@ -178,7 +178,7 @@ mod tests {
             delegated_db_vec_a.get_many(&[0, 1, 2]).await
         );
 
-        #[allow(clippy::shadow_unrelated)]
+        #[expect(clippy::shadow_unrelated)]
         let updates = HashMap::from([(0, 1000), (1, 2000), (2, 3000)]);
         delegated_db_vec_a.set_many(updates).await;
 
@@ -204,7 +204,7 @@ mod tests {
             delegated_db_vec_a.get_many(&[0, 1, 2]).await
         );
 
-        #[allow(clippy::shadow_unrelated)]
+        #[expect(clippy::shadow_unrelated)]
         let updates = vec![1000, 2000, 3000];
         delegated_db_vec_a.set_all(updates).await;
 

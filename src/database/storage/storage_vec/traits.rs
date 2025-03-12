@@ -11,7 +11,7 @@ pub use futures::{pin_mut, StreamExt};
 
 use super::Index;
 
-// #[allow(async_fn_in_trait)]
+// #[expect(async_fn_in_trait)]
 #[async_trait::async_trait]
 pub trait StorageVecBase<T: Send> {
     /// check if collection is empty
@@ -116,7 +116,7 @@ pub trait StorageVecBase<T: Send> {
     async fn clear(&mut self);
 }
 
-#[allow(async_fn_in_trait)]
+#[expect(async_fn_in_trait)]
 pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// get an async Stream for iterating over all elements by key/val
     ///

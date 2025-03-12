@@ -76,7 +76,6 @@ pub(crate) fn mock_item_mp_rr_for_init_msa() -> (Digest, MsMembershipProof, Remo
     (item, mp, removal_record)
 }
 
-#[allow(clippy::type_complexity)]
 pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
     let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
         .await

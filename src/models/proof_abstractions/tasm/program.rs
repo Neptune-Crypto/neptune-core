@@ -58,8 +58,8 @@ where
     // The entire trait is only `pub` to facilitate benchmarks; it is not part of
     // the public API. The suppressed lints below are not nice, but I don't know
     // how else to make it work.
-    #[allow(async_fn_in_trait)]
-    #[allow(private_interfaces)]
+    #[expect(async_fn_in_trait)]
+    #[expect(private_interfaces)]
     async fn prove(
         &self,
         claim: Claim,

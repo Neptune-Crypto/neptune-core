@@ -92,7 +92,7 @@ pub enum PeerSortColumn {
 
 #[derive(Debug, Clone)]
 pub struct PeersScreen {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     config: Arc<Config>,
     active: bool,
     fg: Color,

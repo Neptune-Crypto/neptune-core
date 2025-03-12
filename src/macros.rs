@@ -55,13 +55,9 @@ macro_rules! log_scope_duration {
 //
 // see: https://stackoverflow.com/a/67140319/10087197
 
-#[allow(unused_imports)]
 pub(crate) use fn_name;
-#[allow(unused_imports)]
 pub(crate) use fn_name_bare;
-#[allow(unused_imports)]
 pub(crate) use log_scope_duration;
-#[allow(unused_imports)]
 pub(crate) use log_slow_scope;
 
 #[cfg(test)]

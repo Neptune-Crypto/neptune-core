@@ -123,7 +123,6 @@ pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
 
 // Return empty database objects, and root directory for this unit test instantiation's
 /// data directory.
-#[allow(clippy::type_complexity)]
 pub async fn unit_test_databases(
     network: Network,
 ) -> Result<(
@@ -258,7 +257,6 @@ pub(crate) async fn mock_genesis_global_state(
 ///
 /// Returns:
 /// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, global state, peer's handshake data)
-#[allow(clippy::type_complexity)]
 pub(crate) async fn get_test_genesis_setup(
     network: Network,
     peer_count: u8,
@@ -322,10 +320,6 @@ pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory
 // However, Box<...> is used here because Pin<T> does not allow a &mut T,
 // So a Box<T> (which also implements DerefMut) allows a pinned, mutable
 // pointer.
-//
-// We suppress `clippy::box-collection` on a type alias because the can't
-// easily place the pragma inside the `pin_project!` macro.
-#[allow(clippy::box_collection)]
 type ActionList<Item> = Box<Vec<Action<Item>>>;
 
 pin_project! {

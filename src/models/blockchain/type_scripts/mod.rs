@@ -82,7 +82,7 @@ impl TypeScriptAndWitness {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(any(test, feature = "arbitrary-impls"))]
     pub(crate) fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
         Self {
             program,

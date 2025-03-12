@@ -89,7 +89,7 @@ impl SendScreen {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn check_and_pay_sequence(
         rpc_client: Arc<RPCClient>,
         token: rpc_auth::Token,
@@ -390,8 +390,6 @@ impl Widget for SendScreen {
             let mut address = self.address.clone();
             let mut address_lines = vec![];
 
-            // TODO: Not sure how to handle this linting problem, as clippy suggestion doesn't work.
-            #[allow(clippy::assigning_clones)]
             while address.len() > width {
                 let (line, remainder) = address.split_at(width);
                 address_lines.push(line.to_owned());

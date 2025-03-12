@@ -1,7 +1,7 @@
 // recursion limit for macros (e.g. triton_asm!)
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
-// enables nightly feature async_fn_track_caller for crate feature log-slow-write-lock
+// enables nightly feature async_fn_track_caller for crate feature log-slow-write-lock.
 // log-slow-write-lock logs warning when a write-lock is held longer than 100 millis.
 // to enable: cargo +nightly build --features log-slow-write-lock
 #![cfg_attr(feature = "track-lock-location", feature(async_fn_track_caller))]
@@ -20,7 +20,7 @@ pub mod models;
 pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_auth;
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 // clippy  + tarpc workaround.  see https://github.com/google/tarpc/issues/502
 pub mod rpc_server;
 pub mod util_types;

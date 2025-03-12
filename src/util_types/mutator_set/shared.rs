@@ -52,7 +52,6 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 ///
 /// This function is factored out because it is shared by `update_from_remove`
 /// and `batch_update_from_remove`.
-#[allow(clippy::type_complexity)]
 pub fn get_batch_mutation_argument_for_removal_record(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],
@@ -153,7 +152,6 @@ pub fn get_batch_mutation_argument_for_removal_record(
 ///
 /// This function is factored out because it is shared by
 /// `revert_update_from_remove` and `batch_revert_update_from_remove`.
-#[allow(clippy::type_complexity)]
 pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],

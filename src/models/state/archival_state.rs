@@ -2220,8 +2220,6 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
-    // Added due to clippy warning produced by `traced_test` test framework.
-    #[allow(clippy::needless_return)]
     async fn get_tip_block_test() -> Result<()> {
         for network in [
             Network::Alpha,

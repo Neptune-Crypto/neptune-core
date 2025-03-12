@@ -3344,7 +3344,6 @@ pub(crate) mod tests {
         /// tests that all known keys are unique, for all key types.
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn known_keys_are_unique() {
             for key_type in KeyType::all_types_for_receiving() {
                 worker::known_keys_are_unique(key_type).await
@@ -3354,7 +3353,6 @@ pub(crate) mod tests {
         /// tests that spending key counter persists across restart for all key types.
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn derivation_counter_persists_across_restart() -> Result<()> {
             for key_type in KeyType::all_types_for_receiving() {
                 worker::derivation_counter_persists_across_restart(key_type).await?
@@ -3594,7 +3592,6 @@ pub(crate) mod tests {
         /// https://github.com/Neptune-Crypto/neptune-core/issues/172
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn persisted_exists_after_wallet_restored() {
             worker::restore_wallet(true).await
         }
@@ -3604,7 +3601,6 @@ pub(crate) mod tests {
         /// wallet is dropped from RAM and re-created from disk.
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn unpersisted_gone_after_wallet_restored() {
             worker::restore_wallet(false).await
         }

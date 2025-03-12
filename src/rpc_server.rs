@@ -3894,7 +3894,7 @@ mod rpc_server_tests {
         Ok(())
     }
 
-    #[allow(clippy::shadow_unrelated)]
+    #[expect(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
@@ -4052,7 +4052,7 @@ mod rpc_server_tests {
         Ok(())
     }
 
-    #[allow(clippy::shadow_unrelated)]
+    #[expect(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
@@ -4802,35 +4802,30 @@ mod rpc_server_tests {
         use super::*;
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_before_confirmed() -> Result<()> {
             worker::claim_utxo_owned(false, false).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_after_confirmed() -> Result<()> {
             worker::claim_utxo_owned(true, false).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_after_confirmed_and_after_spent() -> Result<()> {
             worker::claim_utxo_owned(true, true).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_unowned_before_confirmed() -> Result<()> {
             worker::claim_utxo_unowned(false).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_unowned_after_confirmed() -> Result<()> {
             worker::claim_utxo_unowned(true).await
@@ -5210,7 +5205,6 @@ mod rpc_server_tests {
         /// that accepts incoming UTXOs.
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn send_to_many_test() -> Result<()> {
             for recipient_key_type in KeyType::all_types_for_receiving() {
                 worker::send_to_many(recipient_key_type).await?;
@@ -5222,7 +5216,6 @@ mod rpc_server_tests {
         /// note: rate-limit only applies below block 25000
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn send_rate_limit() -> Result<()> {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;

@@ -509,7 +509,7 @@ impl Mempool {
     /// Returns the removed value.
     ///
     /// Computes in θ(lg N)
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn pop_max(&mut self) -> Option<(MempoolEvent, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
             if let Some(tx) = self.tx_dictionary.remove(&transaction_digest) {

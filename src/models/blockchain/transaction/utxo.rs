@@ -239,7 +239,6 @@ impl Utxo {
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
 ///
 /// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
-#[allow(clippy::derived_hash_with_manual_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
         StdHash::hash(&self.encode(), state);

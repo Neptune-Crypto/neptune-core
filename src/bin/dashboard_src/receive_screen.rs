@@ -226,8 +226,6 @@ impl Widget for ReceiveScreen {
 
             vrecter.next(1);
 
-            // TODO: Not sure how to handle this linting problem, as clippy suggestion doesn't work.
-            #[allow(clippy::assigning_clones)]
             while address.len() > width {
                 let (line, remainder) = address.split_at(width);
                 address_lines.push(line.to_owned());

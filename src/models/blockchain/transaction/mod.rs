@@ -418,7 +418,6 @@ mod transaction_tests {
     // Macro is at fault.
     #[traced_test]
     #[tokio::test]
-    #[allow(clippy::needless_return)]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
             let as_single_proof = SingleProof::produce(

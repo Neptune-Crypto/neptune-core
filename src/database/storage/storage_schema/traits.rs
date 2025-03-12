@@ -9,7 +9,6 @@ use super::RustyKey;
 use super::RustyValue;
 
 /// Defines table interface for types used by [`super::DbtSchema`]
-#[allow(async_fn_in_trait)]
 #[async_trait::async_trait]
 pub trait DbTable {
     // Retrieve all unwritten operations and empty write-queue
@@ -19,7 +18,7 @@ pub trait DbTable {
 }
 
 /// Defines storage reader interface
-#[allow(async_fn_in_trait)]
+#[expect(async_fn_in_trait)]
 pub trait StorageReader {
     /// Return multiple values from storage, in the same order as the input keys
     async fn get_many(&self, keys: impl IntoIterator<Item = RustyKey>) -> Vec<Option<RustyValue>>;
@@ -29,7 +28,7 @@ pub trait StorageReader {
 }
 
 /// Defines storage writer interface
-#[allow(async_fn_in_trait)]
+#[expect(async_fn_in_trait)]
 pub trait StorageWriter {
     /// Write data to storage
     async fn persist(&mut self);

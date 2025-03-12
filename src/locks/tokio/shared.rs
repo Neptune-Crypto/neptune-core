@@ -161,7 +161,7 @@ impl LockEvent<'_> {
 /// each time a lock is acquired or released.
 pub type LockCallbackFn = fn(lock_event: LockEvent);
 
-#[allow(clippy::unnecessary_wraps)]
+#[expect(clippy::unnecessary_wraps)]
 #[cfg(feature = "track-lock-time")]
 pub fn now() -> Option<std::time::Instant> {
     Some(std::time::Instant::now())

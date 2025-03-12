@@ -712,7 +712,7 @@ pub mod neptune_arbitrary {
                 .boxed()
         }
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         pub(crate) fn arbitrary_primitive_witness_with_timestamp_and(
             input_utxos: &[Utxo],
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
@@ -801,7 +801,7 @@ pub mod neptune_arbitrary {
                 .boxed()
         }
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         pub(crate) fn from_msa_and_records(
             msa_and_records: MsaAndRecords,
             input_utxos: Vec<Utxo>,
@@ -1392,7 +1392,7 @@ mod test {
                 .boxed()
         }
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         pub(crate) fn arbitrary_given_mutator_set_accumulator_and_inputs(
             num_outputs: usize,
             num_announcements: usize,

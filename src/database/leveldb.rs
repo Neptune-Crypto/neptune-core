@@ -54,7 +54,6 @@ pub struct DbIntMut {
     write_options: WriteOptions,
 }
 
-#[allow(dead_code)]
 impl DbIntMut {
     /// Open a new database
     ///
@@ -347,7 +346,6 @@ impl Snapshots for DbIntMut {
 #[derive(Debug, Clone)]
 pub struct DB(DbIntMut);
 
-#[allow(dead_code)]
 impl DB {
     /// Open a new database
     ///

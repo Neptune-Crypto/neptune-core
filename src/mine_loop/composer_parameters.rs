@@ -15,8 +15,7 @@ impl ComposerParameters {
         sender_randomness: Digest,
         guesser_fee_fraction: f64,
     ) -> Self {
-        #[allow(clippy::manual_range_contains)]
-        let is_fraction = guesser_fee_fraction <= 1.0 && guesser_fee_fraction >= 0f64;
+        let is_fraction = (0_f64..=1.0).contains(&guesser_fee_fraction);
         assert!(
             is_fraction,
             "Guesser fee fraction must be a fraction. Got: {guesser_fee_fraction}"

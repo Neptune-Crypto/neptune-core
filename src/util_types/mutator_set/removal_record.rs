@@ -76,7 +76,7 @@ impl AbsoluteIndexSet {
     ///
     /// Returns an error if a removal index is a future value, i.e. one that's
     /// not yet covered by the active window.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn split_by_activity(
         &self,
         mutator_set: &MutatorSetAccumulator,

@@ -759,7 +759,7 @@ impl GlobalState {
     /// Variant of [Self::create_transaction] that allows caller to specify
     /// prover capability. [Self::create_transaction] is the preferred interface
     /// for anything but tests.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) async fn create_transaction_with_prover_capability(
         &self,
         mut tx_outputs: TxOutputList,
@@ -3560,7 +3560,6 @@ mod global_state_tests {
         /// test described in [change_exists()]
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn onchain_symmetric_change_exists() {
             change_exists(UtxoNotificationMedium::OnChain, KeyType::Symmetric).await
         }
@@ -3571,7 +3570,6 @@ mod global_state_tests {
         /// test described in [change_exists()]
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn onchain_generation_change_exists() {
             change_exists(UtxoNotificationMedium::OnChain, KeyType::Generation).await
         }
@@ -3582,7 +3580,6 @@ mod global_state_tests {
         /// test described in [change_exists()]
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn offchain_symmetric_change_exists() {
             change_exists(UtxoNotificationMedium::OffChain, KeyType::Symmetric).await
         }
@@ -3593,7 +3590,6 @@ mod global_state_tests {
         /// test described in [change_exists()]
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn offchain_generation_change_exists() {
             change_exists(UtxoNotificationMedium::OffChain, KeyType::Generation).await
         }
