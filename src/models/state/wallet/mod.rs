@@ -998,7 +998,7 @@ mod wallet_tests {
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletEntropy::devnet_wallet().nth_symmetric_key_for_tests(0);
         let config = TxCreationConfig::default()
-            .recover_change_on_chain(change_key.into())
+            .recover_change_off_chain(change_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let sender_tx = bob
             .lock_guard()
