@@ -40,6 +40,9 @@ impl From<&[LabelledInstruction]> for LockScript {
 }
 
 impl LockScript {
+    #[cfg(test)]
+    const BURN_ERROR: i128 = 1_000_300;
+
     pub fn new(program: Program) -> Self {
         Self { program }
     }
@@ -50,6 +53,16 @@ impl LockScript {
                 read_io 5
                 halt
             )),
+        }
+    }
+
+    /// A lock script that is guaranteed to fail
+    #[cfg(test)]
+    pub(crate) fn burn() -> Self {
+        Self {
+            program: Program::new(&triton_asm! {
+                push 0 assert error_id {Self::BURN_ERROR}
+            }),
         }
     }
 

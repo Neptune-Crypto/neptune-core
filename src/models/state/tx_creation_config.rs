@@ -3,14 +3,13 @@ use std::fmt::Formatter;
 use std::fmt::Result;
 use std::sync::Arc;
 
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-
 use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
 use super::wallet::unlocked_utxo::UnlockedUtxo;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 /// Custom trait capturing the closure for selecting UTXOs.
 pub(crate) trait UtxoSelector: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static {}
@@ -51,6 +50,7 @@ pub(crate) enum ChangePolicy {
     Recover(Box<ChangeKeyAndMedium>),
 
     /// If the change is nonzero, ignore it.
+    #[cfg(test)]
     Burn,
 }
 
@@ -84,20 +84,23 @@ impl TxCreationConfig {
 
     /// Enable change-recovery with the given key, and set the medium to
     /// `OnChain`.
+    #[cfg(test)]
     pub(crate) fn recover_change_on_chain(self, change_key: SpendingKey) -> Self {
         self.recover_change(change_key, UtxoNotificationMedium::OnChain)
     }
 
     /// Enable change-recovery with the given key, and set the medium to
     /// `OffChain`.
+    #[cfg(test)]
     pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
         self.recover_change(change_key, UtxoNotificationMedium::OffChain)
     }
 
     /// Burn the change.
     ///
-    /// Only use this if you are certain you know what you are doing. Could
-    /// result in loss-of-funds!
+    /// Only use this if you are certain you know what you are doing. Will
+    /// result in loss-of-funds if the transaction is not balanced.
+    #[cfg(test)]
     pub(crate) fn burn_change(mut self) -> Self {
         self.change_policy = ChangePolicy::Burn;
         self
