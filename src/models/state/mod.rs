@@ -43,7 +43,6 @@ use tracing::warn;
 use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
-use tx_creation_config::ChangeKeyAndMedium;
 use tx_creation_config::ChangePolicy;
 use tx_creation_config::TxCreationConfig;
 use tx_proving_capability::TxProvingCapability;
@@ -755,13 +754,13 @@ impl GlobalState {
         let tip_digest = tip.hash();
 
         // 1. balance transaction
-        let total_spend = tx_outputs.total_native_coins() + fee;
+        let total_cost = tx_outputs.total_native_coins() + fee;
 
         // collect spendable inputs
         let tx_inputs = self
             .wallet_state
             .allocate_sufficient_input_funds(
-                total_spend,
+                total_cost,
                 tip_digest,
                 &tip_mutator_set_accumulator,
                 timestamp,
@@ -769,39 +768,41 @@ impl GlobalState {
             )
             .await?;
 
-        let total_spendable = tx_inputs
+        let total_unlocked = tx_inputs
             .iter()
             .map(|x| x.utxo.get_native_currency_amount())
             .sum();
 
         // Add change output, if required to balance transaction
-        let nonzero_change = total_spend < total_spendable;
-        let maybe_change_output = match (nonzero_change, config.change_policy()) {
-            (false, _) | (true, ChangePolicy::Burn) => None,
-            (true, ChangePolicy::None) => {
-                bail!(
-                    "No change policy specified, but there is nonzero change. \
-                    Refusing to create change-burning transaction."
-                );
-            }
-            (true, ChangePolicy::Recover(change_key_and_medium)) => {
-                let ChangeKeyAndMedium {
-                    key: change_key,
-                    medium: change_utxo_notify_medium,
-                } = *change_key_and_medium;
-                let amount = total_spendable.checked_sub(&total_spend).ok_or_else(|| {
-                    anyhow::anyhow!("overflow subtracting total_spend from input_amount")
-                })?;
-
-                let change_utxo =
-                    self.create_change_output(amount, change_key, change_utxo_notify_medium)?;
-                tx_outputs.push(change_utxo.clone());
-                Some(change_utxo)
-            }
+        let nonzero_change = total_cost < total_unlocked;
+        let maybe_change_output = if nonzero_change {
+            let change_amount = total_unlocked.checked_sub(&total_cost).unwrap();
+            let change_output = match config.change_policy() {
+                ChangePolicy::None => bail!("Change policy not specified"),
+                ChangePolicy::Recover(change_key_and_medium) => self.create_change_output(
+                    change_amount,
+                    change_key_and_medium.key,
+                    change_key_and_medium.medium,
+                )?,
+                #[cfg(test)]
+                ChangePolicy::Burn => TxOutput::no_notification(
+                    super::blockchain::transaction::utxo::Utxo::new_native_currency(
+                        super::blockchain::transaction::lock_script::LockScript::burn(),
+                        change_amount,
+                    ),
+                    Digest::default(),
+                    Digest::default(),
+                    false,
+                ),
+            };
+            tx_outputs.push(change_output.clone());
+            Some(change_output)
+        } else {
+            None
         };
 
         // if selection-tracking is enabled, store the keys
-        let selection = config
+        let unlocked_utxos = config
             .selection_is_tracked()
             .then(|| tx_inputs.iter())
             .into_iter()
@@ -834,7 +835,7 @@ impl GlobalState {
             transaction,
             details: maybe_transaction_details,
             change_output: maybe_change_output,
-            selection,
+            selection: unlocked_utxos,
         };
 
         Ok(transaction_creation_artifacts)
@@ -1873,7 +1874,7 @@ mod global_state_tests {
         let six_months = Timestamp::months(6);
         let one_month = Timestamp::months(1);
         let config = TxCreationConfig::default()
-            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
+            .recover_change_off_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
         assert!(bob
             .lock_guard()
@@ -3535,6 +3536,63 @@ mod global_state_tests {
                 )
                 .await;
             }
+        }
+    }
+
+    mod create_transaction {
+        use super::*;
+        use crate::models::blockchain::transaction::lock_script::LockScript;
+        use crate::models::blockchain::transaction::utxo::Utxo;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn have_to_specify_change_policy() {
+            let network = Network::Main;
+            let wallet_entropy = WalletEntropy::devnet_wallet();
+            let alice =
+                mock_genesis_global_state(network, 2, wallet_entropy, cli_args::Args::default())
+                    .await;
+            let alice = alice.global_state_lock.lock_guard().await;
+            let now = network.launch_date() + Timestamp::years(2);
+            assert!(alice
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_available_amount(now)
+                .is_positive());
+            let tx_output = TxOutput::no_notification(
+                Utxo::new_native_currency(
+                    LockScript::anyone_can_spend(),
+                    NativeCurrencyAmount::from_nau(1),
+                ),
+                Digest::default(),
+                Digest::default(),
+                false,
+            );
+
+            let bad_tx_config = TxCreationConfig::default()
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let tx_result = alice
+                .create_transaction(
+                    vec![tx_output.clone()].into(),
+                    NativeCurrencyAmount::zero(),
+                    now,
+                    bad_tx_config.clone(),
+                )
+                .await;
+            assert!(tx_result.is_err());
+
+            // Specify change policy and verify that transaction can be
+            // constructed.
+            let good_tx_config = bad_tx_config.burn_change();
+            assert!(alice
+                .create_transaction(
+                    vec![tx_output].into(),
+                    NativeCurrencyAmount::zero(),
+                    now,
+                    good_tx_config,
+                )
+                .await
+                .is_ok());
         }
     }
 
