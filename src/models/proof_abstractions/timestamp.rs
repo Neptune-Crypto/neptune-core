@@ -157,8 +157,11 @@ impl Timestamp {
     }
 
     pub fn standard_format(&self) -> String {
-        let naive =
-            NaiveDateTime::from_timestamp_millis(self.0.value().try_into().unwrap_or(0)).unwrap();
+        let naive = NaiveDateTime::from_timestamp_millis(self.0.value().try_into().unwrap_or(0));
+        let Some(naive) = naive else {
+            return "Too far into the future".to_string();
+        };
+
         let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
         let offset: DateTime<Local> = DateTime::from(utc);
         offset.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)
@@ -193,10 +196,39 @@ impl Distribution<Timestamp> for StandardUniform {
 
 #[cfg(test)]
 mod test {
+    use proptest_arbitrary_interop::arb;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
+    use test_strategy::proptest;
+
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn print_now() {
         println!("{}", Timestamp::now());
+    }
+
+    #[test]
+    fn std_format_cannot_panic_unit() {
+        let _a = Timestamp(BFieldElement::new(0)).standard_format();
+        let _b = Timestamp(BFieldElement::new(BFieldElement::MAX)).standard_format();
+        let _c = Timestamp(BFieldElement::new(u64::MAX)).standard_format();
+    }
+
+    #[proptest]
+    fn std_format_cannot_panic_prop(#[strategy(arb())] timestamp: Timestamp) {
+        let _a = timestamp.standard_format();
+    }
+
+    #[test]
+    fn format_cannot_panic_unit() {
+        let fmt = "%Y-%m-%d %H:%M:%S";
+        let _a = Timestamp(BFieldElement::new(0)).format(fmt);
+        let _b = Timestamp(BFieldElement::new(BFieldElement::MAX)).format(fmt);
+        let _c = Timestamp(BFieldElement::new(u64::MAX)).format(fmt);
+    }
+
+    #[proptest]
+    fn format_cannot_panic_prop(#[strategy(arb())] timestamp: Timestamp) {
+        let _a = timestamp.format("%Y-%m-%d %H:%M:%S");
     }
 }
