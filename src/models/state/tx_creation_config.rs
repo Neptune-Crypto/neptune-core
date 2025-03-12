@@ -62,9 +62,6 @@ pub(crate) struct TxCreationConfig {
     select_utxos: Option<DebuggableUtxoSelector>,
     record_details: bool,
     proof_job_options: TritonVmProofJobOptions,
-
-    #[cfg(test)]
-    track_selection: bool,
 }
 
 impl TxCreationConfig {
@@ -119,29 +116,9 @@ impl TxCreationConfig {
         self
     }
 
-    /// When selecting UTXOs, filter them through the given closure.
-    #[cfg(test)]
-    pub(crate) fn select_utxos<F>(mut self, selector: F) -> Self
-    where
-        F: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static,
-    {
-        self.select_utxos = Some(DebuggableUtxoSelector(Box::new(selector)));
-        self
-    }
-
     /// Produce a [`TransactionDetails`] object along with the other artifacts.
     pub(crate) fn record_details(mut self) -> Self {
         self.record_details = true;
-        self
-    }
-
-    /// Enable selection-tracking.
-    ///
-    /// When enabled, the a hash set of [`StrongUtxoKey`]s is stored, indicating
-    /// which UTXOs were selected for the transaction.
-    #[cfg(test)]
-    pub(crate) fn track_selection(mut self) -> Self {
-        self.track_selection = true;
         self
     }
 
@@ -160,12 +137,6 @@ impl TxCreationConfig {
     /// Determine whether a [`TransactionDetails`] object should be produced.
     pub(crate) fn details_are_recorded(&self) -> bool {
         self.record_details
-    }
-
-    /// Determine whether to track the selection of input UTXOs.
-    #[cfg(test)]
-    pub(crate) fn selection_is_tracked(&self) -> bool {
-        self.track_selection
     }
 
     /// Get the change key and notification medium, if any.

@@ -7,10 +7,6 @@ pub(crate) struct TxCreationArtifacts {
     pub(crate) transaction: Transaction,
     pub(crate) details: Option<TransactionDetails>,
     pub(crate) change_output: Option<TxOutput>,
-
-    #[cfg(test)]
-    pub(crate) selection:
-        std::collections::HashSet<crate::models::state::wallet::wallet_state::StrongUtxoKey>,
 }
 
 impl From<TxCreationArtifacts> for Transaction {
