@@ -365,8 +365,6 @@ impl MsMembershipProof {
                 self.target_chunks
                     .insert(chunk_index, (new_auth_path.clone(), new_chunk.clone()));
                 swbf_chunk_dictionary_updated = true;
-
-                continue 'outer;
             }
 
             // If `chunk_index` refers to indices that are still in the active window, do nothing.

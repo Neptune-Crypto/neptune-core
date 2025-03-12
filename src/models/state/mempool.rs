@@ -751,9 +751,7 @@ impl Mempool {
     /// Likely computes in O(n).
     fn shrink_to_max_size(&mut self) {
         // Repeately remove the least valuable transaction
-        while self.get_size() > self.max_total_size && self.pop_min().is_some() {
-            continue;
-        }
+        while self.get_size() > self.max_total_size && self.pop_min().is_some() {}
 
         self.shrink_to_fit();
     }
@@ -762,9 +760,7 @@ impl Mempool {
     /// if that field is set.
     fn shrink_to_max_length(&mut self) {
         if let Some(max_length) = self.max_length {
-            while self.len() > max_length && self.pop_min().is_some() {
-                continue;
-            }
+            while self.len() > max_length && self.pop_min().is_some() {}
         }
 
         self.shrink_to_fit()

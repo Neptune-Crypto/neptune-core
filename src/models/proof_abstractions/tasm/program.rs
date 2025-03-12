@@ -545,7 +545,6 @@ pub mod test {
                     proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
                 } else {
                     eprintln!("cannot cast chunk to eight bytes. Server was: {server}");
-                    continue;
                 }
             }
 

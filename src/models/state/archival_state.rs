@@ -668,13 +668,7 @@ impl ArchivalState {
         let mut search_depth = 0;
 
         loop {
-            if block
-                .body()
-                .transaction_kernel
-                .outputs
-                .iter()
-                .any(|ar| *ar == output)
-            {
+            if block.body().transaction_kernel.outputs.contains(&output) {
                 break Some(block);
             }
 
