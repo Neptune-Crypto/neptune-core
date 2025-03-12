@@ -713,7 +713,6 @@ mod test {
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::invalid_empty_block_with_timestamp;
 

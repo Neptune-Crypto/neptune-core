@@ -1039,7 +1039,6 @@ pub(crate) mod block_tests {
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::wallet::wallet_state::StrongUtxoKey;
     use crate::tests::shared::fake_valid_successor_for_tests;
