@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -154,7 +155,7 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-    vm_job_queue: TritonVmJobQueue,
+    vm_job_queue: Arc<TritonVmJobQueue>,
 }
 
 impl GlobalStateLock {
@@ -174,7 +175,7 @@ impl GlobalStateLock {
         Self {
             global_state_lock,
             cli,
-            vm_job_queue: TritonVmJobQueue::start(),
+            vm_job_queue: Arc::new(TritonVmJobQueue::start()),
         }
     }
 
@@ -183,8 +184,8 @@ impl GlobalStateLock {
     /// callers should execute resource intensive triton-vm tasks in this
     /// queue to avoid running simultaneous tasks that could exceed hardware
     /// capabilities.
-    pub(crate) fn vm_job_queue(&self) -> &TritonVmJobQueue {
-        &self.vm_job_queue
+    pub(crate) fn vm_job_queue(&self) -> Arc<TritonVmJobQueue> {
+        self.vm_job_queue.clone()
     }
 
     // check if mining
@@ -747,7 +748,7 @@ impl GlobalState {
         mut tx_outputs: TxOutputList,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
-        config: TxCreationConfig<'_>,
+        config: TxCreationConfig,
     ) -> Result<TxCreationArtifacts> {
         let tip = self.chain.light_state();
         let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after();
@@ -870,7 +871,7 @@ impl GlobalState {
     /// See the implementation of [Self::create_transaction()].
     pub(crate) async fn create_raw_transaction(
         transaction_details: &TransactionDetails,
-        config: TxCreationConfig<'_>,
+        config: TxCreationConfig,
     ) -> anyhow::Result<Transaction> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  The `await` here, should avoid
@@ -885,16 +886,13 @@ impl GlobalState {
     //
     async fn create_transaction_from_data_worker(
         transaction_details: &TransactionDetails,
-        config: TxCreationConfig<'_>,
+        config: TxCreationConfig,
     ) -> anyhow::Result<Transaction> {
         let primitive_witness = PrimitiveWitness::from_transaction_details(transaction_details);
 
         debug!("primitive witness for transaction: {}", primitive_witness);
 
-        let Some(job_queue) = config.job_queue() else {
-            bail!("No job queue supplied.");
-        };
-
+        let job_queue = config.job_queue();
         let job_options = config.proof_job_options();
 
         info!(
@@ -907,10 +905,11 @@ impl GlobalState {
             TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(&primitive_witness, job_queue, job_options).await?,
+                ProofCollection::produce(&primitive_witness, job_queue.clone(), job_options)
+                    .await?,
             ),
             TxProvingCapability::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, job_queue, job_options).await?,
+                SingleProof::produce(&primitive_witness, job_queue.clone(), job_options).await?,
             ),
         };
 
@@ -1875,11 +1874,9 @@ mod global_state_tests {
         let launch = genesis_block.kernel.header.timestamp;
         let six_months = Timestamp::months(6);
         let one_month = Timestamp::months(1);
-        let job_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
-            .with_prover_capability(TxProvingCapability::ProofCollection)
-            .use_job_queue(&job_queue);
+            .with_prover_capability(TxProvingCapability::ProofCollection);
         assert!(bob
             .lock_guard()
             .await
@@ -2573,11 +2570,9 @@ mod global_state_tests {
             .next_unused_spending_key(KeyType::Generation)
             .await
             .unwrap();
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config_alice_and_bob = TxCreationConfig::default()
             .recover_change(genesis_key, UtxoNotificationMedium::OffChain)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_alice_and_bob = premine_receiver
             .lock_guard()
             .await
@@ -2618,7 +2613,7 @@ mod global_state_tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2632,7 +2627,7 @@ mod global_state_tests {
             block_transaction,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -2758,8 +2753,7 @@ mod global_state_tests {
         // Weaker machines need to use the proof server.
         let config_alice = TxCreationConfig::default()
             .recover_change(alice_spending_key.into(), UtxoNotificationMedium::OffChain)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_alice = alice
             .lock_guard()
             .await
@@ -2803,8 +2797,7 @@ mod global_state_tests {
         ];
         let config_bob = TxCreationConfig::default()
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_bob = bob
             .lock_guard()
             .await
@@ -2853,7 +2846,7 @@ mod global_state_tests {
             .merge_with(
                 tx_from_alice,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2861,7 +2854,7 @@ mod global_state_tests {
             .merge_with(
                 tx_from_bob,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2876,7 +2869,7 @@ mod global_state_tests {
             block_transaction2,
             in_eight_months,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -3687,9 +3680,6 @@ mod global_state_tests {
 
             // in alice wallet: send pre-mined funds to bob
             let block_1 = {
-                let vm_job_queue = alice_state_lock.vm_job_queue().clone();
-                // let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
-
                 // store and verify alice's initial balance from pre-mine.
                 let alice_initial_balance = alice_state_lock
                     .lock_guard()
@@ -3719,8 +3709,7 @@ mod global_state_tests {
                 // create tx.  utxo_notify_method is a test param.
                 let config = TxCreationConfig::default()
                     .recover_change(alice_change_key, change_notification_medium)
-                    .with_prover_capability(TxProvingCapability::SingleProof)
-                    .use_job_queue(&vm_job_queue);
+                    .with_prover_capability(TxProvingCapability::SingleProof);
                 let artifacts = alice_state_lock
                     .lock_guard()
                     .await
@@ -3771,7 +3760,7 @@ mod global_state_tests {
                     block_1_tx,
                     seven_months_post_launch,
                     None,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmJobPriority::default().into(),
                 )
                 .await

@@ -1920,7 +1920,6 @@ mod peer_loop_tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
@@ -3334,11 +3333,9 @@ mod peer_loop_tests {
             .nth_symmetric_key_for_tests(0);
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
-            .with_prover_capability(TxProvingCapability::ProofCollection)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::ProofCollection);
         let transaction_1 = state_lock
             .lock_guard()
             .await
@@ -3420,11 +3417,9 @@ mod peer_loop_tests {
 
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
-            .with_prover_capability(TxProvingCapability::ProofCollection)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::ProofCollection);
         let transaction_1 = state_lock
             .lock_guard()
             .await
@@ -3631,11 +3626,9 @@ mod peer_loop_tests {
                 TransactionProofQuality::ProofCollection => TxProvingCapability::ProofCollection,
                 TransactionProofQuality::SingleProof => TxProvingCapability::SingleProof,
             };
-            let dummy_queue = TritonVmJobQueue::dummy();
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(alice_key.into())
-                .with_prover_capability(prover_capability)
-                .use_job_queue(&dummy_queue);
+                .with_prover_capability(prover_capability);
             alice
                 .create_transaction(
                     vec![].into(),

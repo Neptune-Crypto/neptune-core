@@ -166,7 +166,7 @@ mod test {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmJobPriority::default().into(),
                 ))
                 .unwrap();

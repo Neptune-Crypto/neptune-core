@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result;
+use std::sync::Arc;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -55,17 +56,17 @@ pub(crate) enum ChangePolicy {
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TxCreationConfig<'a> {
+pub(crate) struct TxCreationConfig {
     change_policy: ChangePolicy,
     prover_capability: TxProvingCapability,
-    triton_vm_job_queue: Option<&'a TritonVmJobQueue>,
+    triton_vm_job_queue: Option<Arc<TritonVmJobQueue>>,
     select_utxos: Option<DebuggableUtxoSelector>,
     track_selection: bool,
     record_details: bool,
     proof_job_options: TritonVmProofJobOptions,
 }
 
-impl<'a> TxCreationConfig<'a> {
+impl TxCreationConfig {
     /// Enable change-recovery and configure which key and notification medium
     /// to use for that purpose.
     pub(crate) fn recover_change(
@@ -109,7 +110,7 @@ impl<'a> TxCreationConfig<'a> {
     }
 
     /// Configure which job queue to use.
-    pub(crate) fn use_job_queue(mut self, job_queue: &'a TritonVmJobQueue) -> Self {
+    pub(crate) fn use_job_queue(mut self, job_queue: Arc<TritonVmJobQueue>) -> Self {
         self.triton_vm_job_queue = Some(job_queue);
         self
     }
@@ -171,8 +172,11 @@ impl<'a> TxCreationConfig<'a> {
     }
 
     /// Get the job queue, if set.
-    pub(crate) fn job_queue(&self) -> Option<&'a TritonVmJobQueue> {
+    pub(crate) fn job_queue(&self) -> Arc<TritonVmJobQueue> {
         self.triton_vm_job_queue
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(TritonVmJobQueue::start()))
     }
 
     /// Get the closure with which to filter out unsuitable UTXOs during UTXO

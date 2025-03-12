@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -146,7 +147,7 @@ impl LockScriptAndWitness {
     pub(crate) async fn prove(
         &self,
         public_input: PublicInput,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);

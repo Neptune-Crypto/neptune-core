@@ -1802,7 +1802,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
@@ -2073,11 +2072,9 @@ pub(crate) mod tests {
             false,
         );
         let tx_outputs = vec![txoutput.clone(), txoutput.clone()];
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config2 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let tx_block2 = bob
             .lock_guard_mut()
             .await
@@ -2122,8 +2119,7 @@ pub(crate) mod tests {
         // balance.
         let config3 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let tx_block3 = bob
             .lock_guard_mut()
             .await
@@ -2182,11 +2178,9 @@ pub(crate) mod tests {
             false,
         );
         let fee = NativeCurrencyAmount::coins(10);
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let mut tx_block2 = bob
             .lock_guard_mut()
             .await
@@ -2285,11 +2279,9 @@ pub(crate) mod tests {
             false,
         );
         let fee = NativeCurrencyAmount::coins(10);
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let mut tx_block2 = bob
             .lock_guard_mut()
             .await
@@ -3001,12 +2993,10 @@ pub(crate) mod tests {
             // Can make tx with PoW-loot.
             let block2_timestamp = block1.header().timestamp + Timestamp::minutes(2);
             let fee = NativeCurrencyAmount::coins(1);
-            let dummy_queue = TritonVmJobQueue::dummy();
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(a_key.into())
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                .use_job_queue(&dummy_queue);
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let mut tx_spending_guesser_fee = bob
                 .global_state_lock
                 .lock_guard()
@@ -3098,7 +3088,6 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::config_models::cli_args;
-        use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -3184,11 +3173,9 @@ pub(crate) mod tests {
                     UtxoNotificationMedium::OnChain,
                 );
 
-                let dummy_queue = TritonVmJobQueue::dummy();
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                    .use_job_queue(&dummy_queue);
+                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 gs.create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, config)
                     .await?
                     .transaction
@@ -3265,11 +3252,9 @@ pub(crate) mod tests {
                     false,
                 );
 
-                let dummy_queue = TritonVmJobQueue::dummy();
                 let config = TxCreationConfig::default()
                     .recover_change_off_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                    .use_job_queue(&dummy_queue);
+                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
                     .global_state_lock
                     .lock_guard()
@@ -3764,11 +3749,9 @@ pub(crate) mod tests {
                     false,
                 );
 
-                let dummy_queue = TritonVmJobQueue::dummy();
                 let config = TxCreationConfig::default()
                     .recover_change_off_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                    .use_job_queue(&dummy_queue);
+                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
                     .global_state_lock
                     .lock_guard()
@@ -3975,7 +3958,6 @@ pub(crate) mod tests {
         use rand::rng;
 
         use super::*;
-        use crate::job_queue::JobQueue;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
@@ -4025,11 +4007,9 @@ pub(crate) mod tests {
                 alice_future_spending_key.to_address().into(),
                 false,
             );
-            let dummy = &JobQueue::dummy();
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(premine_change_key)
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                .use_job_queue(dummy);
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let transaction = premine_receiver
                 .lock_guard()
                 .await

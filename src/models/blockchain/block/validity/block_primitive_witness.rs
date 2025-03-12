@@ -181,7 +181,7 @@ pub(crate) mod test {
                 let single_proof_inputs = rt
                     .block_on(SingleProof::produce(
                         &primwit_inputs,
-                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::dummy(),
                         TritonVmJobPriority::default().into(),
                     ))
                     .unwrap();
@@ -193,7 +193,7 @@ pub(crate) mod test {
                 let single_proof_coinbase = rt
                     .block_on(SingleProof::produce(
                         &primwit_coinbase,
-                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::dummy(),
                         TritonVmJobPriority::default().into(),
                     ))
                     .unwrap();
@@ -205,7 +205,7 @@ pub(crate) mod test {
                 rt.block_on(tx_inputs.merge_with(
                     tx_coinbase,
                     shuffle_seed,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmJobPriority::default().into(),
                 ))
                 .unwrap()

@@ -1347,11 +1347,9 @@ mod archival_state_tests {
 
         let tx_output_anyone_can_spend =
             TxOutput::no_notification(utxo, rng.random(), rng.random(), false);
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let sender_tx = alice
             .lock_guard()
             .await
@@ -1456,11 +1454,9 @@ mod archival_state_tests {
         let fee = NativeCurrencyAmount::zero();
 
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config_1a = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let big_tx = alice
             .lock_guard()
             .await
@@ -1472,8 +1468,7 @@ mod archival_state_tests {
 
         let config_1b = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let empty_tx = alice
             .lock_guard()
             .await
@@ -1550,13 +1545,11 @@ mod archival_state_tests {
         let fee = NativeCurrencyAmount::zero();
 
         let num_blocks = 30;
-        let dummy_queue = TritonVmJobQueue::dummy();
         for _ in 0..num_blocks {
             let timestamp = previous_block.header().timestamp + Timestamp::months(7);
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                .use_job_queue(&dummy_queue);
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let tx = alice
                 .lock_guard()
                 .await
@@ -1794,11 +1787,9 @@ mod archival_state_tests {
             .next_unused_spending_key(KeyType::Symmetric)
             .await
             .unwrap();
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_alice_and_bob = premine_rec
             .lock_guard()
             .await
@@ -1841,7 +1832,7 @@ mod archival_state_tests {
             .merge_with(
                 tx_to_alice_and_bob,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1853,7 +1844,7 @@ mod archival_state_tests {
             block_tx,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -2005,8 +1996,7 @@ mod archival_state_tests {
             .into();
         let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_change_key)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_alice = alice
             .lock_guard()
             .await
@@ -2053,8 +2043,7 @@ mod archival_state_tests {
             .into();
         let config_bob = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_creation_artifacts_bob = bob
             .lock_guard()
             .await
@@ -2097,7 +2086,7 @@ mod archival_state_tests {
             .merge_with(
                 tx_from_alice,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2105,7 +2094,7 @@ mod archival_state_tests {
             .merge_with(
                 tx_from_bob,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2115,7 +2104,7 @@ mod archival_state_tests {
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await

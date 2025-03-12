@@ -10,6 +10,7 @@ pub mod difficulty_control;
 pub mod mutator_set_update;
 pub mod validity;
 
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use block_appendix::BlockAppendix;
@@ -211,7 +212,7 @@ impl Block {
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let body = primitive_witness.body().to_owned();
@@ -239,7 +240,7 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let tx_claim = SingleProof::claim(transaction.kernel.mast_hash());
@@ -274,7 +275,7 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         Self::make_block_template_with_valid_proof(
@@ -1347,11 +1348,9 @@ pub(crate) mod block_tests {
                 .await;
                 alice.set_new_tip(block1.clone()).await.unwrap();
                 let outputs = vec![output_to_self.clone(); i];
-                let dummy_queue = TritonVmJobQueue::dummy();
                 let config2 = TxCreationConfig::default()
                     .recover_change_on_chain(alice_key)
-                    .with_prover_capability(TxProvingCapability::SingleProof)
-                    .use_job_queue(&dummy_queue);
+                    .with_prover_capability(TxProvingCapability::SingleProof);
                 let tx2 = alice
                     .lock_guard_mut()
                     .await
@@ -1364,7 +1363,7 @@ pub(crate) mod block_tests {
                     .merge_with(
                         tx2,
                         rng.random(),
-                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
                     .await
@@ -1374,7 +1373,7 @@ pub(crate) mod block_tests {
                     block2_tx,
                     plus_eight_months,
                     None,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1403,8 +1402,7 @@ pub(crate) mod block_tests {
                 .unwrap();
                 let config3 = TxCreationConfig::default()
                     .recover_change_on_chain(alice_key)
-                    .with_prover_capability(TxProvingCapability::SingleProof)
-                    .use_job_queue(&dummy_queue);
+                    .with_prover_capability(TxProvingCapability::SingleProof);
                 let tx3 = alice
                     .lock_guard_mut()
                     .await
@@ -1422,7 +1420,7 @@ pub(crate) mod block_tests {
                     .merge_with(
                         tx3,
                         rng.random(),
-                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
                     .await
@@ -1436,7 +1434,7 @@ pub(crate) mod block_tests {
                     block3_tx,
                     plus_nine_months,
                     None,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1685,11 +1683,9 @@ pub(crate) mod block_tests {
                 true,
             );
             let fee = NativeCurrencyAmount::coins(1);
-            let dummy_queue = TritonVmJobQueue::dummy();
             let config1 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                .use_job_queue(&dummy_queue);
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let tx1 = alice
                 .lock_guard()
                 .await
@@ -1704,8 +1700,7 @@ pub(crate) mod block_tests {
 
             let config2 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
-                .use_job_queue(&dummy_queue);
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let tx2 = alice
                 .lock_guard()
                 .await
@@ -1894,7 +1889,7 @@ pub(crate) mod block_tests {
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key.into())
                     .with_prover_capability(TxProvingCapability::SingleProof)
-                    .use_job_queue(&job_queue)
+                    .use_job_queue(job_queue.clone())
                     .select_utxos(move |unlocked_utxo| {
                         !avoidable_utxos_for_closure.contains(&StrongUtxoKey::from(unlocked_utxo))
                     })
@@ -1913,7 +1908,7 @@ pub(crate) mod block_tests {
                     .merge_with(
                         self_spending_transaction,
                         rng.random(),
-                        &job_queue,
+                        job_queue.clone(),
                         TritonVmProofJobOptions::default(),
                     )
                     .await
@@ -1926,7 +1921,7 @@ pub(crate) mod block_tests {
                 transaction,
                 now,
                 None,
-                &job_queue,
+                job_queue.clone(),
                 TritonVmProofJobOptions::default(),
             )
             .await

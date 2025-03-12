@@ -480,7 +480,7 @@ pub(crate) mod test {
                 block_tx,
                 timestamp,
                 None,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmProofJobOptions::default(),
             )
             .await
@@ -509,11 +509,9 @@ pub(crate) mod test {
 
         let genesis_block = Block::genesis(network);
         let now = genesis_block.header().timestamp + Timestamp::months(12);
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let tx = alice
             .lock_guard()
             .await
@@ -531,7 +529,7 @@ pub(crate) mod test {
             &genesis_block.mutator_set_accumulator_after(),
             &block1.mutator_set_update(),
             tx.proof.into_single_proof(),
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
             Some(later),
         )
