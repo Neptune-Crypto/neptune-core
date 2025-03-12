@@ -73,6 +73,15 @@ pub struct Args {
     )]
     pub(crate) max_num_peers: usize,
 
+    /// Maximum number of peers to accept from each IP address.
+    ///
+    /// Multiple nodes can run on the same IP address which would either mean
+    /// that multiple nodes run on the same machine, or multiple machines are
+    /// on the same network that uses Network Address Translation and has one
+    /// public IP.
+    #[clap(long)]
+    pub(crate) max_connections_per_ip: Option<usize>,
+
     /// Whether to act as bootstrapper node.
     ///
     /// Bootstrapper nodes ensure that the maximum number of peers is never
