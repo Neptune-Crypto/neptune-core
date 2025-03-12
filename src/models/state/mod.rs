@@ -48,7 +48,6 @@ use tx_creation_config::TxCreationConfig;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
-use wallet::wallet_state::StrongUtxoKey;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -802,12 +801,13 @@ impl GlobalState {
         };
 
         // if selection-tracking is enabled, store the keys
-        let unlocked_utxos = config
+        #[cfg(test)]
+        let unlocked_utxos: HashSet<wallet::wallet_state::StrongUtxoKey> = config
             .selection_is_tracked()
             .then(|| tx_inputs.iter())
             .into_iter()
             .flatten()
-            .map(StrongUtxoKey::from)
+            .map(wallet::wallet_state::StrongUtxoKey::from)
             .collect();
 
         let transaction_details = TransactionDetails::new_without_coinbase(
@@ -835,6 +835,7 @@ impl GlobalState {
             transaction,
             details: maybe_transaction_details,
             change_output: maybe_change_output,
+            #[cfg(test)]
             selection: unlocked_utxos,
         };
 
