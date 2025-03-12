@@ -492,7 +492,7 @@ mod wallet_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn wallet_state_maintenence_multiple_inputs_outputs_test() {
+    async fn wallet_state_maintenance_multiple_inputs_outputs_test() {
         // Bob is premine receiver, Alice is not. They send coins back and forth
         // and the blockchain forks.
 
@@ -789,7 +789,7 @@ mod wallet_tests {
 
         let config_2b = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
         let tx_from_bob = bob
             .create_transaction(
