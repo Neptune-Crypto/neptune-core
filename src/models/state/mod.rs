@@ -800,16 +800,6 @@ impl GlobalState {
             None
         };
 
-        // if selection-tracking is enabled, store the keys
-        #[cfg(test)]
-        let unlocked_utxos: HashSet<wallet::wallet_state::StrongUtxoKey> = config
-            .selection_is_tracked()
-            .then(|| tx_inputs.iter())
-            .into_iter()
-            .flatten()
-            .map(wallet::wallet_state::StrongUtxoKey::from)
-            .collect();
-
         let transaction_details = TransactionDetails::new_without_coinbase(
             tx_inputs,
             tx_outputs.to_owned(),
@@ -835,8 +825,6 @@ impl GlobalState {
             transaction,
             details: maybe_transaction_details,
             change_output: maybe_change_output,
-            #[cfg(test)]
-            selection: unlocked_utxos,
         };
 
         Ok(transaction_creation_artifacts)

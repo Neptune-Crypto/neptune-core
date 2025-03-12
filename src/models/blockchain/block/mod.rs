@@ -1017,8 +1017,6 @@ impl Block {
 
 #[cfg(test)]
 pub(crate) mod block_tests {
-    use std::collections::HashSet;
-
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1035,12 +1033,12 @@ pub(crate) mod block_tests {
     use crate::database::NeptuneLevelDb;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+    use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::models::state::wallet::wallet_state::StrongUtxoKey;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -1741,12 +1739,12 @@ pub(crate) mod block_tests {
         Block::premine_distribution();
     }
 
-    /// Exhibits a strategy for creating one transaction by mergin in many small
-    /// ones that spend from one's own wallet. The difficulty you run into when
-    /// you do this naïvely is that you end up merging in transactions that
-    /// spend the same UTXOs over and over. To avoid doing this, you need to
-    /// keep track of which UTXOs were used previously. The `TxCreationConfig`
-    /// and `TxCreationArtifacts` can help.
+    /// Exhibits a strategy for creating one transaction by merging in many
+    /// small ones that spend from one's own wallet. The difficulty you run into
+    /// when you do this naïvely is that you end up merging in transactions that
+    /// spend the same UTXOs over and over. To avoid doing this, you insert the
+    /// transaction into the mempool thus making the wallet aware of this
+    /// transaction and avoiding a double-spend of a UTXO.
     #[tokio::test]
     async fn avoid_reselecting_same_input_utxos() {
         let mut rng = StdRng::seed_from_u64(893423984854);
@@ -1790,7 +1788,6 @@ pub(crate) mod block_tests {
             .unwrap();
 
             // for all own UTXOs, spend to self
-            let mut avoidable_utxos = HashSet::new();
             for _ in 0..i {
                 // create a transaction spending it to self
                 let change_key = alice
@@ -1815,15 +1812,10 @@ pub(crate) mod block_tests {
                     true,
                 )]
                 .into();
-                let avoidable_utxos_for_closure = avoidable_utxos.clone();
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key.into())
                     .with_prover_capability(TxProvingCapability::SingleProof)
-                    .use_job_queue(job_queue.clone())
-                    .select_utxos(move |unlocked_utxo| {
-                        !avoidable_utxos_for_closure.contains(&StrongUtxoKey::from(unlocked_utxo))
-                    })
-                    .track_selection();
+                    .use_job_queue(job_queue.clone());
                 let transaction_creation_artifacts = alice
                     .lock_guard_mut()
                     .await
@@ -1831,7 +1823,6 @@ pub(crate) mod block_tests {
                     .await
                     .unwrap();
                 let self_spending_transaction = transaction_creation_artifacts.transaction;
-                avoidable_utxos.extend(transaction_creation_artifacts.selection);
 
                 // merge that transaction in
                 transaction = transaction
@@ -1843,6 +1834,12 @@ pub(crate) mod block_tests {
                     )
                     .await
                     .unwrap();
+
+                alice
+                    .lock_guard_mut()
+                    .await
+                    .mempool_insert(transaction.clone(), TransactionOrigin::Own)
+                    .await;
             }
 
             // compose block
@@ -1856,20 +1853,6 @@ pub(crate) mod block_tests {
             )
             .await
             .unwrap();
-
-            // guess block
-            // let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
-            // let mut nonce = rng.random();
-            // while fast_kernel_mast_hash(kernel_auth_path, header_auth_path, nonce)
-            //     > blocks.last().unwrap().header().difficulty.target()
-            // {
-            //     nonce = rng.random();
-            // }
-            // block.set_header_nonce(nonce);
-            //
-            // Actually, guessing is not necessary! What is tested in `is_valid`
-            // is that the difficulty was updated correctly. Proof of work is
-            // *not* tested, so the block will be valid with *any* nonce.
 
             let block_is_valid = block
                 .is_valid_internal(blocks.last().unwrap(), now, None, None)
