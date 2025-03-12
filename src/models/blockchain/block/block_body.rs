@@ -18,7 +18,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-#[derive(Debug, Clone, EnumCount)]
+#[derive(Debug, Copy, Clone, EnumCount)]
 pub enum BlockBodyField {
     TransactionKernel,
     MutatorSetAccumulator,
@@ -28,7 +28,7 @@ pub enum BlockBodyField {
 
 impl HasDiscriminant for BlockBodyField {
     fn discriminant(&self) -> usize {
-        self.clone() as usize
+        *self as usize
     }
 }
 

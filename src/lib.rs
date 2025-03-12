@@ -92,6 +92,10 @@ const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
+    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
+        tokio::spawn(fut);
+    }
+
     info!("Starting client on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists
@@ -226,11 +230,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("UTXO restoration check complete");
 
     // Connect to peers, and provide each peer task with a thread-safe copy of the state
-    let own_handshake_data: HandshakeData = global_state_lock
-        .lock_guard()
-        .await
-        .get_own_handshakedata()
-        .await;
+    let own_handshake_data: HandshakeData =
+        global_state_lock.lock_guard().await.get_own_handshakedata();
     info!(
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height
@@ -287,10 +288,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     rpc_listener.config_mut().max_frame_length(usize::MAX);
 
     let rpc_state_lock = global_state_lock.clone();
-
-    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
-        tokio::spawn(fut);
-    }
 
     // each time we start neptune-core a new RPC cookie is generated.
     let valid_tokens: Vec<rpc_auth::Token> =
@@ -349,7 +346,7 @@ pub fn time_fn_call<O>(f: impl FnOnce() -> O) -> (O, f64) {
     let start = Instant::now();
     let output = f();
     let elapsed = start.elapsed();
-    let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
+    let total_time = elapsed.as_secs() as f64 + f64::from(elapsed.subsec_nanos()) / 1e9;
     (output, total_time)
 }
 
@@ -361,7 +358,7 @@ where
     let start = Instant::now();
     let output = f.await;
     let elapsed = start.elapsed();
-    let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
+    let total_time = elapsed.as_secs() as f64 + f64::from(elapsed.subsec_nanos()) / 1e9;
     (output, total_time)
 }
 
@@ -527,6 +524,7 @@ const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event
 /// for convenience see macros:
 ///  crate::macros::log_slow_scope,
 ///  crate::macros::log_scope_duration,
+#[derive(Debug, Clone)]
 pub struct ScopeDurationLogger<'a> {
     start: Instant,
     description: &'a str,

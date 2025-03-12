@@ -65,13 +65,13 @@ impl PeerInfo {
     fn system_time_diff_seconds(peer: SystemTime, own: SystemTime) -> i128 {
         let peer = peer
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i128)
-            .unwrap_or_else(|e| -(e.duration().as_secs() as i128));
+            .map(|d| i128::from(d.as_secs()))
+            .unwrap_or_else(|e| -i128::from(e.duration().as_secs()));
 
         let own = own
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i128)
-            .unwrap_or_else(|e| -(e.duration().as_secs() as i128));
+            .map(|d| i128::from(d.as_secs()))
+            .unwrap_or_else(|e| -i128::from(e.duration().as_secs()));
 
         own - peer
     }

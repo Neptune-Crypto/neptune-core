@@ -16,7 +16,7 @@ use tasm_lib::twenty_first::xfe;
 use zeroize::Zeroize;
 
 /// Holds the secret seed of a wallet.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecretKeyMaterial(pub(crate) XFieldElement);
 
 impl Zeroize for SecretKeyMaterial {
@@ -366,8 +366,7 @@ mod test {
             let mut selected_shares = (0..t - 1)
                 .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
                 .collect_vec();
-            let duplicate_share =
-                selected_shares[rng.random_range(0..selected_shares.len())].clone();
+            let duplicate_share = selected_shares[rng.random_range(0..selected_shares.len())];
             selected_shares.push(duplicate_share);
             println!("selected shares: {:?}", selected_shares);
             prop_assert_eq!(
@@ -394,18 +393,16 @@ mod test {
 
             // Make a random selection of t+1 shares such that both sharings are
             // represented. There can be no duplicate indices so n > t.
-            let mut selected_shares = vec![];
-            let insert_unique_index =
-                |collection: &mut Vec<_>, share: (usize, SecretKeyMaterial)| {
-                    if !collection.iter().any(|(i, _)| *i == share.0) {
-                        collection.push(share);
-                        false
-                    } else {
-                        true
-                    }
-                };
+            let insert_unique_index = |collection: &mut Vec<_>, share: (_, _)| {
+                let is_share_in_collection = collection.iter().any(|(i, _)| *i == share.0);
+                if !is_share_in_collection {
+                    collection.push(share);
+                }
+                is_share_in_collection
+            };
 
             // add one share a, randomly selected
+            let mut selected_shares = vec![];
             insert_unique_index(
                 &mut selected_shares,
                 shares_a.swap_remove(rng.random_range(0..shares_a.len())),

@@ -21,6 +21,7 @@ use crate::prelude::twenty_first;
 ///
 /// Merkle Mountain Ranges only know about hashes. When values are to be associated with
 /// MMRs, these values must be stored by the caller, or in a wrapper to this data structure.
+#[derive(Debug, Clone)]
 pub struct ArchivalMmr<Storage: StorageVec<Digest>> {
     digests: Storage,
 }
@@ -129,7 +130,7 @@ where
             "Duplicated leaves are not allowed in membership proof updater"
         );
 
-        for (leaf_index, digest) in mutation_data.iter() {
+        for (leaf_index, digest) in &mutation_data {
             self.mutate_leaf(*leaf_index, *digest).await;
         }
 
@@ -235,13 +236,13 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
             while merkle_tree_index > 1 {
                 let is_left_sibling = merkle_tree_index & 1 == 0;
                 let height_pow = 1u64 << (height + 1);
-                let as_1_or_minus_1: u64 = (2 * (is_left_sibling as i64) - 1) as u64;
+                let as_1_or_minus_1: u64 = (2 * i64::from(is_left_sibling) - 1) as u64;
                 let signed_height_pow = height_pow.wrapping_mul(as_1_or_minus_1);
                 let sibling = node_index
                     .wrapping_add(signed_height_pow)
                     .wrapping_sub(as_1_or_minus_1);
 
-                node_index += 1 << ((height + 1) * is_left_sibling as u32);
+                node_index += 1 << ((height + 1) * u32::from(is_left_sibling));
 
                 ret.push(sibling);
                 merkle_tree_index >>= 1;
@@ -302,7 +303,7 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
 
         let node_index = self.digests.len().await - 1;
         let (_, height) = shared_advanced::right_lineage_length_and_own_height(node_index);
-        let node_index = node_index - height as u64;
+        let node_index = node_index - u64::from(height);
 
         Some(self.digests.get(node_index).await)
     }
@@ -801,7 +802,7 @@ pub(crate) mod mmr_test {
                 mock::get_ammr_from_digests(leaf_hashes_tip5.clone()).await;
             let mut accumulator_iterative = MmrAccumulator::new_from_leafs(vec![]);
             let accumulator_batch = MmrAccumulator::new_from_leafs(leaf_hashes_tip5.clone());
-            for leaf_hash in leaf_hashes_tip5.clone().into_iter() {
+            for leaf_hash in leaf_hashes_tip5.clone() {
                 let leaf_index = archival_iterative.num_leafs().await;
                 let archival_membership_proof = archival_iterative.append(leaf_hash).await;
                 let accumulator_membership_proof = accumulator_iterative.append(leaf_hash);

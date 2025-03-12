@@ -37,6 +37,9 @@ impl BasicSnippet for GenerateK2oClaim {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
+        const INPUT_LENGTH: usize = Digest::LEN;
+        const OUTPUT_LENGTH: usize = Digest::LEN;
+
         let entrypoint = self.entrypoint();
 
         let push_digest = |d: Digest| {
@@ -64,9 +67,6 @@ impl BasicSnippet for GenerateK2oClaim {
         );
 
         let new_claim = library.import(Box::new(NewClaim));
-
-        const INPUT_LENGTH: usize = Digest::LEN;
-        const OUTPUT_LENGTH: usize = Digest::LEN;
 
         triton_asm!(
             // BEFORE: _ [txk_digest] garb0 garb1 *proof_collection

@@ -264,7 +264,7 @@ fn guess_worker(
             return;
         }
         GuessNonceResult::NonceFound { nonce } => nonce,
-        _ => unreachable!(),
+        GuessNonceResult::BlockNotFound => unreachable!(),
     };
 
     info!("Found valid block with nonce: ({nonce}).");
@@ -506,6 +506,9 @@ pub(crate) async fn create_block_transaction_from(
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+    // TODO: Change this const to be defined through CLI arguments.
+    const MAX_NUM_TXS_TO_MERGE: usize = 7;
+
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
@@ -542,8 +545,6 @@ pub(crate) async fn create_block_transaction_from(
     .await?;
 
     // Get most valuable transactions from mempool.
-    // TODO: Change this const to be defined through CLI arguments.
-    const MAX_NUM_TXS_TO_MERGE: usize = 7;
     let only_merge_single_proofs = true;
     let mut transactions_to_merge = match tx_merge_origin {
         #[cfg(test)]
@@ -623,15 +624,17 @@ pub(crate) async fn mine(
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
     const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
-    tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
-    let cli_args = global_state_lock.cli().clone();
 
     // Set PoW guessing to restart every N seconds, if it has been started. Only
     // the guesser task may set this to actually resolve, as this will otherwise
     // abort e.g. the composer.
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
+
+    tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+    let cli_args = global_state_lock.cli().clone();
+
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
-    let infinite = Duration::from_secs(u32::MAX as u64);
+    let infinite = Duration::from_secs(u32::MAX.into());
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
@@ -649,14 +652,14 @@ pub(crate) async fn mine(
                 (
                     !s.net.peer_map.is_empty(),
                     s.net.sync_anchor.is_some(),
-                    s.mining_state.mining_status.clone(),
+                    s.mining_state.mining_status,
                 )
             })
             .await;
         if !is_connected {
+            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             global_state_lock.set_mining_status_to_inactive().await;
             warn!("Not mining because client has no connections");
-            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
             continue;
         }
@@ -1615,9 +1618,9 @@ pub(crate) mod mine_loop_tests {
         let stddev = (guessing_time.pow(2.0_f64) / (NUM_BLOCKS as f64)).sqrt();
         let allowed_standard_deviations = 4;
         let min_duration = (expected_duration.0.value() as f64)
-            - (allowed_standard_deviations as f64) * stddev * (NUM_BLOCKS as f64);
+            - f64::from(allowed_standard_deviations) * stddev * (NUM_BLOCKS as f64);
         let max_duration = (expected_duration.0.value() as f64)
-            + (allowed_standard_deviations as f64) * stddev * (NUM_BLOCKS as f64);
+            + f64::from(allowed_standard_deviations) * stddev * (NUM_BLOCKS as f64);
         let max_test_time = expected_duration * 3;
 
         // we ignore the first 2 blocks after genesis because they are
@@ -1691,13 +1694,11 @@ pub(crate) mod mine_loop_tests {
             }
 
             let elapsed = start_instant.elapsed()?.as_millis();
-            if elapsed > max_test_time.0.value().into() {
-                panic!(
-                    "test time limit exceeded.  \
-                expected_duration: {expected_duration}, \
-                limit: {max_test_time}, actual: {elapsed}"
-                );
-            }
+            assert!(
+                elapsed <= max_test_time.0.value().into(),
+                "test time limit exceeded. \
+                 expected_duration: {expected_duration}, limit: {max_test_time}, actual: {elapsed}"
+            );
         }
 
         let actual_duration = start_instant.elapsed()?.as_millis() as u64;
@@ -1836,7 +1837,7 @@ pub(crate) mod mine_loop_tests {
         // after k trials, so this quantity must be less than 0.0001.
         // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
         // Difficulty 100 sets k = 917.
-        let cofactor = (1.0 - (1.0 / (difficulty as f64))).log10();
+        let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
         let k = (-4.0 / cofactor).ceil() as usize;
 
         let mut predecessor_header = random_block_header();

@@ -157,7 +157,7 @@ impl UpdateWitness {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct UpdateBranch;
 
 impl UpdateBranch {

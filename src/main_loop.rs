@@ -88,6 +88,7 @@ const TX_UPDATER_CHANNEL_CAPACITY: usize = 1;
 ///  a) the miner might not exist in which case there would be no-one to empty
 ///     the channel; and
 ///  b) contrary to other channels, transmission failures here are not critical.
+#[derive(Debug)]
 struct MainToMinerChannel(Option<mpsc::Sender<MainToMiner>>);
 
 impl MainToMinerChannel {
@@ -106,6 +107,7 @@ impl MainToMinerChannel {
 }
 
 /// MainLoop is the immutable part of the input for the main loop function
+#[derive(Debug)]
 pub struct MainLoopHandler {
     incoming_peer_listener: TcpListener,
     global_state_lock: GlobalStateLock,
@@ -463,7 +465,7 @@ impl MainLoopHandler {
         // Update mempool with updated transactions
         {
             let mut state = self.global_state_lock.lock_guard_mut().await;
-            for updated in updated_txs.iter() {
+            for updated in &updated_txs {
                 let txid = updated.kernel.txid();
                 if let Some(tx) = state.mempool.get_mut(txid) {
                     *tx = updated.to_owned();
@@ -506,9 +508,8 @@ impl MainLoopHandler {
             warn!("Got new block from miner that was not child of tip. Discarding.");
             self.main_to_miner_tx.send(MainToMiner::Continue);
             return Ok(());
-        } else {
-            info!("Locally-mined block is new tip: {}", new_block.hash());
         }
+        info!("Locally-mined block is new tip: {}", new_block.hash());
 
         // Share block with peers first thing.
         info!("broadcasting new block to peers");
@@ -519,8 +520,7 @@ impl MainLoopHandler {
         let update_jobs = global_state_mut.set_new_tip(*new_block).await?;
         drop(global_state_mut);
 
-        self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
-            .await;
+        self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
         Ok(())
     }
@@ -706,8 +706,7 @@ impl MainLoopHandler {
                 // Spawn task to handle mempool tx-updating after new blocks.
                 // TODO: Do clever trick to collapse all jobs relating to the same transaction,
                 //       identified by transaction-ID, into *one* update job.
-                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
-                    .await;
+                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
@@ -975,8 +974,7 @@ impl MainLoopHandler {
             .global_state_lock
             .lock_guard()
             .await
-            .get_own_handshakedata()
-            .await;
+            .get_own_handshakedata();
         for &peer_with_lost_connection in peers_with_lost_connection {
             // Disallow reconnection if peer is in bad standing
             let peer_standing = self
@@ -1029,7 +1027,7 @@ impl MainLoopHandler {
         let global_state = self.global_state_lock.lock_guard().await;
         let connected_peers = global_state.net.peer_map.values().cloned().collect_vec();
         let own_instance_id = global_state.net.instance_id;
-        let own_handshake_data = global_state.get_own_handshakedata().await;
+        let own_handshake_data = global_state.get_own_handshakedata();
         drop(global_state);
 
         let num_peers = connected_peers.len();
@@ -1105,21 +1103,17 @@ impl MainLoopHandler {
     /// build on top of by providing potential starting points all the way
     /// back to genesis.
     fn batch_request_uca_candidate_heights(own_tip_height: BlockHeight) -> Vec<BlockHeight> {
+        const FACTOR: f64 = 1.07f64;
+
         let mut look_behind = 0;
         let mut ret = vec![];
 
         // A factor of 1.07 can look back ~1m blocks in 200 digests.
-        const FACTOR: f64 = 1.07f64;
         while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
             let height = match own_tip_height.checked_sub(look_behind) {
                 None => break,
-                Some(height) => {
-                    if height.is_genesis() {
-                        break;
-                    } else {
-                        height
-                    }
-                }
+                Some(height) if height.is_genesis() => break,
+                Some(height) => height,
             };
 
             ret.push(height);
@@ -1353,7 +1347,7 @@ impl MainLoopHandler {
     /// Post-processing when new block has arrived. Spawn a task to update
     /// transactions in the mempool. Only when the spawned task has completed,
     /// should the miner continue.
-    async fn spawn_mempool_txs_update_job(
+    fn spawn_mempool_txs_update_job(
         &self,
         main_loop_state: &mut MutableMainLoopState,
         update_jobs: Vec<UpdateMutatorSetDataJob>,
@@ -1436,11 +1430,11 @@ impl MainLoopHandler {
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
         // signals are only used on Unix systems.
-        let (_tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
-        let (_tx_int, mut rx_int): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_int, mut rx_int): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
-        let (_tx_quit, mut rx_quit): (mpsc::Sender<()>, mpsc::Receiver<()>) =
+        let (tx_quit, mut rx_quit): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
         #[cfg(unix)]
         {
@@ -1454,7 +1448,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigterm.recv().await.is_some() {
                         info!("Received SIGTERM");
-                        _tx_term.send(()).await.unwrap();
+                        tx_term.send(()).await.unwrap();
                     }
                 })?;
 
@@ -1465,7 +1459,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigint.recv().await.is_some() {
                         info!("Received SIGINT");
-                        _tx_int.send(()).await.unwrap();
+                        tx_int.send(()).await.unwrap();
                     }
                 })?;
 
@@ -1476,10 +1470,13 @@ impl MainLoopHandler {
                 .spawn(async move {
                     if sigquit.recv().await.is_some() {
                         info!("Received SIGQUIT");
-                        _tx_quit.send(()).await.unwrap();
+                        tx_quit.send(()).await.unwrap();
                     }
                 })?;
         }
+
+        #[cfg(not(unix))]
+        drop((tx_term, tx_int, tx_quit));
 
         let exit_code: i32 = loop {
             select! {
@@ -1514,7 +1511,7 @@ impl MainLoopHandler {
                     let state = self.global_state_lock.lock_guard().await;
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = self.peer_task_to_main_tx.clone();
-                    let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
+                    let own_handshake_data: HandshakeData = state.get_own_handshakedata();
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
                     let incoming_peer_task_handle = tokio::task::Builder::new()
                         .name("answer_peer_wrapper")
@@ -1824,6 +1821,8 @@ mod test {
     }
 
     async fn setup(num_init_peers_outgoing: u8, num_peers_incoming: u8) -> TestSetup {
+        const CHANNEL_CAPACITY_MINER_TO_MAIN: usize = 10;
+
         let network = Network::Main;
         let (
             main_to_peer_tx,
@@ -1859,12 +1858,12 @@ mod test {
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
 
-        const CHANNEL_CAPACITY: usize = 10;
         let (main_to_miner_tx, _main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
-        let (_miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY);
+        let (_miner_to_main_tx, miner_to_main_rx) =
+            mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
         let (_rpc_server_to_main_tx, rpc_server_to_main_rx) =
-            mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY);
+            mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
 
         let main_loop_handler = MainLoopHandler::new(
             incoming_peer_listener,
@@ -2493,7 +2492,7 @@ mod test {
                         .cmp(&r.1.connection_established())
                 })
                 .map(|(socket_address, _peer_info)| socket_address)
-                .cloned()
+                .copied()
                 .unwrap();
 
             // simulate incoming connection
@@ -2503,8 +2502,7 @@ mod test {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .get_own_handshakedata()
-                .await;
+                .get_own_handshakedata();
             assert_eq!(peer_handshake_data.network, own_handshake_data.network,);
             assert_eq!(peer_handshake_data.version, own_handshake_data.version,);
             let mock_stream = tokio_test::io::Builder::new()

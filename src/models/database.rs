@@ -15,7 +15,7 @@ use crate::prelude::twenty_first;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct BlockFileLocation {
     pub file_index: u32,
     pub offset: u64,
@@ -47,7 +47,7 @@ impl BlockRecord {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct FileRecord {
     pub blocks_in_file_count: u32,
     pub file_size: u64,
@@ -98,7 +98,7 @@ pub struct LastFileRecord {
     pub last_file: u32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum BlockIndexKey {
     Block(Digest),       // points to block headers and file locations
     File(u32),           // points to file information

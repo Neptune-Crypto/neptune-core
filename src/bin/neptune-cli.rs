@@ -404,9 +404,8 @@ async fn main() -> Result<()> {
             if let Some(shell) = Shell::from_env() {
                 generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
                 return Ok(());
-            } else {
-                bail!("Unknown shell.  Shell completions not available.")
             }
+            bail!("Unknown shell. Shell completions not available.")
         }
         Command::WhichWallet { network } => {
             let wallet_dir =
@@ -417,9 +416,8 @@ async fn main() -> Result<()> {
             if !wallet_file.exists() {
                 eprintln!("No wallet file found at {}.", wallet_file.display());
                 return Ok(());
-            } else {
-                println!("{}", wallet_file.display());
             }
+            println!("{}", wallet_file.display());
             return Ok(());
         }
         Command::GenerateWallet { network } => {

@@ -146,8 +146,8 @@ pub enum BlockProof {
 //
 // A unit test-suite exists in module tests::digest_encapsulation.
 #[allow(non_local_definitions)] // needed for [Deserialize] macro from serde
-#[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize)]
 #[readonly::make]
+#[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct Block {
     /// Everything but the proof
     pub kernel: BlockKernel,
@@ -218,7 +218,7 @@ impl Block {
         let body = primitive_witness.body().to_owned();
         let header = primitive_witness.header(timestamp, target_block_interval);
         let (appendix, proof) = {
-            let block_proof_witness = BlockProofWitness::produce(primitive_witness).await?;
+            let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
             let proof = BlockProgram
@@ -707,6 +707,8 @@ impl Block {
         target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
     ) -> Result<(), BlockValidationError> {
+        const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
+
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
@@ -755,7 +757,6 @@ impl Block {
         }
 
         // 0.g)
-        const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
         let future_limit = now + FUTUREDATING_LIMIT;
         if self.kernel.header.timestamp >= future_limit {
             return Err(BlockValidationError::FutureDating);
@@ -789,7 +790,7 @@ impl Block {
         }
 
         // 2.a)
-        for removal_record in self.kernel.body.transaction_kernel.inputs.iter() {
+        for removal_record in &self.kernel.body.transaction_kernel.inputs {
             if !previous_block
                 .mutator_set_accumulator_after()
                 .can_remove(removal_record)
@@ -952,6 +953,8 @@ impl Block {
     ///
     /// The genesis block does not have a guesser reward.
     pub(crate) fn guesser_fee_utxos(&self) -> Vec<Utxo> {
+        const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
+
         if self.header().height.is_genesis() {
             return vec![];
         }
@@ -964,7 +967,6 @@ impl Block {
         value_locked.div_two();
         let value_unlocked = total_guesser_reward.checked_sub(&value_locked).unwrap();
 
-        const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
         let coins = vec![
             Coin::new_native_currency(value_locked),
             TimeLock::until(self.header().timestamp + MINER_REWARD_TIME_LOCK_PERIOD),

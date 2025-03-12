@@ -118,7 +118,7 @@ impl TransactionProof {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum TransactionProofError {
     CannotUpdateProofVariant,
     CannotUpdatePrimitiveWitness,
@@ -126,7 +126,7 @@ pub enum TransactionProofError {
     ProverLockWasTaken,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 

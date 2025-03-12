@@ -252,7 +252,7 @@ mod tests {
                 .swbf_inactive
                 .bag_peaks();
 
-            let aocl_mmr_address = bfe!(aocl_mmr_address as u64);
+            let aocl_mmr_address = bfe!(u64::from(aocl_mmr_address));
 
             let mut memory = HashMap::default();
             encode_to_memory(&mut memory, aocl_mmr_address, aocl_mmr);

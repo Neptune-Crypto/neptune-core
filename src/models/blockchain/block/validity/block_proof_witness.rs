@@ -67,9 +67,7 @@ impl BlockProofWitness {
         BlockAppendix::new(self.claims())
     }
 
-    pub(crate) async fn produce(
-        block_primitive_witness: BlockPrimitiveWitness,
-    ) -> anyhow::Result<BlockProofWitness> {
+    pub(crate) fn produce(block_primitive_witness: BlockPrimitiveWitness) -> BlockProofWitness {
         let txk_mast_hash = block_primitive_witness
             .body()
             .transaction_kernel
@@ -87,15 +85,16 @@ impl BlockProofWitness {
         };
 
         // Add more claim/proof pairs here, when softforking.
-        let ret = Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
+        let witness =
+            Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
 
         assert_eq!(
             BlockAppendix::consensus_claims(block_primitive_witness.body()),
-            ret.claims,
-            "appendix witness must attest to expected claims"
+            witness.claims,
+            "appendix witness must attest to expected claims",
         );
 
-        Ok(ret)
+        witness
     }
 }
 

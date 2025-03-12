@@ -25,8 +25,8 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 /// TransactionKernel is immutable and its hash never changes.
 ///
 /// See [`TransactionKernelModifier`] for generating modified copies.
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, GetSize, BFieldCodec, TasmObject)]
 #[readonly::make]
+#[derive(Debug, Clone, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 pub struct TransactionKernel {
     // note: see field descriptions in [`TransactionKernelProxy`]
     pub inputs: Vec<RemovalRecord>,
@@ -93,6 +93,8 @@ impl PartialEq for TransactionKernel {
         // mast_sequences intentionally skipped.
     }
 }
+
+impl Eq for TransactionKernel {}
 
 impl From<PrimitiveWitness> for TransactionKernel {
     fn from(transaction_primitive_witness: PrimitiveWitness) -> Self {
@@ -257,6 +259,7 @@ pub mod neptune_arbitrary {
 /// into_kernel() method that converts it to a [TransactionKernel].
 ///
 /// It is also useful for destructuring kernel fields without cloning.
+#[derive(Debug, Clone)]
 pub struct TransactionKernelProxy {
     /// contains the transaction inputs.
     pub inputs: Vec<RemovalRecord>,
@@ -321,7 +324,7 @@ impl TransactionKernelProxy {
 /// a builder pattern to facilitate that task.
 ///
 /// supports a move/modify operation and a clone/modify operation.
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TransactionKernelModifier {
     pub inputs: Option<Vec<RemovalRecord>>,
     pub outputs: Option<Vec<AdditionRecord>>,
@@ -568,7 +571,7 @@ pub mod transaction_kernel_tests {
         let mut rng = rand::rng();
         let absolute_indices = AbsoluteIndexSet::new(
             &(0..NUM_TRIALS as usize)
-                .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+                .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
                 .collect_vec()
                 .try_into()
                 .unwrap(),

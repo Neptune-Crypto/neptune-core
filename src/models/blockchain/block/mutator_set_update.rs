@@ -100,7 +100,7 @@ impl MutatorSetUpdate {
     ) -> bool {
         let mut cloned_removals = self.removals.clone();
         let mut applied_removal_records = cloned_removals.iter_mut().rev().collect::<Vec<_>>();
-        for addition_record in self.additions.iter() {
+        for addition_record in &self.additions {
             RemovalRecord::batch_update_from_addition(&mut applied_removal_records, ms_accumulator);
 
             RemovalRecord::batch_update_from_addition(removal_records, ms_accumulator);

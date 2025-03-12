@@ -55,7 +55,7 @@ impl MutatorSetAccumulator {
         swbf_inactive: &[Digest],
         swbf_active: &ActiveWindow,
     ) -> Self {
-        let swbf_inactive_leaf_count = aocl_leaf_count / (BATCH_SIZE as u64);
+        let swbf_inactive_leaf_count = aocl_leaf_count / u64::from(BATCH_SIZE);
         Self {
             aocl: MmrAccumulator::init(aocl.to_vec(), aocl_leaf_count),
             swbf_inactive: MmrAccumulator::init(swbf_inactive.to_vec(), swbf_inactive_leaf_count),
@@ -103,7 +103,7 @@ impl MutatorSetAccumulator {
     pub fn get_batch_index(&self) -> u64 {
         match self.aocl.num_leafs() {
             0 => 0,
-            n => (n - 1) / BATCH_SIZE as u64,
+            n => (n - 1) / u64::from(BATCH_SIZE),
         }
     }
 
@@ -114,14 +114,17 @@ impl MutatorSetAccumulator {
     /// are still contained in the active window.
     pub fn active_window_chunk_interval(&self) -> (u64, u64) {
         let batch_index = self.get_batch_index();
-        (batch_index, batch_index + (WINDOW_SIZE / CHUNK_SIZE) as u64)
+        (
+            batch_index,
+            batch_index + u64::from(WINDOW_SIZE / CHUNK_SIZE),
+        )
     }
 
     /// Remove a record and return the chunks that have been updated in this process,
     /// after applying the update. Does not mutate the removal record.
     pub fn remove_helper(&mut self, removal_record: &RemovalRecord) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index();
-        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+        let active_window_start = u128::from(batch_index) * u128::from(CHUNK_SIZE);
 
         // insert all indices
         let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
@@ -153,7 +156,7 @@ impl MutatorSetAccumulator {
                     )
                 });
             for index in indices {
-                let relative_index = (index % CHUNK_SIZE as u128) as u32;
+                let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
                 relevant_chunk.1.insert(relative_index);
             }
         }
@@ -186,16 +189,16 @@ impl MutatorSetAccumulator {
             return false;
         }
 
-        for inserted_index in removal_record.absolute_indices.to_vec().into_iter() {
+        for inserted_index in removal_record.absolute_indices.to_vec() {
             // determine if inserted index lives in active window
             let active_window_start =
-                (self.aocl.num_leafs() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
+                u128::from(self.aocl.num_leafs() / u64::from(BATCH_SIZE)) * u128::from(CHUNK_SIZE);
             if inserted_index < active_window_start {
-                let inserted_index_chunkidx = (inserted_index / CHUNK_SIZE as u128) as u64;
+                let inserted_index_chunkidx = (inserted_index / u128::from(CHUNK_SIZE)) as u64;
                 if let Some((_mmr_mp, chunk)) =
                     removal_record.target_chunks.get(&inserted_index_chunkidx)
                 {
-                    let relative_index = (inserted_index % CHUNK_SIZE as u128) as u32;
+                    let relative_index = (inserted_index % u128::from(CHUNK_SIZE)) as u32;
                     if !chunk.contains(relative_index) {
                         have_absent_index = true;
                         break;
@@ -276,7 +279,7 @@ impl MutatorSetAccumulator {
 
         // prepare parameters of inactive part
         let current_batch_index: u64 = self.get_batch_index();
-        let window_start = current_batch_index as u128 * CHUNK_SIZE as u128;
+        let window_start = u128::from(current_batch_index) * u128::from(CHUNK_SIZE);
 
         // Get all Bloom filter indices
         let all_indices = AbsoluteIndexSet::new(&get_swbf_indices(
@@ -310,7 +313,7 @@ impl MutatorSetAccumulator {
             all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
             'inner_inactive: for index in indices {
-                let index_within_chunk = index % CHUNK_SIZE as u128;
+                let index_within_chunk = index % u128::from(CHUNK_SIZE);
                 if !swbf_inactive_chunk.contains(index_within_chunk as u32) {
                     has_absent_index = true;
                     break 'inner_inactive;
@@ -377,7 +380,7 @@ impl MutatorSetAccumulator {
     ) -> HashMap<u64, Chunk> {
         {
             let batch_index = self.get_batch_index();
-            let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+            let active_window_start = u128::from(batch_index) * u128::from(CHUNK_SIZE);
 
             // Collect all indices that that are set by the removal records
             let all_removal_records_indices: Vec<u128> = removal_records
@@ -390,23 +393,23 @@ impl MutatorSetAccumulator {
             // `Chunk` but only represents the values which are set by the removal records
             // being handled.
             let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
-            all_removal_records_indices.iter().for_each(|index| {
-                if *index >= active_window_start {
+            for index in all_removal_records_indices {
+                if index >= active_window_start {
                     let relative_index = (index - active_window_start) as u32;
                     self.swbf_active.insert(relative_index);
                 } else {
                     chunkidx_to_chunk_difference_dict
-                        .entry((index / CHUNK_SIZE as u128) as u64)
+                        .entry((index / u128::from(CHUNK_SIZE)) as u64)
                         .or_insert_with(Chunk::empty_chunk)
-                        .insert((*index % CHUNK_SIZE as u128) as u32);
+                        .insert((index % u128::from(CHUNK_SIZE)) as u32);
                 }
-            });
+            }
 
             // Collect all affected chunks as they look before these removal records are applied
             // These chunks are part of the removal records, so we fetch them there.
             let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof)> =
                 HashMap::new();
-            for removal_record in removal_records.iter_mut() {
+            for removal_record in &mut removal_records {
                 for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.iter_mut() {
                     let chunk_hash = Hash::hash(chunk);
                     let prev_val =
@@ -421,7 +424,7 @@ impl MutatorSetAccumulator {
             }
 
             // Apply the removal records: the new chunk is obtained by adding the chunk difference
-            for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
+            for (chunk_index, (chunk, _)) in &mut mutation_data_preimage {
                 **chunk = chunk
                     .clone()
                     .combine(chunkidx_to_chunk_difference_dict[chunk_index].clone())
@@ -484,7 +487,7 @@ impl MutatorSetAccumulator {
     /// Determine if the window slides before absorbing an item,
     /// given the index of the to-be-added item.
     pub fn window_slides(added_index: u64) -> bool {
-        added_index != 0 && added_index % BATCH_SIZE as u64 == 0
+        added_index != 0 && added_index % u64::from(BATCH_SIZE) == 0
 
         // example cases:
         //  - index == 0 we don't care about
@@ -518,7 +521,7 @@ mod ms_accumulator_tests {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (start_empty, end_empty) = accumulator.active_window_chunk_interval();
         assert_eq!(0, start_empty);
-        assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64, end_empty);
+        assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE), end_empty);
 
         // Insert batch-size items and verify that a new batch interval is reported
         for _ in 0..BATCH_SIZE + 1 {
@@ -527,25 +530,25 @@ mod ms_accumulator_tests {
 
             let (start, end) = accumulator.active_window_chunk_interval();
             assert_eq!(0, start);
-            assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64, end);
+            assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE), end);
             accumulator.add(&addition_record);
         }
 
         let (start_final, end_final) = accumulator.active_window_chunk_interval();
         assert_eq!(1, start_final);
-        assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64 + 1, end_final);
+        assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE) + 1, end_final);
     }
 
     #[proptest(cases = 10)]
     fn batch_index_and_active_window_chunk_interval_agree(
-        #[strategy(1u64..10u64 * BATCH_SIZE as u64)] num_insertions: u64,
+        #[strategy(1u64..10u64 * u64::from(BATCH_SIZE))] num_insertions: u64,
     ) {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         for _ in 0..num_insertions {
             let (start, end) = accumulator.active_window_chunk_interval();
             let batch_interval = accumulator.get_batch_index();
             prop_assert_eq!(batch_interval, start);
-            prop_assert_eq!(batch_interval + (WINDOW_SIZE / CHUNK_SIZE) as u64, end);
+            prop_assert_eq!(batch_interval + u64::from(WINDOW_SIZE / CHUNK_SIZE), end);
 
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
@@ -761,7 +764,7 @@ mod ms_accumulator_tests {
                     let original_membership_proofs_sequential =
                         membership_proofs_sequential.clone();
                     let mut update_by_remove_return_values: Vec<bool> = vec![];
-                    for mp in membership_proofs_sequential.iter_mut() {
+                    for mp in &mut membership_proofs_sequential {
                         let update_res_seq = mp.update_from_remove(&removal_record);
                         update_by_remove_return_values.push(update_res_seq);
                     }
@@ -888,10 +891,12 @@ mod ms_accumulator_tests {
                 println!("{}/{}", i, num_iterations);
             }
             let operation = if items_and_membership_proofs.len()
-                > (1.25 * target_set_size as f64) as usize
+                > (1.25 * f64::from(target_set_size)) as usize
             {
                 rng.random_range(0..10) >= 3
-            } else if items_and_membership_proofs.len() < (0.8 * target_set_size as f64) as usize {
+            } else if items_and_membership_proofs.len()
+                < (0.8 * f64::from(target_set_size)) as usize
+            {
                 rng.random_range(0..10) < 3
             } else {
                 rng.random_range(0..10) < 5
@@ -901,7 +906,7 @@ mod ms_accumulator_tests {
                 let index = rng.random_range(0..items_and_membership_proofs.len());
                 let (item, membership_proof) = items_and_membership_proofs.swap_remove(index);
                 let removal_record = msa.drop(item, &membership_proof);
-                for (_it, mp) in items_and_membership_proofs.iter_mut() {
+                for (_it, mp) in &mut items_and_membership_proofs {
                     mp.update_from_remove(&removal_record);
                 }
                 msa.remove(&removal_record);
@@ -911,7 +916,7 @@ mod ms_accumulator_tests {
                 let sender_randomness = rng.random::<Digest>();
                 let receiver_preimage = rng.random::<Digest>();
                 let addition_record = commit(item, sender_randomness, receiver_preimage);
-                for (it, mp) in items_and_membership_proofs.iter_mut() {
+                for (it, mp) in &mut items_and_membership_proofs {
                     mp.update_from_addition(*it, &msa, &addition_record)
                         .unwrap();
                 }

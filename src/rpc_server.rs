@@ -2449,9 +2449,8 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
-        let digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         // verify the block actually exists
         Ok(archival_state
@@ -2471,16 +2470,14 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         let tip_digest = state.chain.light_state().hash();
         let archival_state = state.chain.archival_state();
 
-        let block = match archival_state.get_block(digest).await.unwrap() {
-            Some(b) => b,
-            None => return Ok(None),
+        let Some(block) = archival_state.get_block(digest).await.unwrap() else {
+            return Ok(None);
         };
         let is_canonical = archival_state
             .block_belongs_to_canonical_chain(digest)
@@ -2578,13 +2575,13 @@ impl RPC for NeptuneRPCServer {
         let global_state = self.state.lock_guard().await;
 
         // Get all connected peers
-        for (socket_address, peer_info) in global_state.net.peer_map.iter() {
+        for (socket_address, peer_info) in &global_state.net.peer_map {
             if peer_info.standing().is_negative() {
                 sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
             }
         }
 
-        let sanctions_in_db = global_state.net.all_peer_sanctions_in_database().await;
+        let sanctions_in_db = global_state.net.all_peer_sanctions_in_database();
 
         // Combine result for currently connected peers and previously connected peers but
         // use result for currently connected peer if there is an overlap
@@ -2737,9 +2734,8 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let block_digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(block_digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         Ok(state
             .chain
@@ -2893,7 +2889,7 @@ impl RPC for NeptuneRPCServer {
         let peer_count = Some(state.net.peer_map.len());
         let max_num_peers = self.state.cli().max_num_peers;
 
-        let mining_status = Some(state.mining_state.mining_status.clone());
+        let mining_status = Some(state.mining_state.mining_status);
 
         let confirmations = {
             log_slow_scope!(fn_name!() + "::confirmations_internal()");
@@ -3233,11 +3229,12 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
     ) -> RpcResult<usize> {
+        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
+
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
-        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
         let prune_count_res = global_state_mut
             .prune_abandoned_monitored_utxos(DEFAULT_MUTXO_PRUNE_DEPTH)
@@ -3361,9 +3358,8 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let last_block = match last_block.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(last_block) = last_block.as_digest(&state).await else {
+            return Ok(None);
         };
         let mut intervals = vec![];
         let mut current = state
@@ -4821,7 +4817,7 @@ mod rpc_server_tests {
                         state.set_new_tip(blocks[2].clone()).await?;
                     }
 
-                    for utxo_notification in alice_to_bob_utxo_notifications.into_iter() {
+                    for utxo_notification in alice_to_bob_utxo_notifications {
                         // Register the same UTXO multiple times to ensure that this does not
                         // change the balance.
                         let claim_was_new0 = bob_rpc_server

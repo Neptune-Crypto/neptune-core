@@ -425,6 +425,7 @@ impl<T> AtomicRw<T> {
 
 /// A wrapper for [RwLockReadGuard] that can optionally call a callback to
 /// notify when the lock event occurs.
+#[derive(Debug)]
 pub struct AtomicRwReadGuard<'a, T> {
     guard: RwLockReadGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
@@ -493,6 +494,7 @@ impl<T> Deref for AtomicRwReadGuard<'_, T> {
 
 /// A wrapper for [RwLockWriteGuard] that can optionally call a callback to
 /// notify when the lock event occurs.
+#[derive(Debug)]
 pub struct AtomicRwWriteGuard<'a, T> {
     guard: RwLockWriteGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
@@ -595,15 +597,16 @@ mod tests {
 
     use super::*;
 
+    /// Verify (compile-time) that AtomicRw::lock() and ::lock_mut() accept
+    /// mutable values. (FnMut)
     #[tokio::test]
-    // Verify (compile-time) that AtomicRw::lock() and ::lock_mut() accept mutable values.  (FnMut)
     async fn mutable_assignment() {
         let name = "Jim".to_string();
         let mut atomic_name = AtomicRw::from(name);
 
-        let mut new_name: String = Default::default();
+        let mut new_name = String::new();
         atomic_name.lock_mut(|n| *n = "Sally".to_string()).await;
-        atomic_name.lock_mut(|n| new_name = n.to_string()).await;
+        atomic_name.lock_mut(|n| new_name = (*n).to_string()).await;
     }
 
     #[tokio::test]

@@ -22,7 +22,7 @@ pub const NUM_TRIALS: u32 = 45;
 pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap<u64, Vec<u128>> {
     all_indices
         .iter()
-        .map(|bi| ((bi / CHUNK_SIZE as u128) as u64, *bi))
+        .map(|bi| ((bi / u128::from(CHUNK_SIZE)) as u64, *bi))
         .fold(HashMap::new(), |mut acc, (chunk_index, index)| {
             acc.entry(chunk_index).or_default().push(index);
             acc
@@ -64,13 +64,13 @@ pub fn get_batch_mutation_argument_for_removal_record(
     // input `chunk_dictionaries` slice that shows which elements
     // contain modified chunks.
     let mut mutated_chunk_dictionaries: HashSet<usize> = HashSet::new();
-    for (chunk_index, indices) in removal_record.get_chunkidx_to_indices_dict().iter() {
+    for (chunk_index, indices) in &removal_record.get_chunkidx_to_indices_dict() {
         for (i, chunk_dictionary) in chunk_dictionaries.iter_mut().enumerate() {
             match chunk_dictionary.get_mut(chunk_index) {
                 // Leaf and its MMR-membership proof exists in own MS-membership proof (in `chunk_dictionaries`)
                 Some((mmr_mp, chunk)) => {
-                    for index in indices.iter() {
-                        let relative_index = (index % CHUNK_SIZE as u128) as u32;
+                    for index in indices {
+                        let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
                         mutated_chunk_dictionaries.insert(i);
                         chunk.insert(relative_index);
                     }
@@ -103,8 +103,8 @@ pub fn get_batch_mutation_argument_for_removal_record(
                             // calculate it once.
                             if !batch_modification_hash_map.contains_key(chunk_index) {
                                 let mut target_chunk = chunk.to_owned();
-                                for index in indices.iter() {
-                                    target_chunk.insert((index % CHUNK_SIZE as u128) as u32);
+                                for index in indices {
+                                    target_chunk.insert((index % u128::from(CHUNK_SIZE)) as u32);
                                 }
 
                                 // Since all indices have been applied to the chunk in the above
@@ -167,13 +167,13 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
     // of modified chunks.
     let mut mutated_chunk_dictionaries: HashSet<usize> = HashSet::new();
 
-    for (chunk_index, indices) in removal_record.get_chunkidx_to_indices_dict().iter() {
+    for (chunk_index, indices) in &removal_record.get_chunkidx_to_indices_dict() {
         for (i, chunk_dictionary) in chunk_dictionaries.iter_mut().enumerate() {
             match chunk_dictionary.get_mut(chunk_index) {
                 // Leaf and its MMR-membership proof exists in own MS-membership proof (via `chunk_dictionaries`)
                 Some((mmr_mp, chunk)) => {
-                    for index in indices.iter() {
-                        let relative_index = (index % CHUNK_SIZE as u128) as u32;
+                    for index in indices {
+                        let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
                         mutated_chunk_dictionaries.insert(i);
                         chunk.remove_once(relative_index);
                     }

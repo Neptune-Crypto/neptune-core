@@ -78,26 +78,26 @@ impl Difficulty {
     /// (wrapping) result and the out-of-bounds limb containing the overflow, if
     /// any.
     fn safe_mul_fixed_point_rational(&self, lo: u32, hi: u32) -> (Self, u32) {
-        let mut new_difficulty = [0u32; Self::NUM_LIMBS + 1];
-        let mut carry = 0u32;
+        let mut new_difficulty = [0; Self::NUM_LIMBS + 1];
+        let mut carry = 0;
         for (old_difficulty_i, new_difficulty_i) in self
             .0
             .iter()
             .zip(new_difficulty.iter_mut().take(Self::NUM_LIMBS))
         {
-            let sum = (carry as u64) + (*old_difficulty_i as u64) * (lo as u64);
+            let sum = u64::from(carry) + u64::from(*old_difficulty_i) * u64::from(lo);
             *new_difficulty_i = sum as u32;
             carry = (sum >> 32) as u32;
         }
         new_difficulty[Self::NUM_LIMBS] = carry;
-        carry = 0u32;
+        carry = 0;
         for (old_difficulty_i, new_difficulty_i_plus_one) in
             self.0.iter().zip(new_difficulty.iter_mut().skip(1))
         {
-            let sum = (carry as u64) + (*old_difficulty_i as u64) * (hi as u64);
+            let sum = u64::from(carry) + u64::from(*old_difficulty_i) * u64::from(hi);
             let (digit, carry_bit) = new_difficulty_i_plus_one.overflowing_add(sum as u32);
             *new_difficulty_i_plus_one = digit;
-            carry = ((sum >> 32) as u32) + (carry_bit as u32);
+            carry = ((sum >> 32) as u32) + u32::from(carry_bit);
         }
 
         (
@@ -234,19 +234,19 @@ where
     type Output = ProofOfWork;
 
     fn add(self, rhs: T) -> Self::Output {
-        let mut result = [0u32; Self::NUM_LIMBS];
-        let mut carry = 0u32;
+        let mut result = [0; Self::NUM_LIMBS];
+        let mut carry = 0;
         let mut n = 0;
         for (i, (difficulty_digit, pow_digit)) in
             rhs.into_iter().zip(self.0.into_iter()).enumerate()
         {
-            let sum = (carry as u64) + (difficulty_digit as u64) + (pow_digit as u64);
+            let sum = u64::from(carry) + u64::from(difficulty_digit) + u64::from(pow_digit);
             result[i] = sum as u32;
             carry = (sum >> 32) as u32;
             n += 1;
         }
         for (self_i, result_i) in self.into_iter().zip(result.iter_mut()).skip(n) {
-            let sum = (carry as u64) + (self_i as u64);
+            let sum = u64::from(carry) + u64::from(self_i);
             *result_i = sum as u32;
             carry = (sum >> 32) as u32;
         }
@@ -405,7 +405,7 @@ pub(crate) fn difficulty_control(
     // distance to target
     let absolute_error = (delta_t.0.value() as i64) - (target_block_interval.0.value() as i64);
     let relative_error =
-        (absolute_error as i128) * ((1i128 << 32) / (target_block_interval.0.value() as i128));
+        i128::from(absolute_error) * ((1 << 32) / i128::from(target_block_interval.0.value()));
     let clamped_error = relative_error.clamp(-1 << 32, 4 << 32);
 
     // Errors smaller than -1 cannot occur because delta_t >= MINIMUM_BLOCK_TIME > 0.
@@ -424,7 +424,7 @@ pub(crate) fn difficulty_control(
         relative_error >> (32 + ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2());
     if num_advance_reductions > 0 {
         let shift_amount = ((num_advance_reductions as u128)
-            * (ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2() as u128))
+            * u128::from(ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()))
             as usize;
         old_difficulty >>= shift_amount;
     }
@@ -432,7 +432,7 @@ pub(crate) fn difficulty_control(
     // change to control signal
     // adjustment_factor = (1 + P * error)
     // const P: f64 = -1.0 / 16.0;
-    let one_plus_p_times_error = (1i128 << 32) + ((-clamped_error) >> 4);
+    let one_plus_p_times_error = (1 << 32) + ((-clamped_error) >> 4);
     debug_assert!(one_plus_p_times_error.is_positive());
 
     let lo = one_plus_p_times_error as u32;
@@ -507,9 +507,10 @@ mod test {
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {
-            if bi.iter_u32_digits().count() > Self::NUM_LIMBS {
-                panic!("BigUint too large to convert to Difficulty");
-            }
+            assert!(
+                bi.iter_u32_digits().count() <= Self::NUM_LIMBS,
+                "BigUint too large to convert to Difficulty"
+            );
             Self(
                 bi.iter_u32_digits()
                     .take(Self::NUM_LIMBS)
@@ -523,7 +524,7 @@ mod test {
         /// Convert a u64 into a difficulty.
         pub(crate) fn from_u64(value: u64) -> Self {
             let mut array = [0u32; Self::NUM_LIMBS];
-            array[0] = (value & u32::MAX as u64) as u32;
+            array[0] = (value & u64::from(u32::MAX)) as u32;
             array[1] = (value >> 32) as u32;
             Self(array)
         }
@@ -740,7 +741,7 @@ mod test {
             return Ok(());
         }
 
-        let r = (lo as u64) + ((hi as u64) << 32);
+        let r = u64::from(lo) + (u64::from(hi) << 32);
         let r_times_a_plus_b_bui: BigUint = (a_plus_b_bui.clone() * r) >> 32;
 
         let (ra, ra_overflow) = a.safe_mul_fixed_point_rational(lo, hi);
