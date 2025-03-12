@@ -800,7 +800,7 @@ impl GlobalState {
             }
         };
 
-        // if selection-tracking is enabled, store the keys in a hash map
+        // if selection-tracking is enabled, store the keys
         let selection = config
             .selection_is_tracked()
             .then(|| tx_inputs.iter())
@@ -821,11 +821,9 @@ impl GlobalState {
         // because TritonVmJobOptions::cancel_job_rx is None.
         // see how compose_task handles cancellation in mine_loop.
 
-        let maybe_transaction_details = if config.details_are_recorded() {
-            Some(transaction_details.clone())
-        } else {
-            None
-        };
+        let maybe_transaction_details = config
+            .details_are_recorded()
+            .then(|| transaction_details.clone());
 
         // 2. Create the transaction
         let proof_job_options = self.cli.proof_job_options(TritonVmJobPriority::High);
