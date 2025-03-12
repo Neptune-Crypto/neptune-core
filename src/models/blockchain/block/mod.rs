@@ -1017,10 +1017,8 @@ impl Block {
 
 #[cfg(test)]
 pub(crate) mod block_tests {
-    use std::collections::HashMap;
     use std::collections::HashSet;
 
-    use bytesize::ByteSize;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1743,86 +1741,14 @@ pub(crate) mod block_tests {
         Block::premine_distribution();
     }
 
-    fn block_size_statistics(block: &Block) -> HashMap<String, (usize, f64)> {
-        let mut dictionary = HashMap::new();
-        let total_size = block.size() * 8;
-        dictionary.insert("_total".to_string(), (total_size, 1.0));
-
-        macro_rules! insert_statistic {
-            ($field_expr:expr, $label:expr) => {{
-                let size = $field_expr.encode().len() * 8;
-                dictionary.insert(
-                    $label.to_string(),
-                    (size, (size as f64) / (total_size as f64)),
-                );
-            }};
-        }
-        insert_statistic!(block.header(), "header");
-        insert_statistic!(block.body(), "body");
-        insert_statistic!(&block.body().block_mmr_accumulator, "body / block_mmra");
-        insert_statistic!(
-            &block.body().lock_free_mmr_accumulator,
-            "body / lock_free_mmra"
-        );
-        insert_statistic!(&block.body().mutator_set_accumulator, "body / mutator_set");
-        insert_statistic!(&block.body().transaction_kernel, "body / transaction");
-        insert_statistic!(
-            &block.body().transaction_kernel.inputs,
-            "body / transaction / inputs"
-        );
-        insert_statistic!(
-            &block.body().transaction_kernel.outputs,
-            "body / transaction / outputs"
-        );
-        insert_statistic!(
-            &block.body().transaction_kernel.public_announcements,
-            "body / transaction / public_announcements"
-        );
-        insert_statistic!(block.appendix(), "appendix");
-        insert_statistic!(&block.proof, "proof");
-
-        dictionary
-    }
-
-    fn print_block_size_statistics(dictionary: HashMap<String, (usize, f64)>) {
-        let max_label_length = dictionary.keys().map(|k| k.len()).max().unwrap();
-        let byte_size_string =
-            |(abs, _rs): (usize, f64)| ByteSize::b(abs as u64).to_string_as(true);
-        let percentage_string = |(_abs, rs)| format!("{:.2}%", 100.0 * rs);
-        let max_size_string = dictionary
-            .values()
-            .copied()
-            .map(byte_size_string)
-            .map(|s| s.len())
-            .max()
-            .unwrap();
-        let max_percentage_string = dictionary
-            .values()
-            .copied()
-            .map(percentage_string)
-            .map(|p| p.len())
-            .max()
-            .unwrap();
-
-        let mut collection = dictionary.into_iter().collect_vec();
-        collection.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
-        for (k, v) in collection {
-            println!(
-                "{:<max_label_length$} {:>max_size_string$} {:>max_percentage_string$}",
-                k,
-                byte_size_string(v),
-                percentage_string(v)
-            );
-        }
-    }
-
-    /// See how big transactions can get before the block becomes invalid.
-    ///
-    /// Create block i that spends i inputs. Do this indefinitely. Report on
-    /// block size statistics.
-    #[ignore = "informational; not testing anything"]
+    /// Exhibits a strategy for creating one transaction by mergin in many small
+    /// ones that spend from one's own wallet. The difficulty you run into when
+    /// you do this naïvely is that you end up merging in transactions that
+    /// spend the same UTXOs over and over. To avoid doing this, you need to
+    /// keep track of which UTXOs were used previously. The `TxCreationConfig`
+    /// and `TxCreationArtifacts` can help.
     #[tokio::test]
-    async fn block_size_limit() {
+    async fn avoid_reselecting_same_input_utxos() {
         let mut rng = StdRng::seed_from_u64(893423984854);
         let network = Network::Main;
         let launch_date = network.launch_date();
@@ -1834,14 +1760,17 @@ pub(crate) mod block_tests {
         let job_queue = TritonVmJobQueue::dummy();
 
         let genesis_block = Block::genesis(network);
-        let genesis_block_statistics = block_size_statistics(&genesis_block);
-        print_block_size_statistics(genesis_block_statistics);
 
         let mut blocks = vec![genesis_block];
 
+        // Spend i inputs in block i, for i in {1,2}. The first expenditure and
+        // block is guaranteed to succeed. Prior to the second block, Alice owns
+        // two inputs and creates a big transaction by merging in smaller ones.
+        // She needs to ensure the two transactions she merges in do not spend
+        // the same UTXO.
         now += Timestamp::months(6);
         let mut amount = NativeCurrencyAmount::coins(1);
-        for i in 1..100 {
+        for i in 1..3 {
             now += TARGET_BLOCK_INTERVAL;
 
             if (i + 1) % 20 == 0 {
@@ -1941,11 +1870,6 @@ pub(crate) mod block_tests {
             // Actually, guessing is not necessary! What is tested in `is_valid`
             // is that the difficulty was updated correctly. Proof of work is
             // *not* tested, so the block will be valid with *any* nonce.
-
-            // report size statistics
-            println!("Mined block {i} with {i} inputs and {i} outputs:");
-            print_block_size_statistics(block_size_statistics(&block));
-            println!();
 
             let block_is_valid = block
                 .is_valid_internal(blocks.last().unwrap(), now, None, None)
