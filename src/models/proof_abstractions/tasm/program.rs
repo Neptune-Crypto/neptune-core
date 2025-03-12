@@ -1,4 +1,5 @@
 use std::panic::RefUnwindSafe;
+use std::sync::Arc;
 
 use tasm_lib::library::Library;
 use tasm_lib::prelude::Digest;
@@ -64,7 +65,7 @@ where
         &self,
         claim: Claim,
         nondeterminism: NonDeterminism,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         prove_consensus_program(
@@ -93,7 +94,7 @@ pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
-    triton_vm_job_queue: &TritonVmJobQueue,
+    triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // create a triton-vm-job-queue job for generating this proof.
@@ -569,7 +570,7 @@ pub mod test {
             program,
             claim.clone(),
             NonDeterminism::default(),
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmProofJobOptions::default(),
         )
         .await

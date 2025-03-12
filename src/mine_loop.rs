@@ -1,6 +1,7 @@
 pub(crate) mod composer_parameters;
 
 use std::cmp::max;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::bail;
@@ -28,7 +29,7 @@ use tracing::*;
 use twenty_first::math::digest::Digest;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::JobQueue;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -378,7 +379,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     proving_power: TxProvingCapability,
-    vm_job_queue: &JobQueue<TritonVmJobPriority>,
+    vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_outputs, transaction_details) =
@@ -538,7 +539,7 @@ pub(crate) async fn create_block_transaction_from(
         composer_parameters,
         timestamp,
         TxProvingCapability::SingleProof,
-        vm_job_queue,
+        vm_job_queue.clone(),
         job_options.clone(),
     )
     .await?;
@@ -565,7 +566,8 @@ pub(crate) async fn create_block_transaction_from(
         let nop =
             TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
         let nop = PrimitiveWitness::from_transaction_details(&nop);
-        let nop_proof = SingleProof::produce(&nop, vm_job_queue, job_options.clone()).await?;
+        let nop_proof =
+            SingleProof::produce(&nop, vm_job_queue.clone(), job_options.clone()).await?;
         let nop = Transaction {
             kernel: nop.kernel,
             proof: TransactionProof::SingleProof(nop_proof),
@@ -588,7 +590,7 @@ pub(crate) async fn create_block_transaction_from(
             block_transaction,
             tx_to_include,
             rng.random(),
-            vm_job_queue,
+            vm_job_queue.clone(),
             job_options.clone(),
         )
         .await
@@ -1197,11 +1199,9 @@ pub(crate) mod mine_loop_tests {
             alice_key.to_address().into(),
             false,
         );
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_from_alice = alice
             .lock_guard()
             .await
@@ -1265,7 +1265,7 @@ pub(crate) mod mine_loop_tests {
                 transaction_empty_mempool,
                 now,
                 None,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::High.into(),
             )
             .await
@@ -1307,7 +1307,7 @@ pub(crate) mod mine_loop_tests {
                 transaction_non_empty_mempool,
                 now,
                 None,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await

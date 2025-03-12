@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
@@ -227,12 +228,12 @@ impl SingleProof {
     /// This involves generating a [ProofCollection] as an intermediate step.
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         let proof_collection = ProofCollection::produce(
             primitive_witness,
-            triton_vm_job_queue,
+            triton_vm_job_queue.clone(),
             proof_job_options.clone(),
         )
         .await?;
@@ -846,7 +847,7 @@ mod test {
 
             let good_proof_collection = ProofCollection::produce(
                 &good_primitive_witness,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -865,7 +866,7 @@ mod test {
 
             let bad_proof_collection = ProofCollection::produce(
                 &bad_primitive_witness,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -896,7 +897,7 @@ mod test {
 
             let proof_collection = ProofCollection::produce(
                 &primitive_witness,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -935,7 +936,7 @@ mod test {
 
             let proof_collection = ProofCollection::produce(
                 &primitive_witness,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await

@@ -547,12 +547,10 @@ mod wallet_tests {
 
         let receiver_data_to_alice: TxOutputList =
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
-        let dummy_queue = TritonVmJobQueue::dummy();
         let bob_change_key = bob_wallet.nth_generation_spending_key_for_tests(0).into();
         let config_1 = TxCreationConfig::default()
             .recover_change_on_chain(bob_change_key)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_1 = bob
             .create_transaction(
                 receiver_data_to_alice.clone(),
@@ -789,8 +787,7 @@ mod wallet_tests {
 
         let config_2b = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_from_bob = bob
             .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
@@ -822,7 +819,7 @@ mod wallet_tests {
             .merge_with(
                 tx_from_bob.into(),
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -833,7 +830,7 @@ mod wallet_tests {
             merged_tx,
             timestamp,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -1000,11 +997,9 @@ mod wallet_tests {
         let tx_output =
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletEntropy::devnet_wallet().nth_symmetric_key_for_tests(0);
-        let dummy_queue = TritonVmJobQueue::dummy();
         let config = TxCreationConfig::default()
             .recover_change_on_chain(change_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof)
-            .use_job_queue(&dummy_queue);
+            .with_prover_capability(TxProvingCapability::SingleProof);
         let sender_tx = bob
             .lock_guard()
             .await
@@ -1016,7 +1011,7 @@ mod wallet_tests {
             .merge_with(
                 cbtx,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1026,7 +1021,7 @@ mod wallet_tests {
             tx_for_block,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await

@@ -2,6 +2,7 @@ pub mod proof_upgrader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -433,7 +434,7 @@ impl MainLoopHandler {
     /// Sends the result back through the provided channel.
     async fn update_mempool_jobs(
         update_jobs: Vec<UpdateMutatorSetDataJob>,
-        job_queue: &TritonVmJobQueue,
+        job_queue: Arc<TritonVmJobQueue>,
         transaction_update_sender: mpsc::Sender<Vec<Transaction>>,
         proof_job_options: TritonVmProofJobOptions,
     ) {
@@ -447,7 +448,7 @@ impl MainLoopHandler {
             // they block the composer from continuing.
             // TODO: Handle errors better here.
             let job_result = job
-                .upgrade(job_queue, proof_job_options.clone())
+                .upgrade(job_queue.clone(), proof_job_options.clone())
                 .await
                 .unwrap();
             result.push(job_result);
@@ -1330,7 +1331,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     upgrade_candidate
                         .handle_upgrade(
-                            &vm_job_queue,
+                            vm_job_queue,
                             tx_origin,
                             perform_ms_update_if_needed,
                             global_state_lock_clone,
@@ -1374,7 +1375,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     Self::update_mempool_jobs(
                         update_jobs,
-                        &vm_job_queue,
+                        vm_job_queue.clone(),
                         update_sender,
                         job_options,
                     )
@@ -1701,7 +1702,7 @@ impl MainLoopHandler {
                         .spawn(async move {
                         upgrade_job
                             .handle_upgrade(
-                                &vm_job_queue,
+                                vm_job_queue.clone(),
                                 TransactionOrigin::Own,
                                 true,
                                 global_state_lock_clone,
@@ -2079,7 +2080,6 @@ mod test {
 
     mod proof_upgrader {
         use super::*;
-        use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -2107,11 +2107,9 @@ mod test {
                 .timestamp
                 + Timestamp::months(7);
 
-            let dummy_queue = TritonVmJobQueue::dummy();
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(change_key.into())
-                .with_prover_capability(tx_proof_type)
-                .use_job_queue(&dummy_queue);
+                .with_prover_capability(tx_proof_type);
             let global_state = global_state_lock.lock_guard().await;
             global_state
                 .create_transaction(vec![].into(), fee, in_seven_months, config)

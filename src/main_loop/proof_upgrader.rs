@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use itertools::Itertools;
@@ -97,7 +98,7 @@ impl UpdateMutatorSetDataJob {
 
     pub(crate) async fn upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         let UpdateMutatorSetDataJob {
@@ -255,7 +256,7 @@ impl UpgradeJob {
     /// informs peers of this new transaction.
     pub(crate) async fn handle_upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         tx_origin: TransactionOrigin,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
@@ -300,7 +301,7 @@ impl UpgradeJob {
             let (upgraded, expected_utxos) = match upgrade_job
                 .clone()
                 .upgrade(
-                    triton_vm_job_queue,
+                    triton_vm_job_queue.clone(),
                     job_options,
                     &wallet_entropy,
                     block_height,
@@ -430,7 +431,7 @@ impl UpgradeJob {
     /// prover is busy.
     pub(crate) async fn upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
         own_wallet_entropy: &WalletEntropy,
         current_block_height: BlockHeight,
@@ -472,9 +473,12 @@ impl UpgradeJob {
                 })
                 .collect_vec();
             let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
-            let gobbler_proof =
-                SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())
-                    .await?;
+            let gobbler_proof = SingleProof::produce(
+                &gobbler,
+                triton_vm_job_queue.clone(),
+                proof_job_options.clone(),
+            )
+            .await?;
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
             let gobbler = Transaction {
                 kernel: gobbler.kernel,
@@ -499,7 +503,7 @@ impl UpgradeJob {
                     .prove(
                         claim,
                         nondeterminism,
-                        triton_vm_job_queue,
+                        triton_vm_job_queue.clone(),
                         proof_job_options.clone(),
                     )
                     .await?;
@@ -519,7 +523,7 @@ impl UpgradeJob {
                         .merge_with(
                             rhs,
                             gobble_shuffle_seed,
-                            triton_vm_job_queue,
+                            triton_vm_job_queue.clone(),
                             proof_job_options,
                         )
                         .await?;
@@ -552,7 +556,7 @@ impl UpgradeJob {
                     left,
                     right,
                     shuffle_seed.to_owned(),
-                    triton_vm_job_queue,
+                    triton_vm_job_queue.clone(),
                     proof_job_options.clone(),
                 )
                 .await?;
@@ -732,7 +736,7 @@ mod test {
         let mut state = state.lock_guard_mut().await;
         let change_key = state.wallet_state.next_unused_symmetric_key().await;
         let fee = NativeCurrencyAmount::from_nau(100);
-        let dummy = &TritonVmJobQueue::dummy();
+        let dummy = TritonVmJobQueue::dummy();
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key.into())
@@ -775,7 +779,7 @@ mod test {
                 UpgradeJob::from_primitive_witness(proving_capability, pw.to_owned());
             pw_to_tx_upgrade_job
                 .handle_upgrade(
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TransactionOrigin::Own,
                     true,
                     alice.clone(),
@@ -853,7 +857,7 @@ mod test {
             alice.set_new_tip(block1).await.unwrap();
             upgrade_job
                 .handle_upgrade(
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TransactionOrigin::Own,
                     true,
                     alice.clone(),
