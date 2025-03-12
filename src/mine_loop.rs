@@ -967,7 +967,6 @@ pub(crate) mod mine_loop_tests {
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::invalid_empty_block;

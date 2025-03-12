@@ -57,7 +57,6 @@ mod wallet_tests {
     use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;

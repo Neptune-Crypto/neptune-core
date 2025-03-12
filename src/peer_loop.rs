@@ -1928,7 +1928,6 @@ mod peer_loop_tests {
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::fake_valid_block_for_tests;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
