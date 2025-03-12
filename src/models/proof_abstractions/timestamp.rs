@@ -231,4 +231,43 @@ mod test {
     fn format_cannot_panic_prop(#[strategy(arb())] timestamp: Timestamp) {
         let _a = timestamp.format("%Y-%m-%d %H:%M:%S");
     }
+
+    #[test]
+    fn year_is_sane() {
+        assert_eq!(365240 * 60 * 60 * 24, Timestamp::years(1).to_millis());
+        assert_eq!(5 * 365240 * 60 * 60 * 24, Timestamp::years(5).to_millis());
+    }
+
+    #[test]
+    fn month_is_sane() {
+        assert_eq!(365240 * 60 * 60 * 24 / 12, Timestamp::months(1).to_millis());
+        assert_eq!(
+            5 * 365240 * 60 * 60 * 24 / 12,
+            Timestamp::months(5).to_millis()
+        );
+    }
+
+    #[test]
+    fn day_is_sane() {
+        assert_eq!(1000 * 60 * 60 * 24, Timestamp::days(1).to_millis());
+        assert_eq!(12 * 1000 * 60 * 60 * 24, Timestamp::days(12).to_millis());
+    }
+
+    #[test]
+    fn hour_is_sane() {
+        assert_eq!(1000 * 60 * 60, Timestamp::hours(1).to_millis());
+        assert_eq!(6 * 1000 * 60 * 60, Timestamp::hours(6).to_millis());
+    }
+
+    #[test]
+    fn minute_is_sane() {
+        assert_eq!(1000 * 60, Timestamp::minutes(1).to_millis());
+        assert_eq!(1915 * 1000 * 60, Timestamp::minutes(1915).to_millis());
+    }
+
+    #[test]
+    fn second_is_sane() {
+        assert_eq!(1000, Timestamp::seconds(1).to_millis());
+        assert_eq!(59 * 1000, Timestamp::seconds(59).to_millis());
+    }
 }
