@@ -7,7 +7,6 @@ use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
 use super::wallet::unlocked_utxo::UnlockedUtxo;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
@@ -61,9 +60,11 @@ pub(crate) struct TxCreationConfig {
     prover_capability: TxProvingCapability,
     triton_vm_job_queue: Option<Arc<TritonVmJobQueue>>,
     select_utxos: Option<DebuggableUtxoSelector>,
-    track_selection: bool,
     record_details: bool,
     proof_job_options: TritonVmProofJobOptions,
+
+    #[cfg(test)]
+    track_selection: bool,
 }
 
 impl TxCreationConfig {
@@ -119,6 +120,7 @@ impl TxCreationConfig {
     }
 
     /// When selecting UTXOs, filter them through the given closure.
+    #[cfg(test)]
     pub(crate) fn select_utxos<F>(mut self, selector: F) -> Self
     where
         F: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static,
@@ -137,6 +139,7 @@ impl TxCreationConfig {
     ///
     /// When enabled, the a hash set of [`StrongUtxoKey`]s is stored, indicating
     /// which UTXOs were selected for the transaction.
+    #[cfg(test)]
     pub(crate) fn track_selection(mut self) -> Self {
         self.track_selection = true;
         self
@@ -160,6 +163,7 @@ impl TxCreationConfig {
     }
 
     /// Determine whether to track the selection of input UTXOs.
+    #[cfg(test)]
     pub(crate) fn selection_is_tracked(&self) -> bool {
         self.track_selection
     }
@@ -186,16 +190,6 @@ impl TxCreationConfig {
     /// selection.
     pub(crate) fn utxo_selector(&self) -> Option<&Box<dyn UtxoSelector>> {
         self.select_utxos.as_ref().map(|dus| &dus.0)
-    }
-
-    pub(crate) fn proof_job_priority(&self) -> TritonVmJobPriority {
-        self.proof_job_options.job_priority
-    }
-
-    pub(crate) fn max_log2_padded_height_for_proofs(&self) -> Option<u8> {
-        self.proof_job_options
-            .job_settings
-            .max_log2_padded_height_for_proofs
     }
 
     pub(crate) fn proof_job_options(&self) -> TritonVmProofJobOptions {
