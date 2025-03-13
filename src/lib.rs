@@ -171,6 +171,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     let mempool = Mempool::new(
         cli_args.max_mempool_size,
         cli_args.max_mempool_num_tx,
+        cli_args.max_num_inputs_per_tx,
         latest_block.hash(),
     );
     let mut global_state_lock = GlobalStateLock::new(

@@ -806,15 +806,19 @@ impl MainLoopHandler {
                     return Ok(());
                 }
 
-                // Insert into mempool
-                global_state_mut
+                // Insert into mempool, if allowed.
+                if let Err(err) = global_state_mut
                     .mempool_insert(
                         pt2m_transaction.transaction.to_owned(),
                         TransactionOrigin::Foreign,
                     )
-                    .await;
+                    .await
+                {
+                    warn!("cannot add transaction into mempool: {err}");
+                    return Ok(());
+                }
 
-                // send notification to peers
+                // send notification to peers, if tx accepted by mempool.
                 let transaction_notification: TransactionNotification =
                     (&pt2m_transaction.transaction).try_into()?;
                 self.main_to_peer_broadcast_tx
@@ -1670,7 +1674,8 @@ impl MainLoopHandler {
                     .lock_guard_mut()
                     .await
                     .mempool_insert(*transaction.clone(), TransactionOrigin::Own)
-                    .await;
+                    .await
+                    .unwrap();
 
                 // Is this a transaction we can share with peers? If so, share
                 // it immediately.
@@ -2174,7 +2179,8 @@ mod test {
                 .lock_guard_mut()
                 .await
                 .mempool_insert(proof_collection_tx.clone(), TransactionOrigin::Foreign)
-                .await;
+                .await
+                .unwrap();
 
             assert!(
                 main_loop_handler
