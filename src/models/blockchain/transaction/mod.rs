@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
@@ -148,7 +150,7 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: &MutatorSetUpdate,
         old_single_proof: Proof,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
     ) -> anyhow::Result<Transaction> {
@@ -245,7 +247,7 @@ impl Transaction {
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
         assert_eq!(
@@ -422,7 +424,7 @@ mod transaction_tests {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
             let as_single_proof = SingleProof::produce(
                 &to_be_updated,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -440,7 +442,7 @@ mod transaction_tests {
                 &to_be_updated.mutator_set_accumulator,
                 &mutator_set_update,
                 original_tx.proof.into_single_proof(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
                 None,
             )

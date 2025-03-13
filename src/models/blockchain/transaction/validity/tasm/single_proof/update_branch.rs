@@ -919,7 +919,7 @@ pub(crate) mod test {
             .unwrap();
         let old_proof = SingleProof::produce(
             &old_pw,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -985,7 +985,7 @@ pub(crate) mod test {
         );
         let old_proof = SingleProof::produce(
             &primitive_witness,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
