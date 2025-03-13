@@ -159,8 +159,8 @@ impl TxCreationConfig {
 
     /// Get the closure with which to filter out unsuitable UTXOs during UTXO
     /// selection.
-    pub(crate) fn utxo_selector(&self) -> Option<&Box<dyn UtxoSelector>> {
-        self.select_utxos.as_ref().map(|dus| &dus.0)
+    pub(crate) fn utxo_selector(&self) -> Option<&dyn UtxoSelector> {
+        self.select_utxos.as_ref().map(|dus| &*dus.0)
     }
 
     pub(crate) fn proof_job_options(&self) -> TritonVmProofJobOptions {
