@@ -773,16 +773,14 @@ impl GlobalState {
             .sum();
 
         // Add change output, if required to balance transaction
-        let nonzero_change = total_cost < total_unlocked;
-        let maybe_change_output = if nonzero_change {
+        let change_amount_is_nonzero = total_cost < total_unlocked;
+        let maybe_change_output = if change_amount_is_nonzero {
             let change_amount = total_unlocked.checked_sub(&total_cost).unwrap();
             let change_output = match config.change_policy() {
                 ChangePolicy::None => bail!("Change policy not specified"),
-                ChangePolicy::Recover(change_key_and_medium) => self.create_change_output(
-                    change_amount,
-                    change_key_and_medium.key,
-                    change_key_and_medium.medium,
-                )?,
+                ChangePolicy::Recover { key, medium } => {
+                    self.create_change_output(change_amount, *key, medium)?
+                }
                 #[cfg(test)]
                 ChangePolicy::Burn => TxOutput::no_notification(
                     super::blockchain::transaction::utxo::Utxo::new_native_currency(

@@ -1803,14 +1803,14 @@ mod tests {
 
             // Clippy is wrong here. You can *not* eliminate the binding.
             #[allow(clippy::let_and_return)]
-            let x = bob
+            let transaction = bob
                 .lock_guard()
                 .await
                 .create_transaction(vec![].into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
                 .transaction;
-            x
+            transaction
         }
 
         #[traced_test]

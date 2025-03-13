@@ -56,16 +56,6 @@ impl LockScript {
         }
     }
 
-    /// A lock script that is guaranteed to fail
-    #[cfg(test)]
-    pub(crate) fn burn() -> Self {
-        Self {
-            program: Program::new(&triton_asm! {
-                push 0 assert error_id {Self::BURN_ERROR}
-            }),
-        }
-    }
-
     pub fn hash(&self) -> Digest {
         self.program.hash()
     }
@@ -194,6 +184,18 @@ mod test {
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+    impl LockScript {
+        /// A lock script that is guaranteed to fail
+        #[cfg(test)]
+        pub(crate) fn burn() -> Self {
+            Self {
+                program: triton_program! {
+                    push 0 assert error_id {Self::BURN_ERROR}
+                },
+            }
+        }
+    }
 
     #[proptest]
     fn lock_script_halts_gracefully_prop(

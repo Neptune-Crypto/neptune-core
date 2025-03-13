@@ -2011,12 +2011,12 @@ impl NeptuneRPCServer {
                 return Err(e.into());
             }
         };
+        drop(state);
         let mut transaction = transaction_creation_artifacts.transaction;
         let transaction_details = transaction_creation_artifacts
             .details
             .expect("details should be some when configured to track details");
         let maybe_change_output = transaction_creation_artifacts.change_output;
-        drop(state);
 
         if let Some(invalid_proof) = mocked_invalid_proof {
             transaction.proof = invalid_proof;

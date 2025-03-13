@@ -1670,8 +1670,8 @@ impl WalletState {
             .await;
 
         // Start selecting inputs.
-        // If there aren't enough inputs, we will discover after the next loop.
-        // We handle this error gracefully where we catch it, if we catch it.
+        // If there aren't enough inputs, we will discover after the next loop,
+        // and handle the corresponding error gracefully where we catch it.
         let mut input_funds = vec![];
         let mut total_available_amount_ignoring_mempool = NativeCurrencyAmount::zero();
         let mut allocated_amount = NativeCurrencyAmount::zero();
@@ -1729,12 +1729,9 @@ impl WalletState {
         if allocated_amount < total_spend {
             bail!(
                 "UTXO allocation failed.\n\
-                Requested: {}\n\
-                Avaialble, ignoring mempool: {}\n\
-                Allocated: {}",
-                total_spend,
-                total_available_amount_ignoring_mempool,
-                allocated_amount
+                Requested: {total_spend}\n\
+                Available, ignoring mempool: {total_available_amount_ignoring_mempool}\n\
+                Allocated: {allocated_amount}"
             )
         }
 

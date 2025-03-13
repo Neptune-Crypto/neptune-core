@@ -7,12 +7,6 @@ use super::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
-#[derive(Debug, Clone)]
-pub(crate) struct ChangeKeyAndMedium {
-    pub(crate) key: SpendingKey,
-    pub(crate) medium: UtxoNotificationMedium,
-}
-
 /// When the selected inputs represent more coins than the outputs (with fee)
 /// where does this change go?
 #[derive(Debug, Clone, Default)]
@@ -23,7 +17,10 @@ pub(crate) enum ChangePolicy {
 
     /// If the change is nonzero, create a new UTXO spendable by this key and
     /// via this notification medium. Otherwise, do not create a change output.
-    Recover(Box<ChangeKeyAndMedium>),
+    Recover {
+        key: Box<SpendingKey>,
+        medium: UtxoNotificationMedium,
+    },
 
     /// If the change is nonzero, ignore it.
     #[cfg(test)]
@@ -48,35 +45,10 @@ impl TxCreationConfig {
         change_key: SpendingKey,
         notification_medium: UtxoNotificationMedium,
     ) -> Self {
-        let change_key_and_medium = ChangeKeyAndMedium {
-            key: change_key,
+        self.change_policy = ChangePolicy::Recover {
+            key: Box::new(change_key),
             medium: notification_medium,
         };
-        self.change_policy = ChangePolicy::Recover(Box::new(change_key_and_medium));
-        self
-    }
-
-    /// Enable change-recovery with the given key, and set the medium to
-    /// `OnChain`.
-    #[cfg(test)]
-    pub(crate) fn recover_change_on_chain(self, change_key: SpendingKey) -> Self {
-        self.recover_change(change_key, UtxoNotificationMedium::OnChain)
-    }
-
-    /// Enable change-recovery with the given key, and set the medium to
-    /// `OffChain`.
-    #[cfg(test)]
-    pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
-        self.recover_change(change_key, UtxoNotificationMedium::OffChain)
-    }
-
-    /// Burn the change.
-    ///
-    /// Only use this if you are certain you know what you are doing. Will
-    /// result in loss-of-funds if the transaction is not balanced.
-    #[cfg(test)]
-    pub(crate) fn burn_change(mut self) -> Self {
-        self.change_policy = ChangePolicy::Burn;
         self
     }
 
@@ -127,7 +99,8 @@ impl TxCreationConfig {
         self.prover_capability
     }
 
-    /// Get the job queue, if set.
+    /// Get (a smart pointer to) the job queue, or create a new job queue and
+    /// return a pointer to that.
     pub(crate) fn job_queue(&self) -> Arc<TritonVmJobQueue> {
         self.triton_vm_job_queue
             .as_ref()
@@ -137,5 +110,36 @@ impl TxCreationConfig {
 
     pub(crate) fn proof_job_options(&self) -> TritonVmProofJobOptions {
         self.proof_job_options.clone()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod text {
+    use super::*;
+
+    impl TxCreationConfig {
+        /// Enable change-recovery with the given key, and set the medium to
+        /// `OnChain`.
+        #[cfg(test)]
+        pub(crate) fn recover_change_on_chain(self, change_key: SpendingKey) -> Self {
+            self.recover_change(change_key, UtxoNotificationMedium::OnChain)
+        }
+
+        /// Enable change-recovery with the given key, and set the medium to
+        /// `OffChain`.
+        #[cfg(test)]
+        pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
+            self.recover_change(change_key, UtxoNotificationMedium::OffChain)
+        }
+
+        /// Burn the change.
+        ///
+        /// Only use this if you are certain you know what you are doing. Will
+        /// result in loss-of-funds if the transaction is not balanced.
+        #[cfg(test)]
+        pub(crate) fn burn_change(mut self) -> Self {
+            self.change_policy = ChangePolicy::Burn;
+            self
+        }
     }
 }

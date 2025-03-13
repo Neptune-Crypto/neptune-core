@@ -1748,8 +1748,6 @@ pub(crate) mod block_tests {
     async fn avoid_reselecting_same_input_utxos() {
         let mut rng = StdRng::seed_from_u64(893423984854);
         let network = Network::Main;
-        let launch_date = network.launch_date();
-        let mut now = launch_date;
         let devnet_wallet = WalletEntropy::devnet_wallet();
         let mut alice =
             mock_genesis_global_state(network, 0, devnet_wallet, cli_args::Args::default()).await;
@@ -1765,14 +1763,10 @@ pub(crate) mod block_tests {
         // two inputs and creates a big transaction by merging in smaller ones.
         // She needs to ensure the two transactions she merges in do not spend
         // the same UTXO.
-        now += Timestamp::months(6);
-        let mut amount = NativeCurrencyAmount::coins(1);
+        let launch_date = network.launch_date();
+        let mut now = launch_date + Timestamp::months(6);
         for i in 1..3 {
             now += TARGET_BLOCK_INTERVAL;
-
-            if (i + 1) % 20 == 0 {
-                amount = amount.lossy_f64_fraction_mul(0.5);
-            }
 
             // create coinbase transaction
             let (mut transaction, _) = make_coinbase_transaction_from_state(
@@ -1856,10 +1850,7 @@ pub(crate) mod block_tests {
             let block_is_valid = block
                 .is_valid_internal(blocks.last().unwrap(), now, None, None)
                 .await;
-            println!(
-                "block is valid? {:?}",
-                block_is_valid.map(|_| "yes".to_string())
-            );
+            println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));
             println!();
             assert!(block_is_valid.is_ok());
 
