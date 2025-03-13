@@ -620,10 +620,11 @@ impl GlobalState {
         Ok(change_output)
     }
 
-    /// generates TxOutputList from a list of address:amount pairs (outputs).
+    /// generates `TxOutputList` from a list of address:amount pairs
+    /// (outputs).
     ///
-    /// This is a helper method for generating the `TxOutputList` that
-    /// is required by [Self::create_transaction()].
+    /// This is a helper method for generating the `TxOutputList` that is
+    /// required by `create_transaction`.
     ///
     /// Each output may use either `OnChain` or `OffChain` notifications.
     ///
@@ -672,8 +673,8 @@ impl GlobalState {
     ///   change = sum(inputs) - sum(outputs) - fee.
     ///
     /// The `tx_outputs` parameter should normally be generated with
-    /// [Self::generate_tx_outputs()] which determines which outputs should be
-    /// `OnChain` or `OffChain`.
+    /// [`generate_tx_outputs`](Self::generate_tx_outputs) which determines
+    /// which outputs should be `OnChain` or `OffChain`.
     ///
     /// After this call returns, it is the caller's responsibility to inform the
     /// wallet of any produced [`ExpectedUtxo`]s, ie `OffChain` secret
@@ -686,10 +687,10 @@ impl GlobalState {
     /// The change_key should normally be a [SpendingKey::Symmetric] in
     /// order to save blockchain space compared to a regular address.
     ///
-    /// Note that [`create_transaction`](Self::create_transaction_with_config)
-    /// does not modify any state and does not require acquiring write lock.
-    /// This is important because internally it calls prove() which is a very
-    /// lengthy operation.
+    /// Note that [`create_transaction`](Self::create_transaction) does not
+    /// modify any state and does not require acquiring write lock. This note is
+    /// important because internally it calls prove() which is a very lengthy
+    /// operation.
     ///
     /// Example:
     ///

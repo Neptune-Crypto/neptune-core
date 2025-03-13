@@ -92,7 +92,8 @@ impl TxCreationConfig {
         self
     }
 
-    /// Produce a [`TransactionDetails`] object along with the other artifacts.
+    /// Produce a [`TransactionDetails`](super::TransactionDetails) object along
+    /// with the other artifacts.
     pub(crate) fn record_details(mut self) -> Self {
         self.record_details = true;
         self
@@ -110,7 +111,8 @@ impl TxCreationConfig {
         self
     }
 
-    /// Determine whether a [`TransactionDetails`] object should be produced.
+    /// Determine whether a [`TransactionDetails`](super::TransactionDetails)
+    /// object should be produced.
     pub(crate) fn details_are_recorded(&self) -> bool {
         self.record_details
     }
