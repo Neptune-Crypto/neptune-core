@@ -1656,17 +1656,13 @@ impl WalletState {
     /// The argument `utxo_filter` is an optional predicate which, if set,
     /// filters for UTXOs where the predicate evaluates to true. If not set,
     /// all UTXOs are allowed.
-    pub(crate) async fn allocate_sufficient_input_funds<F>(
+    pub(crate) async fn allocate_sufficient_input_funds(
         &self,
         total_spend: NativeCurrencyAmount,
         tip_digest: Digest,
         mutator_set_accumulator: &MutatorSetAccumulator,
         timestamp: Timestamp,
-        utxo_filter: Option<F>,
-    ) -> Result<Vec<UnlockedUtxo>>
-    where
-        F: Fn(&UnlockedUtxo) -> bool,
-    {
+    ) -> Result<Vec<UnlockedUtxo>> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status = self
@@ -1677,8 +1673,7 @@ impl WalletState {
         // If there aren't enough inputs, we will discover after the next loop.
         // We handle this error gracefully where we catch it, if we catch it.
         let mut input_funds = vec![];
-        let mut total_available_amount_unfiltered = NativeCurrencyAmount::zero();
-        let mut total_available_amount_filtered_ignoring_mempool = NativeCurrencyAmount::zero();
+        let mut total_available_amount_ignoring_mempool = NativeCurrencyAmount::zero();
         let mut allocated_amount = NativeCurrencyAmount::zero();
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .mempool_spent_utxos
@@ -1716,17 +1711,9 @@ impl WalletState {
                 membership_proof.clone(),
             );
 
-            // Don't use inputs that the caller wants to exclude
-            total_available_amount_unfiltered = total_available_amount_unfiltered + utxo_amount;
-            if let Some(filter) = &utxo_filter {
-                if !filter(&unlocked_utxo) {
-                    continue;
-                }
-            }
-
             // Don't use inputs that are already spent by txs in mempool.
-            total_available_amount_filtered_ignoring_mempool =
-                total_available_amount_filtered_ignoring_mempool + utxo_amount;
+            total_available_amount_ignoring_mempool =
+                total_available_amount_ignoring_mempool + utxo_amount;
             let absolute_index_set =
                 membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
             if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
@@ -1743,12 +1730,10 @@ impl WalletState {
             bail!(
                 "UTXO allocation failed.\n\
                 Requested: {}\n\
-                Available, unfiltered: {}\n\
-                Avaialble, filtered but ignoring mempool: {}\n\
+                Avaialble, ignoring mempool: {}\n\
                 Allocated: {}",
                 total_spend,
-                total_available_amount_unfiltered,
-                total_available_amount_filtered_ignoring_mempool,
+                total_available_amount_ignoring_mempool,
                 allocated_amount
             )
         }
@@ -1831,30 +1816,6 @@ pub(crate) mod tests {
         ) -> Self {
             let configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
             Self::new(configuration, wallet_entropy).await
-        }
-
-        /// Convenience wrapper around [`Self::allocate_sufficient_input_funds`]
-        /// that supplies the default filte predicate, which is the constant `true`
-        /// function.
-        //
-        // It would be cleaner to call the one interface with `None`. However, rust
-        // is (at time of writing) not smart enough to infer the type of `None` in
-        // that context, resulting in syntactic vomit.
-        pub(crate) async fn allocate_sufficient_input_funds_nofilter(
-            &self,
-            total_spend: NativeCurrencyAmount,
-            tip_digest: Digest,
-            mutator_set_accumulator: &MutatorSetAccumulator,
-            timestamp: Timestamp,
-        ) -> Result<Vec<UnlockedUtxo>> {
-            self.allocate_sufficient_input_funds(
-                total_spend,
-                tip_digest,
-                mutator_set_accumulator,
-                timestamp,
-                Some(|_utxo: &UnlockedUtxo| true),
-            )
-            .await
         }
     }
 
@@ -1948,7 +1909,7 @@ pub(crate) mod tests {
         assert!(
             alice
                 .wallet_state
-                .allocate_sufficient_input_funds_nofilter(
+                .allocate_sufficient_input_funds(
                     one_coin,
                     genesis_digest,
                     &mutator_set_accumulator_after_genesis,
@@ -1961,7 +1922,7 @@ pub(crate) mod tests {
         assert!(
             alice
                 .wallet_state
-                .allocate_sufficient_input_funds_nofilter(
+                .allocate_sufficient_input_funds(
                     one_coin,
                     genesis_digest,
                     &mutator_set_accumulator_after_genesis,
@@ -1996,7 +1957,7 @@ pub(crate) mod tests {
 
         let input_utxos = alice
             .wallet_state
-            .allocate_sufficient_input_funds_nofilter(
+            .allocate_sufficient_input_funds(
                 one_coin,
                 block1.hash(),
                 &block1.mutator_set_accumulator_after(),

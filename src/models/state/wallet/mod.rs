@@ -306,7 +306,7 @@ mod wallet_tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds_nofilter(amount, tip_digest, &ms_acc, now)
+                .allocate_sufficient_input_funds(amount, tip_digest, &ms_acc, now)
                 .await
         };
         let num_utxos_in_allocation = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
@@ -408,7 +408,7 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .allocate_sufficient_input_funds_nofilter(
+            .allocate_sufficient_input_funds(
                 liquid_mining_reward.scalar_mul(2),
                 next_block.hash(),
                 &next_block.mutator_set_accumulator_after(),

@@ -1,34 +1,11 @@
 use std::fmt::Debug;
-use std::fmt::Formatter;
-use std::fmt::Result;
 use std::sync::Arc;
 
 use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
-use super::wallet::unlocked_utxo::UnlockedUtxo;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-
-/// Custom trait capturing the closure for selecting UTXOs.
-pub(crate) trait UtxoSelector: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static {}
-impl<T> UtxoSelector for T where T: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static {}
-
-/// Wrapper around the closure type for selecting UTXOs. Purpose: allow
-/// `derive(Debug)` and `derive(Clone)` on structs that have this closure as a
-/// field. (Note that these derive macros don't work for raw closure types.)
-struct DebuggableUtxoSelector(Box<dyn UtxoSelector>);
-impl Debug for DebuggableUtxoSelector {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        write!(f, "DebuggableUtxoSelector")
-    }
-}
-
-impl Clone for DebuggableUtxoSelector {
-    fn clone(&self) -> Self {
-        panic!("Cloning not supported for DebuggableUtxoSelector");
-    }
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeKeyAndMedium {
@@ -59,7 +36,6 @@ pub(crate) struct TxCreationConfig {
     change_policy: ChangePolicy,
     prover_capability: TxProvingCapability,
     triton_vm_job_queue: Option<Arc<TritonVmJobQueue>>,
-    select_utxos: Option<DebuggableUtxoSelector>,
     record_details: bool,
     proof_job_options: TritonVmProofJobOptions,
 }
@@ -155,12 +131,6 @@ impl TxCreationConfig {
             .as_ref()
             .cloned()
             .unwrap_or_else(|| Arc::new(TritonVmJobQueue::start()))
-    }
-
-    /// Get the closure with which to filter out unsuitable UTXOs during UTXO
-    /// selection.
-    pub(crate) fn utxo_selector(&self) -> Option<&dyn UtxoSelector> {
-        self.select_utxos.as_ref().map(|dus| &*dus.0)
     }
 
     pub(crate) fn proof_job_options(&self) -> TritonVmProofJobOptions {

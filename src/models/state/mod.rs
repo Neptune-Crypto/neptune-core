@@ -763,7 +763,6 @@ impl GlobalState {
                 tip_digest,
                 &tip_mutator_set_accumulator,
                 timestamp,
-                config.utxo_selector(),
             )
             .await?;
 
