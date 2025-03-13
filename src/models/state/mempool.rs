@@ -1979,4 +1979,270 @@ mod tests {
             ));
         }
     }
+
+    #[cfg(test)]
+    mod restrict_num_inputs {
+        use proptest::collection::vec;
+        use proptest::prop_assert;
+        use proptest::prop_assume;
+        use tasm_lib::triton_vm::prelude::BFieldCodec;
+        use test_strategy::proptest;
+
+        use super::*;
+        use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+        use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+
+        #[test]
+        fn cannot_insert_tx_with_too_many_inputs() {
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let max_inputs_per_tx = 5;
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                None,
+                max_inputs_per_tx,
+                genesis_block.hash(),
+            );
+
+            let fee_density = NativeCurrencyAmount::zero();
+            for i in 0..=max_inputs_per_tx {
+                let tx = tx_with_n_inputs(i, fee_density);
+                assert!(mempool.insert(tx, TransactionOrigin::Foreign).is_ok());
+            }
+
+            assert_eq!(max_inputs_per_tx + 1, mempool.len());
+            assert!(mempool
+                .insert(
+                    tx_with_n_inputs(max_inputs_per_tx + 1, fee_density),
+                    TransactionOrigin::Foreign
+                )
+                .is_err());
+            assert_eq!(max_inputs_per_tx + 1, mempool.len());
+        }
+
+        #[test]
+        fn max_num_inputs_respected_when_returning_most_valuable_tx_pair_unit() {
+            let tx_a = tx_with_n_inputs(3, NativeCurrencyAmount::from_nau(500));
+            let tx_b = tx_with_n_inputs(3, NativeCurrencyAmount::from_nau(100));
+            let tx_c = tx_with_n_inputs(2, NativeCurrencyAmount::zero());
+            let mut mempool = mempool_with_specific_transactions(
+                5,
+                vec![tx_a.clone(), tx_b.clone(), tx_c.clone()],
+            );
+
+            // Transaction pair (tx_a, tx_b) is the most valuable for merging.
+            // But combined their input count is too big for this mempool. So
+            // the method to return most valuable tx-pair must return the pair
+            // (tx_a, tx_c).
+            let returned_pair_max_5 = mempool.most_dense_single_proof_pair().unwrap().0;
+            let returned_pair_max_5 = returned_pair_max_5
+                .iter()
+                .map(|(tx_kernel, _proof)| tx_kernel.txid());
+            assert!(returned_pair_max_5.clone().contains(&tx_a.kernel.txid()));
+            assert!(returned_pair_max_5.clone().contains(&tx_c.kernel.txid()));
+
+            // However, if the mempool has a policy of max six inputs, then the
+            // (tx_a, tx_b) pair must be returned.
+            mempool.max_num_inputs_per_transaction = 6;
+            let returned_pair_max_6 = mempool.most_dense_single_proof_pair().unwrap().0;
+            let returned_pair_max_6 = returned_pair_max_6
+                .iter()
+                .map(|(tx_kernel, _proof)| tx_kernel.txid());
+            assert!(returned_pair_max_6.clone().contains(&tx_a.kernel.txid()));
+            assert!(returned_pair_max_6.clone().contains(&tx_b.kernel.txid()));
+
+            // If the mempool has a policy of max three or four inputs, no pair
+            // should be returned.
+            for input_cap in [3, 4] {
+                mempool.max_num_inputs_per_transaction = input_cap;
+                assert!(mempool.most_dense_single_proof_pair().is_none());
+            }
+
+            // We don't test lower numbers input caps, as the mempool would then
+            // contain transactions with more inputs than its input limit, which
+            // is not allowed.
+        }
+
+        #[test]
+        fn most_dense_transaction_pair_does_not_include_most_dense_transaction() {
+            let tx_a = tx_with_n_inputs(4, NativeCurrencyAmount::from_nau(400));
+            let tx_b = tx_with_n_inputs(3, NativeCurrencyAmount::from_nau(100));
+            let tx_c = tx_with_n_inputs(2, NativeCurrencyAmount::zero());
+            let mempool = mempool_with_specific_transactions(
+                5,
+                vec![tx_a.clone(), tx_b.clone(), tx_c.clone()],
+            );
+            let returned_pair_max_5 = mempool.most_dense_single_proof_pair().unwrap().0;
+            let returned_pair_max_5 = returned_pair_max_5
+                .iter()
+                .map(|(tx_kernel, _proof)| tx_kernel.txid());
+            assert!(returned_pair_max_5.clone().contains(&tx_b.kernel.txid()));
+            assert!(returned_pair_max_5.clone().contains(&tx_c.kernel.txid()));
+        }
+
+        #[proptest]
+        fn max_num_inputs_respected_when_returning_most_valuable_tx_pair_prop(
+            #[strategy(2usize..10)] _num_transactions: usize,
+            #[strategy(10usize..40)] max_num_inputs: usize,
+            #[strategy(vec(0usize..=#max_num_inputs, #_num_transactions))] num_inputs: Vec<usize>,
+            #[strategy(vec(0u32..=1_000, #_num_transactions))] fee_densities: Vec<u32>,
+        ) {
+            let mempool = mempool_with_transactions(max_num_inputs, num_inputs, fee_densities);
+            let returned_pair = mempool.most_dense_single_proof_pair();
+
+            // Only continue if some pair was returned. As `None` is also a
+            // possibility.
+            prop_assume!(returned_pair.is_some());
+            let [(txk0, _), (txk1, _)] = returned_pair.unwrap().0;
+            let combined_num_inputs = txk0.inputs.len() + txk1.inputs.len();
+            prop_assert!(max_num_inputs >= combined_num_inputs);
+        }
+
+        #[test]
+        fn max_num_inputs_respected_when_returning_transactions_for_block_unit() {
+            let tx_a = tx_with_n_inputs(3, NativeCurrencyAmount::from_nau(200));
+            let tx_b = tx_with_n_inputs(3, NativeCurrencyAmount::from_nau(100));
+            let tx_c = tx_with_n_inputs(2, NativeCurrencyAmount::zero());
+            let mut mempool = mempool_with_specific_transactions(
+                5,
+                vec![tx_a.clone(), tx_b.clone(), tx_c.clone()],
+            );
+
+            let max_size = 1_000_000;
+            let only_single_proofs = true;
+            let max_num_transactions = None;
+            let txs_for_block_max_5_inputs = mempool.get_transactions_for_block(
+                max_size,
+                max_num_transactions,
+                only_single_proofs,
+            );
+            assert_eq!(2, txs_for_block_max_5_inputs.len());
+            assert!(txs_for_block_max_5_inputs.contains(&tx_a));
+            assert!(txs_for_block_max_5_inputs.contains(&tx_c));
+
+            mempool.max_num_inputs_per_transaction = 6;
+            let txs_for_block_max_6_inputs = mempool.get_transactions_for_block(
+                max_size,
+                max_num_transactions,
+                only_single_proofs,
+            );
+            assert_eq!(2, txs_for_block_max_6_inputs.len());
+            assert!(txs_for_block_max_6_inputs.contains(&tx_a));
+            assert!(txs_for_block_max_6_inputs.contains(&tx_b));
+
+            mempool.max_num_inputs_per_transaction = usize::MAX;
+            let txs_for_block_inf_inputs = mempool.get_transactions_for_block(
+                max_size,
+                max_num_transactions,
+                only_single_proofs,
+            );
+            assert_eq!(3, txs_for_block_inf_inputs.len());
+            assert!(txs_for_block_inf_inputs.contains(&tx_a));
+            assert!(txs_for_block_inf_inputs.contains(&tx_b));
+            assert!(txs_for_block_inf_inputs.contains(&tx_c));
+
+            for input_cap in [3, 4] {
+                mempool.max_num_inputs_per_transaction = input_cap;
+                let txs_for_block_max_3_inputs = mempool.get_transactions_for_block(
+                    max_size,
+                    max_num_transactions,
+                    only_single_proofs,
+                );
+                assert_eq!(1, txs_for_block_max_3_inputs.len());
+                assert!(txs_for_block_max_3_inputs.contains(&tx_a));
+            }
+
+            // We don't test lower numbers input caps, as the mempool would then
+            // contain transactions higher than its input limit, which is not
+            // allowed.
+        }
+
+        #[proptest]
+        fn max_num_inputs_respected_when_returning_transactions_for_block_prop(
+            #[strategy(2usize..10)] _num_transactions: usize,
+            #[strategy(10usize..40)] max_num_inputs: usize,
+            #[strategy(vec(0usize..=#max_num_inputs, #_num_transactions))] num_inputs: Vec<usize>,
+            #[strategy(vec(0u32..=1_000, #_num_transactions))] fee_densities: Vec<u32>,
+        ) {
+            let mempool = mempool_with_transactions(max_num_inputs, num_inputs, fee_densities);
+            let max_size = 100_000_000;
+            let only_return_single_proofs = true;
+            let max_num_transactions = None;
+            let transactions_for_block = mempool.get_transactions_for_block(
+                max_size,
+                max_num_transactions,
+                only_return_single_proofs,
+            );
+            let total_num_inputs: usize = transactions_for_block
+                .iter()
+                .map(|x| x.kernel.inputs.len())
+                .sum();
+            prop_assert!(max_num_inputs >= total_num_inputs);
+        }
+
+        /// Return a mempool defined by a specific list of transactions and a
+        /// maximum number of inputs.
+        fn mempool_with_specific_transactions(
+            max_num_inputs: usize,
+            transactions: Vec<Transaction>,
+        ) -> Mempool {
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mut mempool =
+                Mempool::new(ByteSize::gb(1), None, max_num_inputs, genesis_block.hash());
+
+            for tx in transactions {
+                mempool.insert(tx, TransactionOrigin::Foreign).unwrap();
+            }
+
+            mempool
+        }
+
+        /// Return a mempool defined by some parameters.
+        fn mempool_with_transactions(
+            max_num_inputs: usize,
+            num_inputs: Vec<usize>,
+            fee_densities: Vec<u32>,
+        ) -> Mempool {
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mut mempool =
+                Mempool::new(ByteSize::gb(1), None, max_num_inputs, genesis_block.hash());
+
+            let fee_densities = fee_densities
+                .into_iter()
+                .map(|x| NativeCurrencyAmount::one().scalar_mul(x));
+            let transactions = num_inputs
+                .into_iter()
+                .zip(fee_densities)
+                .map(|(num_inputs, fee_density)| tx_with_n_inputs(num_inputs, fee_density));
+            for tx in transactions {
+                mempool.insert(tx, TransactionOrigin::Foreign).unwrap();
+            }
+
+            mempool
+        }
+
+        /// Return an invalid SingleProof-backed transaction with `n` inputs.
+        fn tx_with_n_inputs(n: usize, fee_density: NativeCurrencyAmount) -> Transaction {
+            let mut rng = rand::rng();
+            let num_outputs = 10;
+            let num_public_announcements = 10;
+            let kernel = pseudorandom_transaction_kernel(
+                rng.random(),
+                n,
+                num_outputs,
+                num_public_announcements,
+            );
+            let kernel_size: u32 = kernel.encode().len().try_into().unwrap();
+            let total_fee = fee_density.scalar_mul(kernel_size);
+            let kernel = TransactionKernelModifier::default()
+                .fee(total_fee)
+                .modify(kernel);
+            Transaction {
+                kernel,
+                proof: TransactionProof::invalid(),
+            }
+        }
+    }
 }
