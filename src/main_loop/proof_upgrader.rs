@@ -742,13 +742,11 @@ mod test {
             .recover_change_off_chain(change_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(dummy);
-        let tx = state
+        state
             .create_transaction(tx_outputs, fee, timestamp, config)
             .await
             .unwrap()
-            .transaction;
-
-        tx
+            .transaction
     }
 
     #[traced_test]
