@@ -67,13 +67,29 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-/// Maximum block size in number of `BFieldElement`.
+/// Block height for 1st hardfork that increases block size limit to allow for
+/// more inputs per transaction.
+pub(crate) const BLOCK_HEIGHT_HF_1: BlockHeight = BlockHeight::new(BFieldElement::new(6_000));
+
+/// Old maximum block size in number of `BFieldElement`s.
+pub(crate) const MAX_BLOCK_SIZE_BEFORE_HF_1: usize = 250_000;
+
+/// New maximum block size in number of `BFieldElement`s.
 ///
-/// This number limits the number of outputs in a block's transaction to around
-/// 25000. This limit ensures that it remains feasible to run an archival node
-/// even in the event of denial-of-service attack, where the attacker creates
-/// blocks with many outputs.
-pub(crate) const MAX_BLOCK_SIZE: usize = 250_000;
+/// This size is 8MB which should keep it feasible to run archival nodes for
+/// many years without requiring excessive disk space. With an SWBF MMR of
+/// height 20, this limit allows for 150-200 inputs per block.
+pub(crate) const MAX_BLOCK_SIZE_AFTER_HF_1: usize = 1_000_000;
+
+/// With removal records only represented by their absolute index set, the block
+/// size limit of 1.000.000 `BFieldElement`s allows for a "balanced" block
+/// (equal number of inputs and outputs, no public announcements) of ~10.000
+/// input and outputs. To prevent an attacker from making it costly to run an
+/// archival node, the number of outputs is restricted. For simplicity though
+/// this limit is enforced for inputs, outputs, and public announcements. This
+/// restriction on the number of public announcements also makes it feasible for
+/// wallets to scan through all.
+const MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
 
 /// Duration of timelock for half of all mining rewards.
 ///
@@ -784,7 +800,11 @@ impl Block {
         }
 
         // 1.e)
-        if self.size() > MAX_BLOCK_SIZE {
+        if self.header().height < BLOCK_HEIGHT_HF_1 && self.size() > MAX_BLOCK_SIZE_BEFORE_HF_1 {
+            return Err(BlockValidationError::MaxSize);
+        }
+
+        if self.header().height >= BLOCK_HEIGHT_HF_1 && self.size() > MAX_BLOCK_SIZE_AFTER_HF_1 {
             return Err(BlockValidationError::MaxSize);
         }
 
@@ -853,6 +873,29 @@ impl Block {
         let fee = self.kernel.body.transaction_kernel.fee;
         if fee.is_negative() {
             return Err(BlockValidationError::NegativeFee);
+        }
+
+        if self.header().height >= BLOCK_HEIGHT_HF_1 {
+            // 2.i)
+            if self.body().transaction_kernel.inputs.len()
+                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
+            {
+                return Err(BlockValidationError::TooManyInputs);
+            }
+
+            // 2.j)
+            if self.body().transaction_kernel.outputs.len()
+                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
+            {
+                return Err(BlockValidationError::TooManyOutputs);
+            }
+
+            // 2.k)
+            if self.body().transaction_kernel.public_announcements.len()
+                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
+            {
+                return Err(BlockValidationError::TooManyPublicAnnouncements);
+            }
         }
 
         Ok(())
