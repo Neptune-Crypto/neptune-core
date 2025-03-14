@@ -297,6 +297,7 @@ impl UpgradeJob {
             };
 
             // No locks may be held here!
+            let offchain_notifications = global_state_lock.cli().offchain_fee_notifications;
             let (upgraded, expected_utxos) = match upgrade_job
                 .clone()
                 .upgrade(
@@ -304,6 +305,7 @@ impl UpgradeJob {
                     job_options,
                     &wallet_entropy,
                     block_height,
+                    offchain_notifications,
                 )
                 .await
             {
@@ -434,6 +436,7 @@ impl UpgradeJob {
         proof_job_options: TritonVmProofJobOptions,
         own_wallet_entropy: &WalletEntropy,
         current_block_height: BlockHeight,
+        offchain_notifications: bool,
     ) -> anyhow::Result<(Transaction, Vec<ExpectedUtxo>)> {
         let gobbling_fee = self.gobbling_fee();
         let mutator_set = self.mutator_set();
@@ -447,17 +450,19 @@ impl UpgradeJob {
             let gobble_receiver = gobble_receiver.to_address().expect(
                 "gobble receiver should have a corresponding address because it is a symmetric key",
             );
+            let receiver_digest = gobble_receiver.privacy_digest();
+            let fee_notification_method = if offchain_notifications {
+                UtxoNotifyMethod::OffChain(gobble_receiver)
+            } else {
+                UtxoNotifyMethod::OnChain(gobble_receiver)
+            };
             let gobbler = TransactionDetails::fee_gobbler(
                 gobbling_fee,
-                own_wallet_entropy.generate_sender_randomness(
-                    current_block_height,
-                    gobble_receiver.privacy_digest(),
-                ),
+                own_wallet_entropy
+                    .generate_sender_randomness(current_block_height, receiver_digest),
                 mutator_set,
                 old_tx_timestamp,
-                // TODO: Consider using `None` here as UTXOs are already
-                // stored as expected UTXOs by wallet.
-                UtxoNotifyMethod::OnChain(gobble_receiver),
+                fee_notification_method,
             );
             let expected_utxos = gobbler
                 .tx_outputs
