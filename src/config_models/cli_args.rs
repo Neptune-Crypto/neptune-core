@@ -153,6 +153,22 @@ pub struct Args {
     #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_gobbling_fee: NativeCurrencyAmount,
 
+    /// Whether to keep the UTXO notifications for composer fees and
+    /// proof-upgrader fees off chain.
+    ///
+    /// Composers and proof-upgraders can gobble a portion of the fee of
+    /// transactions they work on, by directing it to an output only they can
+    /// spend. By default, a public announcement is added to the transaction
+    /// which enables the composer or proof-upgrader to use the blockchain to
+    /// back up UTXO data and recover such UTXOs after importing the key onto a
+    /// new machine. Enable this flag to avoid wasting blockchain space, if you
+    /// know what you're doing and a robust alternative for backups is in place.
+    ///
+    /// This flag does not apply to guesser fees because those UTXOs are
+    /// generated automatically.
+    #[clap(long)]
+    pub(crate) offchain_fee_notifications: bool,
+
     /// Prune the mempool when it exceeds this size in RAM.
     ///
     /// Units: B (bytes), K (kilobytes), M (megabytes), G (gigabytes)
