@@ -125,14 +125,13 @@ impl TxOutput {
         receiving_address: ReceivingAddress,
         owned: bool,
     ) -> Self {
-        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
-        Self {
-            utxo,
+        Self::native_currency(
+            amount,
             sender_randomness,
-            receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            receiving_address,
+            UtxoNotificationMedium::OnChain,
             owned,
-        }
+        )
     }
 
     /// Instantiate a [TxOutput] for native currency intended for off-chain UTXO
@@ -143,12 +142,31 @@ impl TxOutput {
         receiving_address: ReceivingAddress,
         owned: bool,
     ) -> Self {
+        Self::native_currency(
+            amount,
+            sender_randomness,
+            receiving_address,
+            UtxoNotificationMedium::OffChain,
+            owned,
+        )
+    }
+
+    /// Instantiate a [TxOutput] for native currency.
+    pub(crate) fn native_currency(
+        amount: NativeCurrencyAmount,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        notification_medium: UtxoNotificationMedium,
+        owned: bool,
+    ) -> Self {
+        let receiver_digest = receiving_address.privacy_digest();
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        let notify_method = UtxoNotifyMethod::new(notification_medium, receiving_address);
         Self {
             utxo,
             sender_randomness,
-            receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
+            receiver_digest,
+            notification_method: notify_method,
             owned,
         }
     }

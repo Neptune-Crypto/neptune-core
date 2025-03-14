@@ -105,6 +105,7 @@ use crate::models::state::wallet::address::generation_address::GenerationReceivi
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::GlobalStateLock;
@@ -712,6 +713,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         composer_key.to_address().into(),
         coinbase_sender_randomness,
         guesser_fraction,
+        UtxoNotificationMedium::OffChain,
     );
 
     let (tx, composer_txos) = make_coinbase_transaction_stateless(
@@ -1009,6 +1011,7 @@ async fn fake_block_successor(
         GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
         rng.random(),
         0.5f64,
+        UtxoNotificationMedium::OffChain,
     );
     let (block_tx, _) = fake_create_block_transaction_for_tests(
         predecessor,
