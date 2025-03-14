@@ -2962,8 +2962,12 @@ pub(crate) mod tests {
             // below test function.
             tx_spending_guesser_fee.proof = TransactionProof::invalid();
 
-            let composer_parameters =
-                ComposerParameters::new(a_key.to_address().into(), rng.random(), 0.5f64);
+            let composer_parameters = ComposerParameters::new(
+                a_key.to_address().into(),
+                rng.random(),
+                0.5f64,
+                UtxoNotificationMedium::OffChain,
+            );
             let (block2_tx, _) = fake_create_block_transaction_for_tests(
                 &block1,
                 composer_parameters,

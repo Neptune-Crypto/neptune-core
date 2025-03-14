@@ -433,19 +433,21 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         .expect("Amount to composer must be larger than liquid amount to composer.");
 
     let owned = true;
-    let liquid_coinbase_output = TxOutput::offchain_native_currency(
+    let liquid_coinbase_output = TxOutput::native_currency(
         liquid_composer_amount,
         composer_parameters.sender_randomness(),
         composer_parameters.reward_address(),
+        composer_parameters.notification_medium(),
         owned,
     );
 
     // Set the time lock to 3 years (minimum) plus 30 minutes margin, since the
     // timestamp might be bumped by future merges.
-    let timelocked_coinbase_output = TxOutput::offchain_native_currency(
+    let timelocked_coinbase_output = TxOutput::native_currency(
         timelocked_composer_amount,
         composer_parameters.sender_randomness(),
         composer_parameters.reward_address(),
+        composer_parameters.notification_medium(),
         owned,
     )
     .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
@@ -1020,6 +1022,7 @@ pub(crate) mod mine_loop_tests {
             receiving_address.into(),
             sender_randomness,
             guesser_block_subsidy_fraction,
+            UtxoNotificationMedium::OffChain,
         );
         let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
             latest_block,
