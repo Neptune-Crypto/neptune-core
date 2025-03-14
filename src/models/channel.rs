@@ -14,6 +14,7 @@ use super::peer::transaction_notification::TransactionNotification;
 use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 use super::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::peer::InstanceId;
 
 #[derive(Clone, Debug)]
 pub(crate) enum MainToMiner {
@@ -162,8 +163,8 @@ pub(crate) enum PeerTaskToMain {
     },
     RemovePeerMaxBlockHeight(SocketAddr),
 
-    /// (\[(peer_listen_address)\], reported_by, distance)
-    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
+    /// list of peer's peers, and their distance from “self”
+    PeerDiscoveryAnswer(Vec<(SocketAddr, InstanceId)>, u8),
 
     Transaction(Box<PeerTaskToMainTransaction>),
     BlockProposal(Box<Block>),
@@ -182,7 +183,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::NewBlocks(_) => "new blocks",
             PeerTaskToMain::AddPeerMaxBlockHeight { .. } => "add peer max block height",
             PeerTaskToMain::RemovePeerMaxBlockHeight(_) => "remove peer max block height",
-            PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
+            PeerTaskToMain::PeerDiscoveryAnswer(..) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
