@@ -170,6 +170,20 @@ pub struct Args {
     #[clap(long)]
     pub(crate) max_mempool_num_tx: Option<usize>,
 
+    /// Restrict the number of inputs for transcations that this node deals
+    /// with.
+    ///
+    /// The node will not create transactions with more inputs than this limit.
+    /// It will also not accept such transactions from peers into its mempool.
+    /// And if the node is either upgrading transaction proofs on the network
+    /// or composing, it will never merge two transactions that would exceed
+    /// this limit. Does not affect block validity, i.e. consensus: a block with
+    /// more than this number of inputs can be valid. Also does not affect which
+    /// which block proposals that a guessing node will attempt to solve the PoW
+    /// puzzle for.
+    #[clap(long, default_value = "28")]
+    pub(crate) max_num_inputs_per_tx: usize,
+
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub(crate) peer_port: u16,

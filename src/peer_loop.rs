@@ -3451,7 +3451,8 @@ mod peer_loop_tests {
             .lock_guard_mut()
             .await
             .mempool_insert(transaction_1.clone(), TransactionOrigin::Foreign)
-            .await;
+            .await
+            .unwrap();
         assert!(
             !state_lock.lock_guard().await.mempool.is_empty(),
             "Mempool must be non-empty after insertion"
@@ -3682,7 +3683,8 @@ mod peer_loop_tests {
                     .lock_guard_mut()
                     .await
                     .mempool_insert(own_tx.to_owned(), TransactionOrigin::Foreign)
-                    .await;
+                    .await
+                    .unwrap();
 
                 let tx_notification: TransactionNotification = new_tx.try_into().unwrap();
 

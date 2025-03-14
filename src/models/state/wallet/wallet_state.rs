@@ -1725,6 +1725,15 @@ impl WalletState {
             confirmed_available_amount_without_mempool_spends,
         );
 
+        let max_num_inputs = self.configuration.max_num_inputs_per_transaction;
+        if input_funds.len() > max_num_inputs {
+            bail!(
+                "Attempted to create transaction that would exceed this node's \
+                 transaction-input limit of {max_num_inputs}. You may have to either consolidate
+                 your unspent UTXOs, create a smaller transaction, or to increase this limit."
+            );
+        }
+
         Ok(input_funds)
     }
 
@@ -1901,7 +1910,7 @@ pub(crate) mod tests {
                     one_coin,
                     genesis_digest,
                     &mutator_set_accumulator_after_genesis,
-                    launch_timestamp
+                    launch_timestamp,
                 )
                 .await
                 .is_err(),
@@ -1914,7 +1923,7 @@ pub(crate) mod tests {
                     one_coin,
                     genesis_digest,
                     &mutator_set_accumulator_after_genesis,
-                    released_timestamp
+                    released_timestamp,
                 )
                 .await
                 .is_ok(),
@@ -3143,7 +3152,8 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool_insert(tx, TransactionOrigin::Own)
-                .await;
+                .await
+                .unwrap();
 
             {
                 let gs = global_state_lock.lock_guard().await;
@@ -3296,7 +3306,8 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool_insert(tx1, TransactionOrigin::Own)
-                .await;
+                .await
+                .unwrap();
 
             // generate a second transaction
             let tx2 = outgoing_transaction(
@@ -3314,7 +3325,8 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool_insert(tx2, TransactionOrigin::Own)
-                .await;
+                .await
+                .unwrap();
 
             // verify that the mempool contains two transactions
             // ==> did not kick anything out

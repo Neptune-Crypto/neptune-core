@@ -24,6 +24,7 @@ use anyhow::bail;
 use anyhow::Result;
 use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
+use mempool::mempool_insertion_error::MempoolInsertionError;
 use mempool::Mempool;
 use mempool::TransactionOrigin;
 use mining_state::MiningState;
@@ -1698,14 +1699,20 @@ impl GlobalState {
         self.wallet_state.handle_mempool_events(events).await
     }
 
-    /// adds Tx to mempool and notifies wallet of change.
+    /// adds Tx to mempool and notifies wallet of change. Returns an error if
+    /// mempool rejected the transaction.
     pub(crate) async fn mempool_insert(
         &mut self,
         transaction: Transaction,
         origin: TransactionOrigin,
-    ) {
-        let events = self.mempool.insert(transaction, origin);
-        self.wallet_state.handle_mempool_events(events).await
+    ) -> Result<(), MempoolInsertionError> {
+        match self.mempool.insert(transaction, origin) {
+            Ok(events) => {
+                self.wallet_state.handle_mempool_events(events).await;
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// prunes stale tx in mempool and notifies wallet of changes.
