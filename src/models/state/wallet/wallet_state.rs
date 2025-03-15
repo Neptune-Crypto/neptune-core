@@ -1766,8 +1766,9 @@ impl WalletState {
 #[cfg(test)]
 pub(crate) mod tests {
     use generation_address::GenerationSpendingKey;
+    use rand::prelude::*;
     use rand::random;
-    use rand::Rng;
+    use rand::rng;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1786,6 +1787,7 @@ pub(crate) mod tests {
     use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
+    use crate::tests::shared::unit_test_data_directory;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
 
     impl WalletState {
@@ -3922,9 +3924,6 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
-        use rand::prelude::*;
-        use rand::rng;
-
         use super::*;
         use crate::job_queue::JobQueue;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
@@ -4264,5 +4263,83 @@ pub(crate) mod tests {
 
             assert_eq!(filtered_utxos, caught_utxos);
         }
+
+    }
+
+    pub(crate) mod fee_notifications {
+
+        use crate::mine_loop::make_coinbase_transaction_stateless;
+        use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+
+        use super::*;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn wallet_recovers_unexpected_onchain_composer_utxos() {
+            // set up rando
+            let network = Network::Main;
+            let seed: [u8; 32] = random();
+            let cli_args = cli_args::Args::default();
+            dbg!(seed);
+            let mut rng = StdRng::from_seed(seed);
+            let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let data_dir = unit_test_data_directory(network).unwrap();
+            let mut wallet_state =
+                WalletState::new_from_wallet_entropy(&data_dir, wallet_secret.clone(), &cli_args)
+                    .await;
+            let fee_address = wallet_state.wallet_entropy.prover_fee_address();
+            let global_state_lock =
+                mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args).await;
+
+            println!("(ignore all log messages above this line)");
+
+            // compose block
+            let genesis_block = Block::genesis(network);
+            let previous_block = genesis_block.clone();
+            let now = network.launch_date() + Timestamp::minutes(10);
+
+            let composer_parameters = global_state_lock
+                .lock_guard()
+                .await
+                .composer_parameters(fee_address); // on-chain notifications by default
+            let (transaction, composer_utxos) = make_coinbase_transaction_stateless(
+                &previous_block,
+                composer_parameters.clone(),
+                now,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            let new_block = invalid_block_with_transaction(&previous_block, transaction);
+
+            assert_eq!(
+                2,
+                new_block
+                    .body()
+                    .transaction_kernel
+                    .public_announcements
+                    .len()
+            );
+
+            // update wallet state with new block (ignoring expected UTXOs)
+            drop(composer_utxos);
+            wallet_state
+                .update_wallet_state_with_new_block(
+                    &previous_block.mutator_set_accumulator_after(),
+                    &new_block,
+                )
+                .await
+                .unwrap();
+
+            // Lo! composer utxos
+            let wallet_status = wallet_state
+                .get_wallet_status(new_block.hash(), &new_block.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(2, wallet_status.synced_unspent.len());
+        }
+
     }
 }

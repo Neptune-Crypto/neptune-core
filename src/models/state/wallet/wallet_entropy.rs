@@ -18,6 +18,9 @@ use crate::models::state::wallet::address::symmetric_key;
 use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use crate::prelude::twenty_first;
 
+use super::address::ReceivingAddress;
+use super::address::SpendingKey;
+
 /// The wallet's one source of randomness, from which all keys are derived.
 ///
 /// This struct wraps around [`SecretKeyMaterial`], which contains the secret
@@ -60,6 +63,20 @@ impl WalletEntropy {
     /// Returns the spending key for guessing on top of the given block.
     pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
         HashLockKey::from_preimage(self.guesser_preimage(prev_block_digest))
+    }
+
+    /// Returns the spending key for prover rewards, *i.e.*, composer fee or
+    /// proof-upgrader (gobbling) fee.
+    fn prover_fee_key(&self) -> generation_address::GenerationSpendingKey {
+        self.nth_generation_spending_key(0u64)
+    }
+
+    /// Returns the receiving address for prover rewards, *i.e.*, composer fee
+    /// or proof-upgrader (gobbling) fee.
+    pub(crate) fn prover_fee_address(&self) -> ReceivingAddress {
+        SpendingKey::from(self.prover_fee_key())
+            .to_address()
+            .unwrap()
     }
 
     /// derives a generation spending key at `index`
