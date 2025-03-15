@@ -838,7 +838,7 @@ impl Mempool {
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis(network);
-    /// let mempool = Mempool::new(ByteSize::gb(1), None, None, genesis_block.hash());
+    /// let mempool = Mempool::new(ByteSize::gb(1), None, 200, genesis_block.hash());
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_id, fee_density) in mempool.get_sorted_iter() {
