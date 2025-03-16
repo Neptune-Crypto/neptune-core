@@ -1433,7 +1433,10 @@ pub(crate) mod block_tests {
                 network,
                 3,
                 alice_wallet.clone(),
-                cli_args::Args::default(),
+                cli_args::Args {
+                    guesser_fraction: 0.5,
+                    ..Default::default()
+                },
             )
             .await;
             alice.set_new_tip(block1.clone()).await.unwrap();
@@ -1454,7 +1457,6 @@ pub(crate) mod block_tests {
             let (coinbase_for_block2, _) = make_coinbase_transaction_from_state(
                 &block1,
                 &alice,
-                0.5f64,
                 plus_eight_months,
                 TxProvingCapability::SingleProof,
                 (TritonVmJobPriority::Normal, None).into(),
@@ -1523,7 +1525,6 @@ pub(crate) mod block_tests {
                 let (coinbase_for_block3, _) = make_coinbase_transaction_from_state(
                     &block2_without_valid_pow,
                     &alice,
-                    0.5f64,
                     plus_nine_months,
                     TxProvingCapability::SingleProof,
                     (TritonVmJobPriority::Normal, None).into(),

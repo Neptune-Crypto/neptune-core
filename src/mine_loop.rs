@@ -10,6 +10,7 @@ use block_header::BlockHeaderField;
 use block_header::MINIMUM_BLOCK_TIME;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
+use itertools::Itertools;
 use num_traits::CheckedSub;
 use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
@@ -522,23 +523,17 @@ pub(crate) async fn create_block_transaction_from(
     let mut rng: StdRng =
         SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
 
-    let coinbase_recipient_spending_key = global_state_lock
-        .lock_guard()
-        .await
-        .wallet_state
-        .wallet_entropy
-        .nth_generation_spending_key(0);
     let composer_parameters = global_state_lock
         .lock_guard()
         .await
-        .composer_parameters(coinbase_recipient_spending_key.to_address().into());
+        .composer_parameters(Some(predecessor_block.header().height));
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
     let vm_job_queue = global_state_lock.vm_job_queue();
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
-        composer_parameters,
+        composer_parameters.clone(),
         timestamp,
         TxProvingCapability::SingleProof,
         vm_job_queue,
@@ -598,17 +593,22 @@ pub(crate) async fn create_block_transaction_from(
         .expect("Must be able to merge transactions in mining context");
     }
 
-    let own_expected_utxos = composer_txos
-        .iter()
-        .map(|txo| {
-            ExpectedUtxo::new(
-                txo.utxo(),
-                txo.sender_randomness(),
-                coinbase_recipient_spending_key.privacy_preimage(),
-                UtxoNotifier::OwnMinerComposeBlock,
-            )
-        })
-        .collect();
+    let own_expected_utxos =
+        composer_parameters
+            .maybe_receiver_preimage()
+            .map_or(vec![], |receiver_preimage| {
+                composer_txos
+                    .iter()
+                    .map(|txo| {
+                        ExpectedUtxo::new(
+                            txo.utxo(),
+                            txo.sender_randomness(),
+                            receiver_preimage,
+                            UtxoNotifier::OwnMinerComposeBlock,
+                        )
+                    })
+                    .collect_vec()
+            });
 
     Ok((block_transaction, own_expected_utxos))
 }
@@ -985,7 +985,6 @@ pub(crate) mod mine_loop_tests {
     pub(crate) async fn make_coinbase_transaction_from_state(
         latest_block: &Block,
         global_state_lock: &GlobalStateLock,
-        guesser_block_subsidy_fraction: f64,
         timestamp: Timestamp,
         proving_power: TxProvingCapability,
         job_options: TritonVmProofJobOptions,
@@ -1002,32 +1001,16 @@ pub(crate) mod mine_loop_tests {
         // reading it from state, since that could, because of a race condition
         // lead to an inconsistent witness higher up in the call graph. This is
         // done to avoid holding a read-lock throughout this function.
-
-        let coinbase_recipient_spending_key = global_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .wallet_entropy
-            .nth_generation_spending_key(0);
-        let receiving_address = coinbase_recipient_spending_key.to_address();
         let next_block_height: BlockHeight = latest_block.header().height.next();
-        let sender_randomness: Digest = global_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .wallet_entropy
-            .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
         let vm_job_queue = global_state_lock.vm_job_queue();
 
-        let composer_parameters = ComposerParameters::new(
-            receiving_address.into(),
-            sender_randomness,
-            guesser_block_subsidy_fraction,
-            UtxoNotificationMedium::OffChain,
-        );
+        let composer_parameters = global_state_lock
+            .lock_guard()
+            .await
+            .composer_parameters(Some(next_block_height));
         let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
             latest_block,
-            composer_parameters,
+            composer_parameters.clone(),
             timestamp,
             proving_power,
             vm_job_queue,
@@ -1035,17 +1018,22 @@ pub(crate) mod mine_loop_tests {
         )
         .await?;
 
-        let own_expected_utxos = composer_outputs
-            .iter()
-            .map(|txo| {
-                ExpectedUtxo::new(
-                    txo.utxo(),
-                    txo.sender_randomness(),
-                    coinbase_recipient_spending_key.privacy_preimage(),
-                    UtxoNotifier::OwnMinerComposeBlock,
-                )
-            })
-            .collect();
+        let own_expected_utxos =
+            composer_parameters
+                .maybe_receiver_preimage()
+                .map_or(vec![], |receiver_preimage| {
+                    composer_outputs
+                        .iter()
+                        .map(|txo| {
+                            ExpectedUtxo::new(
+                                txo.utxo(),
+                                txo.sender_randomness(),
+                                receiver_preimage,
+                                UtxoNotifier::OwnMinerComposeBlock,
+                            )
+                        })
+                        .collect()
+                });
 
         Ok((transaction, own_expected_utxos))
     }
@@ -1134,19 +1122,18 @@ pub(crate) mod mine_loop_tests {
     async fn estimate_block_preparation_time_invalid_proof() -> f64 {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
+        let guesser_fee_fraction = 0.0;
+        let cli_args = cli_args::Args {
+            guesser_fraction: guesser_fee_fraction,
+            ..Default::default()
+        };
 
-        let global_state_lock = mock_genesis_global_state(
-            network,
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
         let tick = std::time::SystemTime::now();
         let (transaction, _coinbase_utxo_info) = make_coinbase_transaction_from_state(
             &genesis_block,
             &global_state_lock,
-            0f64,
             network.launch_date(),
             TxProvingCapability::PrimitiveWitness,
             (TritonVmJobPriority::Normal, None).into(),
@@ -1392,13 +1379,12 @@ pub(crate) mod mine_loop_tests {
     #[tokio::test]
     async fn mined_block_has_proof_of_work() {
         let network = Network::Main;
-        let global_state_lock = mock_genesis_global_state(
-            network,
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+        let cli_args = cli_args::Args {
+            guesser_fraction: 0.0,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
         let tip_block_orig = Block::genesis(network);
         let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -1406,7 +1392,6 @@ pub(crate) mod mine_loop_tests {
         let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state(
             &tip_block_orig,
             &global_state_lock,
-            0f64,
             launch_date,
             TxProvingCapability::PrimitiveWitness,
             (TritonVmJobPriority::Normal, None).into(),
@@ -1459,13 +1444,12 @@ pub(crate) mod mine_loop_tests {
     #[tokio::test]
     async fn block_timestamp_represents_time_guessing_started() -> Result<()> {
         let network = Network::Main;
-        let global_state_lock = mock_genesis_global_state(
-            network,
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+        let cli_args = cli_args::Args {
+            guesser_fraction: 0.0,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let tip_block_orig = global_state_lock
@@ -1483,7 +1467,6 @@ pub(crate) mod mine_loop_tests {
         let (transaction, _composer_utxo_info) = make_coinbase_transaction_from_state(
             &tip_block_orig,
             &global_state_lock,
-            0f64,
             ten_seconds_ago,
             TxProvingCapability::PrimitiveWitness,
             (TritonVmJobPriority::Normal, None).into(),
@@ -1780,20 +1763,18 @@ pub(crate) mod mine_loop_tests {
     #[tokio::test]
     async fn coinbase_has_expected_timelocked_outputs() {
         let network = Network::Main;
-        let global_state_lock = mock_genesis_global_state(
-            network,
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+        let cli_args = cli_args::Args {
+            guesser_fraction: 0.0,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
         let genesis_block = Block::genesis(network);
         let launch_date = genesis_block.header().timestamp;
 
         let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
             &genesis_block,
             &global_state_lock,
-            0f64,
             launch_date,
             TxProvingCapability::PrimitiveWitness,
             (TritonVmJobPriority::Normal, None).into(),

@@ -499,9 +499,16 @@ mod wallet_tests {
         let network = Network::Main;
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
         let alice_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
-        let mut alice =
-            mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args::Args::default())
-                .await;
+        let mut alice = mock_genesis_global_state(
+            network,
+            2,
+            alice_wallet_secret,
+            cli_args::Args {
+                guesser_fraction: 0.0,
+                ..Default::default()
+            },
+        )
+        .await;
         let alice_key = alice
             .lock_guard()
             .await
@@ -797,7 +804,6 @@ mod wallet_tests {
             .await
             .unwrap();
 
-        let guesser_fraction = 0f64;
         let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction_from_state(
             &alice
                 .global_state_lock
@@ -807,7 +813,6 @@ mod wallet_tests {
                 .light_state()
                 .clone(),
             &alice,
-            guesser_fraction,
             block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
@@ -968,13 +973,15 @@ mod wallet_tests {
             network,
             42,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args {
+                guesser_fraction: 0.0,
+                ..Default::default()
+            },
         )
         .await;
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
-        let guesser_fraction = 0f64;
         let (cbtx, _cb_expected) = make_coinbase_transaction_from_state(
             &bob.global_state_lock
                 .lock_guard()
@@ -983,7 +990,6 @@ mod wallet_tests {
                 .light_state()
                 .clone(),
             &bob,
-            guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
