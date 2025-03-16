@@ -76,7 +76,7 @@ impl AbsoluteIndexSet {
     ///
     /// Returns an error if a removal index is a future value, i.e. one that's
     /// not yet covered by the active window.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn split_by_activity(
         &self,
         mutator_set: &MutatorSetAccumulator,
@@ -201,7 +201,7 @@ impl RemovalRecord {
             let chunks_set: HashSet<u64> = indices
                 .to_array()
                 .iter()
-                .map(|x| (x / CHUNK_SIZE as u128) as u64)
+                .map(|x| (x / u128::from(CHUNK_SIZE)) as u64)
                 .collect();
 
             chunks_set
@@ -211,7 +211,7 @@ impl RemovalRecord {
 
         // Find the removal records that need a new dictionary entry for the chunk
         // that's being added to the inactive part by this addition.
-        let batch_index = new_item_index / BATCH_SIZE as u64;
+        let batch_index = new_item_index / u64::from(BATCH_SIZE);
         let old_window_start_batch_index = batch_index - 1;
 
         let rrs_for_new_chunk_dictionary_entry: Vec<usize> =
@@ -223,7 +223,7 @@ impl RemovalRecord {
         // Find the removal records that have dictionary entry MMR membership proofs
         // that need to be updated because of the window sliding.
         let mut rrs_for_batch_append: HashSet<usize> = HashSet::new();
-        for (chunk_index, mp_indices) in chunk_index_to_rr_index.into_iter() {
+        for (chunk_index, mp_indices) in chunk_index_to_rr_index {
             if chunk_index < old_window_start_batch_index {
                 for mp_index in mp_indices {
                     rrs_for_batch_append.insert(mp_index);
@@ -235,7 +235,7 @@ impl RemovalRecord {
 
         // First insert the new entry into the chunk dictionary for the removal
         // record that need it.
-        for i in rrs_for_new_chunk_dictionary_entry.iter() {
+        for i in &rrs_for_new_chunk_dictionary_entry {
             removal_records.index_mut(*i).target_chunks.insert(
                 old_window_start_batch_index,
                 (new_swbf_auth_path.clone(), new_chunk.clone()),
@@ -296,7 +296,7 @@ impl RemovalRecord {
         // Collect all the MMR membership proofs from the chunk dictionaries.
         let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
         let mut leaf_indices = vec![];
-        for chunk_dict in chunk_dictionaries.iter_mut() {
+        for chunk_dict in &mut chunk_dictionaries {
             for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
                 own_mmr_mps.push(mp);
                 leaf_indices.push(*chunk_index);
@@ -508,7 +508,9 @@ mod removal_record_tests {
         // Verify that the hash map has put the indices into the correct buckets
         for (key, values) in chunks2indices {
             for value in values {
-                assert!((value - key as u128 * CHUNK_SIZE as u128) < CHUNK_SIZE as u128);
+                assert!(
+                    (value - u128::from(key) * u128::from(CHUNK_SIZE)) < u128::from(CHUNK_SIZE)
+                );
             }
         }
     }
@@ -572,7 +574,7 @@ mod removal_record_tests {
         // replaced by the inactive part of the sliding-window Bloom filter.
         // That way, the removal record is guaranteed to be invalid against
         // the empty mutator set.
-        for _ in 0..(BATCH_SIZE as u64) * num_chunks_in_active_window + 1 {
+        for _ in 0..u64::from(BATCH_SIZE) * num_chunks_in_active_window + 1 {
             RemovalRecord::batch_update_from_addition(&mut [&mut rr_for_aocl0], &accumulator);
             accumulator.add(&addition_record);
         }
@@ -583,7 +585,7 @@ mod removal_record_tests {
 
     #[proptest(cases = 10)]
     fn removal_record_missing_chunk_element_is_invalid_pbt(
-        #[strategy(1u64..20*BATCH_SIZE as u64)] initial_additions: u64,
+        #[strategy(1u64..20*u64::from(BATCH_SIZE))] initial_additions: u64,
         #[strategy(0u64..(#initial_additions as u64))] index_to_drop: u64,
     ) {
         // Construct a valid removal record, verify that it is considered
@@ -808,7 +810,7 @@ mod removal_record_tests {
         let mut rng = rand::rng();
         let original_indexset = AbsoluteIndexSet::new(
             &(0..NUM_TRIALS)
-                .map(|_| ((rng.next_u64() as u128) << 64) | (rng.next_u64() as u128))
+                .map(|_| (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64()))
                 .collect_vec()
                 .try_into()
                 .unwrap(),

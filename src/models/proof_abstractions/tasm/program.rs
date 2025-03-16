@@ -58,8 +58,8 @@ where
     // The entire trait is only `pub` to facilitate benchmarks; it is not part of
     // the public API. The suppressed lints below are not nice, but I don't know
     // how else to make it work.
-    #[allow(async_fn_in_trait)]
-    #[allow(private_interfaces)]
+    #[expect(async_fn_in_trait)]
+    #[expect(private_interfaces)]
     async fn prove(
         &self,
         claim: Claim,
@@ -106,9 +106,7 @@ pub(crate) async fn prove_consensus_program(
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
-    let job_handle = triton_vm_job_queue
-        .add_job(Box::new(job), proof_job_options.job_priority)
-        .await?;
+    let job_handle = triton_vm_job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
 
     // satisfy borrow checker.
     // instead of calling job_handle.cancel() inside select!()
@@ -285,10 +283,10 @@ pub mod test {
                 return fail("expected a failure in Triton VM, but it halted gracefully".into());
             };
 
-            let err = match err {
-                InstructionError::AssertionFailed(err)
-                | InstructionError::VectorAssertionFailed(_, err) => err,
-                _ => return fail(format!("expected an assertion failure, but got: {err}")),
+            let (InstructionError::AssertionFailed(err)
+            | InstructionError::VectorAssertionFailed(_, err)) = err
+            else {
+                return fail(format!("expected an assertion failure, but got: {err}"));
             };
 
             let ids_str = expected_error_ids.iter().join(", ");
@@ -547,7 +545,6 @@ pub mod test {
                     proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
                 } else {
                     eprintln!("cannot cast chunk to eight bytes. Server was: {server}");
-                    continue;
                 }
             }
 

@@ -20,13 +20,12 @@ pub fn own_program_digest() -> Digest {
     PROGRAM_DIGEST.with(|v| *v.borrow())
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_stdin___bfe() -> BFieldElement {
-    #[allow(clippy::unwrap_used)]
     PUB_INPUT.with(|v| v.borrow_mut().pop_front().unwrap())
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_stdin___xfe() -> XFieldElement {
     let x2 = PUB_INPUT.with(|v| v.borrow_mut().pop_front().unwrap());
     let x1 = PUB_INPUT.with(|v| v.borrow_mut().pop_front().unwrap());
@@ -34,9 +33,8 @@ pub fn tasmlib_io_read_stdin___xfe() -> XFieldElement {
     XFieldElement::new([x0, x1, x2])
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_stdin___u32() -> u32 {
-    #[allow(clippy::unwrap_used)]
     let val: u32 = PUB_INPUT
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
@@ -44,9 +42,8 @@ pub fn tasmlib_io_read_stdin___u32() -> u32 {
     val
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_stdin___u64() -> u64 {
-    #[allow(clippy::unwrap_used)]
     let hi: u32 = PUB_INPUT
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
@@ -55,12 +52,11 @@ pub fn tasmlib_io_read_stdin___u64() -> u64 {
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
-    ((hi as u64) << 32) + lo as u64
+    (u64::from(hi) << 32) + u64::from(lo)
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_stdin___u128() -> u128 {
-    #[allow(clippy::unwrap_used)]
     let e3: u32 = PUB_INPUT
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
@@ -77,10 +73,10 @@ pub fn tasmlib_io_read_stdin___u128() -> u128 {
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
-    ((e3 as u128) << 96) + ((e2 as u128) << 64) + ((e1 as u128) << 32) + e0 as u128
+    (u128::from(e3) << 96) + (u128::from(e2) << 64) + (u128::from(e1) << 32) + u128::from(e0)
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_stdin___digest() -> Digest {
     let e4 = PUB_INPUT.with(|v| {
         v.borrow_mut()
@@ -110,55 +106,53 @@ pub fn tasmlib_io_read_stdin___digest() -> Digest {
     Digest::new([e0, e1, e2, e3, e4])
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___bfe(x: BFieldElement) {
     PUB_OUTPUT.with(|v| v.borrow_mut().push(x));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___xfe(x: XFieldElement) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.coefficients.to_vec()));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___digest(x: Digest) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.values().to_vec()));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___bool(x: bool) {
-    PUB_OUTPUT.with(|v| v.borrow_mut().push(BFieldElement::new(x as u64)));
+    PUB_OUTPUT.with(|v| v.borrow_mut().push(BFieldElement::new(u64::from(x))));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___u32(x: u32) {
-    PUB_OUTPUT.with(|v| v.borrow_mut().push(BFieldElement::new(x as u64)));
+    PUB_OUTPUT.with(|v| v.borrow_mut().push(BFieldElement::new(u64::from(x))));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___u64(x: u64) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.encode()));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___u128(x: u128) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.encode()));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_write_to_stdout___encoding<T: BFieldCodec>(t: T) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(t.encode()));
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_secin___bfe() -> BFieldElement {
-    #[allow(clippy::unwrap_used)]
     ND_INDIVIDUAL_TOKEN.with(|v| v.borrow_mut().pop_front().unwrap())
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_secin___u64() -> u64 {
-    #[allow(clippy::unwrap_used)]
     let hi: u32 = ND_INDIVIDUAL_TOKEN
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
@@ -167,10 +161,10 @@ pub fn tasmlib_io_read_secin___u64() -> u64 {
         .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
-    ((hi as u64) << 32) + lo as u64
+    (u64::from(hi) << 32) + u64::from(lo)
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn tasmlib_io_read_secin___digest() -> Digest {
     let e4 = ND_INDIVIDUAL_TOKEN.with(|v| {
         v.borrow_mut()
@@ -272,7 +266,7 @@ impl Iterator for EnvironmentMemoryIter {
         let value = ND_MEMORY.with(|v| {
             v.borrow()
                 .get(&self.0)
-                .cloned()
+                .copied()
                 .unwrap_or_else(|| BFieldElement::new(0))
         });
         self.0.increment();

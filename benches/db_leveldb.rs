@@ -35,8 +35,8 @@ fn main() {
 ///
 /// C++ docs:  (complete)
 ///   https://github.com/google/leveldb/blob/068d5ee1a3ac40dabd00d211d5013af44be55bea/include/leveldb/options.h
-fn db_options() -> Option<Options> {
-    Some(Options {
+fn db_options() -> Options {
+    Options {
         // default: false
         create_if_missing: true,
 
@@ -71,21 +71,21 @@ fn db_options() -> Option<Options> {
         // Warning: WriteBatch.put() tends to crash
         // when this value is Some(Cache::new(..))
         // instead of None.
-    })
+    }
 }
 
-fn read_options(verify_checksums: bool, fill_cache: bool) -> Option<ReadOptions> {
-    Some(ReadOptions {
+fn read_options(verify_checksums: bool, fill_cache: bool) -> ReadOptions {
+    ReadOptions {
         verify_checksums,
         fill_cache,
-    })
+    }
 }
-fn read_options_default() -> Option<ReadOptions> {
-    Some(ReadOptions::new())
+fn read_options_default() -> ReadOptions {
+    ReadOptions::new()
 }
 
-fn write_options(sync: bool) -> Option<WriteOptions> {
-    Some(WriteOptions { sync })
+fn write_options(sync: bool) -> WriteOptions {
+    WriteOptions { sync }
 }
 
 fn value() -> Vec<u8> {
@@ -104,9 +104,9 @@ mod write_100_entries {
         fn put(bencher: Bencher, sync: bool) {
             let mut db = DB::open_new_test_database(
                 true,
-                db_options(),
-                read_options_default(),
-                write_options(sync),
+                Some(db_options()),
+                Some(read_options_default()),
+                Some(write_options(sync)),
             )
             .unwrap();
 
@@ -120,9 +120,9 @@ mod write_100_entries {
         fn batch_put(bencher: Bencher, sync: bool) {
             let mut db = DB::open_new_test_database(
                 true,
-                db_options(),
-                read_options_default(),
-                write_options(sync),
+                Some(db_options()),
+                Some(read_options_default()),
+                Some(write_options(sync)),
             )
             .unwrap();
 
@@ -138,9 +138,9 @@ mod write_100_entries {
         fn batch_put_write(bencher: Bencher, sync: bool) {
             let mut db = DB::open_new_test_database(
                 true,
-                db_options(),
-                read_options_default(),
-                write_options(sync),
+                Some(db_options()),
+                Some(read_options_default()),
+                Some(write_options(sync)),
             )
             .unwrap();
 
@@ -199,9 +199,9 @@ mod write_100_entries {
         fn delete(bencher: Bencher, sync: bool) {
             let mut db = DB::open_new_test_database(
                 true,
-                db_options(),
-                read_options_default(),
-                write_options(sync),
+                Some(db_options()),
+                Some(read_options_default()),
+                Some(write_options(sync)),
             )
             .unwrap();
 
@@ -219,9 +219,9 @@ mod write_100_entries {
         fn batch_delete(bencher: Bencher, sync: bool) {
             let mut db = DB::open_new_test_database(
                 true,
-                db_options(),
-                read_options_default(),
-                write_options(sync),
+                Some(db_options()),
+                Some(read_options_default()),
+                Some(write_options(sync)),
             )
             .unwrap();
 
@@ -246,9 +246,9 @@ mod write_100_entries {
         fn batch_delete_write(bencher: Bencher, sync: bool) {
             let mut db = DB::open_new_test_database(
                 true,
-                db_options(),
-                read_options_default(),
-                write_options(sync),
+                Some(db_options()),
+                Some(read_options_default()),
+                Some(write_options(sync)),
             )
             .unwrap();
 
@@ -321,9 +321,9 @@ mod read_100_entries {
         fn get(bencher: Bencher, num_reads: usize, cache: bool, verify_checksum: bool) {
             let mut db = DB::open_new_test_database(
                 true,
-                db_options(),
-                read_options(verify_checksum, cache),
-                write_options(false),
+                Some(db_options()),
+                Some(read_options(verify_checksum, cache)),
+                Some(write_options(false)),
             )
             .unwrap();
 

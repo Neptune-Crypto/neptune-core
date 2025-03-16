@@ -147,7 +147,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         );
 
         let mut nd_stream: Vec<BFieldElement> = self.swbfa_hash.reversed().values().to_vec();
-        for msmp in self.membership_proofs.iter() {
+        for msmp in &self.membership_proofs {
             let mut u64_as_stream = msmp.aocl_leaf_index.encode();
             u64_as_stream.reverse();
             nd_stream.extend(&u64_as_stream);
@@ -186,7 +186,9 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
+#[derive(
+    Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec,
+)]
 pub struct RemovalRecordsIntegrity;
 
 impl RemovalRecordsIntegrityWitness {
@@ -199,7 +201,7 @@ impl RemovalRecordsIntegrityWitness {
         let mut nodes: HashMap<u64, Digest> = HashMap::new();
 
         // populate nodes dictionary with leafs
-        for (leaf, index) in leafs_and_indices.iter() {
+        for (leaf, index) in leafs_and_indices {
             nodes.insert(*index, *leaf);
         }
 
@@ -210,9 +212,7 @@ impl RemovalRecordsIntegrityWitness {
             let mut working_indices = nodes
                 .keys()
                 .copied()
-                .filter(|i| {
-                    (*i as u128) < (1u128 << (depth)) && (*i as u128) >= (1u128 << (depth - 1))
-                })
+                .filter(|&i| u128::from(i) < (1 << depth) && u128::from(i) >= (1 << (depth - 1)))
                 .collect_vec();
             working_indices.sort();
             working_indices.dedup();
@@ -301,8 +301,9 @@ impl RemovalRecordsIntegrityWitness {
             }
 
             // generate root and authentication paths
-            let tree_height = (*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128)
-                .ilog2() as usize;
+            let tree_height =
+                u128::from(*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap()).ilog2()
+                    as usize;
             let (root, authentication_paths) =
                 Self::pseudorandom_merkle_root_with_authentication_paths(
                     rng.random(),
@@ -368,6 +369,9 @@ impl RemovalRecordsIntegrityWitness {
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+        type MmrAccumulatorTip5 = MmrAccumulator;
+        const MAX_JUMP_LENGTH: usize = 2_000_000;
+
         let mut library = Library::new();
 
         let bag_peaks = library.import(Box::new(BagPeaks));
@@ -388,7 +392,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         let field_aocl = field!(RemovalRecordsIntegrityWitnessMemory::aocl);
         let field_swbfi = field!(RemovalRecordsIntegrityWitnessMemory::swbfi);
-        type MmrAccumulatorTip5 = MmrAccumulator;
         let field_peaks = field!(MmrAccumulatorTip5::peaks);
         let field_input_utxos = field!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
@@ -691,8 +694,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let receiver_preimage_alloc = library.kmalloc(digest_stack_size);
         let sender_randomness_alloc = library.kmalloc(digest_stack_size);
         let utxo_hash_alloc = library.kmalloc(digest_stack_size);
-
-        const MAX_JUMP_LENGTH: usize = 2_000_000;
 
         let for_all_utxos_loop = triton_asm! {
             // INVARIANT: _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl

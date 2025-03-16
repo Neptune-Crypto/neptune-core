@@ -34,7 +34,7 @@ use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SendScreenWidget {
     Address,
     Amount,
@@ -89,7 +89,7 @@ impl SendScreen {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn check_and_pay_sequence(
         rpc_client: Arc<RPCClient>,
         token: rpc_auth::Token,
@@ -101,6 +101,8 @@ impl SendScreen {
         network: Network,
         refresh_tx: tokio::sync::mpsc::Sender<()>,
     ) {
+        const SEND_DEADLINE_IN_SECONDS: u64 = 40;
+
         //        *focus_arc.lock().await = SendScreenWidget::Notice;
 
         *notice_arc.lock().await = "sending ...".to_string();
@@ -144,7 +146,6 @@ impl SendScreen {
 
         // Allow the generation of proves to take some time...
         let mut send_ctx = context::current();
-        const SEND_DEADLINE_IN_SECONDS: u64 = 40;
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
         let send_result = rpc_client
             .send(
@@ -193,7 +194,7 @@ impl SendScreen {
                         *n = "".to_string();
                     }
                 }
-                _ => {}
+                ResetType::None => {}
             }
             *reset_me_mutex_guard = ResetType::None;
         }
@@ -236,9 +237,9 @@ impl SendScreen {
                                             rpc_client, token, address, amount, fee, notice,
                                             reset_me, network, refresh_tx,
                                         ));
-                                        //                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                        // escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
-                                    _ => {
+                                    SendScreenWidget::Notice => {
                                         escalate_event = None;
                                     }
                                 }
@@ -389,8 +390,6 @@ impl Widget for SendScreen {
             let mut address = self.address.clone();
             let mut address_lines = vec![];
 
-            // TODO: Not sure how to handle this linting problem, as clippy suggestion doesn't work.
-            #[allow(clippy::assigning_clones)]
             while address.len() > width {
                 let (line, remainder) = address.split_at(width);
                 address_lines.push(line.to_owned());

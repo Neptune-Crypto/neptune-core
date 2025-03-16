@@ -11,7 +11,7 @@ pub use futures::{pin_mut, StreamExt};
 
 use super::Index;
 
-// #[allow(async_fn_in_trait)]
+// #[expect(async_fn_in_trait)]
 #[async_trait::async_trait]
 pub trait StorageVecBase<T: Send> {
     /// check if collection is empty
@@ -116,7 +116,7 @@ pub trait StorageVecBase<T: Send> {
     async fn clear(&mut self);
 }
 
-#[allow(async_fn_in_trait)]
+#[expect(async_fn_in_trait)]
 pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// get an async Stream for iterating over all elements by key/val
     ///
@@ -139,7 +139,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     where
         T: 'a,
     {
-        self.stream_many(0..self.len().await).await
+        self.stream_many(0..self.len().await)
     }
 
     /// get an async Stream for iterating over all elements by value
@@ -163,7 +163,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     where
         T: 'a,
     {
-        self.stream_many_values(0..self.len().await).await
+        self.stream_many_values(0..self.len().await)
     }
 
     /// get an async Stream for iterating over elements matching indices by key/value
@@ -174,7 +174,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # use neptune_cash::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
-    /// let stream = vec.stream_many([2,3,7]).await;
+    /// let stream = vec.stream_many([2,3,7]);
     /// pin_mut!(stream);  // needed for iteration
     ///
     /// while let Some((key, val)) = stream.next().await {
@@ -182,7 +182,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// }
     /// # })
     /// ```
-    async fn stream_many<'a>(
+    fn stream_many<'a>(
         &'a self,
         indices: impl IntoIterator<Item = Index> + 'a,
     ) -> impl Stream<Item = (Index, T)> + 'a
@@ -190,7 +190,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
         T: 'a,
     {
         stream! {
-            for i in indices.into_iter() {
+            for i in indices {
                 yield (i, self.get(i).await)
             }
         }
@@ -204,7 +204,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # use neptune_cash::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
-    /// let stream = vec.stream_many_values([2,3,7]).await;
+    /// let stream = vec.stream_many_values([2,3,7]);
     /// pin_mut!(stream);  // needed for iteration
     ///
     /// while let Some(val) = stream.next().await {
@@ -212,7 +212,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// }
     /// # })
     /// ```
-    async fn stream_many_values<'a>(
+    fn stream_many_values<'a>(
         &'a self,
         indices: impl IntoIterator<Item = Index> + 'a,
     ) -> impl Stream<Item = T> + 'a
@@ -220,7 +220,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
         T: 'a,
     {
         stream! {
-            for i in indices.into_iter() {
+            for i in indices {
                 yield self.get(i).await
             }
         }
@@ -277,7 +277,7 @@ pub(in super::super) mod tests {
 
             {
                 let mut vals = vec![];
-                let stream = vec.stream_many([0, 1, 2, 3]).await;
+                let stream = vec.stream_many([0, 1, 2, 3]);
                 pin_mut!(stream); // needed for iteration
                 while let Some(value) = stream.next().await {
                     vals.push(value);
@@ -287,7 +287,7 @@ pub(in super::super) mod tests {
 
             {
                 let mut vals = vec![];
-                let stream = vec.stream_many([1, 2]).await;
+                let stream = vec.stream_many([1, 2]);
                 pin_mut!(stream); // needed for iteration
                 while let Some(value) = stream.next().await {
                     vals.push(value);

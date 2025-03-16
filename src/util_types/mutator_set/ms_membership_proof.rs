@@ -44,7 +44,7 @@ impl fmt::Display for MembershipProofError {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MembershipProofError {
     AlreadyExistingChunk(u64),
     MissingChunkOnUpdateFromAdd(u64),
@@ -136,7 +136,7 @@ impl MsMembershipProof {
         let new_item_index2 = mutator_set.aocl.num_leafs();
 
         // window does slide
-        let batch_index = new_item_index2 / BATCH_SIZE as u64;
+        let batch_index = new_item_index2 / u64::from(BATCH_SIZE);
         let old_window_start_batch_index = batch_index - 1;
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
@@ -168,7 +168,7 @@ impl MsMembershipProof {
                 for chunk_index in absolute_indices
                     .to_array()
                     .iter()
-                    .map(|x| (*x / CHUNK_SIZE as u128) as u64)
+                    .map(|x| (*x / u128::from(CHUNK_SIZE)) as u64)
                     .unique()
                 {
                     chunk_index_to_mp_index
@@ -189,7 +189,7 @@ impl MsMembershipProof {
         // Find the membership proofs that have dictionary entry MMR membership proofs that need
         // to be updated because of the window sliding. We just
         let mut mps_for_batch_append: HashSet<usize> = HashSet::new();
-        for (chunk_index, mp_indices) in chunk_index_to_mp_index.into_iter() {
+        for (chunk_index, mp_indices) in chunk_index_to_mp_index {
             if chunk_index < old_window_start_batch_index {
                 for mp_index in mp_indices {
                     mps_for_batch_append.insert(mp_index);
@@ -201,7 +201,7 @@ impl MsMembershipProof {
 
         // First insert the new entry into the chunk dictionary for the membership
         // proofs that need it.
-        for i in indices_for_mps_with_new_chunk_dictionary_entry.iter() {
+        for i in &indices_for_mps_with_new_chunk_dictionary_entry {
             membership_proofs.index_mut(*i).target_chunks.insert(
                 old_window_start_batch_index,
                 (new_chunk_auth_path.clone(), new_chunk.clone()),
@@ -306,7 +306,7 @@ impl MsMembershipProof {
         );
         let chunk_indices_set: HashSet<u64> = all_indices
             .into_iter()
-            .map(|bi| (bi / CHUNK_SIZE as u128) as u64)
+            .map(|bi| (bi / u128::from(CHUNK_SIZE)) as u64)
             .collect::<HashSet<u64>>();
 
         // Insert the new SWBF leaf into a duplicate of the SWBFI MMRA to get
@@ -317,7 +317,7 @@ impl MsMembershipProof {
             swbfi_mmra.append(new_chunk_digest);
 
         let mut swbf_chunk_dictionary_updated = false;
-        let batch_index = new_item_aocl_index / (BATCH_SIZE as u64);
+        let batch_index = new_item_aocl_index / u64::from(BATCH_SIZE);
         let old_window_start_batch_index = batch_index - 1;
 
         // Sanity check: assert that the new SWBFI leaf index agrees with the
@@ -327,7 +327,7 @@ impl MsMembershipProof {
             new_leaf_index, old_window_start_batch_index,
             "corrupt mutator set accumulator"
         );
-        'outer: for chunk_index in chunk_indices_set.into_iter() {
+        'outer: for chunk_index in chunk_indices_set {
             // Update for indices that are in the inactive part of the SWBF.
             // Here the MMR membership proofs of the chunks must be updated.
             if chunk_index < old_window_start_batch_index {
@@ -365,8 +365,6 @@ impl MsMembershipProof {
                 self.target_chunks
                     .insert(chunk_index, (new_auth_path.clone(), new_chunk.clone()));
                 swbf_chunk_dictionary_updated = true;
-
-                continue 'outer;
             }
 
             // If `chunk_index` refers to indices that are still in the active window, do nothing.
@@ -389,7 +387,7 @@ impl MsMembershipProof {
             "Cannot revert a membership proof for an item to back its state before the item was added to the mutator set."
         );
         let aocl_discrepancies = self.aocl_leaf_index ^ previous_leaf_count;
-        let aocl_mt_height = (aocl_discrepancies as u128).ilog2();
+        let aocl_mt_height = u128::from(aocl_discrepancies).ilog2();
 
         // trim to length
         while self.auth_path_aocl.authentication_path.len() > aocl_mt_height as usize {
@@ -404,7 +402,7 @@ impl MsMembershipProof {
         for (k, (mp, _chnk)) in self.target_chunks.iter_mut() {
             // calculate length
             let chunk_discrepancies = swbfi_leaf_count ^ *k;
-            let chunk_mt_height = (chunk_discrepancies as u128).ilog2();
+            let chunk_mt_height = u128::from(chunk_discrepancies).ilog2();
 
             // trim to length
             while mp.authentication_path.len() > chunk_mt_height as usize {
@@ -719,7 +717,7 @@ mod ms_proof_tests {
             let receiver_preimage: Digest = random();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
 
-            for (oi, mp) in membership_proofs.iter_mut() {
+            for (oi, mp) in &mut membership_proofs {
                 mp.update_from_addition(
                     *oi,
                     &archival_mutator_set.accumulator().await,
@@ -760,13 +758,13 @@ mod ms_proof_tests {
         );
 
         // Assert that all other mps are valid
-        for (itm, mp) in membership_proofs.iter() {
+        for (itm, mp) in &membership_proofs {
             assert!(archival_mutator_set.verify(*itm, mp).await);
         }
 
         // generate some removal records
         let mut removal_records = vec![];
-        for (item, membership_proof) in membership_proofs.into_iter() {
+        for (item, membership_proof) in membership_proofs {
             if rng.next_u32() % 2 == 1 {
                 let removal_record = archival_mutator_set.drop(item, &membership_proof).await;
                 removal_records.push(removal_record);
@@ -807,7 +805,7 @@ mod ms_proof_tests {
         // revert some removal records
         let mut reversions = removal_records[cutoff_point..].to_vec();
         reversions.reverse();
-        for revert_removal_record in reversions.iter() {
+        for revert_removal_record in &reversions {
             own_membership_proof
                 .as_mut()
                 .unwrap()
@@ -1192,7 +1190,7 @@ mod ms_proof_tests {
                     .await;
 
                 // update existing membership proof
-                for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {
+                for (it, mp) in &mut tracked_items_and_membership_proofs {
                     mp.update_from_addition(
                         *it,
                         &archival_mutator_set.accumulator().await,
@@ -1250,7 +1248,7 @@ mod ms_proof_tests {
                 let removal_record = archival_mutator_set.drop(item, &membership_proof).await;
 
                 // update the other membership proofs with the removal record
-                for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
+                for (_, mp) in &mut tracked_items_and_membership_proofs {
                     mp.update_from_remove(&removal_record);
                 }
 
@@ -1303,7 +1301,7 @@ mod ms_proof_tests {
                                 }
                                 tracked_items_and_membership_proofs.pop();
                             }
-                            for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
+                            for (_, mp) in &mut tracked_items_and_membership_proofs {
                                 mp.revert_update_from_batch_addition(
                                     &archival_mutator_set.accumulator().await,
                                 );
@@ -1322,8 +1320,7 @@ mod ms_proof_tests {
                                             // revert update to mutator set
                                             archival_mutator_set.revert_add(&addition_record).await;
                                             tracked_items_and_membership_proofs.pop();
-                                            for (_, mp) in
-                                                tracked_items_and_membership_proofs.iter_mut()
+                                            for (_, mp) in &mut tracked_items_and_membership_proofs
                                             {
                                                 mp.revert_update_from_batch_addition(
                                                     &archival_mutator_set.accumulator().await,
@@ -1343,8 +1340,7 @@ mod ms_proof_tests {
                                                 .await;
 
                                             // assert valid proofs
-                                            for (_, mp) in
-                                                tracked_items_and_membership_proofs.iter_mut()
+                                            for (_, mp) in &mut tracked_items_and_membership_proofs
                                             {
                                                 mp.revert_update_from_remove(&removal_record);
                                             }
@@ -1413,7 +1409,7 @@ mod ms_proof_tests {
         let aocl_peaks = (0..aocl_leaf_count.count_ones())
             .map(|_| rng.random::<Digest>())
             .collect_vec();
-        let swbfi_leaf_count = (aocl_leaf_count / (BATCH_SIZE as u64)) + 1;
+        let swbfi_leaf_count = (aocl_leaf_count / u64::from(BATCH_SIZE)) + 1;
         let swbfi_peaks = (0..swbfi_leaf_count.count_ones())
             .map(|_| rng.random::<Digest>())
             .collect_vec();

@@ -35,8 +35,8 @@ fn main() {
 ///
 /// C++ docs:  (complete)
 ///   https://github.com/google/leveldb/blob/068d5ee1a3ac40dabd00d211d5013af44be55bea/include/leveldb/options.h
-fn db_options() -> Option<Options> {
-    Some(Options {
+fn db_options() -> Options {
+    Options {
         // default: false
         create_if_missing: true,
 
@@ -70,7 +70,7 @@ fn db_options() -> Option<Options> {
         // So Cache of 1024 bytes is 8% of total data set.
         // that seems reasonably realistic to get some
         // hits/misses.
-    })
+    }
 }
 
 fn value() -> Vec<u8> {
@@ -80,7 +80,7 @@ fn value() -> Vec<u8> {
 async fn create_test_dbtvec() -> (SimpleRustyStorage, DbtVec<Vec<u8>>) {
     let db = NeptuneLevelDb::open_new_test_database(
         true,
-        db_options(),
+        Some(db_options()),
         Some(ReadOptions {
             verify_checksums: false,
             fill_cache: false,

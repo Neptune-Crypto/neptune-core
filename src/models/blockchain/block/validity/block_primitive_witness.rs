@@ -253,7 +253,7 @@ pub(crate) mod test {
                         input_amounts.push(
                             total_input
                                 .checked_sub(
-                                    &input_amounts.iter().cloned().sum::<NativeCurrencyAmount>(),
+                                    &input_amounts.iter().copied().sum::<NativeCurrencyAmount>(),
                                 )
                                 .unwrap(),
                         );

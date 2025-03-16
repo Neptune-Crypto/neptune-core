@@ -12,6 +12,7 @@ use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
 
+#[derive(Debug)]
 pub struct RustyWalletDatabase {
     storage: SimpleRustyStorage,
 
@@ -132,16 +133,16 @@ impl RustyWalletDatabase {
     }
 
     /// Get the hash of the block to which this database is synced.
-    pub async fn get_sync_label(&self) -> Digest {
-        self.sync_label.get().await
+    pub fn get_sync_label(&self) -> Digest {
+        self.sync_label.get()
     }
 
     pub async fn set_sync_label(&mut self, sync_label: Digest) {
         self.sync_label.set(sync_label).await;
     }
 
-    pub async fn get_counter(&self) -> u64 {
-        self.counter.get().await
+    pub fn get_counter(&self) -> u64 {
+        self.counter.get()
     }
 
     pub async fn set_counter(&mut self, counter: u64) {
@@ -149,8 +150,8 @@ impl RustyWalletDatabase {
     }
 
     /// retrieve wallet derivation counter for generation keys
-    pub async fn get_generation_key_counter(&self) -> u64 {
-        self.generation_key_counter.get().await
+    pub fn get_generation_key_counter(&self) -> u64 {
+        self.generation_key_counter.get()
     }
 
     /// set wallet derivation counter for generation keys
@@ -159,8 +160,8 @@ impl RustyWalletDatabase {
     }
 
     /// retrieve wallet derivation counter for symmetric keys
-    pub async fn get_symmetric_key_counter(&self) -> u64 {
-        self.symmetric_key_counter.get().await
+    pub fn get_symmetric_key_counter(&self) -> u64 {
+        self.symmetric_key_counter.get()
     }
 
     /// set wallet derivation counter for symmetric keys

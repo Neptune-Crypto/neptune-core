@@ -75,6 +75,7 @@ pub type PeerStandingNumber = i32;
 ///
 /// also handles messages from main task over the main-to-peer-tasks broadcast
 /// channel.
+#[derive(Debug, Clone)]
 pub struct PeerLoopHandler {
     to_main_tx: mpsc::Sender<PeerTaskToMain>,
     global_state_lock: GlobalStateLock,
@@ -293,7 +294,7 @@ impl PeerLoopHandler {
         let now = self.now();
         debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
-        for new_block in received_blocks.iter() {
+        for new_block in &received_blocks {
             let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
             let new_block_is_valid = new_block.is_valid(previous_block, now).await;
@@ -328,13 +329,12 @@ impl PeerLoopHandler {
                 .await?;
                 warn!("Failed to validate block: invalid block");
                 return Ok(None);
-            } else {
-                info!(
-                    "Block with height {} is valid. mined: {}",
-                    new_block.kernel.header.height,
-                    new_block.kernel.header.timestamp.standard_format()
-                );
             }
+            info!(
+                "Block with height {} is valid. mined: {}",
+                new_block.kernel.header.height,
+                new_block.kernel.header.timestamp.standard_format()
+            );
 
             previous_block = new_block;
         }
@@ -630,6 +630,8 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotification(block_notification) => {
+                const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
+
                 let (tip_header, sync_anchor_is_set) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
@@ -647,7 +649,6 @@ impl PeerLoopHandler {
                 let time_since_latest_successful_challenge = peer_state_info
                     .successful_sync_challenge_response_time
                     .map(|then| now - then);
-                const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
                 let cooldown_expired = time_since_latest_successful_challenge
                     .is_none_or(|time_passed| time_passed > SYNC_CHALLENGE_COOLDOWN);
                 let exceeds_sync_mode_threshold = GlobalState::sync_mode_threshold_stateless(
@@ -746,6 +747,8 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
+
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
                 info!(
                     "Got sync challenge response from {}",
@@ -818,7 +821,6 @@ impl PeerLoopHandler {
                 }
 
                 // Did it come in time?
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
                 if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
                     self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
                         .await?;
@@ -1081,17 +1083,14 @@ impl PeerLoopHandler {
 
                 let response = Self::batch_response(&state, returned_blocks, &anchor).await;
 
-                // issue 457. do not hold lock across a peer.send().  nor self.punish()
+                // issue 457. do not hold lock across a peer.send(), nor self.punish()
                 drop(state);
 
-                let response = match response {
-                    Some(response) => response,
-                    None => {
-                        warn!("Unable to satisfy batch-block request");
-                        self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
+                let Some(response) = response else {
+                    warn!("Unable to satisfy batch-block request");
+                    self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
                 debug!("Returning {} blocks in batch response", response.len());
@@ -1525,10 +1524,10 @@ impl PeerLoopHandler {
                         }
                     } else {
                         // Verify validity and that proposal is child of current tip
-                        if !block.is_valid(&tip, self.now()).await {
-                            Some(NegativePeerSanction::InvalidBlockProposal)
-                        } else {
+                        if block.is_valid(&tip, self.now()).await {
                             None // all is well, no punishment.
+                        } else {
+                            Some(NegativePeerSanction::InvalidBlockProposal)
                         }
                     }
                 };
@@ -1783,6 +1782,8 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
+
         let cli_args = self.global_state_lock.cli().clone();
         let global_state = self.global_state_lock.lock_guard().await;
 
@@ -1809,7 +1810,6 @@ impl PeerLoopHandler {
         .with_standing(standing);
 
         // If timestamps are different, we currently just log a warning.
-        const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
         let peer_clock_ahead_in_seconds = new_peer.time_difference_in_seconds();
         let own_clock_ahead_in_seconds = -peer_clock_ahead_in_seconds;
         if peer_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
@@ -2104,7 +2104,7 @@ mod peer_loop_tests {
     {
         let args = cli_args::Args::default();
         let network = args.network;
-        let (_from_main_tx, from_main_rx, to_main_tx, _to_main_rx, state_lock, _) =
+        let (from_main_tx, from_main_rx, to_main_tx, to_main_rx, state_lock, _) =
             get_test_genesis_setup(network, 0, args).await?;
 
         let peer_address = get_dummy_socket_address(0);
@@ -2127,8 +2127,8 @@ mod peer_loop_tests {
             .last_disconnection_time_of_peer(peer_id)
             .is_none());
 
-        drop(_to_main_rx);
-        drop(_from_main_tx);
+        drop(to_main_rx);
+        drop(from_main_tx);
 
         Ok(())
     }
@@ -2727,7 +2727,7 @@ mod peer_loop_tests {
         let tip_height: u64 = block7.header().height.into();
         assert_eq!(7, tip_height);
 
-        for block in blocks.iter() {
+        for block in &blocks {
             state_lock.set_new_tip(block.to_owned()).await.unwrap();
         }
 
@@ -3015,24 +3015,16 @@ mod peer_loop_tests {
             .await
             .unwrap();
 
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::NewBlocks(blocks)) => {
-                if blocks[0].hash() != block_2.hash() {
-                    panic!("1st received block by main loop must be block 1");
-                }
-                if blocks[1].hash() != block_3.hash() {
-                    panic!("2nd received block by main loop must be block 2");
-                }
-                if blocks[2].hash() != block_4.hash() {
-                    panic!("3rd received block by main loop must be block 3");
-                }
-            }
-            _ => panic!("Did not find msg sent to main task"),
+        let Some(PeerTaskToMain::NewBlocks(blocks)) = to_main_rx1.recv().await else {
+            panic!("Did not find msg sent to main task");
         };
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-            _ => panic!("Must receive remove of peer block max height"),
-        }
+        assert_eq!(blocks[0].hash(), block_2.hash());
+        assert_eq!(blocks[1].hash(), block_3.hash());
+        assert_eq!(blocks[2].hash(), block_4.hash());
+
+        let Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) = to_main_rx1.recv().await else {
+            panic!("Must receive remove of peer block max height");
+        };
 
         assert!(
             state_lock.lock_guard().await.net.peer_map.is_empty(),
@@ -3664,6 +3656,8 @@ mod peer_loop_tests {
             for (own_tx_pq, new_tx_pq) in
                 TransactionProofQuality::iter().cartesian_product(TransactionProofQuality::iter())
             {
+                use TransactionProofQuality::*;
+
                 let (
                     _peer_broadcast_tx,
                     from_main_rx_clone,
@@ -3675,7 +3669,6 @@ mod peer_loop_tests {
                     .await
                     .unwrap();
 
-                use TransactionProofQuality::*;
                 let (own_tx, new_tx) = match (own_tx_pq, new_tx_pq) {
                     (ProofCollection, ProofCollection) => {
                         (&proof_collection_tx, &proof_collection_tx)
@@ -3777,7 +3770,7 @@ mod peer_loop_tests {
                 [0u8; 32],
             )
             .await;
-            for block in blocks.iter() {
+            for block in &blocks {
                 alice.set_new_tip(block.clone()).await.unwrap();
             }
 

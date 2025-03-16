@@ -74,6 +74,7 @@ use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -600,6 +601,17 @@ pub trait RPC {
         token: rpc_auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockInfo>>;
+
+    /// Return the public announements contained in a specified block.
+    ///
+    /// Returns `None` if the selected block could not be found, otherwise
+    /// returns `Some(public_announcements)`.
+    ///
+    /// Does not attempt to decode the public announcements.
+    async fn public_announcements_in_block(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<Vec<PublicAnnouncement>>>;
 
     /// Return the digests of known blocks with specified height.
     ///
@@ -2456,9 +2468,8 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
-        let digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         // verify the block actually exists
         Ok(archival_state
@@ -2478,16 +2489,14 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         let tip_digest = state.chain.light_state().hash();
         let archival_state = state.chain.archival_state();
 
-        let block = match archival_state.get_block(digest).await.unwrap() {
-            Some(b) => b,
-            None => return Ok(None),
+        let Some(block) = archival_state.get_block(digest).await.unwrap() else {
+            return Ok(None);
         };
         let is_canonical = archival_state
             .block_belongs_to_canonical_chain(digest)
@@ -2508,6 +2517,30 @@ impl RPC for NeptuneRPCServer {
             sibling_blocks,
             is_canonical,
         )))
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn public_announcements_in_block(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<Vec<PublicAnnouncement>>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+        let archival_state = state.chain.archival_state();
+        let Some(block) = archival_state.get_block(digest).await.unwrap() else {
+            return Ok(None);
+        };
+
+        Ok(Some(
+            block.body().transaction_kernel.public_announcements.clone(),
+        ))
     }
 
     // documented in trait. do not add doc-comment.
@@ -2585,13 +2618,13 @@ impl RPC for NeptuneRPCServer {
         let global_state = self.state.lock_guard().await;
 
         // Get all connected peers
-        for (socket_address, peer_info) in global_state.net.peer_map.iter() {
+        for (socket_address, peer_info) in &global_state.net.peer_map {
             if peer_info.standing().is_negative() {
                 sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
             }
         }
 
-        let sanctions_in_db = global_state.net.all_peer_sanctions_in_database().await;
+        let sanctions_in_db = global_state.net.all_peer_sanctions_in_database();
 
         // Combine result for currently connected peers and previously connected peers but
         // use result for currently connected peer if there is an overlap
@@ -2744,9 +2777,8 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let block_digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(block_digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         Ok(state
             .chain
@@ -2900,7 +2932,7 @@ impl RPC for NeptuneRPCServer {
         let peer_count = Some(state.net.peer_map.len());
         let max_num_peers = self.state.cli().max_num_peers;
 
-        let mining_status = Some(state.mining_state.mining_status.clone());
+        let mining_status = Some(state.mining_state.mining_status);
 
         let confirmations = {
             log_slow_scope!(fn_name!() + "::confirmations_internal()");
@@ -3240,11 +3272,12 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
     ) -> RpcResult<usize> {
+        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
+
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
-        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
         let prune_count_res = global_state_mut
             .prune_abandoned_monitored_utxos(DEFAULT_MUTXO_PRUNE_DEPTH)
@@ -3368,9 +3401,8 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let last_block = match last_block.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(last_block) = last_block.as_digest(&state).await else {
+            return Ok(None);
         };
         let mut intervals = vec![];
         let mut current = state
@@ -3639,11 +3671,13 @@ mod rpc_server_tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::rpc_server::NeptuneRPCServer;
+    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::unit_test_data_directory;
@@ -3747,6 +3781,10 @@ mod rpc_server_tests {
         let _ = rpc_server
             .clone()
             .block_info(ctx, token, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
+            .public_announcements_in_block(ctx, token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
             .clone()
@@ -3863,7 +3901,7 @@ mod rpc_server_tests {
         Ok(())
     }
 
-    #[allow(clippy::shadow_unrelated)]
+    #[expect(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
@@ -4021,7 +4059,7 @@ mod rpc_server_tests {
         Ok(())
     }
 
-    #[allow(clippy::shadow_unrelated)]
+    #[expect(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
@@ -4221,6 +4259,11 @@ mod rpc_server_tests {
                 .await,
         );
 
+        assert!(
+            genesis_block_info.num_public_announcements.is_zero(),
+            "Genesis block contains no public announcements. Block info must reflect that."
+        );
+
         let tip_block_info = BlockInfo::new(
             global_state.chain.light_state(),
             genesis_hash,
@@ -4296,6 +4339,74 @@ mod rpc_server_tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn public_announcements_in_block_test() {
+        let network = Network::Main;
+        let mut rpc_server = test_rpc_server(
+            network,
+            WalletEntropy::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
+        let mut rng = rand::rng();
+        let num_public_announcements_block1 = 7;
+        let num_inputs = 0;
+        let num_outputs = 2;
+        let tx_block1 = pseudorandom_transaction_kernel(
+            rng.random(),
+            num_inputs,
+            num_outputs,
+            num_public_announcements_block1,
+        );
+        let tx_block1 = Transaction {
+            kernel: tx_block1,
+            proof: TransactionProof::invalid(),
+        };
+        let block1 = invalid_block_with_transaction(&Block::genesis(network), tx_block1);
+        rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
+
+        let token = cookie_token(&rpc_server).await;
+        let ctx = context::current();
+        let block1_public_announcements = rpc_server
+            .clone()
+            .public_announcements_in_block(ctx, token, BlockSelector::Height(1u64.into()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            block1.body().transaction_kernel.public_announcements,
+            block1_public_announcements,
+            "Must return expected public announcements"
+        );
+        assert_eq!(
+            num_public_announcements_block1,
+            block1_public_announcements.len(),
+            "Must return expected number of public announcements"
+        );
+
+        let genesis_block_public_announcements = rpc_server
+            .clone()
+            .public_announcements_in_block(ctx, token, BlockSelector::Height(0u64.into()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            genesis_block_public_announcements.is_empty(),
+            "Genesis block has no public announements"
+        );
+
+        assert!(
+            rpc_server
+                .public_announcements_in_block(ctx, token, BlockSelector::Height(2u64.into()))
+                .await
+                .unwrap()
+                .is_none(),
+            "Public announcements in unknown block must return None"
+        );
     }
 
     #[traced_test]
@@ -4698,35 +4809,30 @@ mod rpc_server_tests {
         use super::*;
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_before_confirmed() -> Result<()> {
             worker::claim_utxo_owned(false, false).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_after_confirmed() -> Result<()> {
             worker::claim_utxo_owned(true, false).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_after_confirmed_and_after_spent() -> Result<()> {
             worker::claim_utxo_owned(true, true).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_unowned_before_confirmed() -> Result<()> {
             worker::claim_utxo_unowned(false).await
         }
 
         #[traced_test]
-        #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_unowned_after_confirmed() -> Result<()> {
             worker::claim_utxo_unowned(true).await
@@ -4828,7 +4934,7 @@ mod rpc_server_tests {
                         state.set_new_tip(blocks[2].clone()).await?;
                     }
 
-                    for utxo_notification in alice_to_bob_utxo_notifications.into_iter() {
+                    for utxo_notification in alice_to_bob_utxo_notifications {
                         // Register the same UTXO multiple times to ensure that this does not
                         // change the balance.
                         let claim_was_new0 = bob_rpc_server
@@ -5106,7 +5212,6 @@ mod rpc_server_tests {
         /// that accepts incoming UTXOs.
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn send_to_many_test() -> Result<()> {
             for recipient_key_type in KeyType::all_types_for_receiving() {
                 worker::send_to_many(recipient_key_type).await?;
@@ -5118,7 +5223,6 @@ mod rpc_server_tests {
         /// note: rate-limit only applies below block 25000
         #[traced_test]
         #[tokio::test]
-        #[allow(clippy::needless_return)]
         async fn send_rate_limit() -> Result<()> {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;

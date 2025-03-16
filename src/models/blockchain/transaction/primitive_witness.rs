@@ -617,7 +617,7 @@ pub mod neptune_arbitrary {
                                     .iter()
                                     .rev()
                                     .skip(1)
-                                    .cloned()
+                                    .copied()
                                     .sum::<NativeCurrencyAmount>();
                                 if let Some(last_input) = input_amounts.last_mut() {
                                     *last_input =
@@ -648,7 +648,7 @@ pub mod neptune_arbitrary {
                             .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                             .collect_vec();
                         let total_outputs =
-                            output_amounts.iter().cloned().sum::<NativeCurrencyAmount>();
+                            output_amounts.iter().copied().sum::<NativeCurrencyAmount>();
                         let fee = total_amount.checked_sub(&total_outputs).unwrap();
                         let total_inputs = input_utxos
                             .iter()
@@ -712,7 +712,7 @@ pub mod neptune_arbitrary {
                 .boxed()
         }
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         pub(crate) fn arbitrary_primitive_witness_with_timestamp_and(
             input_utxos: &[Utxo],
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
@@ -801,7 +801,7 @@ pub mod neptune_arbitrary {
                 .boxed()
         }
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         pub(crate) fn from_msa_and_records(
             msa_and_records: MsaAndRecords,
             input_utxos: Vec<Utxo>,
@@ -954,7 +954,7 @@ pub mod neptune_arbitrary {
         );
             let mut total_output_amount = output_amounts_suggestion
                 .iter()
-                .cloned()
+                .copied()
                 .sum::<NativeCurrencyAmount>();
             let total_input_plus_coinbase =
                 total_input_amount + coinbase.unwrap_or_else(|| NativeCurrencyAmount::coins(0));
@@ -966,7 +966,7 @@ pub mod neptune_arbitrary {
                 }
                 total_output_amount = output_amounts_suggestion
                     .iter()
-                    .cloned()
+                    .copied()
                     .sum::<NativeCurrencyAmount>();
                 match total_input_plus_coinbase.checked_sub(&total_output_amount) {
                     Some(number) => {
@@ -1243,8 +1243,8 @@ mod test {
                             input_lock_scripts_and_witnesses.try_into().unwrap();
 
                         let mut all_input_triples = vec![];
-                        for input_utxos in input_utxoss.iter() {
-                            for input_utxo in input_utxos.iter() {
+                        for input_utxos in &input_utxoss {
+                            for input_utxo in input_utxos {
                                 all_input_triples.push((
                                     Hash::hash(input_utxo),
                                     input_sender_randomnesses.pop().unwrap(),
@@ -1392,7 +1392,7 @@ mod test {
                 .boxed()
         }
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         pub(crate) fn arbitrary_given_mutator_set_accumulator_and_inputs(
             num_outputs: usize,
             num_announcements: usize,
@@ -1788,7 +1788,7 @@ mod test {
             total_input_amount.checked_add(&coinbase).unwrap()
                 == output_amounts
                     .iter()
-                    .cloned()
+                    .copied()
                     .sum::<NativeCurrencyAmount>()
                     .checked_add(&fee)
                     .unwrap()
@@ -1813,7 +1813,7 @@ mod test {
             total_input_amount
                 == output_amounts
                     .iter()
-                    .cloned()
+                    .copied()
                     .sum::<NativeCurrencyAmount>()
                     .checked_add(&fee)
                     .unwrap()
@@ -1836,10 +1836,10 @@ mod test {
                 .iter()
                 .map(|b| b.value() as u32)
                 .collect_vec();
-            let amount = u32s[0] as u128
-                | ((u32s[1] as u128) << 32)
-                | ((u32s[2] as u128) << 64)
-                | ((u32s[3] as u128) << 96);
+            let amount = u128::from(u32s[0])
+                | (u128::from(u32s[1]) << 32)
+                | (u128::from(u32s[2]) << 64)
+                | (u128::from(u32s[3]) << 96);
             total = total + NativeCurrencyAmount::from_nau(amount.try_into().unwrap());
         }
         prop_assert!(total <= NativeCurrencyAmount::coins(42000000));

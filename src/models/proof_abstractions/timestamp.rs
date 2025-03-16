@@ -99,9 +99,9 @@ impl Mul<usize> for Timestamp {
     ///
     /// Panics if there is overflow mod P = 2^64 - 2^32 + 1.
     fn mul(self, rhs: usize) -> Self::Output {
-        let value: u128 = (self.0.value() as u128) * (u128::try_from(rhs).unwrap());
+        let value: u128 = u128::from(self.0.value()) * (u128::try_from(rhs).unwrap());
 
-        assert!(value < BFieldElement::P as u128);
+        assert!(value < u128::from(BFieldElement::P));
 
         Self(BFieldElement::new(value as u64))
     }
@@ -157,8 +157,11 @@ impl Timestamp {
     }
 
     pub fn standard_format(&self) -> String {
-        let naive =
-            NaiveDateTime::from_timestamp_millis(self.0.value().try_into().unwrap_or(0)).unwrap();
+        let naive = NaiveDateTime::from_timestamp_millis(self.0.value().try_into().unwrap_or(0));
+        let Some(naive) = naive else {
+            return "Too far into the future".to_string();
+        };
+
         let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
         let offset: DateTime<Local> = DateTime::from(utc);
         offset.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)
@@ -193,10 +196,78 @@ impl Distribution<Timestamp> for StandardUniform {
 
 #[cfg(test)]
 mod test {
+    use proptest_arbitrary_interop::arb;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
+    use test_strategy::proptest;
+
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn print_now() {
         println!("{}", Timestamp::now());
+    }
+
+    #[test]
+    fn std_format_cannot_panic_unit() {
+        let _a = Timestamp(BFieldElement::new(0)).standard_format();
+        let _b = Timestamp(BFieldElement::new(BFieldElement::MAX)).standard_format();
+        let _c = Timestamp(BFieldElement::new(u64::MAX)).standard_format();
+    }
+
+    #[proptest]
+    fn std_format_cannot_panic_prop(#[strategy(arb())] timestamp: Timestamp) {
+        let _a = timestamp.standard_format();
+    }
+
+    #[test]
+    fn format_cannot_panic_unit() {
+        let fmt = "%Y-%m-%d %H:%M:%S";
+        let _a = Timestamp(BFieldElement::new(0)).format(fmt);
+        let _b = Timestamp(BFieldElement::new(BFieldElement::MAX)).format(fmt);
+        let _c = Timestamp(BFieldElement::new(u64::MAX)).format(fmt);
+    }
+
+    #[proptest]
+    fn format_cannot_panic_prop(#[strategy(arb())] timestamp: Timestamp) {
+        let _a = timestamp.format("%Y-%m-%d %H:%M:%S");
+    }
+
+    #[test]
+    fn year_is_sane() {
+        assert_eq!(365240 * 60 * 60 * 24, Timestamp::years(1).to_millis());
+        assert_eq!(5 * 365240 * 60 * 60 * 24, Timestamp::years(5).to_millis());
+    }
+
+    #[test]
+    fn month_is_sane() {
+        assert_eq!(365240 * 60 * 60 * 24 / 12, Timestamp::months(1).to_millis());
+        assert_eq!(
+            5 * 365240 * 60 * 60 * 24 / 12,
+            Timestamp::months(5).to_millis()
+        );
+    }
+
+    #[test]
+    fn day_is_sane() {
+        assert_eq!(1000 * 60 * 60 * 24, Timestamp::days(1).to_millis());
+        assert_eq!(12 * 1000 * 60 * 60 * 24, Timestamp::days(12).to_millis());
+    }
+
+    #[test]
+    fn hour_is_sane() {
+        assert_eq!(1000 * 60 * 60, Timestamp::hours(1).to_millis());
+        assert_eq!(6 * 1000 * 60 * 60, Timestamp::hours(6).to_millis());
+    }
+
+    #[test]
+    fn minute_is_sane() {
+        assert_eq!(1000 * 60, Timestamp::minutes(1).to_millis());
+        assert_eq!(1915 * 1000 * 60, Timestamp::minutes(1915).to_millis());
+    }
+
+    #[test]
+    fn second_is_sane() {
+        assert_eq!(1000, Timestamp::seconds(1).to_millis());
+        assert_eq!(59 * 1000, Timestamp::seconds(59).to_millis());
     }
 }

@@ -79,7 +79,7 @@ impl SecretWitness for CollectTypeScriptsWitness {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectTypeScripts;
 
 impl ConsensusProgram for CollectTypeScripts {

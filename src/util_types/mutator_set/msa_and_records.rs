@@ -118,23 +118,23 @@ pub mod neptune_arbitrary {
                             },
                         )
                         .collect_vec();
-                    let mut all_bloom_indices = all_index_sets.iter().flatten().cloned().collect_vec();
+                    let mut all_bloom_indices = all_index_sets.iter().flatten().copied().collect_vec();
                     all_bloom_indices.sort();
 
                     // assemble all chunk indices
                     let mut all_chunk_indices = all_bloom_indices
                         .iter()
-                        .map(|index| *index / (CHUNK_SIZE as u128))
+                        .map(|index| *index / u128::from(CHUNK_SIZE))
                         .map(|index| index as u64)
                         .collect_vec();
                     all_chunk_indices.sort();
                     all_chunk_indices.dedup();
 
                     // filter by swbf mmr size
-                    let swbf_mmr_size = aocl_mmra.num_leafs() / (BATCH_SIZE as u64);
+                    let swbf_mmr_size = aocl_mmra.num_leafs() / u64::from(BATCH_SIZE);
                     let mmr_chunk_indices = all_chunk_indices
                         .iter()
-                        .cloned()
+                        .copied()
                         .filter(|ci| *ci < swbf_mmr_size)
                         .collect_vec();
 
@@ -160,7 +160,7 @@ pub mod neptune_arbitrary {
                             let all_index_sets = all_index_sets.clone();
                             let aocl_membership_proofs = aocl_membership_proofs.clone();
                             let removables = removables.clone();
-                            let swbf_mmr_leaf_count = (aocl_mmra.num_leafs() / (BATCH_SIZE as u64)).saturating_sub(1);
+                            let swbf_mmr_leaf_count = (aocl_mmra.num_leafs() / u64::from(BATCH_SIZE)).saturating_sub(1);
                             let aocl_leaf_indices = aocl_leaf_indices.clone();
 
                             // unwrap random swbf mmra and membership proofs
@@ -173,7 +173,7 @@ pub mod neptune_arbitrary {
                                     let universal_chunk_dictionary: HashMap<u64, (MmrMembershipProof, Chunk)> =
                                         swbf_chunk_indices
                                             .iter()
-                                            .cloned()
+                                            .copied()
                                             .zip(
                                                 swbf_membership_proofs
                                                     .into_iter()
@@ -185,7 +185,7 @@ pub mod neptune_arbitrary {
                                         .map(|index_set| {
                                             let mut is = index_set
                                                 .iter()
-                                                .map(|index| *index / (CHUNK_SIZE as u128))
+                                                .map(|index| *index / u128::from(CHUNK_SIZE))
                                                 .map(|index| index as u64)
                                                 .collect_vec();
                                             is.sort();
@@ -365,7 +365,7 @@ mod test {
         }
 
         let split_msa_and_records = original.split_by(split);
-        for elem in split_msa_and_records.iter() {
+        for elem in &split_msa_and_records {
             assert_eq!(
                 elem.mutator_set_accumulator,
                 original.mutator_set_accumulator

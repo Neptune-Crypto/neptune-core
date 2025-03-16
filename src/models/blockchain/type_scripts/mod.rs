@@ -82,7 +82,7 @@ impl TypeScriptAndWitness {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(any(test, feature = "arbitrary-impls"))]
     pub(crate) fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
         Self {
             program,
@@ -95,7 +95,7 @@ impl TypeScriptAndWitness {
     pub(crate) fn nondeterminism(&self) -> NonDeterminism {
         NonDeterminism::new(self.nd_tokens.clone())
             .with_digests(self.nd_digests.clone())
-            .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>())
+            .with_ram(self.nd_memory.iter().copied().collect::<HashMap<_, _>>())
     }
 
     /// Assuming the type script halts gracefully, prove it.

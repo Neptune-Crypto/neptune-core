@@ -54,7 +54,6 @@ pub struct DbIntMut {
     write_options: WriteOptions,
 }
 
-#[allow(dead_code)]
 impl DbIntMut {
     /// Open a new database
     ///
@@ -347,7 +346,6 @@ impl Snapshots for DbIntMut {
 #[derive(Debug, Clone)]
 pub struct DB(DbIntMut);
 
-#[allow(dead_code)]
 impl DB {
     /// Open a new database
     ///
@@ -495,7 +493,7 @@ impl DB {
         sync: bool,
     ) -> Result<(), DbError> {
         let write_batch = WriteBatch::new();
-        for (key, value) in batch.into_iter() {
+        for (key, value) in batch {
             write_batch.put(&key, value);
         }
 
@@ -520,7 +518,7 @@ impl DB {
         batch: impl IntoIterator<Item = (&'static [u8], &'static [u8])>,
     ) -> Result<(), DbError> {
         let write_batch = WriteBatch::new();
-        for (key, value) in batch.into_iter() {
+        for (key, value) in batch {
             write_batch.put(&key, value);
         }
 

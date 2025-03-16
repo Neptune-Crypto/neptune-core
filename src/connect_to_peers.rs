@@ -151,6 +151,23 @@ async fn check_if_connection_is_allowed(
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
 
+    // Cap connections per IP, if specified.
+    if let Some(max_connections_per_ip) = cli_arguments.max_connections_per_ip {
+        let peer_ip = peer_address.ip();
+        let num_connections_to_this_ip = global_state
+            .net
+            .peer_map
+            .keys()
+            .map(|x| x.ip())
+            .filter(|ip| *ip == peer_ip)
+            .count();
+        if num_connections_to_this_ip >= max_connections_per_ip {
+            return InternalConnectionStatus::Refused(
+                ConnectionRefusedReason::MaxPeerNumberExceeded,
+            );
+        }
+    }
+
     // Disallow connection to self
     if own_handshake.instance_id == other_handshake.instance_id {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
@@ -534,6 +551,7 @@ pub(crate) async fn close_peer_connected_callback(
 
 #[cfg(test)]
 mod connect_tests {
+    use std::str::FromStr;
     use std::time::Duration;
     use std::time::SystemTime;
 
@@ -555,6 +573,7 @@ mod connect_tests {
     use crate::prelude::twenty_first;
     use crate::tests::shared::get_dummy_handshake_data_for_genesis;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
+    use crate::tests::shared::get_dummy_peer_incoming;
     use crate::tests::shared::get_dummy_socket_address;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::to_bytes;
@@ -608,7 +627,7 @@ mod connect_tests {
     #[test]
     fn malformed_version_from_peer_doesnt_crash() {
         let version_numbers = ["potato", "&&&&"];
-        for b in version_numbers.iter() {
+        for b in version_numbers {
             assert!(!versions_are_compatible("0.1.0", b));
         }
     }
@@ -625,8 +644,8 @@ mod connect_tests {
             "3.2.0",
             "9999.99999.9999",
         ];
-        for a in version_numbers.iter() {
-            for b in version_numbers.iter() {
+        for a in version_numbers {
+            for b in version_numbers {
                 assert!(versions_are_compatible(a, b));
             }
         }
@@ -973,7 +992,7 @@ mod connect_tests {
                 .await
                 .unwrap();
         let state = state_lock.lock_guard().await;
-        let mut own_handshake = state.get_own_handshakedata().await;
+        let mut own_handshake = state.get_own_handshakedata();
 
         // Set reported versions to something incompatible
         VersionString::try_from_str("0.0.3")
@@ -1078,6 +1097,82 @@ mod connect_tests {
         assert!(answer.is_err(), "max peers exceeded must result in error");
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn allow_capping_number_of_peers_per_ip() {
+        let allow_5_connections_from_same_ip = cli_args::Args {
+            max_connections_per_ip: Some(5),
+            ..Default::default()
+        };
+        let (
+            _peer_broadcast_tx,
+            _from_main_rx_clone,
+            _to_main_tx,
+            _to_main_rx1,
+            mut state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Main, 0, allow_5_connections_from_same_ip)
+            .await
+            .unwrap();
+
+        let dummy_address =
+            |i: usize| std::net::SocketAddr::from_str(&format!("253.4.5.1:2801{i}")).unwrap();
+        let five_dummy_addresses = (1..=5).map(dummy_address);
+
+        let own_handshake = state_lock.lock_guard().await.get_own_handshakedata();
+
+        // First five connections are allowed, from the same IP.
+        for peer_address in five_dummy_addresses {
+            let peer_info = get_dummy_peer_incoming(peer_address);
+            let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
+            let accepted = check_if_connection_is_allowed(
+                state_lock.clone(),
+                &own_handshake,
+                &peer_handshake,
+                &peer_address,
+            )
+            .await;
+            assert_eq!(InternalConnectionStatus::Accepted, accepted);
+
+            state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .peer_map
+                .insert(peer_address, peer_info.clone());
+        }
+
+        // The next connection from the same IP is rejected, as the limit per
+        // IP is reached.
+        let sixth_peer = dummy_address(6);
+        let peer_handshake = get_dummy_handshake_data_for_genesis(Network::Main);
+        let refused = check_if_connection_is_allowed(
+            state_lock.clone(),
+            &own_handshake,
+            &peer_handshake,
+            &sixth_peer,
+        )
+        .await;
+        assert_eq!(
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded),
+            refused
+        );
+
+        // But if connections per IP is not capped, allow this sixth connection.
+        let allow_all_ips = cli_args::Args::default();
+        state_lock.set_cli(allow_all_ips).await;
+
+        assert_eq!(
+            InternalConnectionStatus::Accepted,
+            check_if_connection_is_allowed(
+                state_lock.clone(),
+                &own_handshake,
+                &peer_handshake,
+                &sixth_peer,
+            )
+            .await
+        );
     }
 
     #[traced_test]

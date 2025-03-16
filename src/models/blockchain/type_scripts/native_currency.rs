@@ -68,7 +68,7 @@ const INVALID_COINBASE_DISCRIMINANT: i128 = 1_000_044;
 ///
 /// Lastly, if the coinbase is set then at least half of this amount must be
 /// time-locked for 3 years.
-#[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct NativeCurrency;
 
 impl NativeCurrency {

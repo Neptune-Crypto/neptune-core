@@ -118,7 +118,7 @@ impl Sub for BlockHeight {
     type Output = i128;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        self.0.value() as i128 - rhs.0.value() as i128
+        i128::from(self.0.value()) - i128::from(rhs.0.value())
     }
 }
 

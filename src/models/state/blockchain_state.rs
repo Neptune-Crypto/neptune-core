@@ -13,7 +13,7 @@ use super::light_state::LightState;
 ///
 // silence possible clippy bug / false positive.
 // see: https://github.com/rust-lang/rust-clippy/issues/9798
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum BlockchainState {
     /// represents a Archival blockchain state

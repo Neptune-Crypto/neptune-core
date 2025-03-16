@@ -212,7 +212,7 @@ impl SecretWitness for SingleProofWitness {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct SingleProof;
 
 impl SingleProof {
@@ -365,7 +365,7 @@ impl ConsensusProgram for SingleProof {
                 push 0
                 push 0
                 push 1
-                push {false as u64}
+                push {u32::from(false)}
                 // _ [txk_digest] garb garb [txk_digest] height index [padded-false-encoded]
 
                 sponge_init

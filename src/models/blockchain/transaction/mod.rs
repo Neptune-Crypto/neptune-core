@@ -118,7 +118,7 @@ impl TransactionProof {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum TransactionProofError {
     CannotUpdateProofVariant,
     CannotUpdatePrimitiveWitness,
@@ -126,7 +126,7 @@ pub enum TransactionProofError {
     ProverLockWasTaken,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
@@ -418,7 +418,6 @@ mod transaction_tests {
     // Macro is at fault.
     #[traced_test]
     #[tokio::test]
-    #[allow(clippy::needless_return)]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
             let as_single_proof = SingleProof::produce(

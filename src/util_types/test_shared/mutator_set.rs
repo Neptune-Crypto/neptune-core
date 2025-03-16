@@ -45,15 +45,15 @@ pub async fn get_all_indices_with_duplicates<
 ) -> Vec<u128> {
     let mut ret: Vec<u128> = vec![];
 
-    for index in archival_mutator_set.swbf_active.sbf.iter() {
-        ret.push(*index as u128);
+    for index in &archival_mutator_set.swbf_active.sbf {
+        ret.push(u128::from(*index));
     }
 
     let chunk_count = archival_mutator_set.chunks.len().await;
     for chunk_index in 0..chunk_count {
         let chunk = archival_mutator_set.chunks.get(chunk_index).await;
-        for index in chunk.relative_indices.iter() {
-            ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index as u128);
+        for index in &chunk.relative_indices {
+            ret.push(u128::from(*index) + u128::from(CHUNK_SIZE) * u128::from(chunk_index));
         }
     }
 
@@ -76,7 +76,6 @@ pub(crate) fn mock_item_mp_rr_for_init_msa() -> (Digest, MsMembershipProof, Remo
     (item, mp, removal_record)
 }
 
-#[allow(clippy::type_complexity)]
 pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
     let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
         .await
@@ -126,7 +125,7 @@ pub(crate) fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let absolute_indices = AbsoluteIndexSet::new(
         &(0..NUM_TRIALS as usize)
-            .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+            .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
             .collect_vec()
             .try_into()
             .unwrap(),
@@ -154,7 +153,7 @@ pub fn random_addition_record() -> AdditionRecord {
 
 pub fn pseudorandom_mmra(seed: [u8; 32]) -> MmrAccumulator {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let leaf_count = rng.next_u32() as u64;
+    let leaf_count = u64::from(rng.next_u32());
     let num_peaks = rng.next_u32() % 10;
     let peaks: Vec<Digest> = (0..num_peaks).map(|_| rng.random()).collect_vec();
     MmrAccumulator::init(peaks, leaf_count)
@@ -169,7 +168,10 @@ pub fn pseudorandom_mmra_with_mp_and_index(
     let num_peaks = leaf_count.count_ones();
     let leaf_index = rng.next_u64() % leaf_count;
     let (inner_index, peak_index) = leaf_index_to_mt_index_and_peak_index(leaf_index, leaf_count);
-    let tree_height = (inner_index as u128 + 1u128).next_power_of_two().ilog2() - 1;
+    let tree_height = (u128::from(inner_index) + 1u128)
+        .next_power_of_two()
+        .ilog2()
+        - 1;
 
     let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths(
         rng.random(),
@@ -250,8 +252,8 @@ pub fn pseudorandom_mmra_with_mps_and_indices(
         }
 
         // generate root and authentication paths
-        let tree_height =
-            (*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128).ilog2() as usize;
+        let tree_height = u128::from(*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap())
+            .ilog2() as usize;
         let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths(
             rng.random(),
             tree_height,
@@ -329,7 +331,7 @@ pub fn pseudorandom_merkle_root_with_authentication_paths(
     let mut nodes: HashMap<u64, Digest> = HashMap::new();
 
     // populate nodes dictionary with leafs
-    for (leaf, index) in leafs_and_indices.iter() {
+    for (leaf, index) in leafs_and_indices {
         nodes.insert(*index, *leaf);
     }
 
@@ -340,7 +342,9 @@ pub fn pseudorandom_merkle_root_with_authentication_paths(
         let mut working_indices = nodes
             .keys()
             .copied()
-            .filter(|i| (*i as u128) < (1u128 << (depth)) && (*i as u128) >= (1u128 << (depth - 1)))
+            .filter(|i| {
+                u128::from(*i) < (1u128 << (depth)) && u128::from(*i) >= (1u128 << (depth - 1))
+            })
             .collect_vec();
         working_indices.sort();
         working_indices.dedup();

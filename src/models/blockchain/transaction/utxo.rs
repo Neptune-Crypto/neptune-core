@@ -99,7 +99,7 @@ impl GetSize for Utxo {
     fn get_heap_size(&self) -> usize {
         // self.lock_script.get_heap_size() + self.coins.len() * (std::mem::size_of::<Digest>())
         let mut total = self.lock_script_hash().get_heap_size();
-        for v in self.coins.iter() {
+        for v in &self.coins {
             total += size_of::<Digest>();
             total += v.state.len() * size_of::<BFieldElement>();
         }
@@ -163,7 +163,7 @@ impl Utxo {
 
     /// If the UTXO has a timelock, find out what the release date is.
     pub fn release_date(&self) -> Option<Timestamp> {
-        self.coins.iter().filter_map(Coin::release_date).next()
+        self.coins.iter().find_map(Coin::release_date)
     }
 
     /// Test the coins for state validity, relative to known type scripts.
@@ -239,7 +239,6 @@ impl Utxo {
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
 ///
 /// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
-#[allow(clippy::derived_hash_with_manual_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
         StdHash::hash(&self.encode(), state);
