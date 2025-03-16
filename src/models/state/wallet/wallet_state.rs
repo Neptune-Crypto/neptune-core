@@ -2967,6 +2967,7 @@ pub(crate) mod tests {
             let composer_parameters = ComposerParameters::new(
                 a_key.to_address().into(),
                 rng.random(),
+                Some(a_key.privacy_preimage()),
                 0.5f64,
                 UtxoNotificationMedium::OffChain,
             );
@@ -4264,11 +4265,14 @@ pub(crate) mod tests {
             assert_eq!(filtered_utxos, caught_utxos);
         }
 
+        #[test]
+        fn scan_mode_recovers_offchain_composer_utxos() {}
     }
 
     pub(crate) mod fee_notifications {
 
         use crate::mine_loop::make_coinbase_transaction_stateless;
+        use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
         use super::*;
@@ -4287,7 +4291,6 @@ pub(crate) mod tests {
             let mut wallet_state =
                 WalletState::new_from_wallet_entropy(&data_dir, wallet_secret.clone(), &cli_args)
                     .await;
-            let fee_address = wallet_state.wallet_entropy.prover_fee_address();
             let global_state_lock =
                 mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args).await;
 
@@ -4301,7 +4304,7 @@ pub(crate) mod tests {
             let composer_parameters = global_state_lock
                 .lock_guard()
                 .await
-                .composer_parameters(fee_address); // on-chain notifications by default
+                .composer_parameters(Some(BlockHeight::genesis())); // on-chain notifications by default
             let (transaction, composer_utxos) = make_coinbase_transaction_stateless(
                 &previous_block,
                 composer_parameters.clone(),

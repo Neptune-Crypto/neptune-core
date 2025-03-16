@@ -723,6 +723,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     let composer_parameters = ComposerParameters::new(
         composer_key.to_address().into(),
         coinbase_sender_randomness,
+        Some(composer_key.privacy_preimage()),
         guesser_fraction,
         UtxoNotificationMedium::OffChain,
     );
@@ -1021,6 +1022,7 @@ async fn fake_block_successor(
     let composer_parameters = ComposerParameters::new(
         GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
         rng.random(),
+        None,
         0.5f64,
         UtxoNotificationMedium::OffChain,
     );

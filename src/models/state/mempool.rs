@@ -1251,17 +1251,32 @@ mod tests {
         let network = Network::Main;
         let bob_wallet_secret = WalletEntropy::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let mut bob =
-            mock_genesis_global_state(network, 2, bob_wallet_secret, cli_args::Args::default())
-                .await;
+        let mut bob = mock_genesis_global_state(
+            network,
+            2,
+            bob_wallet_secret,
+            cli_args::Args {
+                guesser_fraction: 0.0,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let bob_address = bob_spending_key.to_address();
 
         let alice_wallet = WalletEntropy::new_pseudorandom(rng.random());
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
-        let mut alice =
-            mock_genesis_global_state(network, 2, alice_wallet, cli_args::Args::default()).await;
+        let mut alice = mock_genesis_global_state(
+            network,
+            2,
+            alice_wallet,
+            cli_args::Args {
+                guesser_fraction: 0.0,
+                ..Default::default()
+            },
+        )
+        .await;
 
         // Ensure that both wallets have a non-zero balance by letting Alice
         // mine a block.
@@ -1367,7 +1382,6 @@ mod tests {
         }
 
         // Create next block which includes Bob's, but not Alice's, transaction.
-        let guesser_fraction = 0f64;
         let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction_from_state(
             &bob.global_state_lock
                 .lock_guard()
@@ -1376,7 +1390,6 @@ mod tests {
                 .light_state()
                 .clone(),
             &bob,
-            guesser_fraction,
             in_eight_months,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
@@ -1456,7 +1469,6 @@ mod tests {
                 .light_state()
                 .clone(),
             &alice,
-            guesser_fraction,
             block_5_timestamp,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),

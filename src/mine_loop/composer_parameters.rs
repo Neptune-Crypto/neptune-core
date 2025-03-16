@@ -7,6 +7,7 @@ use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 pub(crate) struct ComposerParameters {
     reward_address: ReceivingAddress,
     sender_randomness: Digest,
+    maybe_receiver_preimage: Option<Digest>,
     guesser_fee_fraction: f64,
     notification_medium: UtxoNotificationMedium,
 }
@@ -15,6 +16,7 @@ impl ComposerParameters {
     pub(crate) fn new(
         reward_address: ReceivingAddress,
         sender_randomness: Digest,
+        maybe_receiver_preimage: Option<Digest>,
         guesser_fee_fraction: f64,
         notification_medium: UtxoNotificationMedium,
     ) -> Self {
@@ -26,6 +28,7 @@ impl ComposerParameters {
         Self {
             reward_address,
             sender_randomness,
+            maybe_receiver_preimage,
             guesser_fee_fraction,
             notification_medium,
         }
@@ -37,6 +40,10 @@ impl ComposerParameters {
 
     pub(crate) fn sender_randomness(&self) -> Digest {
         self.sender_randomness
+    }
+
+    pub(crate) fn maybe_receiver_preimage(&self) -> Option<Digest> {
+        self.maybe_receiver_preimage
     }
 
     pub(crate) fn guesser_fee_fraction(&self) -> f64 {

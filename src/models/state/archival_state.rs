@@ -1717,7 +1717,10 @@ mod archival_state_tests {
             network,
             3,
             premine_rec_ws.wallet_entropy,
-            cli_args::Args::default(),
+            cli_args::Args {
+                guesser_fraction: 0.0,
+                ..Default::default()
+            },
         )
         .await;
         assert_eq!(
@@ -1819,7 +1822,6 @@ mod archival_state_tests {
             .unwrap();
         println!("Generated transaction for Alice and Bob.");
 
-        let guesser_fraction = 0f64;
         let (cbtx, composer_expected_utxos) = make_coinbase_transaction_from_state(
             &premine_rec
                 .global_state_lock
@@ -1829,7 +1831,6 @@ mod archival_state_tests {
                 .light_state()
                 .clone(),
             &premine_rec,
-            guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
@@ -2082,7 +2083,6 @@ mod archival_state_tests {
                 .light_state()
                 .clone(),
             &premine_rec,
-            guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
