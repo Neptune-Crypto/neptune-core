@@ -1033,6 +1033,8 @@ pub(crate) mod block_tests {
     use crate::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::TransactionProof;
+    use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
+    use crate::models::blockchain::type_scripts::TypeScript;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -1158,6 +1160,27 @@ pub(crate) mod block_tests {
 
             guesser_fraction += step;
         }
+    }
+
+    #[test]
+    fn observed_total_mining_reward_matches_block_subsidy() {
+        // Data read from a node composing and guessing on test net. It
+        // composed and guessed block number #115 and got four UTXOs, where the
+        // native currency type script recorded these states. Those states must
+        // sum to the total block subsidy for generation 0, 128 coins. This
+        // were the recorded states for block
+        // a1cd0ea9103c19444dd0342e7c772b0a02ed610b71a73ea37e4fe48357c619bb4fa0c3e866000000
+        let state0 = [0u64, 980281920, 2521720867, 1615].map(BFieldElement::new);
+        let state1 = [0u64, 980281920, 2521720867, 1615].map(BFieldElement::new);
+        let state2 = [0u64, 981467136, 2521720867, 1615].map(BFieldElement::new);
+        let state3 = [0u64, 981467136, 2521720867, 1615].map(BFieldElement::new);
+
+        let mut total_amount = NativeCurrencyAmount::zero();
+        for state in [state0, state1, state2, state3] {
+            total_amount = total_amount + *NativeCurrency.try_decode_state(&state).unwrap();
+        }
+
+        assert_eq!(NativeCurrencyAmount::coins(128), total_amount);
     }
 
     #[tokio::test]
