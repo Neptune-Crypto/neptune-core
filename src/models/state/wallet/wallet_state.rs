@@ -312,19 +312,37 @@ impl WalletState {
             configuration: configuration.clone(),
         };
 
-        // Generation key 0 is reserved for composing and guessing rewards. The
+        // Generation and Symmetric keys with derivation index 0 are reserved
+        // for composing and proof-upgrading rewards. The
         // next lines ensure that the key with derivation-index=0 key is known
         // to the wallet, so that claiming these rewards works.
-        // See comment in [`mine_loop::make_coinbase_transaction()`] for the
-        // rationale why these rewards always go to key 0.
+        //
+        // Motivation:
+        //  1. If the notifications are transmitted off-chain, there is no
+        //     privacy issue because publicly observable data is unlinkable even
+        //     if though the lock script is the same.
+        //  2. If we were to derive a new address for each proving task (compose
+        //     or upgrade) then we would have large gaps since an address only
+        //     receives funds if that transaction or block actually gets
+        //     confirmed.
+        //  3. Using derivation-index 0 allows us to avoid modifying
+        //     global/wallet state.
+        //  4. The singleton of derivation-indices {0} is easier to scan for
+        //     than a non-trivial set.
         //
         // Wallets start at key derivation index 1 for all UTXOs that are
-        // neither composing rewards, nor guessing rewards, nor premine UTXOs.
+        // neither composing rewards, nor proof upgrading rewards, nor premine
+        // UTXOs.
         //
         // note: this makes test known_keys_are_unique() pass.
         if wallet_state.known_generation_keys.is_empty() {
             let _ = wallet_state
                 .next_unused_spending_key(KeyType::Generation)
+                .await;
+        }
+        if wallet_state.known_symmetric_keys.is_empty() {
+            let _ = wallet_state
+                .next_unused_spending_key(KeyType::Symmetric)
                 .await;
         }
 
