@@ -880,6 +880,7 @@ mod tests {
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1018,6 +1019,37 @@ mod tests {
         }
 
         assert!(!mempool.is_empty())
+    }
+
+    #[test]
+    fn most_valuable_single_proof_pair_empty_mempool() {
+        let network = Network::Main;
+        let mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
+        assert!(mempool.most_dense_single_proof_pair().is_none());
+    }
+
+    #[test]
+    fn most_valuable_single_proof_pair_one_tx_in_mempool() {
+        let network = Network::Main;
+        let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign);
+        let mut rng = rand::rng();
+        let num_outputs = 0;
+        let num_public_announcements = 0;
+        let num_inputs = 0;
+        let kernel = pseudorandom_transaction_kernel(
+            rng.random(),
+            num_inputs,
+            num_outputs,
+            num_public_announcements,
+        );
+        let dummy_tx = Transaction {
+            kernel,
+            proof: TransactionProof::invalid(),
+        };
+        mempool
+            .insert(dummy_tx, TransactionOrigin::Foreign)
+            .unwrap();
+        assert!(mempool.most_dense_single_proof_pair().is_none());
     }
 
     #[traced_test]
