@@ -47,6 +47,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
@@ -105,7 +106,6 @@ use crate::models::state::wallet::address::generation_address::GenerationReceivi
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::GlobalStateLock;
@@ -725,7 +725,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         coinbase_sender_randomness,
         Some(composer_key.privacy_preimage()),
         guesser_fraction,
-        UtxoNotificationMedium::OffChain,
+        FeeNotificationPolicy::OffChain,
     );
 
     let (tx, composer_txos) = make_coinbase_transaction_stateless(
@@ -1024,7 +1024,7 @@ async fn fake_block_successor(
         rng.random(),
         None,
         0.5f64,
-        UtxoNotificationMedium::OffChain,
+        FeeNotificationPolicy::OffChain,
     );
     let (block_tx, _) = fake_create_block_transaction_for_tests(
         predecessor,

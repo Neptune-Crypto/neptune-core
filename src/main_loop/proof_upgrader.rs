@@ -5,11 +5,13 @@ use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::proof::Proof;
 use tracing::error;
 use tracing::info;
 
 use super::TransactionOrigin;
+use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -297,7 +299,7 @@ impl UpgradeJob {
             };
 
             // No locks may be held here!
-            let offchain_notifications = global_state_lock.cli().offchain_fee_notifications;
+            let offchain_notifications = global_state_lock.cli().fee_notification;
             let (upgraded, expected_utxos) = match upgrade_job
                 .clone()
                 .upgrade(
@@ -424,6 +426,39 @@ impl UpgradeJob {
         }
     }
 
+    fn gobbler_notification_method_with_receiver_preimage(
+        own_wallet_entropy: &WalletEntropy,
+        notification_policy: FeeNotificationPolicy,
+    ) -> (UtxoNotifyMethod, Digest) {
+        let gobble_receiver_key = match notification_policy {
+            FeeNotificationPolicy::OffChain => {
+                SpendingKey::from(own_wallet_entropy.nth_symmetric_key(0))
+            }
+            FeeNotificationPolicy::OnChainSymmetric => {
+                SpendingKey::from(own_wallet_entropy.nth_symmetric_key(0))
+            }
+            FeeNotificationPolicy::OnChainGeneration => {
+                SpendingKey::from(own_wallet_entropy.nth_generation_spending_key(0))
+            }
+        };
+        let receiver_preimage = gobble_receiver_key.privacy_preimage().unwrap();
+        let gobble_receiver_address = gobble_receiver_key
+            .to_address()
+            .expect("gobble receiver should have a corresponding address");
+
+        let fee_notification_method = match notification_policy {
+            FeeNotificationPolicy::OffChain => UtxoNotifyMethod::OffChain(gobble_receiver_address),
+            FeeNotificationPolicy::OnChainSymmetric => {
+                UtxoNotifyMethod::OnChain(gobble_receiver_address)
+            }
+            FeeNotificationPolicy::OnChainGeneration => {
+                UtxoNotifyMethod::OnChain(gobble_receiver_address)
+            }
+        };
+
+        (fee_notification_method, receiver_preimage)
+    }
+
     /// Execute the proof upgrade.
     ///
     /// Upgrades transactions to a proof of higher quality that is more likely
@@ -436,56 +471,60 @@ impl UpgradeJob {
         proof_job_options: TritonVmProofJobOptions,
         own_wallet_entropy: &WalletEntropy,
         current_block_height: BlockHeight,
-        offchain_notifications: bool,
+        fee_notification_policy: FeeNotificationPolicy,
     ) -> anyhow::Result<(Transaction, Vec<ExpectedUtxo>)> {
         let gobbling_fee = self.gobbling_fee();
         let mutator_set = self.mutator_set();
         let old_tx_timestamp = self.old_tx_timestamp();
 
-        let (gobbler, expected_utxos) = if gobbling_fee.is_positive() {
+        let (maybe_gobbler_transaction, expected_utxos) = if gobbling_fee.is_positive() {
             info!("Producing gobbler-transaction for a value of {gobbling_fee}");
-            let gobble_receiver = own_wallet_entropy.nth_symmetric_key(0);
-            let receiver_preimage = gobble_receiver.privacy_preimage();
-            let gobble_receiver = SpendingKey::Symmetric(gobble_receiver);
-            let gobble_receiver = gobble_receiver.to_address().expect(
-                "gobble receiver should have a corresponding address because it is a symmetric key",
-            );
-            let receiver_digest = gobble_receiver.privacy_digest();
-            let fee_notification_method = if offchain_notifications {
-                UtxoNotifyMethod::OffChain(gobble_receiver)
-            } else {
-                UtxoNotifyMethod::OnChain(gobble_receiver)
-            };
-            let gobbler = TransactionDetails::fee_gobbler(
+            let (utxo_notification_method, receiver_preimage) =
+                Self::gobbler_notification_method_with_receiver_preimage(
+                    own_wallet_entropy,
+                    fee_notification_policy,
+                );
+            let receiver_digest = receiver_preimage.hash();
+            let gobbler_transaction_details = TransactionDetails::fee_gobbler(
                 gobbling_fee,
                 own_wallet_entropy
                     .generate_sender_randomness(current_block_height, receiver_digest),
                 mutator_set,
                 old_tx_timestamp,
-                fee_notification_method,
+                utxo_notification_method,
             );
-            let expected_utxos = gobbler
-                .tx_outputs
-                .iter()
-                .map(|x| {
-                    ExpectedUtxo::new(
-                        x.utxo(),
-                        x.sender_randomness(),
-                        receiver_preimage,
-                        UtxoNotifier::FeeGobbler,
-                    )
-                })
-                .collect_vec();
-            let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
-            let gobbler_proof =
-                SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())
-                    .await?;
+
+            let expected_utxos =
+                if matches!(fee_notification_policy, FeeNotificationPolicy::OffChain) {
+                    gobbler_transaction_details
+                        .tx_outputs
+                        .iter()
+                        .map(|x| {
+                            ExpectedUtxo::new(
+                                x.utxo(),
+                                x.sender_randomness(),
+                                receiver_preimage,
+                                UtxoNotifier::FeeGobbler,
+                            )
+                        })
+                        .collect_vec()
+                } else {
+                    vec![]
+                };
+            let gobbler_primitive_witness =
+                PrimitiveWitness::from_transaction_details(&gobbler_transaction_details);
+            let gobbler_proof = SingleProof::produce(
+                &gobbler_primitive_witness,
+                triton_vm_job_queue,
+                proof_job_options.clone(),
+            )
+            .await?;
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
-            let gobbler = Transaction {
-                kernel: gobbler.kernel,
+            let gobbler_transaction = Transaction {
+                kernel: gobbler_primitive_witness.kernel,
                 proof: TransactionProof::SingleProof(gobbler_proof),
             };
-            (Some(gobbler), expected_utxos)
+            (Some(gobbler_transaction), expected_utxos)
         } else {
             (None, vec![])
         };
@@ -515,8 +554,8 @@ impl UpgradeJob {
                     proof: TransactionProof::SingleProof(single_proof),
                 };
 
-                let tx = if let Some(gobbler) = gobbler {
-                    let lhs = gobbler;
+                let tx = if let Some(gobbler_transaction) = maybe_gobbler_transaction {
+                    let lhs = gobbler_transaction;
                     let rhs = upgraded_tx;
 
                     info!("Proof-upgrader: Start merging with gobbler");
@@ -563,7 +602,7 @@ impl UpgradeJob {
                 .await?;
                 info!("Proof-upgrader, merge: Done");
 
-                if let Some(gobbler) = gobbler {
+                if let Some(gobbler) = maybe_gobbler_transaction {
                     ret = gobbler
                         .merge_with(
                             ret,

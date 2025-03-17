@@ -2717,6 +2717,7 @@ pub(crate) mod tests {
         use rand::rng;
 
         use super::*;
+        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::mine_loop::composer_parameters;
         use crate::mine_loop::guess_nonce;
         use crate::mine_loop::GuessingConfiguration;
@@ -2969,7 +2970,7 @@ pub(crate) mod tests {
                 rng.random(),
                 Some(a_key.privacy_preimage()),
                 0.5f64,
-                UtxoNotificationMedium::OffChain,
+                FeeNotificationPolicy::OffChain,
             );
             let (block2_tx, _) = fake_create_block_transaction_for_tests(
                 &block1,

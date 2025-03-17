@@ -438,7 +438,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         liquid_composer_amount,
         composer_parameters.sender_randomness(),
         composer_parameters.reward_address(),
-        composer_parameters.notification_medium(),
+        composer_parameters.notification_policy().into(),
         owned,
     );
 
@@ -448,7 +448,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         timelocked_composer_amount,
         composer_parameters.sender_randomness(),
         composer_parameters.reward_address(),
-        composer_parameters.notification_medium(),
+        composer_parameters.notification_policy().into(),
         owned,
     )
     .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
