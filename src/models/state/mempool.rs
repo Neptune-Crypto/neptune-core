@@ -11,16 +11,17 @@
 //! density'.
 
 pub mod mempool_insertion_error;
+mod mempool_size_policy;
 
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::Rev;
 
-use bytesize::ByteSize;
 use get_size2::GetSize;
 use itertools::Itertools;
 use mempool_insertion_error::MempoolInsertionError;
+use mempool_size_policy::MempoolSizePolicy;
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
 /// to mine, but a simple one is to pick transactions in descending order of
@@ -52,6 +53,7 @@ use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;
+use crate::config_models::cli_args::Args;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -123,21 +125,6 @@ pub(crate) struct MempoolTransaction {
 
 #[derive(Debug, GetSize)]
 pub struct Mempool {
-    /// Maximum size this data structure may take up in memory.
-    max_total_size: usize,
-
-    /// Maximum number of inputs per transaction allowed in this mempool.
-    ///
-    /// Also limits the pairs of single-proof backed transactions that are
-    /// returned for potential proof upgrading as well as the list of
-    /// transactions returned for block inclusion in such a way that the sum of
-    /// inputs in the returned transactions will never exceed this limit.
-    max_num_inputs_per_transaction: usize,
-
-    /// If set, represents the maximum number of transactions allowed in the
-    /// mempool. If None, mempool is only restricted by size.
-    max_length: Option<usize>,
-
     /// Contains transactions, with a mapping from transaction ID to transaction.
     /// Maintain for constant lookup
     tx_dictionary: HashMap<TransactionKernelId, MempoolTransaction>,
@@ -149,7 +136,12 @@ pub struct Mempool {
 
     /// Records the digest of the block that the transactions were synced to.
     /// Used to discover reorganizations.
+    #[get_size(ignore)]
     tip_digest: Digest,
+
+    /// Restrictions on the size of the mempool and the transactions in it.
+    #[get_size(ignore)]
+    size_policy: MempoolSizePolicy,
 }
 
 /// note that all methods that modify state and result in a MempoolEvent
@@ -160,22 +152,15 @@ pub struct Mempool {
 /// forward mempool events to the wallet in atomic fashion.
 impl Mempool {
     /// instantiate a new, empty `Mempool`
-    pub fn new(
-        max_total_size: ByteSize,
-        max_num_transactions: Option<usize>,
-        max_num_inputs_per_tx: usize,
-        tip_digest: Digest,
-    ) -> Self {
+    pub fn new(cli_args: &Args, tip_digest: Digest) -> Self {
         let table = Default::default();
         let queue = Default::default();
-        let max_total_size = max_total_size.0.try_into().unwrap();
+        let size_policy = MempoolSizePolicy::new(cli_args);
         Self {
-            max_total_size,
-            max_length: max_num_transactions,
-            max_num_inputs_per_transaction: max_num_inputs_per_tx,
             tx_dictionary: table,
             queue,
             tip_digest,
+            size_policy,
         }
     }
 
@@ -263,7 +248,8 @@ impl Mempool {
         ) -> Option<([(&TransactionKernel, &Proof); 2], TransactionOrigin)> {
             let mut ret = vec![];
             let mut own_tx = false;
-            let mut remaining_num_inputs = mempool.max_num_inputs_per_transaction as i128;
+            let mut remaining_num_inputs =
+                mempool.size_policy.max_num_inputs_per_transaction as i128;
             for (txid, _fee_density) in mempool.get_sorted_iter().skip(i) {
                 let candidate = mempool.tx_dictionary.get(&txid).unwrap();
                 let candidate_num_inputs = candidate.transaction.kernel.inputs.len() as i128;
@@ -384,7 +370,7 @@ impl Mempool {
         }
 
         // Check if tx conforms to mempool policy.
-        let max_num_inputs = self.max_num_inputs_per_transaction;
+        let max_num_inputs = self.size_policy.max_num_inputs_per_transaction;
         let num_inputs = new_tx.kernel.inputs.len();
         if num_inputs > max_num_inputs {
             return Err(MempoolInsertionError::TooManyInputs {
@@ -517,7 +503,7 @@ impl Mempool {
     ) -> Vec<Transaction> {
         let mut transactions = vec![];
         let mut fee_acc = NativeCurrencyAmount::zero();
-        let mut remaining_num_inputs = self.max_num_inputs_per_transaction;
+        let mut remaining_num_inputs = self.size_policy.max_num_inputs_per_transaction;
 
         for (transaction_digest, _fee_density) in self.get_sorted_iter() {
             // No more transactions can possibly be packed
@@ -804,7 +790,7 @@ impl Mempool {
     /// Likely computes in O(n).
     fn shrink_to_max_size(&mut self) {
         // Repeately remove the least valuable transaction
-        while self.get_size() > self.max_total_size && self.pop_min().is_some() {}
+        while self.get_size() > self.size_policy.max_total_size && self.pop_min().is_some() {}
 
         self.shrink_to_fit();
     }
@@ -812,7 +798,7 @@ impl Mempool {
     /// Shrink the memory pool to the value of its `max_length` field,
     /// if that field is set.
     fn shrink_to_max_length(&mut self) {
-        if let Some(max_length) = self.max_length {
+        if let Some(max_length) = self.size_policy.max_length {
             while self.len() > max_length && self.pop_min().is_some() {}
         }
 
@@ -835,10 +821,12 @@ impl Mempool {
     /// use neptune_cash::models::blockchain::block::Block;
     /// use neptune_cash::models::state::mempool::Mempool;
     /// use neptune_cash::config_models::network::Network;
+    /// use neptune_cash::config_models::cli_args::Args;
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis(network);
-    /// let mempool = Mempool::new(ByteSize::gb(1), None, 200, genesis_block.hash());
+    /// let cli_args = Args::default();
+    /// let mempool = Mempool::new(&cli_args, genesis_block.hash());
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_id, fee_density) in mempool.get_sorted_iter() {
@@ -902,7 +890,8 @@ mod tests {
     pub async fn insert_then_get_then_remove_then_get() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, usize::MAX, genesis_block.hash());
+        let cli_args = Args::default_with_network(network);
+        let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
 
         let txs = make_plenty_mock_transaction_with_primitive_witness(2);
         let transaction_digests = txs.iter().map(|tx| tx.kernel.txid()).collect_vec();
@@ -943,7 +932,8 @@ mod tests {
         origin: TransactionOrigin,
     ) -> Mempool {
         let genesis_block = Block::genesis(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, usize::MAX, genesis_block.hash());
+        let cli_args = Args::default_with_network(network);
+        let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
         let txs = make_plenty_mock_transaction_with_primitive_witness(transactions_count);
         for tx in txs {
             mempool.insert(tx, origin).unwrap();
@@ -1142,7 +1132,8 @@ mod tests {
     async fn prune_stale_transactions() {
         let network = Network::Alpha;
         let genesis_block = Block::genesis(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, usize::MAX, genesis_block.hash());
+        let cli_args = Args::default_with_network(network);
+        let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -1252,7 +1243,8 @@ mod tests {
             .await;
 
         // Add this transaction to a mempool
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, usize::MAX, block_1.hash());
+        let cli_args = Args::default_with_network(network);
+        let mut mempool = Mempool::new(&cli_args, block_1.hash());
         mempool
             .insert(tx_by_bob.clone(), TransactionOrigin::Own)
             .unwrap();
@@ -1481,7 +1473,8 @@ mod tests {
         // are the input into the merge.
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, usize::MAX, genesis_block.hash());
+        let cli_args = Args::default_with_network(network);
+        let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
 
         let ((left, right), merged) = merge_tx_triplet().await;
         mempool.insert(left, TransactionOrigin::Foreign).unwrap();
@@ -1778,7 +1771,8 @@ mod tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let txs = make_plenty_mock_transaction_with_primitive_witness(11);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, usize::MAX, genesis_block.hash());
+        let cli_args = Args::default_with_network(network);
+        let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
         for tx in txs {
             mempool.insert(tx, TransactionOrigin::Foreign).unwrap();
         }
@@ -1797,7 +1791,8 @@ mod tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let txs = make_plenty_mock_transaction_with_primitive_witness(11);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, usize::MAX, genesis_block.hash());
+        let cli_args = Args::default_with_network(network);
+        let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
 
         for tx in txs {
             mempool.insert(tx, TransactionOrigin::Foreign).unwrap();
@@ -1820,10 +1815,11 @@ mod tests {
         let mut expected_txs = txs.clone();
         expected_txs.sort_by_key(|x| x.fee_density());
         expected_txs.reverse();
+        let mut cli_args = Args::default_with_network(network);
 
         for i in 0..10 {
-            let mut mempool =
-                Mempool::new(ByteSize::gb(1), Some(i), usize::MAX, genesis_block.hash());
+            cli_args.max_mempool_num_tx = Some(i);
+            let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
             for tx in txs.clone() {
                 mempool.insert(tx, TransactionOrigin::Foreign).unwrap();
             }
@@ -2029,12 +2025,9 @@ mod tests {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             let max_inputs_per_tx = 5;
-            let mut mempool = Mempool::new(
-                ByteSize::gb(1),
-                None,
-                max_inputs_per_tx,
-                genesis_block.hash(),
-            );
+            let mut cli_args = Args::default_with_network(network);
+            cli_args.max_num_inputs_per_tx = max_inputs_per_tx;
+            let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
 
             let fee_density = NativeCurrencyAmount::zero();
             for i in 0..=max_inputs_per_tx {
@@ -2075,7 +2068,7 @@ mod tests {
 
             // However, if the mempool has a policy of max six inputs, then the
             // (tx_a, tx_b) pair must be returned.
-            mempool.max_num_inputs_per_transaction = 6;
+            mempool.size_policy.max_num_inputs_per_transaction = 6;
             let returned_pair_max_6 = mempool.most_dense_single_proof_pair().unwrap().0;
             let returned_pair_max_6 = returned_pair_max_6
                 .iter()
@@ -2086,7 +2079,7 @@ mod tests {
             // If the mempool has a policy of max three or four inputs, no pair
             // should be returned.
             for input_cap in [3, 4] {
-                mempool.max_num_inputs_per_transaction = input_cap;
+                mempool.size_policy.max_num_inputs_per_transaction = input_cap;
                 assert!(mempool.most_dense_single_proof_pair().is_none());
             }
 
@@ -2152,7 +2145,7 @@ mod tests {
             assert!(txs_for_block_max_5_inputs.contains(&tx_a));
             assert!(txs_for_block_max_5_inputs.contains(&tx_c));
 
-            mempool.max_num_inputs_per_transaction = 6;
+            mempool.size_policy.max_num_inputs_per_transaction = 6;
             let txs_for_block_max_6_inputs = mempool.get_transactions_for_block(
                 max_size,
                 max_num_transactions,
@@ -2162,7 +2155,7 @@ mod tests {
             assert!(txs_for_block_max_6_inputs.contains(&tx_a));
             assert!(txs_for_block_max_6_inputs.contains(&tx_b));
 
-            mempool.max_num_inputs_per_transaction = usize::MAX;
+            mempool.size_policy.max_num_inputs_per_transaction = usize::MAX;
             let txs_for_block_inf_inputs = mempool.get_transactions_for_block(
                 max_size,
                 max_num_transactions,
@@ -2174,7 +2167,7 @@ mod tests {
             assert!(txs_for_block_inf_inputs.contains(&tx_c));
 
             for input_cap in [3, 4] {
-                mempool.max_num_inputs_per_transaction = input_cap;
+                mempool.size_policy.max_num_inputs_per_transaction = input_cap;
                 let txs_for_block_max_3_inputs = mempool.get_transactions_for_block(
                     max_size,
                     max_num_transactions,
@@ -2220,8 +2213,9 @@ mod tests {
         ) -> Mempool {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
-            let mut mempool =
-                Mempool::new(ByteSize::gb(1), None, max_num_inputs, genesis_block.hash());
+            let mut cli_args = Args::default_with_network(network);
+            cli_args.max_num_inputs_per_tx = max_num_inputs;
+            let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
 
             for tx in transactions {
                 mempool.insert(tx, TransactionOrigin::Foreign).unwrap();
@@ -2238,8 +2232,9 @@ mod tests {
         ) -> Mempool {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
-            let mut mempool =
-                Mempool::new(ByteSize::gb(1), None, max_num_inputs, genesis_block.hash());
+            let mut cli_args = Args::default_with_network(network);
+            cli_args.max_num_inputs_per_tx = max_num_inputs;
+            let mut mempool = Mempool::new(&cli_args, genesis_block.hash());
 
             let fee_densities = fee_densities
                 .into_iter()
