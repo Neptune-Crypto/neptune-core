@@ -396,29 +396,25 @@ impl GlobalState {
         )
     }
 
+    /// Automatically assemble the composer parameters for composing the next
+    /// block from the state.
+    ///
+    /// The relevant CLI parameters are read from the CLI arguments living on
+    /// [`GlobalState`]. If `None` is passed for `maybe_next_block_height` then
+    /// the current block height is read from state. However, in some cases
+    /// (e.g., resolving race conditions) it is necessary to override that state
+    /// read, and in such cases the supplied `Some` block height is used
+    /// instead.
     pub(crate) fn composer_parameters(
         &self,
         maybe_next_block_height: Option<BlockHeight>,
     ) -> ComposerParameters {
-        let reward_address = self.wallet_state.wallet_entropy.prover_fee_address();
-        let receiver_preimage = self
-            .wallet_state
-            .wallet_entropy
-            .prover_fee_key()
-            .privacy_preimage();
         let next_block_height = maybe_next_block_height
             .unwrap_or_else(|| self.chain.light_state().header().height.next());
-        let sender_randomness_for_composer = self
-            .wallet_state
-            .wallet_entropy
-            .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
-
-        ComposerParameters::new(
-            reward_address,
-            sender_randomness_for_composer,
-            Some(receiver_preimage),
+        self.wallet_state.composer_parameters(
+            next_block_height,
             self.cli.guesser_fraction,
-            self.cli().fee_notification,
+            self.cli.fee_notification,
         )
     }
 

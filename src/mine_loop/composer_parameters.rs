@@ -3,7 +3,7 @@ use tasm_lib::prelude::Digest;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::models::state::wallet::address::ReceivingAddress;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ComposerParameters {
     reward_address: ReceivingAddress,
     sender_randomness: Digest,
@@ -11,6 +11,8 @@ pub(crate) struct ComposerParameters {
     guesser_fee_fraction: f64,
     notification_policy: FeeNotificationPolicy,
 }
+
+impl Eq for ComposerParameters {}
 
 impl ComposerParameters {
     pub(crate) fn new(
@@ -42,6 +44,11 @@ impl ComposerParameters {
         self.sender_randomness
     }
 
+    /// Get the receiver preimage, if it is stored; and `None` otherwise.
+    ///
+    /// Note that the receiver preimage is not known in a *cold composing*
+    /// scenario, where the composer fee UTXOs are sent to a foreign
+    /// [`ReceivingAddress`].
     pub(crate) fn maybe_receiver_preimage(&self) -> Option<Digest> {
         self.maybe_receiver_preimage
     }

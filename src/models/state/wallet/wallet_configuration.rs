@@ -74,6 +74,12 @@ impl WalletConfiguration {
             }
         };
 
+        if cli_args.compose {
+            if let Some(scan_mode_configuration) = self.scan_mode.as_mut() {
+                scan_mode_configuration.set_guesser_fraction(cli_args.guesser_fraction);
+            };
+        }
+
         self.network = cli_args.network;
 
         self

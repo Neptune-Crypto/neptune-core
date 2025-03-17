@@ -77,8 +77,9 @@ mod wallet_tests {
 
         let mut rng = rand::rng();
         for network in Network::iter() {
+            let cli_args = cli_args::Args::default();
             let mut alice =
-                mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
+                mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
             let alice_wallet = get_monitored_utxos(&alice).await;
             assert_eq!(
                 1,
@@ -93,7 +94,7 @@ mod wallet_tests {
             );
 
             let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
-            let bob_wallet = mock_genesis_wallet_state(bob_wallet, network).await;
+            let bob_wallet = mock_genesis_wallet_state(bob_wallet, network, &cli_args).await;
             let bob_mutxos = get_monitored_utxos(&bob_wallet).await;
             assert!(
                 bob_mutxos.is_empty(),
@@ -143,8 +144,10 @@ mod wallet_tests {
     async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
         let mut rng = rand::rng();
         let network = Network::RegTest;
+        let cli_args = cli_args::Args::default();
         let alice_wallet = WalletEntropy::new_random();
-        let mut alice_wallet = mock_genesis_wallet_state(alice_wallet.clone(), network).await;
+        let mut alice_wallet =
+            mock_genesis_wallet_state(alice_wallet.clone(), network, &cli_args).await;
         let bob_wallet = WalletEntropy::new_random();
         let bob_key = bob_wallet.nth_generation_spending_key_for_tests(0);
 
@@ -497,6 +500,7 @@ mod wallet_tests {
         // and the blockchain forks.
 
         let network = Network::Main;
+        let cli_args = cli_args::Args::default();
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
         let alice_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
         let mut alice = mock_genesis_global_state(
@@ -517,9 +521,10 @@ mod wallet_tests {
             .nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let genesis_block = Block::genesis(network);
-        let bob_wallet = mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network)
-            .await
-            .wallet_entropy;
+        let bob_wallet =
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args)
+                .await
+                .wallet_entropy;
         let mut bob_global_lock =
             mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args::Args::default())
                 .await;
