@@ -988,14 +988,6 @@ pub(crate) mod mine_loop_tests {
         proving_power: TxProvingCapability,
         job_options: TritonVmProofJobOptions,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
-        // note: it is Ok to always use the same key here because:
-        //  1. if we find a block, the utxo will go to our wallet
-        //     and notification occurs offchain, so there is no privacy issue.
-        //  2. if we were to derive a new addr for each block then we would
-        //     have large gaps since an address only receives funds when
-        //     we actually win the mining lottery.
-        //  3. also this way we do not have to modify global/wallet state.
-
         // It's important to use the input `latest_block` here instead of
         // reading it from state, since that could, because of a race condition
         // lead to an inconsistent witness higher up in the call graph. This is
