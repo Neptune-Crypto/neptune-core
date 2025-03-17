@@ -689,10 +689,12 @@ impl PeerLoopHandler {
                         .await?;
                 }
                 self.to_main_tx
-                    .send(PeerTaskToMain::PeerDiscoveryAnswer(
+                    .send(PeerTaskToMain::PeerDiscoveryAnswer((
                         peers,
+                        self.peer_address,
+                        // The distance to the revealed peers is 1 + this peer's distance
                         self.distance + 1,
-                    ))
+                    )))
                     .await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }

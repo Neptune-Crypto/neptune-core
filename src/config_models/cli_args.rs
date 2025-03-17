@@ -97,9 +97,6 @@ pub struct Args {
     ///   connection immediately, a non-bootstrap node might accept (depending on
     ///   its current and maximum number of peers), while a bootstrap node will
     ///   certainly refuse until the reconnect cooldown has expired.
-    /// - If a node is well-connected, it will stop trying to connect to known
-    ///   bootstrap nodes, even if this node's address is passed as an explicit peer
-    ///   via the corresponding command line argument.
     #[clap(long)]
     pub(crate) bootstrap: bool,
 
@@ -209,10 +206,6 @@ pub struct Args {
     pub(crate) sync_mode_threshold: usize,
 
     /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
-    ///
-    /// Connection attempts to bootstrap nodes will only be made if the own node is
-    /// not well-connected yet. Once enough connections to non-bootstrap peers have
-    /// been established, bootstrap nodes will not be bothered anymore.
     #[structopt(long)]
     pub(crate) peers: Vec<SocketAddr>,
 

@@ -15,7 +15,6 @@ pub(crate) struct BootstrapInfo {
 
 /// Does the node help bootstrapping the network?
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub(crate) enum BootstrapStatus {
     /// The node is not a bootstrap node.
     ///
