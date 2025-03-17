@@ -1029,6 +1029,10 @@ pub(crate) mod block_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
+    use crate::mine_loop::composer_parameters::ComposerParameters;
+    use crate::mine_loop::prepare_coinbase_transaction_stateless;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -1088,6 +1092,72 @@ pub(crate) mod block_tests {
 
         let random_height: BFieldElement = random();
         Block::block_subsidy(random_height.into());
+    }
+
+    #[test]
+    fn block_subsidy_generation_0() {
+        let block_height_generation_0 = 199u64.into();
+        assert_eq!(
+            NativeCurrencyAmount::coins(128),
+            Block::block_subsidy(block_height_generation_0)
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn total_block_subsidy_is_128_coins_regardless_of_guesser_fraction() {
+        let network = Network::Main;
+        let a_wallet_secret = WalletEntropy::new_random();
+        let a_key = a_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let genesis = Block::genesis(network);
+        let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+        let now = genesis.header().timestamp + Timestamp::days(1);
+
+        let mut guesser_fraction = 0f64;
+        let step = 0.05;
+        while guesser_fraction + step <= 1f64 {
+            let composer_parameters =
+                ComposerParameters::new(a_key.to_address().into(), rng.random(), guesser_fraction);
+            let (composer_txos, transaction_details) =
+                prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now).unwrap();
+            let coinbase_kernel =
+                PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
+            let coinbase = Transaction {
+                kernel: coinbase_kernel,
+                proof: TransactionProof::invalid(),
+            };
+            let total_composer_reward: NativeCurrencyAmount = composer_txos
+                .iter()
+                .map(|tx_output| tx_output.utxo().get_native_currency_amount())
+                .sum();
+            let block_primitive_witness = BlockPrimitiveWitness::new(genesis.clone(), coinbase);
+            let block_proof_witness = BlockProofWitness::produce(block_primitive_witness.clone());
+            let block1 = Block::new(
+                block_primitive_witness.header(now, None),
+                block_primitive_witness.body().to_owned(),
+                block_proof_witness.appendix(),
+                BlockProof::Invalid,
+            );
+            let total_guesser_reward = block1.total_guesser_reward();
+            let total_miner_reward = total_composer_reward + total_guesser_reward;
+            assert_eq!(NativeCurrencyAmount::coins(128), total_miner_reward);
+
+            println!("guesser_fraction: {guesser_fraction}");
+            println!(
+                "total_composer_reward: {total_guesser_reward}, as nau: {}",
+                total_composer_reward.to_nau()
+            );
+            println!(
+                "total_guesser_reward: {total_guesser_reward}, as nau {}",
+                total_guesser_reward.to_nau()
+            );
+            println!(
+                "total_miner_reward: {total_miner_reward}, as nau {}\n\n",
+                total_miner_reward.to_nau()
+            );
+
+            guesser_fraction += step;
+        }
     }
 
     #[tokio::test]
