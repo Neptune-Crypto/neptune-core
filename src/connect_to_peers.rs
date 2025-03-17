@@ -24,7 +24,6 @@ use tracing::warn;
 
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
-use crate::models::peer::bootstrap_info::BootstrapStatus;
 use crate::models::peer::ConnectionRefusedReason;
 use crate::models::peer::InternalConnectionStatus;
 use crate::models::peer::NegativePeerSanction;
@@ -311,23 +310,12 @@ where
     info!("Connection accepted from {peer_address}");
 
     // If necessary, disconnect from another, existing peer.
-    let self_is_bootstrap = state.cli().bootstrap;
-    if connection_status == InternalConnectionStatus::AcceptedMaxReached && self_is_bootstrap {
+    if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
         peer_task_to_main_tx
             .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
             .await?;
     }
-
-    // inform the new peer about our bootstrap status
-    let bootstrap_status = if self_is_bootstrap {
-        BootstrapStatus::Bootstrap
-    } else {
-        BootstrapStatus::Ordinary
-    };
-    peer.send(PeerMessage::BootstrapStatus(bootstrap_status))
-        .await?;
-    debug!("Informing {peer_address} of our bootstrap status: {bootstrap_status}");
 
     let peer_distance = 1; // All incoming connections have distance 1
     let mut peer_loop_handler = PeerLoopHandler::new(
@@ -572,9 +560,6 @@ mod connect_tests {
 
     use anyhow::bail;
     use anyhow::Result;
-    use bytes::Bytes;
-    use proptest::prelude::*;
-    use test_strategy::proptest;
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
     use twenty_first::math::digest::Digest;
@@ -601,12 +586,9 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_outgoing_connection_succeed() -> Result<()> {
-        let network = Network::Main;
-        let (_tx, main_to_peer_rx, peer_to_main_tx, _rx, state, own_handshake) =
-            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
-        let (peer_handshake, peer_socket_address) =
-            get_dummy_peer_connection_data_genesis(network, 0);
-
+        let network = Network::Alpha;
+        let other_handshake = get_dummy_handshake_data_for_genesis(network);
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
             .write(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -614,7 +596,7 @@ mod connect_tests {
             ))))?)
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_RESPONSE.to_vec(),
-                peer_handshake,
+                other_handshake,
             ))))?)
             .read(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
@@ -622,20 +604,25 @@ mod connect_tests {
             .write(&to_bytes(&PeerMessage::PeerListRequest)?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
+
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Alpha, 0, cli_args::Args::default()).await?;
         call_peer_inner(
             mock,
             state.clone(),
-            peer_socket_address,
-            main_to_peer_rx,
-            peer_to_main_tx,
+            get_dummy_socket_address(0),
+            from_main_rx_clone,
+            to_main_tx,
             &own_handshake,
             1,
         )
         .await?;
 
-        if !state.lock_guard().await.net.peer_map.is_empty() {
-            bail!("peer map must be empty after connection has been closed");
-        }
+        // Verify that peer map is empty after connection has been closed
+        match state.lock(|s| s.net.peer_map.keys().len()).await {
+            0 => (),
+            _ => bail!("Incorrect number of maps in peer map"),
+        };
 
         Ok(())
     }
@@ -860,9 +847,6 @@ mod connect_tests {
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
             ))?)
-            .write(&to_bytes(&PeerMessage::BootstrapStatus(
-                BootstrapStatus::Ordinary,
-            ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
         answer_peer_inner(
@@ -903,9 +887,6 @@ mod connect_tests {
             ))))?)
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
-            ))?)
-            .write(&to_bytes(&PeerMessage::BootstrapStatus(
-                BootstrapStatus::Ordinary,
             ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
@@ -1260,102 +1241,5 @@ mod connect_tests {
         };
 
         Ok(())
-    }
-
-    #[proptest(cases = 20, async = "tokio")]
-    async fn bootstrap_status_message_propagates_to_state(
-        connection_is_incoming: bool,
-        own_bootstrap_status: BootstrapStatus,
-        peer_bootstrap_status: BootstrapStatus,
-    ) {
-        // convenience wrapper for `to_bytes`
-        fn serialize(message: &PeerMessage) -> Bytes {
-            to_bytes(message).unwrap()
-        }
-
-        let network = Network::Main;
-        let args = cli_args::Args {
-            network,
-            bootstrap: own_bootstrap_status == BootstrapStatus::Bootstrap,
-            ..Default::default()
-        };
-        let (_tx, main_to_peer_rx, peer_to_main_tx, _rx, state, own_handshake) =
-            get_test_genesis_setup(network, 0, args).await.unwrap();
-
-        // sanity check: no bootstrap status is known after startup
-        prop_assert!(state.lock_guard().await.net.bootstrap_status.is_empty());
-
-        // simulate connection
-        let (peer_handshake, peer_socket_address) =
-            get_dummy_peer_connection_data_genesis(network, 1);
-        let mut stream_builder = Builder::new();
-
-        if connection_is_incoming {
-            stream_builder
-                .read(&serialize(&PeerMessage::Handshake(Box::new((
-                    MAGIC_STRING_REQUEST.to_vec(),
-                    peer_handshake.clone(),
-                )))))
-                .write(&serialize(&PeerMessage::Handshake(Box::new((
-                    MAGIC_STRING_RESPONSE.to_vec(),
-                    own_handshake.clone(),
-                )))))
-                .write(&serialize(&PeerMessage::ConnectionStatus(
-                    TransferConnectionStatus::Accepted,
-                )))
-                .write(&serialize(&PeerMessage::BootstrapStatus(
-                    own_bootstrap_status,
-                )));
-        } else {
-            stream_builder
-                .write(&serialize(&PeerMessage::Handshake(Box::new((
-                    MAGIC_STRING_REQUEST.to_vec(),
-                    own_handshake.clone(),
-                )))))
-                .read(&serialize(&PeerMessage::Handshake(Box::new((
-                    MAGIC_STRING_RESPONSE.to_vec(),
-                    peer_handshake.clone(),
-                )))))
-                .read(&serialize(&PeerMessage::ConnectionStatus(
-                    TransferConnectionStatus::Accepted,
-                )))
-                .write(&serialize(&PeerMessage::PeerListRequest));
-        }
-        let mock_stream = stream_builder
-            .read(&serialize(&PeerMessage::BootstrapStatus(
-                peer_bootstrap_status,
-            )))
-            .read(&serialize(&PeerMessage::Bye))
-            .build();
-
-        if connection_is_incoming {
-            answer_peer_inner(
-                mock_stream,
-                state.clone(),
-                peer_socket_address,
-                main_to_peer_rx,
-                peer_to_main_tx,
-                own_handshake,
-            )
-            .await
-            .unwrap();
-        } else {
-            call_peer_inner(
-                mock_stream,
-                state.clone(),
-                peer_socket_address,
-                main_to_peer_rx,
-                peer_to_main_tx,
-                &own_handshake,
-                1,
-            )
-            .await
-            .unwrap();
-        }
-
-        let bootstrap_status = &state.lock_guard().await.net.bootstrap_status;
-        prop_assert_eq!(1, bootstrap_status.len());
-        let peer_status = bootstrap_status.get(&peer_socket_address).unwrap();
-        prop_assert_eq!(peer_bootstrap_status, peer_status.status);
     }
 }

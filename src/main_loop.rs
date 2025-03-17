@@ -2403,8 +2403,8 @@ mod test {
             instants.iter().copied().min_by(|l, r| l.cmp(r)).unwrap()
         );
     }
+    mod bootstrapper_mode {
 
-    mod bootstrap_mode {
         use rand::Rng;
 
         use super::*;
@@ -2416,7 +2416,7 @@ mod test {
         #[tokio::test]
         #[traced_test]
         async fn disconnect_from_oldest_peer_upon_connection_request() {
-            // Set up a node in bootstrap mode and connected to a given
+            // Set up a node in bootstrapper mode and connected to a given
             // number of peers, which is one less than the maximum. Initiate a
             // connection request. Verify that the oldest of the existing
             // connections is dropped.
@@ -2427,10 +2427,11 @@ mod test {
             let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
                 mut peer_to_main_rx,
+                miner_to_main_rx: _,
+                rpc_server_to_main_rx: _,
                 task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-                ..
             } = test_setup;
 
             let mocked_cli = cli_args::Args {
@@ -2459,13 +2460,9 @@ mod test {
             );
 
             // randomize "connection established" timestamps
-            let random_offset = || {
-                let unix_epoch_to_now_in_millis = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64;
-                Duration::from_millis(rand::rng().random_range(0..unix_epoch_to_now_in_millis))
-            };
+            let mut rng = rand::rng();
+            let now = SystemTime::now();
+            let now_as_unix_timestamp = now.duration_since(UNIX_EPOCH).unwrap();
             main_loop_handler
                 .global_state_lock
                 .lock_guard_mut()
@@ -2473,8 +2470,13 @@ mod test {
                 .net
                 .peer_map
                 .iter_mut()
-                .for_each(|(_, peer_info)| {
-                    peer_info.set_connection_established(UNIX_EPOCH + random_offset());
+                .for_each(|(_socket_address, peer_info)| {
+                    peer_info.set_connection_established(
+                        UNIX_EPOCH
+                            + Duration::from_millis(
+                                rng.random_range(0..(now_as_unix_timestamp.as_millis() as u64)),
+                            ),
+                    );
                 });
 
             // compute which peer will be dropped, for later reference
@@ -2485,11 +2487,11 @@ mod test {
                 .net
                 .peer_map
                 .iter()
-                .min_by(|(_, left), (_, right)| {
-                    left.connection_established()
-                        .cmp(&right.connection_established())
+                .min_by(|l, r| {
+                    l.1.connection_established()
+                        .cmp(&r.1.connection_established())
                 })
-                .map(|(socket_address, _)| socket_address)
+                .map(|(socket_address, _peer_info)| socket_address)
                 .copied()
                 .unwrap();
 
@@ -2501,8 +2503,8 @@ mod test {
                 .lock_guard()
                 .await
                 .get_own_handshakedata();
-            assert_eq!(peer_handshake_data.network, own_handshake_data.network);
-            assert_eq!(peer_handshake_data.version, own_handshake_data.version);
+            assert_eq!(peer_handshake_data.network, own_handshake_data.network,);
+            assert_eq!(peer_handshake_data.version, own_handshake_data.version,);
             let mock_stream = tokio_test::io::Builder::new()
                 .read(
                     &to_bytes(&PeerMessage::Handshake(Box::new((
@@ -2527,20 +2529,23 @@ mod test {
                 .build();
             let peer_to_main_tx_clone = main_loop_handler.peer_task_to_main_tx.clone();
             let global_state_lock_clone = main_loop_handler.global_state_lock.clone();
-            let main_to_peer_rx_clone = main_loop_handler.main_to_peer_broadcast_tx.subscribe();
+            let (_main_to_peer_tx_mock, main_to_peer_rx_mock) = tokio::sync::broadcast::channel(10);
             let incoming_peer_task_handle = tokio::task::Builder::new()
                 .name("answer_peer_wrapper")
                 .spawn(async move {
-                    answer_peer(
+                    match answer_peer(
                         mock_stream,
                         global_state_lock_clone,
                         peer_socket_address,
-                        main_to_peer_rx_clone,
+                        main_to_peer_rx_mock,
                         peer_to_main_tx_clone,
                         own_handshake_data,
                     )
                     .await
-                    .unwrap();
+                    {
+                        Ok(()) => (),
+                        Err(err) => error!("Got error: {:?}", err),
+                    }
                 })
                 .unwrap();
 

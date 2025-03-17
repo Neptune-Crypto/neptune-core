@@ -1,4 +1,3 @@
-pub(crate) mod bootstrap_info;
 pub(crate) mod handshake_data;
 pub mod peer_block_notifications;
 pub mod peer_info;
@@ -43,7 +42,6 @@ use super::proof_abstractions::timestamp::Timestamp;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
-use crate::models::peer::bootstrap_info::BootstrapStatus;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::prelude::twenty_first;
 
@@ -99,17 +97,6 @@ pub enum NegativePeerSanction {
     UnwantedMessage,
 
     NoStandingFoundMaybeCrash,
-
-    /// Nodes can change their bootstrap status and notify their peers about
-    /// such updates. Under normal circumstances, these updates are rare.
-    /// Frequent updates are an indicator of malicious behavior.
-    BootstrapStatusUpdateSpam,
-
-    /// It is valid for a peer to update its bootstrap status. However, each
-    /// update requires write-access to the global state lock, which is to be
-    /// avoided. In order to disincentivize updates, they cause a mild
-    /// punishment.
-    BootstrapStatusUpdate,
 }
 
 /// The reason for improving a peer's standing
@@ -177,8 +164,6 @@ impl Display for NegativePeerSanction {
             }
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => "fishy pow evolution",
             NegativePeerSanction::FishyDifficultiesChallengeResponse => "fishy difficulties",
-            NegativePeerSanction::BootstrapStatusUpdateSpam => "bootstrap status update spam",
-            NegativePeerSanction::BootstrapStatusUpdate => "bootstrap status update",
         };
         write!(f, "{string}")
     }
@@ -253,8 +238,6 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
             NegativePeerSanction::FishyPowEvolutionChallengeResponse => -51,
             NegativePeerSanction::FishyDifficultiesChallengeResponse => -51,
-            NegativePeerSanction::BootstrapStatusUpdateSpam => -20,
-            NegativePeerSanction::BootstrapStatusUpdate => -2,
         }
     }
 }
@@ -302,7 +285,6 @@ pub struct PeerStanding {
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
     peer_tolerance: i32,
 }
-
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct StandingExceedsBanThreshold;
 
@@ -485,7 +467,6 @@ pub(crate) enum PeerMessage {
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),
-    BootstrapStatus(BootstrapStatus),
 }
 
 impl PeerMessage {
@@ -512,7 +493,6 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => "unable to satisfy batch request",
             PeerMessage::SyncChallenge(_) => "sync challenge",
             PeerMessage::SyncChallengeResponse(_) => "sync challenge response",
-            PeerMessage::BootstrapStatus(_) => "bootstrap status",
         }
         .to_string()
     }
@@ -540,7 +520,6 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => true,
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
-            PeerMessage::BootstrapStatus(_) => false,
         }
     }
 
@@ -568,7 +547,6 @@ impl PeerMessage {
             PeerMessage::UnableToSatisfyBatchRequest => false,
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
-            PeerMessage::BootstrapStatus(_) => false,
         }
     }
 }
