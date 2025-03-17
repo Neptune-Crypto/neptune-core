@@ -47,8 +47,6 @@ pub struct UtxoNotificationPayload {
 }
 
 impl UtxoNotificationPayload {
-    // TODO: Remove test flag when used in main code.
-    #[cfg(test)]
     pub(crate) fn new(utxo: Utxo, sender_randomness: Digest) -> Self {
         Self {
             utxo,

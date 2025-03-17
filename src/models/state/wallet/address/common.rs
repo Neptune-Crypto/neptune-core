@@ -1,4 +1,5 @@
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
@@ -63,9 +64,11 @@ pub fn key_type_from_public_announcement(
 pub fn ciphertext_from_public_announcement(
     announcement: &PublicAnnouncement,
 ) -> Result<Vec<BFieldElement>> {
-    if announcement.message.len() <= 2 {
-        bail!("Public announcement does not contain ciphertext.");
-    }
+    ensure!(
+        announcement.message.len() > 2,
+        "Public announcement does not contain ciphertext.",
+    );
+
     Ok(announcement.message[2..].to_vec())
 }
 
@@ -106,14 +109,15 @@ pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
 /// Decodes a slice of BFieldElements to a vec of bytes. This method
 /// computes the inverse of `bytes_to_bfes`.
 pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
-    if bfes.is_empty() {
-        bail!("Cannot decode empty byte stream");
-    }
+    ensure!(!bfes.is_empty(), "Cannot decode empty byte stream");
 
     let length = bfes[0].value() as usize;
-    if length > std::mem::size_of_val(bfes) {
-        bail!("Cannot decode byte stream shorter than length indicated. BFE slice length: {}, indicated byte stream length: {length}", bfes.len());
-    }
+    ensure!(
+        length <= size_of_val(bfes),
+        "Cannot decode byte stream shorter than length indicated. \
+        BFE slice length: {}, indicated byte stream length: {length}",
+        bfes.len(),
+    );
 
     let mut bytes: Vec<u8> = Vec::with_capacity(length);
     let mut skip_top = false;

@@ -5,7 +5,9 @@ use std::ops::Neg;
 use std::ops::Sub;
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use anyhow::bail;
+use anyhow::ensure;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
@@ -474,15 +476,14 @@ impl NativeCurrencyAmount {
                 num_bigint::Sign::NoSign => unreachable!(),
             }
         };
-        if -BigInt::from(Self::MAX_NAU) > nau || nau > BigInt::from(Self::MAX_NAU) {
-            bail!("amount of Neptune coins too large or too small",);
-        }
-        match i128::try_from(nau) {
-            Ok(i) => Ok(Self(i)),
-            Err(e) => {
-                bail!("invalid amount of Neptune coins: {e:?}");
-            }
-        }
+
+        let max_nau = BigInt::from(Self::MAX_NAU);
+        ensure!(nau >= -max_nau.clone(), "amount of Neptune coins too small");
+        ensure!(nau <= max_nau, "amount of Neptune coins too large");
+
+        i128::try_from(nau)
+            .map(Self)
+            .map_err(|e| anyhow!("invalid amount of Neptune coins: {e:?}"))
     }
 }
 

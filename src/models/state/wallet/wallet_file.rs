@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use rand::rng;
@@ -103,24 +103,21 @@ impl WalletFileContext {
         }
 
         // Sanity checks that files were actually created
-        if !wallet_secret_path.exists() {
-            bail!(
-                "Wallet secret file '{}' must exist on disk after reading/creating it.",
-                wallet_secret_path.display()
-            );
-        }
-        if !outgoing_randomness_file.exists() {
-            bail!(
-                "file containing outgoing randomness '{}' must exist on disk.",
-                outgoing_randomness_file.display()
-            );
-        }
-        if !incoming_randomness_file.exists() {
-            bail!(
-                "file containing ingoing randomness '{}' must exist on disk.",
-                incoming_randomness_file.display()
-            );
-        }
+        ensure!(
+            wallet_secret_path.exists(),
+            "Wallet secret file '{}' must exist on disk after reading/creating it.",
+            wallet_secret_path.display(),
+        );
+        ensure!(
+            outgoing_randomness_file.exists(),
+            "file containing outgoing randomness '{}' must exist on disk.",
+            outgoing_randomness_file.display(),
+        );
+        ensure!(
+            incoming_randomness_file.exists(),
+            "file containing ingoing randomness '{}' must exist on disk.",
+            incoming_randomness_file.display(),
+        );
 
         Ok(Self {
             wallet_file: wallet_secret,

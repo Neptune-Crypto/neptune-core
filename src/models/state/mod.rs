@@ -21,6 +21,7 @@ use std::ops::DerefMut;
 use std::time::SystemTime;
 
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
@@ -1301,13 +1302,11 @@ impl GlobalState {
         block_depth_threshold: usize,
     ) -> Result<usize> {
         const MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING: usize = 10;
-        if block_depth_threshold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
-            bail!(
-                "
-                Cannot prune monitored UTXOs with a depth threshold less than
-                {MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING}. Got threshold {block_depth_threshold}"
-            )
-        }
+        ensure!(
+            block_depth_threshold >= MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING,
+            "Cannot prune monitored UTXOs with a depth threshold less than \
+            {MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING}. Got threshold {block_depth_threshold}"
+        );
 
         // Find monitored_utxo for updating
         let current_tip_header = self.chain.light_state().header();
@@ -1584,19 +1583,22 @@ impl GlobalState {
         };
 
         let tip_height = tip.header().height;
-        if tip_height < (SYNC_CHALLENGE_POW_WITNESS_LENGTH as u64).into() {
-            bail!("tip height is too small for sync mode")
-        }
+        ensure!(
+            tip_height >= (SYNC_CHALLENGE_POW_WITNESS_LENGTH as u64).into(),
+            "tip height {tip_height} is too small for sync mode",
+        );
 
         let mut block_pairs: Vec<(TransferBlock, TransferBlock)> = vec![];
         let mut block_mmr_mps = vec![];
         for child_height in sync_challenge.challenges {
-            if child_height < 2u64.into() {
-                bail!("challenge asks for genesis block");
-            }
-            if child_height >= tip.header().height {
-                bail!("challenge asks for height that's not ancestor to tip.");
-            }
+            ensure!(
+                child_height >= 2u64.into(),
+                "challenge asks for genesis block",
+            );
+            ensure!(
+                child_height < tip.header().height,
+                "challenge asks for height that's not ancestor to tip.",
+            );
 
             let Some(child_digest) = self
                 .chain

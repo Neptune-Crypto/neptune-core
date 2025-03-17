@@ -1,4 +1,5 @@
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
@@ -25,9 +26,10 @@ impl TryFrom<TransferBlock> for Block {
     type Error = anyhow::Error;
 
     fn try_from(t_block: TransferBlock) -> std::result::Result<Self, Self::Error> {
-        if t_block.header.height == BlockHeight::genesis() {
-            bail!("The genesis block cannot be transferred or decoded from transfer");
-        }
+        ensure!(
+            t_block.header.height != BlockHeight::genesis(),
+            "The genesis block cannot be transferred or decoded from transfer",
+        );
 
         let block = Block::new(
             t_block.header,

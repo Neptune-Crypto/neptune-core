@@ -1,4 +1,5 @@
-use anyhow::bail;
+use anyhow::anyhow;
+use anyhow::ensure;
 use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
@@ -87,29 +88,20 @@ impl EncryptedUtxoNotification {
     pub(crate) fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
         let (hrp, data, variant) = bech32::decode(encoded)?;
 
-        if variant != bech32::Variant::Bech32m {
-            bail!("Can only decode bech32m addresses.");
-        }
-
-        if hrp != *Self::get_hrp(network) {
-            bail!("Could not decode bech32m address because of invalid prefix");
-        }
+        ensure!(
+            variant == bech32::Variant::Bech32m,
+            "Can only decode bech32m addresses."
+        );
+        ensure!(
+            hrp == *Self::get_hrp(network),
+            "Could not decode bech32m address because of invalid prefix",
+        );
 
         let payload = Vec::<u8>::from_base32(&data)?;
-
-        let message: Vec<BFieldElement> = match bincode::deserialize(&payload) {
-            Ok(ra) => ra,
-            Err(e) => {
-                bail!("Could not decode bech32m because of error: {e}")
-            }
-        };
-
-        let encrypted_utxo_notification = match Self::from_message(message) {
-            Ok(eun) => eun,
-            Err(e) => {
-                bail!("conversion from bech32m failed: {e}")
-            }
-        };
+        let message = bincode::deserialize(&payload)
+            .map_err(|e| anyhow!("Could not decode bech32m because of error: {e}"))?;
+        let encrypted_utxo_notification = Self::from_message(message)
+            .map_err(|e| anyhow!("conversion from bech32m failed: {e}"))?;
 
         Ok(encrypted_utxo_notification)
     }
@@ -122,17 +114,12 @@ impl EncryptedUtxoNotification {
     pub fn decrypt_with_spending_key(
         &self,
         spending_key: &SpendingKey,
-    ) -> Option<anyhow::Result<UtxoNotificationPayload>> {
-        match spending_key.decrypt(&self.ciphertext) {
-            Some(decryption_result) => match decryption_result {
-                Ok((utxo, sender_randomness)) => Some(Ok(UtxoNotificationPayload {
-                    utxo,
-                    sender_randomness,
-                })),
-                Err(e) => Some(Err(e)),
-            },
-            None => None,
-        }
+    ) -> Option<Result<UtxoNotificationPayload>> {
+        let decryption_result = spending_key
+            .decrypt(&self.ciphertext)?
+            .map(|(utxo, sender_randomness)| UtxoNotificationPayload::new(utxo, sender_randomness));
+
+        Some(decryption_result)
     }
 }
 

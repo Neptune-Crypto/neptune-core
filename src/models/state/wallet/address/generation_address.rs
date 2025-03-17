@@ -16,7 +16,9 @@ use aead::Aead;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
+use anyhow::anyhow;
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -198,13 +200,15 @@ impl GenerationSpendingKey {
     /// Decrypt a Generation Address ciphertext
     pub(super) fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
         // parse ciphertext
-        if ciphertext.len() <= CIPHERTEXT_SIZE_IN_BFES {
-            bail!("Ciphertext does not have nonce.");
-        }
+        ensure!(
+            ciphertext.len() > CIPHERTEXT_SIZE_IN_BFES,
+            "Ciphertext does not have nonce.",
+        );
         let (kem_ctxt, remainder_ctxt) = ciphertext.split_at(CIPHERTEXT_SIZE_IN_BFES);
-        if remainder_ctxt.len() <= 1 {
-            bail!("Ciphertext does not have payload.")
-        }
+        ensure!(
+            remainder_ctxt.len() > 1,
+            "Ciphertext does not have payload.",
+        );
         let (nonce_ctxt, dem_ctxt) = remainder_ctxt.split_at(1);
         let kem_ctxt_array: [BFieldElement; CIPHERTEXT_SIZE_IN_BFES] = kem_ctxt.try_into().unwrap();
 
@@ -216,9 +220,9 @@ impl GenerationSpendingKey {
         let nonce_as_bytes = [nonce_ctxt[0].value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
         let ciphertext_bytes = common::bfes_to_bytes(dem_ctxt)?;
-        let Ok(plaintext) = cipher.decrypt(nonce, ciphertext_bytes.as_ref()) else {
-            bail!("Failed to decrypt symmetric payload.");
-        };
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext_bytes.as_ref())
+            .map_err(|_| anyhow!("Failed to decrypt symmetric payload."))?;
 
         // convert plaintext to utxo and digest
         Ok(bincode::deserialize(&plaintext)?)
@@ -316,20 +320,18 @@ impl GenerationReceivingAddress {
     pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
         let (hrp, data, variant) = bech32::decode(encoded)?;
 
-        if variant != Variant::Bech32m {
-            bail!("Can only decode bech32m addresses.");
-        }
-
-        if hrp[0..=5] != Self::get_hrp(network) {
-            bail!("Could not decode bech32m address because of invalid prefix");
-        }
+        ensure!(
+            variant == Variant::Bech32m,
+            "Can only decode bech32m addresses.",
+        );
+        ensure!(
+            hrp[0..=5] == Self::get_hrp(network),
+            "Could not decode bech32m address because of invalid prefix",
+        );
 
         let payload = Vec::<u8>::from_base32(&data)?;
-
-        match bincode::deserialize(&payload) {
-            Ok(ra) => Ok(ra),
-            Err(e) => bail!("Could not decode bech32m address because of error: {e}"),
-        }
+        bincode::deserialize(&payload)
+            .map_err(|e| anyhow!("Could not decode bech32m address because of error: {e}"))
     }
 
     /// returns an abbreviated address.

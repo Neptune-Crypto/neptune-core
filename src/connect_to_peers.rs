@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 use futures::FutureExt;
 use futures::SinkExt;
@@ -270,9 +271,10 @@ where
         bail!("Didn't get handshake on connection attempt");
     };
     let (magic_string_request, peer_handshake_data) = *payload;
-    if magic_string_request != MAGIC_STRING_REQUEST {
-        bail!("Expected magic value, got {magic_string_request:?}");
-    }
+    ensure!(
+        magic_string_request == MAGIC_STRING_REQUEST,
+        "Expected magic value, got {magic_string_request:?}",
+    );
 
     let handshake_response = Box::new((MAGIC_STRING_RESPONSE.to_vec(), own_handshake_data.clone()));
     peer.send(PeerMessage::Handshake(handshake_response))
@@ -281,12 +283,11 @@ where
     // Verify peer network before moving on
     let peer_network = peer_handshake_data.network;
     let own_network = own_handshake_data.network;
-    if peer_network != own_network {
-        bail!(
-            "Cannot connect with {peer_address}: \
-            Peer runs {peer_network}, this client runs {own_network}."
-        );
-    }
+    ensure!(
+        peer_network == own_network,
+        "Cannot connect with {peer_address}: \
+        Peer runs {peer_network}, this client runs {own_network}."
+    );
 
     // Check if incoming connection is allowed
     let connection_status = check_if_connection_is_allowed(
@@ -451,9 +452,11 @@ where
         bail!("Didn't get handshake response from {peer_address}");
     };
     let (magic_string_response, other_handshake) = *handshake_payload;
-    if magic_string_response != MAGIC_STRING_RESPONSE {
-        bail!("Didn't get expected magic value for handshake from {peer_address}");
-    }
+    ensure!(
+        magic_string_response == MAGIC_STRING_RESPONSE,
+        "Didn't get expected magic value for handshake from {peer_address}",
+    );
+
     debug!("Got correct magic value response from {peer_address}!");
     if other_handshake.network != own_handshake.network {
         let other = other_handshake.network;
@@ -668,18 +671,11 @@ mod connect_tests {
     #[tokio::test]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Alpha;
-        let (
-            _peer_broadcast_tx,
-            _from_main_rx_clone,
-            _to_main_tx,
-            _to_main_rx1,
-            mut state_lock,
-            _hsd,
-        ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
+        let (_, _, _, _, mut state_lock, own_handshake) =
+            get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
 
         // Get an address for a peer that's not already connected
         let (other_handshake, peer_sa) = get_dummy_peer_connection_data_genesis(network, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network);
 
         let mut status = check_if_connection_is_allowed(
             state_lock.clone(),
@@ -688,9 +684,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != InternalConnectionStatus::Accepted {
-            bail!("Must return ConnectionStatus::Accepted");
-        }
+        assert_eq!(InternalConnectionStatus::Accepted, status);
 
         status = check_if_connection_is_allowed(
             state_lock.clone(),
@@ -699,9 +693,10 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
-            bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
-        }
+        assert_eq!(
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect),
+            status,
+        );
 
         // pretend --max_peers is 1.
         let mut cli = state_lock.cli().clone();
@@ -715,13 +710,10 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status
-            != InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded)
-        {
-            bail!(
-                "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
-            );
-        }
+        assert_eq!(
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded),
+            status,
+        );
 
         // pretend --max-peers is 100
         cli.max_num_peers = 100;
@@ -740,11 +732,10 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
-            bail!(
-                "Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))"
-            );
-        }
+        assert_eq!(
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected),
+            status,
+        );
 
         // pretend --ban <peer_sa>
         cli.ban.push(peer_sa.ip());
@@ -759,9 +750,10 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
-            bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on CLI-ban");
-        }
+        assert_eq!(
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding),
+            status,
+        );
 
         // pretend --ban ""
         cli.ban.pop();
@@ -774,9 +766,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != InternalConnectionStatus::Accepted {
-            bail!("Must return ConnectionStatus::Accepted after unban");
-        }
+        assert_eq!(InternalConnectionStatus::Accepted, status);
 
         // Then check that peers can be banned by bad behavior
         let bad_standing: PeerStanding = PeerStanding::init(
@@ -803,9 +793,10 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
-            bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on db-ban");
-        }
+        assert_eq!(
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding),
+            status,
+        );
 
         Ok(())
     }

@@ -10,6 +10,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::Parser;
@@ -103,10 +104,7 @@ impl FromStr for TransactionOutput {
     /// to generate on the command-line.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts = s.split(':').collect::<Vec<_>>();
-
-        if parts.len() != 2 {
-            anyhow::bail!("Invalid transaction output.  missing :")
-        }
+        ensure!(parts.len() == 2, "Invalid transaction output. Missing “:”");
 
         Ok(Self {
             address: parts[0].to_string(),
@@ -453,20 +451,19 @@ async fn main() -> Result<()> {
             let wallet_db_dir = data_directory.wallet_database_dir_path();
             let wallet_secret_path = WalletFileContext::wallet_secret_path(&wallet_dir);
 
-            // if the wallet dir already exists,
-            if wallet_dir.exists() {
-                bail!(
-                    "Cannot import seed phrase; wallet directory {} already exists. Move it to another location to import a seed phrase.",
-                    wallet_dir.display()
-                );
-            }
+            ensure!(
+                !wallet_dir.exists(),
+                "Cannot import seed phrase; wallet directory {} already exists. \
+                Move it to another location to import a seed phrase.",
+                wallet_dir.display(),
+            );
 
-            if wallet_db_dir.exists() {
-                bail!(
-                    "Cannot import seed phrase; wallet database directory {} already exists. Move it to another location to import a seed phrase.",
-                    wallet_db_dir.display()
-                );
-            }
+            ensure!(
+                !wallet_db_dir.exists(),
+                "Cannot import seed phrase; wallet database directory {} already exists. \
+                Move it to another location to import a seed phrase.",
+                wallet_db_dir.display(),
+            );
 
             // read seed phrase from user input
             println!("Importing seed phrase. Please enter words:");
@@ -504,12 +501,12 @@ async fn main() -> Result<()> {
 
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletFileContext::wallet_secret_path(&wallet_dir);
-            if !wallet_file.exists() {
-                bail!(
-                    concat!("Cannot export seed phrase because there is no wallet.dat file to export from.\n",
-                    "Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
-                );
-            }
+            ensure!(
+                wallet_file.exists(),
+                "Cannot export seed phrase because there is no wallet.dat file to export from.\n\
+                Generate one using `neptune-cli generate-wallet`, or import a seed phrase using \
+                `neptune-cli import-seed-phrase`."
+            );
             let wallet_secret = match WalletFile::read_from_file(&wallet_file) {
                 Err(e) => {
                     println!("Could not export seed phrase.");
@@ -1204,9 +1201,11 @@ fn get_nth_receiving_address(
 
     // Get wallet object, create various wallet secret files
     let wallet_file_name = WalletFileContext::wallet_secret_path(&wallet_dir);
-    if !wallet_file_name.exists() {
-        bail!("No wallet file found at {}.", wallet_file_name.display());
-    }
+    ensure!(
+        wallet_file_name.exists(),
+        "No wallet file found at {}.",
+        wallet_file_name.display(),
+    );
 
     println!("{}", wallet_file_name.display());
 

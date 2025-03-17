@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
@@ -1666,13 +1667,11 @@ impl WalletState {
                     .sum(),
             )
             .expect("balance must never be negative");
-        if confirmed_available_amount_without_mempool_spends < total_spend {
-            bail!(
-                "Insufficient funds. Requested: {}, Available: {}",
-                total_spend,
-                confirmed_available_amount_without_mempool_spends,
-            );
-        }
+        ensure!(
+            confirmed_available_amount_without_mempool_spends >= total_spend,
+            "Insufficient funds. Requested: {total_spend}, \
+            Available: {confirmed_available_amount_without_mempool_spends}",
+        );
 
         let mut input_funds = vec![];
         let mut allocated_amount = NativeCurrencyAmount::zero();

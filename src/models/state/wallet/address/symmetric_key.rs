@@ -5,7 +5,9 @@ use aead::Key;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
+use anyhow::anyhow;
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -226,7 +228,7 @@ impl SymmetricKey {
     /// security: note that anyone that can view the bech32m string will be able
     /// to spend the funds. In general it is best practice to avoid display of
     /// any part of a symmetric key.
-    pub fn to_bech32m(&self, network: Network) -> anyhow::Result<String> {
+    pub fn to_bech32m(&self, network: Network) -> Result<String> {
         let hrp = Self::get_hrp(network);
         let payload = bincode::serialize(self)?;
         let variant = bech32::Variant::Bech32m;
@@ -239,7 +241,7 @@ impl SymmetricKey {
     /// returns the privacy_preimage() digest encoded as bech32m string.
     /// this is suitable for display purposes as it does not give away the
     /// secret key.
-    pub fn to_display_bech32m(&self, network: Network) -> anyhow::Result<String> {
+    pub fn to_display_bech32m(&self, network: Network) -> Result<String> {
         let hrp = Self::get_hrp(network);
         let payload = bincode::serialize(&self.privacy_preimage())?;
         let variant = bech32::Variant::Bech32m;
@@ -250,23 +252,21 @@ impl SymmetricKey {
     }
 
     /// decodes a key from bech32m with network-specific prefix
-    pub fn from_bech32m(encoded: &str, network: Network) -> anyhow::Result<Self> {
+    pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
         let (hrp, data, variant) = bech32::decode(encoded)?;
 
-        if variant != bech32::Variant::Bech32m {
-            bail!("Can only decode bech32m addresses.");
-        }
-
-        if hrp != *Self::get_hrp(network) {
-            bail!("Could not decode bech32m address because of invalid prefix");
-        }
+        ensure!(
+            variant == bech32::Variant::Bech32m,
+            "Can only decode bech32m addresses.",
+        );
+        ensure!(
+            hrp == *Self::get_hrp(network),
+            "Could not decode bech32m address because of invalid prefix",
+        );
 
         let payload = Vec::<u8>::from_base32(&data)?;
-
-        match bincode::deserialize(&payload) {
-            Ok(ra) => Ok(ra),
-            Err(e) => bail!("Could not decode bech32m because of error: {e}"),
-        }
+        bincode::deserialize(&payload)
+            .map_err(|e| anyhow!("Could not decode bech32m because of error: {e}"))
     }
 
     /// returns human readable prefix (hrp) of a key, specific to `network`

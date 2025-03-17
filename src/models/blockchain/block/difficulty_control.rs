@@ -4,7 +4,7 @@ use std::ops::Add;
 use std::ops::Shr;
 use std::ops::ShrAssign;
 
-use anyhow::bail;
+use anyhow::ensure;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
@@ -278,9 +278,8 @@ impl TryFrom<f64> for ProofOfWork {
     type Error = anyhow::Error;
 
     fn try_from(value: f64) -> Result<Self, Self::Error> {
-        if value.is_nan() {
-            bail!("cannot convert NaN to ProofOfWork value");
-        }
+        ensure!(!value.is_nan(), "cannot convert NaN to ProofOfWork value");
+
         if value < 0_f64 {
             return Ok(ProofOfWork::MINIMUM);
         }
