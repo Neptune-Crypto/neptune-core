@@ -413,18 +413,12 @@ impl GlobalState {
             .wallet_entropy
             .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
 
-        let utxo_notification_method = if self.cli().offchain_fee_notifications {
-            UtxoNotificationMedium::OffChain
-        } else {
-            UtxoNotificationMedium::OnChain
-        };
-
         ComposerParameters::new(
             reward_address,
             sender_randomness_for_composer,
             Some(receiver_preimage),
             self.cli.guesser_fraction,
-            utxo_notification_method,
+            self.cli().fee_notification,
         )
     }
 

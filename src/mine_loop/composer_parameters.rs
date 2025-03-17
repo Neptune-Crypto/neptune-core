@@ -1,7 +1,7 @@
 use tasm_lib::prelude::Digest;
 
+use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ComposerParameters {
@@ -9,7 +9,7 @@ pub(crate) struct ComposerParameters {
     sender_randomness: Digest,
     maybe_receiver_preimage: Option<Digest>,
     guesser_fee_fraction: f64,
-    notification_medium: UtxoNotificationMedium,
+    notification_policy: FeeNotificationPolicy,
 }
 
 impl ComposerParameters {
@@ -18,7 +18,7 @@ impl ComposerParameters {
         sender_randomness: Digest,
         maybe_receiver_preimage: Option<Digest>,
         guesser_fee_fraction: f64,
-        notification_medium: UtxoNotificationMedium,
+        notification_medium: FeeNotificationPolicy,
     ) -> Self {
         let is_fraction = (0_f64..=1.0).contains(&guesser_fee_fraction);
         assert!(
@@ -30,7 +30,7 @@ impl ComposerParameters {
             sender_randomness,
             maybe_receiver_preimage,
             guesser_fee_fraction,
-            notification_medium,
+            notification_policy: notification_medium,
         }
     }
 
@@ -50,7 +50,7 @@ impl ComposerParameters {
         self.guesser_fee_fraction
     }
 
-    pub(crate) fn notification_medium(&self) -> UtxoNotificationMedium {
-        self.notification_medium
+    pub(crate) fn notification_policy(&self) -> FeeNotificationPolicy {
+        self.notification_policy
     }
 }
