@@ -224,9 +224,9 @@ pub struct ProofOfWorkPuzzle {
     /// kernel, apart from the nonce.
     pub id: Digest,
 
-    /// Indicates whether a template is invalid due to the presence of a new tip.  
-    /// This can be used to reset templates in pools that   
-    /// perform local checks before submitting solution to the node.
+    /// Indicates whether template is invalid due to the presence of a new tip.
+    /// Can be used to reset templates in pools that
+    /// perform local checks before submitting a solution to the node.
     pub prev_block: Digest,
 }
 
@@ -4573,7 +4573,10 @@ mod rpc_server_tests {
             let mut block1 = invalid_empty_block(&genesis);
             let hash_lock_key = HashLockKey::from_preimage(random());
             block1.set_header_guesser_digest(hash_lock_key.after_image());
+
             let guess_challenge = ProofOfWorkPuzzle::new(block1.clone(), *genesis.header());
+            assert_eq!(guess_challenge.prev_block, genesis.hash());
+
             let nonce = random();
             let resulting_block_hash = fast_kernel_mast_hash(
                 guess_challenge.kernel_auth_path,
