@@ -19,6 +19,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time;
+use tokio::time::MissedTickBehavior;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -56,27 +57,27 @@ use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::SUCCESS_EXIT_CODE;
 
-const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
-const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 3;
-const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
-const MP_RESYNC_INTERVAL_IN_SECS: u64 = 59;
-const EXPECTED_UTXOS_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
+const PEER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(2 * 60);
+const SYNC_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
+const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
+const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
+const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
 
 /// Interval for when transaction-upgrade checker is run. Note that this does
 /// *not* define how often a transaction-proof upgrade is actually performed.
 /// Only how often we check if we're ready to perform an upgrade.
-const TRANSACTION_UPGRADE_CHECK_INTERVAL_IN_SECONDS: u64 = 60; // 1 minute
+const TRANSACTION_UPGRADE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
 
 /// Number of seconds within which an individual peer is expected to respond
 /// to a synchronization request.
-const INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT_IN_SECONDS: u64 =
-    SANCTION_PEER_TIMEOUT_FACTOR * SYNC_REQUEST_INTERVAL_IN_SECONDS;
+const INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT: Duration =
+    Duration::from_secs(SYNC_REQUEST_INTERVAL.as_secs() * SANCTION_PEER_TIMEOUT_FACTOR);
 
 /// Number of seconds that a synchronization may run without any progress.
-const GLOBAL_SYNCHRONIZATION_TIMEOUT_IN_SECONDS: u64 =
-    INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT_IN_SECONDS * 4;
+const GLOBAL_SYNCHRONIZATION_TIMEOUT: Duration =
+    Duration::from_secs(INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT.as_secs() * 4);
 
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 pub(crate) const MAX_NUM_DIGESTS_IN_BATCH_REQUEST: usize = 200;
@@ -134,13 +135,13 @@ struct MutableMainLoopState {
     /// Information about potential peers for new connections.
     potential_peers: PotentialPeersState,
 
-    /// A list of joinhandles to spawned tasks.
+    /// A list of join-handles to spawned tasks.
     task_handles: Vec<JoinHandle<()>>,
 
-    /// A joinhandle to a task performing transaction-proof upgrades.
+    /// A join-handle to a task performing transaction-proof upgrades.
     proof_upgrader_task: Option<JoinHandle<()>>,
 
-    /// A joinhandle to a task running the update of the mempool transactions.
+    /// A join-handle to a task running the update of the mempool transactions.
     update_mempool_txs_handle: Option<JoinHandle<()>>,
 
     /// A channel that the task updating mempool transactions can use to
@@ -211,10 +212,7 @@ impl SyncState {
                 if requested_height < current_block_height {
                     // The last sync request updated the state
                     (None, true)
-                } else if req_time
-                    + Duration::from_secs(INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT_IN_SECONDS)
-                    < now
-                {
+                } else if req_time + INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT < now {
                     // The last sync request was not answered, sanction peer
                     // and make a new sync request.
                     (Some(peer_sa), true)
@@ -1155,9 +1153,7 @@ impl MainLoopHandler {
         // Check if sync mode has timed out entirely, in which case it should
         // be abandoned.
         let anchor = anchor.to_owned();
-        if self.now().duration_since(anchor.updated)?.as_secs()
-            > GLOBAL_SYNCHRONIZATION_TIMEOUT_IN_SECONDS
-        {
+        if self.now().duration_since(anchor.updated)? > GLOBAL_SYNCHRONIZATION_TIMEOUT {
             warn!("Sync mode has timed out. Abandoning sync mode.");
 
             // Abandon attempt, and punish all peers claiming to serve these
@@ -1397,47 +1393,37 @@ impl MainLoopHandler {
         // Handle incoming connections, messages from peer tasks, and messages from the mining task
         let mut main_loop_state = MutableMainLoopState::new(task_handles);
 
-        // Set peer discovery to run every N seconds. All timers must be reset
-        // every time they have run.
-        let peer_discovery_timer_interval = Duration::from_secs(PEER_DISCOVERY_INTERVAL_IN_SECONDS);
-        let peer_discovery_timer = time::sleep(peer_discovery_timer_interval);
-        tokio::pin!(peer_discovery_timer);
+        // Set up various timers.
+        //
+        // The `MissedTickBehavior::Delay` is appropriate for tasks that don't
+        // do anything meaningful if executed in quick succession. For example,
+        // pruning stale information immediately after pruning stale information
+        // is almost certainly a no-op.
+        // Similarly, tasks performing network operations (e.g., peer discovery)
+        // should probably not try to “catch up” if some ticks were missed.
+        let mut peer_discovery_interval = time::interval(PEER_DISCOVERY_INTERVAL);
+        peer_discovery_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        // Set synchronization to run every M seconds.
-        let block_sync_interval = Duration::from_secs(SYNC_REQUEST_INTERVAL_IN_SECONDS);
-        let block_sync_timer = time::sleep(block_sync_interval);
-        tokio::pin!(block_sync_timer);
+        let mut block_sync_interval = time::interval(SYNC_REQUEST_INTERVAL);
+        block_sync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        // Set removal of transactions from mempool.
-        let mempool_cleanup_interval = Duration::from_secs(MEMPOOL_PRUNE_INTERVAL_IN_SECS);
-        let mempool_cleanup_timer = time::sleep(mempool_cleanup_interval);
-        tokio::pin!(mempool_cleanup_timer);
+        let mut mempool_cleanup_interval = time::interval(MEMPOOL_PRUNE_INTERVAL);
+        mempool_cleanup_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        // Set removal of stale notifications for incoming UTXOs.
-        let utxo_notification_cleanup_interval =
-            Duration::from_secs(EXPECTED_UTXOS_PRUNE_INTERVAL_IN_SECS);
-        let utxo_notification_cleanup_timer = time::sleep(utxo_notification_cleanup_interval);
-        tokio::pin!(utxo_notification_cleanup_timer);
+        let mut utxo_notification_cleanup_interval = time::interval(EXPECTED_UTXOS_PRUNE_INTERVAL);
+        utxo_notification_cleanup_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        // Set restoration of membership proofs to run every Q seconds.
-        let mp_resync_interval = Duration::from_secs(MP_RESYNC_INTERVAL_IN_SECS);
-        let mp_resync_timer = time::sleep(mp_resync_interval);
-        tokio::pin!(mp_resync_timer);
+        let mut mp_resync_interval = time::interval(MP_RESYNC_INTERVAL);
+        mp_resync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        // Set transasction-proof-upgrade-checker to run every R secnods.
-        let tx_proof_upgrade_interval =
-            Duration::from_secs(TRANSACTION_UPGRADE_CHECK_INTERVAL_IN_SECONDS);
-        let tx_proof_upgrade_timer = time::sleep(tx_proof_upgrade_interval);
-        tokio::pin!(tx_proof_upgrade_timer);
+        let mut tx_proof_upgrade_interval = time::interval(TRANSACTION_UPGRADE_CHECK_INTERVAL);
+        tx_proof_upgrade_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
         // signals are only used on Unix systems.
-        let (tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
-            tokio::sync::mpsc::channel(2);
-        let (tx_int, mut rx_int): (mpsc::Sender<()>, mpsc::Receiver<()>) =
-            tokio::sync::mpsc::channel(2);
-        let (tx_quit, mut rx_quit): (mpsc::Sender<()>, mpsc::Receiver<()>) =
-            tokio::sync::mpsc::channel(2);
+        let (tx_term, mut rx_term) = mpsc::channel::<()>(2);
+        let (tx_int, mut rx_int) = mpsc::channel::<()>(2);
+        let (tx_quit, mut rx_quit) = mpsc::channel::<()>(2);
         #[cfg(unix)]
         {
             use tokio::signal::unix::signal;
@@ -1568,45 +1554,42 @@ impl MainLoopHandler {
                 }
 
                 // Handle peer discovery
-                _ = &mut peer_discovery_timer => {
-                    log_slow_scope!(fn_name!() + "::select::peer_discovery_timer");
+                _ = peer_discovery_interval.tick() => {
+                    log_slow_scope!(fn_name!() + "::select::peer_discovery_interval");
 
-                    // Check number of peers we are connected to and connect to more peers
-                    // if needed.
+                    // Check number of peers we are connected to and connect to
+                    // more peers if needed.
                     debug!("Timer: peer discovery job");
                     self.prune_peers().await?;
                     self.reconnect(&mut main_loop_state).await?;
                     self.discover_peers(&mut main_loop_state).await?;
-
-                    // Reset the timer to run this branch again in N seconds
-                    peer_discovery_timer.as_mut().reset(tokio::time::Instant::now() + peer_discovery_timer_interval);
                 }
 
                 // Handle synchronization (i.e. batch-downloading of blocks)
-                _ = &mut block_sync_timer => {
-                    log_slow_scope!(fn_name!() + "::select::block_sync_timer");
+                _ = block_sync_interval.tick() => {
+                    log_slow_scope!(fn_name!() + "::select::block_sync_interval");
 
                     trace!("Timer: block-synchronization job");
                     self.block_sync(&mut main_loop_state).await?;
-
-                    // Reset the timer to run this branch again in M seconds
-                    block_sync_timer.as_mut().reset(tokio::time::Instant::now() + block_sync_interval);
                 }
 
-                // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
-                _ = &mut mempool_cleanup_timer => {
-                    log_slow_scope!(fn_name!() + "::select::mempool_cleanup_timer");
+                // Clean up mempool: remove stale / too old transactions
+                _ = mempool_cleanup_interval.tick() => {
+                    log_slow_scope!(fn_name!() + "::select::mempool_cleanup_interval");
 
                     debug!("Timer: mempool-cleaner job");
-                    self.global_state_lock.lock_guard_mut().await.mempool_prune_stale_transactions().await;
-
-                    // Reset the timer to run this branch again in P seconds
-                    mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_interval);
+                    self
+                        .global_state_lock
+                        .lock_guard_mut()
+                        .await
+                        .mempool_prune_stale_transactions()
+                        .await;
                 }
 
-                // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
-                _ = &mut utxo_notification_cleanup_timer => {
-                    log_slow_scope!(fn_name!() + "::select::utxo_notification_cleanup_timer");
+                // Clean up incoming UTXO notifications: remove stale / too old
+                // UTXO notifications from pool
+                _ = utxo_notification_cleanup_interval.tick() => {
+                    log_slow_scope!(fn_name!() + "::select::utxo_notification_cleanup_interval");
 
                     debug!("Timer: UTXO notification pool cleanup job");
 
@@ -1618,28 +1601,22 @@ impl MainLoopHandler {
                     // evaluation and perhaps reimplementation determines that
                     // it can be called safely without possible loss of funds.
                     // self.global_state_lock.lock_mut(|s| s.wallet_state.prune_stale_expected_utxos()).await;
-
-                    utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_interval);
                 }
 
                 // Handle membership proof resynchronization
-                _ = &mut mp_resync_timer => {
-                    log_slow_scope!(fn_name!() + "::select::mp_resync_timer");
+                _ = mp_resync_interval.tick() => {
+                    log_slow_scope!(fn_name!() + "::select::mp_resync_interval");
 
                     debug!("Timer: Membership proof resync job");
                     self.global_state_lock.resync_membership_proofs().await?;
-
-                    mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_interval);
                 }
 
-                // Check if it's time to run the proof upgrader
-                _ = &mut tx_proof_upgrade_timer => {
-                    log_slow_scope!(fn_name!() + "::select::tx_upgrade_proof_timer");
+                // run the proof upgrader
+                _ = tx_proof_upgrade_interval.tick() => {
+                    log_slow_scope!(fn_name!() + "::select::tx_proof_upgrade_interval");
 
                     trace!("Timer: tx-proof-upgrader");
                     self.proof_upgrader(&mut main_loop_state).await?;
-
-                    tx_proof_upgrade_timer.as_mut().reset(tokio::time::Instant::now() + tx_proof_upgrade_interval);
                 }
 
             }
@@ -1848,8 +1825,7 @@ mod test {
         );
 
         for i in 0..num_peers_incoming {
-            let peer_address =
-                std::net::SocketAddr::from_str(&format!("255.254.253.{}:8080", i)).unwrap();
+            let peer_address = SocketAddr::from_str(&format!("255.254.253.{i}:8080")).unwrap();
             state
                 .lock_guard_mut()
                 .await
@@ -2058,8 +2034,7 @@ mod test {
 
             // Mock that sync-mode has timed out
             main_loop_handler = main_loop_handler.with_mocked_time(
-                SystemTime::now()
-                    + Duration::from_secs(GLOBAL_SYNCHRONIZATION_TIMEOUT_IN_SECONDS + 1),
+                SystemTime::now() + GLOBAL_SYNCHRONIZATION_TIMEOUT + Duration::from_secs(1),
             );
 
             main_loop_handler
