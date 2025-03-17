@@ -273,7 +273,9 @@ impl Mempool {
             None
         }
 
-        (0..self.len() - 1).find_map(|i| most_dense_pair_skip_first_n(self, i))
+        // Only attempt to find pair if mempool has more than one transaction.
+        let num_invocations = self.len().saturating_sub(1);
+        (0..num_invocations).find_map(|i| most_dense_pair_skip_first_n(self, i))
     }
 
     /// check if transaction exists in mempool
