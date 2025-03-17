@@ -3945,8 +3945,12 @@ pub(crate) mod tests {
         use std::hint::black_box;
 
         use super::*;
+        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::job_queue::JobQueue;
+        use crate::mine_loop::make_coinbase_transaction_stateless;
+        use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+        use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
 
@@ -4284,15 +4288,81 @@ pub(crate) mod tests {
             assert_eq!(filtered_utxos, caught_utxos);
         }
 
-        #[test]
-        fn scan_mode_recovers_offchain_composer_utxos() {}
+        #[traced_test]
+        #[tokio::test]
+        async fn scan_mode_recovers_unexpected_offchain_composer_utxos() {
+            // Set up Rando with scan mode active
+            let network = Network::Main;
+            let seed: [u8; 32] = random();
+            let cli_args = cli_args::Args {
+                fee_notification: FeeNotificationPolicy::OffChain,
+                scan_blocks: Some(0..=10),
+                ..Default::default()
+            };
+            dbg!(seed);
+            let mut rng = StdRng::from_seed(seed);
+            let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let mut global_state_lock =
+                mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args).await;
+
+            println!("(ignore all log messages above this line)");
+
+            // Mine block
+            // Send composer UTXO notifications off-chain
+            let genesis_block = Block::genesis(network);
+            let previous_block = genesis_block.clone();
+            let now = network.launch_date() + Timestamp::minutes(10);
+
+            let composer_parameters = global_state_lock
+                .lock_guard()
+                .await
+                .composer_parameters(Some(BlockHeight::genesis()));
+            let (transaction, _composer_txos) = make_coinbase_transaction_stateless(
+                &previous_block,
+                composer_parameters.clone(),
+                now,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            let new_block = invalid_block_with_transaction(&previous_block, transaction);
+
+            // Forget about expecting the composer UTXOs
+
+            // Update wallet state with new block (ignoring expected UTXOs)
+            // Be saved by scan mode
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &previous_block.mutator_set_accumulator_after(),
+                    &new_block,
+                )
+                .await
+                .unwrap();
+
+            // Lo! composer utxos
+            let wallet_status = global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(new_block.hash(), &new_block.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(2, wallet_status.synced_unspent.len());
+        }
     }
 
     pub(crate) mod fee_notifications {
 
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
-        use crate::main_loop::proof_upgrader::{UpdateMutatorSetDataJob, UpgradeJob};
-        use crate::mine_loop::{create_block_transaction, make_coinbase_transaction_stateless};
+        use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+        use crate::main_loop::proof_upgrader::UpgradeJob;
+        use crate::mine_loop::create_block_transaction;
+        use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::mempool::TransactionOrigin;
@@ -4349,7 +4419,7 @@ pub(crate) mod tests {
             let composer_parameters = global_state_lock
                 .lock_guard()
                 .await
-                .composer_parameters(Some(BlockHeight::genesis())); // on-chain notifications by default
+                .composer_parameters(Some(BlockHeight::genesis()));
             let (transaction, composer_txos) = make_coinbase_transaction_stateless(
                 &previous_block,
                 composer_parameters.clone(),
