@@ -243,7 +243,7 @@ pub(crate) async fn mock_genesis_global_state(
         genesis_block.hash(),
     );
 
-    let wallet_state = mock_genesis_wallet_state(wallet, network).await;
+    let wallet_state = mock_genesis_wallet_state(wallet, network, &cli).await;
 
     GlobalStateLock::new(
         wallet_state,
@@ -781,24 +781,20 @@ pub(crate) async fn make_mock_block(
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
 pub async fn mock_genesis_wallet_state(
-    wallet_secret: WalletEntropy,
+    wallet_entropy: WalletEntropy,
     network: Network,
+    cli_args: &cli_args::Args,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(network).unwrap();
-    mock_genesis_wallet_state_with_data_dir(wallet_secret, network, &data_dir).await
+    mock_genesis_wallet_state_with_data_dir(wallet_entropy, &data_dir, cli_args).await
 }
 
 pub async fn mock_genesis_wallet_state_with_data_dir(
     wallet_entropy: WalletEntropy,
-    network: Network,
     data_dir: &DataDirectory,
+    cli_args: &cli_args::Args,
 ) -> WalletState {
-    let cli_args: cli_args::Args = cli_args::Args {
-        number_of_mps_per_utxo: 30,
-        network,
-        ..Default::default()
-    };
-    WalletState::new_from_wallet_entropy(data_dir, wallet_entropy, &cli_args).await
+    WalletState::new_from_wallet_entropy(data_dir, wallet_entropy, cli_args).await
 }
 
 /// Return an archival state populated with the genesis block

@@ -45,10 +45,14 @@ use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::database::NeptuneLevelDb;
+use crate::mine_loop::coinbase_outputs;
+use crate::mine_loop::composer_parameters::ComposerParameters;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -165,6 +169,27 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
+    pub(crate) fn composer_parameters(
+        &self,
+        next_block_height: BlockHeight,
+        guesser_fraction: f64,
+        fee_notification: FeeNotificationPolicy,
+    ) -> ComposerParameters {
+        let reward_address = self.wallet_entropy.prover_fee_address();
+        let receiver_preimage = self.wallet_entropy.prover_fee_key().privacy_preimage();
+        let sender_randomness_for_composer = self
+            .wallet_entropy
+            .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
+
+        ComposerParameters::new(
+            reward_address,
+            sender_randomness_for_composer,
+            Some(receiver_preimage),
+            guesser_fraction,
+            fee_notification,
+        )
+    }
+
     /// Store information needed to recover mutator set membership proof of a
     /// UTXO, in case the wallet database is deleted.
     ///
@@ -243,13 +268,15 @@ impl WalletState {
             .unwrap();
         let mut configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
 
+        let wallet_entropy = wallet_file_context.entropy();
+
         // if wallet was imported, ensure scan mode is enabled
         if !wallet_file_context.wallet_is_new && database_is_new {
             info!("Wallet file present but database absent; wallet may have been imported.");
             configuration.enable_scan_mode();
         }
 
-        Self::new(configuration, wallet_file_context.entropy()).await
+        Self::new(configuration, wallet_entropy).await
     }
 
     /// Construct a `WalletState` object.
@@ -1133,13 +1160,16 @@ impl WalletState {
         Ok(())
     }
 
-    /// Scan the block with keys that will be derived in the future.
+    /// Scan the block for UTXOs owned by us.
+    ///
+    /// Scan with keys that will be derived in the future. Also, try-and-recover
+    /// composer UTXOs assuming the block was composed by us.
     ///
     /// The scan is done only if scan mode is active and the block is in range.
     /// If incoming UTXOs are found, the relevant key derivation counters are
     /// updated.
     async fn recover_by_scanning(&mut self, new_block: &Block) -> Vec<IncomingUtxo> {
-        let Some(scan_mode_configuration) = self.configuration.scan_mode else {
+        let Some(scan_mode_configuration) = &self.configuration.scan_mode else {
             return Vec::new();
         };
         if !scan_mode_configuration.block_is_in_range(new_block) {
@@ -1148,6 +1178,7 @@ impl WalletState {
 
         let mut recovered_outputs = vec![];
 
+        // try to recover UTXOs spent to future keys
         let mut max_counters = HashMap::<KeyType, u64>::new();
         for (key_type, derivation_index, incoming_utxo) in self
             .scan_for_utxos_announced_to_future_keys(
@@ -1164,6 +1195,58 @@ impl WalletState {
                 max_counters.insert(key_type, derivation_index);
             }
             recovered_outputs.push(incoming_utxo);
+        }
+
+        // try to reproduce composer fee UTXOs, assuming it was our block
+        if let Some(guesser_fraction) = scan_mode_configuration.maybe_guesser_fraction() {
+            // derive the composer parameters as the own miner would have
+            let composer_parameters = self.composer_parameters(
+                new_block.header().height,
+                guesser_fraction,
+                FeeNotificationPolicy::OffChain,
+            );
+
+            // derive the composer fee UTXOs as the own miner would have
+            let coinbase_amount = Block::block_subsidy(new_block.header().height);
+            let composer_txos = coinbase_outputs(
+                coinbase_amount,
+                composer_parameters.clone(),
+                new_block.header().timestamp,
+            )
+            .map(|array| array.to_vec())
+            .unwrap_or_default();
+
+            // if we have the necessary info to claim them
+            if let Some(receiver_preimage) = composer_parameters.maybe_receiver_preimage() {
+                for composer_output in composer_txos {
+                    // compute what the addition record would have been
+                    let incoming_utxo = IncomingUtxo {
+                        utxo: composer_output.utxo(),
+                        sender_randomness: composer_output.sender_randomness(),
+                        receiver_preimage,
+                    };
+                    let addition_record = incoming_utxo.addition_record();
+
+                    // if the addition record is an output in the block,
+                    // it is ours!
+                    if new_block
+                        .body()
+                        .transaction_kernel
+                        .outputs
+                        .contains(&addition_record)
+                    {
+                        info!(
+                            "Found composer fee UTXO worth {}; timelocked? {}",
+                            incoming_utxo
+                                .utxo
+                                .get_native_currency_amount()
+                                .display_n_decimals(8),
+                            incoming_utxo.utxo.release_date().is_some()
+                        );
+                        recovered_outputs.push(incoming_utxo);
+                    }
+                }
+            }
         }
 
         info!(
@@ -2696,7 +2779,8 @@ pub(crate) mod tests {
         let wallet = WalletEntropy::devnet_wallet();
         let genesis_block = Block::genesis(network);
 
-        let wallet_state = mock_genesis_wallet_state(wallet, network).await;
+        let cli_args = cli_args::Args::default();
+        let wallet_state = mock_genesis_wallet_state(wallet, network, &cli_args).await;
 
         // are we synchronized to the genesis block?
         assert_eq!(
@@ -3025,8 +3109,9 @@ pub(crate) mod tests {
         async fn guesser_fee_scanner_finds_guesser_fee_iff_present() {
             let network = Network::Main;
             let mut rng = rng();
+            let cli_args = cli_args::Args::default();
             let wallet_state =
-                mock_genesis_wallet_state(WalletEntropy::new_random(), network).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), network, &cli_args).await;
             let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (mut incoming_block, _) =
@@ -3388,8 +3473,9 @@ pub(crate) mod tests {
         mod worker {
             use super::*;
             use crate::database::storage::storage_schema::traits::StorageWriter;
-            use crate::tests::shared::mock_genesis_wallet_state_with_data_dir;
-            use crate::tests::shared::unit_test_data_directory;
+            use crate::tests::shared::{
+                mock_genesis_wallet_state_with_data_dir, unit_test_data_directory,
+            };
 
             /// tests that all known keys are unique for a given key-type
             ///
@@ -3401,8 +3487,13 @@ pub(crate) mod tests {
                 info!("key_type: {}", key_type);
 
                 // 1. Generate a mock WalletState
-                let mut wallet =
-                    mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
+                let cli_args = cli_args::Args::default();
+                let mut wallet = mock_genesis_wallet_state(
+                    WalletEntropy::new_random(),
+                    Network::RegTest,
+                    &cli_args,
+                )
+                .await;
 
                 let num_known_keys = wallet.get_known_spending_keys(key_type).count();
                 let num_to_derive = 20;
@@ -3445,11 +3536,12 @@ pub(crate) mod tests {
                 // 2. record wallet counter and known-keys
                 // 3. persist wallet.
                 // 4. forget wallet (dropped)
+                let cli_args = cli_args::Args::default();
                 let (orig_counter, orig_known_keys) = {
                     let mut wallet = mock_genesis_wallet_state_with_data_dir(
                         wallet_secret.clone(),
-                        Network::RegTest,
                         &data_dir,
+                        &cli_args,
                     )
                     .await;
 
@@ -3466,12 +3558,9 @@ pub(crate) mod tests {
                 };
 
                 // 5. instantiate 2nd wallet instance with same data_dir and secret as the first
-                let wallet = mock_genesis_wallet_state_with_data_dir(
-                    wallet_secret,
-                    Network::RegTest,
-                    &data_dir,
-                )
-                .await;
+                let wallet =
+                    mock_genesis_wallet_state_with_data_dir(wallet_secret, &data_dir, &cli_args)
+                        .await;
 
                 let persisted_counter = wallet.spending_key_counter(key_type);
                 let persisted_known_keys = wallet.get_known_spending_keys(key_type).collect_vec();
@@ -3500,8 +3589,10 @@ pub(crate) mod tests {
         #[traced_test]
         #[tokio::test]
         async fn insert_and_scan() {
+            let cli_args = cli_args::Args::default();
             let mut wallet =
-                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest, &cli_args)
+                    .await;
 
             assert!(wallet.wallet_db.expected_utxos().is_empty().await);
             assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
@@ -3555,8 +3646,10 @@ pub(crate) mod tests {
         #[traced_test]
         #[tokio::test]
         async fn prune_stale() {
+            let cli_args = cli_args::Args::default();
             let mut wallet =
-                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest, &cli_args)
+                    .await;
 
             let mock_utxo = Utxo::new_native_currency(
                 LockScript::anyone_can_spend(),
@@ -3654,12 +3747,13 @@ pub(crate) mod tests {
                 let network = Network::RegTest;
                 let wallet_secret = WalletEntropy::new_random();
                 let data_dir = unit_test_data_directory(network).unwrap();
+                let cli_args = cli_args::Args::default();
 
                 // create initial wallet in a new directory
                 let mut wallet = mock_genesis_wallet_state_with_data_dir(
                     wallet_secret.clone(),
-                    network,
                     &data_dir,
+                    &cli_args,
                 )
                 .await;
 
@@ -3693,7 +3787,7 @@ pub(crate) mod tests {
 
                 // re-create wallet state from same seed and same directory
                 let restored_wallet =
-                    mock_genesis_wallet_state_with_data_dir(wallet_secret, network, &data_dir)
+                    mock_genesis_wallet_state_with_data_dir(wallet_secret, &data_dir, &cli_args)
                         .await;
 
                 // if wallet state was persisted to DB then we should have
@@ -4297,6 +4391,7 @@ pub(crate) mod tests {
             let cli_args = cli_args::Args {
                 fee_notification: FeeNotificationPolicy::OffChain,
                 scan_blocks: Some(0..=10),
+                compose: true,
                 ..Default::default()
             };
             dbg!(seed);
@@ -4316,7 +4411,7 @@ pub(crate) mod tests {
             let composer_parameters = global_state_lock
                 .lock_guard()
                 .await
-                .composer_parameters(Some(BlockHeight::genesis()));
+                .composer_parameters(Some(BlockHeight::genesis().next()));
             let (transaction, _composer_txos) = make_coinbase_transaction_stateless(
                 &previous_block,
                 composer_parameters.clone(),
@@ -4352,6 +4447,18 @@ pub(crate) mod tests {
                 .wallet_state
                 .get_wallet_status(new_block.hash(), &new_block.mutator_set_accumulator_after())
                 .await;
+            println!(
+                "wallet status -- # synced unspent: {}",
+                wallet_status.synced_unspent.len()
+            );
+            println!(
+                "wallet status -- # synced spent: {}",
+                wallet_status.synced_spent.len()
+            );
+            println!(
+                "wallet status -- # unsynced: {}",
+                wallet_status.unsynced.len()
+            );
             assert_eq!(2, wallet_status.synced_unspent.len());
         }
     }

@@ -1271,8 +1271,9 @@ mod archival_state_tests {
         // Verify that a restored archival mutator set is populated with the right `sync_label`
         let network = Network::Alpha;
         let mut archival_state = make_test_archival_state(network).await;
+        let cli_args = cli_args::Args::default();
         let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
         let (mock_block_1, _) = make_mock_block(
             &archival_state.genesis_block,
             None,
@@ -1309,7 +1310,9 @@ mod archival_state_tests {
 
         let network = Network::Alpha;
         let mut rng = StdRng::seed_from_u64(107221549301u64);
-        let alice_wallet = mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
+        let cli_args = cli_args::Args::default();
+        let alice_wallet =
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
         let alice_wallet = alice_wallet.wallet_entropy;
         let mut alice =
             mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
@@ -1710,8 +1713,9 @@ mod archival_state_tests {
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         let network = Network::Main;
+        let cli_args = cli_args::Args::default();
         let premine_rec_ws =
-            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
         let premine_rec_spending_key = premine_rec_ws.wallet_entropy.nth_generation_spending_key(0);
         let mut premine_rec = mock_genesis_global_state(
             network,

@@ -546,7 +546,7 @@ pub(crate) async fn create_block_transaction_from(
     let composer_parameters = global_state_lock
         .lock_guard()
         .await
-        .composer_parameters(Some(predecessor_block.header().height));
+        .composer_parameters(Some(predecessor_block.header().height.next()));
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
