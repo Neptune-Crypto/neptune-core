@@ -37,6 +37,7 @@ use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::*;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -397,22 +398,19 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     Ok((transaction, composer_outputs))
 }
 
-/// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
-/// transaction.
-pub(super) fn prepare_coinbase_transaction_stateless(
-    latest_block: &Block,
+/// Produce two outputs spending a given portion of the coinbase.
+///
+/// The coinbase is the block subsidy plus the anticipated transaction fee.
+/// There are two outputs because one is liquid immediately, and the other is
+/// locked for 3 years. The portion is determined by the guesser fee fraction
+/// field of the composer parameters.
+pub(crate) fn coinbase_outputs(
+    coinbase_amount: NativeCurrencyAmount,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
-) -> Result<(TxOutputList, TransactionDetails)> {
-    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
-    let next_block_height: BlockHeight = latest_block.header().height.next();
-    info!("Creating coinbase for block of height {next_block_height}.");
-
-    let coinbase_amount = Block::block_subsidy(next_block_height);
+) -> Result<[TxOutput; 2]> {
     let guesser_fee =
         coinbase_amount.lossy_f64_fraction_mul(composer_parameters.guesser_fee_fraction());
-
-    info!("Setting guesser_fee to {guesser_fee}.");
 
     let Some(amount_to_composer) = coinbase_amount.checked_sub(&guesser_fee) else {
         bail!(
@@ -421,10 +419,6 @@ pub(super) fn prepare_coinbase_transaction_stateless(
             guesser_fee.to_nau()
         );
     };
-
-    info!(
-        "Setting coinbase amount to {coinbase_amount}; and amount to prover to {amount_to_composer}"
-    );
 
     let mut liquid_composer_amount = amount_to_composer;
     liquid_composer_amount.div_two();
@@ -453,6 +447,34 @@ pub(super) fn prepare_coinbase_transaction_stateless(
     )
     .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
 
+    Ok([liquid_coinbase_output, timelocked_coinbase_output])
+}
+
+/// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
+/// transaction.
+pub(super) fn prepare_coinbase_transaction_stateless(
+    latest_block: &Block,
+    composer_parameters: ComposerParameters,
+    timestamp: Timestamp,
+) -> Result<(TxOutputList, TransactionDetails)> {
+    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
+    let next_block_height: BlockHeight = latest_block.header().height.next();
+    info!("Creating coinbase for block of height {next_block_height}.");
+
+    let coinbase_amount = Block::block_subsidy(next_block_height);
+    let [liquid_coinbase_output, timelocked_coinbase_output] =
+        coinbase_outputs(coinbase_amount, composer_parameters, timestamp)?;
+    let total_composer_fee = liquid_coinbase_output.utxo().get_native_currency_amount()
+        + timelocked_coinbase_output
+            .utxo()
+            .get_native_currency_amount();
+    let total_guesser_fee = coinbase_amount.checked_sub(&total_composer_fee).unwrap();
+
+    info!(
+        "Coinbase amount is set to {coinbase_amount} and is divided between \
+        composer fee ({total_composer_fee}) and guesser fee ({total_guesser_fee})."
+    );
+
     let composer_outputs: TxOutputList = vec![
         liquid_coinbase_output.clone(),
         timelocked_coinbase_output.clone(),
@@ -462,7 +484,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         vec![],
         composer_outputs.clone(),
         coinbase_amount,
-        guesser_fee,
+        total_guesser_fee,
         timestamp,
         mutator_set_accumulator,
     )
