@@ -123,3 +123,15 @@ mod tests {
         assert_eq!(tx_id_original, updated.kernel.txid());
     }
 }
+
+#[cfg(test)]
+pub mod propteststrategy {
+    use super::TransactionKernelId;
+    use proptest::prop_compose;
+
+    prop_compose! {
+        pub fn random_tx_kernelid() (
+            digest_an in proptest_arbitrary_interop::arb::<tasm_lib::prelude::Digest>()
+        ) -> TransactionKernelId {TransactionKernelId(digest_an)}
+    }
+}
