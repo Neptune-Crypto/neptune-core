@@ -1,5 +1,8 @@
 use crate::models::{
-    blockchain::{block::Block, transaction::primitive_witness::PrimitiveWitness},
+    blockchain::{
+        block::{block_header::BlockHeader, Block},
+        transaction::primitive_witness::PrimitiveWitness,
+    },
     peer::SyncChallenge,
     proof_abstractions::timestamp::Timestamp,
 };
@@ -38,7 +41,7 @@ prop_compose! {
 // adaptation of `arbitrary_transaction_is_valid`
 prop_compose! {
     pub fn block_invalid() (
-        header in crate::models::blockchain::block::block_header::block_header_tests::block_header_strategy(),
+        header in arb::<BlockHeader>(),
         // pw in any::<crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness>(),
         size_numbers in (1usize..3, 1usize..3, 0usize..3),
         mutatorsetacc in (arb::<Digest>(), any::<u64>(), arb::<Digest>()),
