@@ -346,7 +346,8 @@ impl UpgradeJob {
                     // sure to have it when they ask.
                     global_state
                         .mempool_insert(upgraded.clone(), tx_origin)
-                        .await;
+                        .await
+                        .expect("Self-upgraded transaction must be accepted by mempool.");
 
                     global_state
                         .wallet_state
@@ -769,7 +770,8 @@ mod test {
                 .lock_guard_mut()
                 .await
                 .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
-                .await;
+                .await
+                .unwrap();
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
             };
@@ -841,7 +843,8 @@ mod test {
                 .lock_guard_mut()
                 .await
                 .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
-                .await;
+                .await
+                .unwrap();
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
             };

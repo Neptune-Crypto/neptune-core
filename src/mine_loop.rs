@@ -1277,7 +1277,8 @@ pub(crate) mod mine_loop_tests {
                 let mut alice_gsm = alice.lock_guard_mut().await;
                 alice_gsm
                     .mempool_insert(tx_from_alice.clone(), TransactionOrigin::Own)
-                    .await;
+                    .await
+                    .unwrap();
                 assert_eq!(1, alice_gsm.mempool.len());
             }
 

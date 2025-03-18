@@ -22,6 +22,9 @@ pub(crate) struct WalletConfiguration {
     /// How many mutator set membership proofs to store per monitored UTXO.
     pub(crate) num_mps_per_utxo: usize,
 
+    /// Maximum number of inputs in transactions initiated by this wallet.
+    pub(crate) max_num_inputs_per_transaction: usize,
+
     /// Where wallet files are stored
     wallet_files_directory: PathBuf,
 
@@ -41,6 +44,7 @@ impl WalletConfiguration {
         Self {
             scan_mode: None,
             num_mps_per_utxo: 0,
+            max_num_inputs_per_transaction: 0,
             wallet_files_directory: data_dir.wallet_directory_path(),
             wallet_database_directory: data_dir.wallet_database_dir_path(),
             network: Network::Main,
@@ -53,6 +57,7 @@ impl WalletConfiguration {
     /// relevant for wallet state management.
     pub(crate) fn absorb_options(mut self, cli_args: &cli_args::Args) -> Self {
         self.num_mps_per_utxo = cli_args.number_of_mps_per_utxo;
+        self.max_num_inputs_per_transaction = cli_args.max_num_inputs_per_tx;
 
         self.scan_mode = match (&cli_args.scan_blocks, cli_args.scan_keys) {
             (None, None) => self.scan_mode,
