@@ -214,6 +214,7 @@ impl MastHash for BlockHeader {
 /// The data needed to calculate the block hash, apart from the data present
 /// in the block header.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct HeaderToBlockHashWitness {
     /// The "body" leaf of the Merkle tree from which block hash is calculated.
     body_leaf: Digest,
@@ -233,6 +234,7 @@ impl From<&Block> for HeaderToBlockHashWitness {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub(crate) struct BlockHeaderWithBlockHashWitness {
     pub(crate) header: BlockHeader,
     witness: HeaderToBlockHashWitness,
@@ -261,10 +263,10 @@ impl BlockHeaderWithBlockHashWitness {
 
 #[cfg(test)]
 pub(crate) mod block_header_tests {
-    use rand::Rng;
-
     use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
+    use proptest::prelude::any;
+    use rand::Rng;
 
     pub fn random_block_header() -> BlockHeader {
         let mut rng = rand::rng();
@@ -281,6 +283,48 @@ pub(crate) mod block_header_tests {
             guesser_digest: rng.random(),
         }
     }
+    proptest::prop_compose! {
+        pub fn block_header_strategy()(
+            version_raw in any::<u64>(),
+            height_raw in any::<u64>(),
+            prev_digest_raw in proptest::collection::vec(any::<u64>(), 5),
+            timestamp_raw in any::<u64>(),
+            nonce_raw in proptest::collection::vec(any::<u64>(), 5),
+            pow_raw in proptest::array::uniform6(any::<u32>()),
+            difficulty_raw in proptest::array::uniform5(any::<u32>()),
+            guesser_digest_raw in proptest::collection::vec(any::<u64>(), 5),
+        ) -> BlockHeader {
+            BlockHeader {
+                version: BFieldElement::new(version_raw),
+                height: BlockHeight::from(height_raw),
+                prev_block_digest: Digest::new([
+                    BFieldElement::new(prev_digest_raw[0]),
+                    BFieldElement::new(prev_digest_raw[1]),
+                    BFieldElement::new(prev_digest_raw[2]),
+                    BFieldElement::new(prev_digest_raw[3]),
+                    BFieldElement::new(prev_digest_raw[4]),
+                ]),
+                timestamp: Timestamp(twenty_first::bfe![timestamp_raw]),
+                nonce: Digest::new([
+                    BFieldElement::new(nonce_raw[0]),
+                    BFieldElement::new(nonce_raw[1]),
+                    BFieldElement::new(nonce_raw[2]),
+                    BFieldElement::new(nonce_raw[3]),
+                    BFieldElement::new(nonce_raw[4]),
+                ]),
+                cumulative_proof_of_work: ProofOfWork::new(pow_raw),
+                difficulty: Difficulty::new(difficulty_raw),
+                guesser_digest: Digest::new([
+                    BFieldElement::new(guesser_digest_raw[0]),
+                    BFieldElement::new(guesser_digest_raw[1]),
+                    BFieldElement::new(guesser_digest_raw[2]),
+                    BFieldElement::new(guesser_digest_raw[3]),
+                    BFieldElement::new(guesser_digest_raw[4]),
+                ]),
+            }
+        }
+    }
+
     #[test]
     pub fn test_block_header_decode() {
         let block_header = random_block_header();
