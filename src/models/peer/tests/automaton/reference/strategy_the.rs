@@ -243,17 +243,23 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             // let height_cloned = current_tip.header().height.clone();
             /* we only have `SyncChallenge::generate` for this, which `assert` 10 blocks difference between the tips */
             if current_tip.header().height - challenge_pre.height >= 10 {
-                the = the.prop_union(any::<[u8; 32]>().prop_map(move |randomness| {
-                    Transition(
-                        SyncChallenge::generate(
-                            &challenge_pre,
-                            tip_of_request.header().height,
-                            randomness,
-                        )
-                        .into(),
-                        Some(AssosiatedData::Randomness(/* randomness */)),
+                the = the
+                    .prop_union(
+                        any::<[u8; 32]>()
+                            .prop_map(move |randomness| {
+                                Transition(
+                                    SyncChallenge::generate(
+                                        &challenge_pre,
+                                        tip_of_request.header().height,
+                                        randomness,
+                                    )
+                                    .into(),
+                                    Some(AssosiatedData::Randomness(/* randomness */)),
+                                )
+                            })
+                            .boxed(),
                     )
-                }).boxed()).boxed();
+                    .boxed();
             }
         }
         the
