@@ -1662,6 +1662,8 @@ impl WalletState {
         wallet_status: WalletStatus,
         timestamp: Timestamp,
     ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+
+        // Build a hashset of all tx inputs presently in the mempool.
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .mempool_spent_utxos
             .iter()
@@ -1672,12 +1674,20 @@ impl WalletState {
         // filter spendable inputs.
         wallet_status.synced_unspent.into_iter().filter_map(
             move |(wallet_status_element, membership_proof)| {
-                // Don't attempt to use UTXOs that are still timelocked.
+
+                // filter out UTXOs that are still timelocked.
                 if !wallet_status_element.utxo.can_spend_at(timestamp) {
                     return None;
                 }
 
-                // Don't use inputs that we can't spend
+                // filter out inputs that are already spent by txs in mempool.
+                let absolute_index_set =
+                    membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
+                if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
+                    return None;
+                }
+
+                // filter out inputs that we can't spend
                 let Some(spending_key) =
                     self.find_spending_key_for_utxo(&wallet_status_element.utxo)
                 else {
@@ -1687,13 +1697,6 @@ impl WalletState {
                     );
                     return None;
                 };
-
-                // Don't use inputs that are already spent by txs in mempool.
-                let absolute_index_set =
-                    membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
-                if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
-                    return None;
-                }
 
                 // Create the transaction input object
                 Some(
