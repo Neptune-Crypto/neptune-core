@@ -1662,7 +1662,6 @@ impl WalletState {
         wallet_status: WalletStatus,
         timestamp: Timestamp,
     ) -> impl IntoIterator<Item = TxInput> + use<'_> {
-
         // Build a hashset of all tx inputs presently in the mempool.
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .mempool_spent_utxos
@@ -1674,7 +1673,6 @@ impl WalletState {
         // filter spendable inputs.
         wallet_status.synced_unspent.into_iter().filter_map(
             move |(wallet_status_element, membership_proof)| {
-
                 // filter out UTXOs that are still timelocked.
                 if !wallet_status_element.utxo.can_spend_at(timestamp) {
                     return None;
