@@ -1279,13 +1279,14 @@ impl PeerLoopHandler {
                 }
 
                 // 5. if transaction is not confirmable, punish.
-                let mutator_set_accumulator_after = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .mutator_set_accumulator_after();
+                let (tip, mutator_set_accumulator_after) = {
+                    let state = self.global_state_lock.lock_guard().await;
+
+                    (
+                        state.chain.light_state().hash(),
+                        state.chain.light_state().mutator_set_accumulator_after(),
+                    )
+                };
                 if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
                     warn!(
                         "Received unconfirmable transaction with TXID {}. Unconfirmable because:",
@@ -1376,13 +1377,7 @@ impl PeerLoopHandler {
                 // Otherwise, relay to main
                 let pt2m_transaction = PeerTaskToMainTransaction {
                     transaction,
-                    confirmable_for_block: self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .hash(),
+                    confirmable_for_block: tip,
                 };
                 self.to_main_tx
                     .send(PeerTaskToMain::Transaction(Box::new(pt2m_transaction)))
