@@ -49,7 +49,7 @@ track-lock-location = []
 track-lock-time = []
 
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop"]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]
@@ -84,7 +84,7 @@ num-bigint = { version = "0.4", features = ["serde"] }
 num-rational = "0.4"
 num-traits = "0.2"
 priority-queue = "1.4"
-proptest = { version = "1.5", optional = true }
+proptest = { version = "1.6", optional = true }
 proptest-arbitrary-interop = { version = "0.1", optional = true }
 rand = "0.9"
 ratatui = "0.29"
@@ -144,13 +144,14 @@ clienter = "0.1.1"
 divan = "0.1.14"
 macro_rules_attr = "0.1.3"
 pin-project-lite = "0.2.14"
-proptest = { version = "1.5" }
+proptest = { version = "1.6" }
 proptest-arbitrary-interop = { version = "0.1" }
 rand_distr = "0.4.3"
 rayon = "1.10"
 statrs = "0.18.0"
 test-strategy = "0.3"
 tokio-test = "0.4"
+proptest-state-machine = "0.3.1"
 
 [dev-dependencies.cargo-husky]
 version = "1"

@@ -137,7 +137,7 @@ impl PeerLoopHandler {
     ///
     /// Useful for derandomizing tests.
     #[cfg(test)]
-    fn set_rng(&mut self, rng: StdRng) {
+    pub(crate) fn set_rng(&mut self, rng: StdRng) {
         self.rng = rng;
     }
 
@@ -540,6 +540,14 @@ impl PeerLoopHandler {
 
         Ok(())
     }
+
+    // #[cfg(test)]
+    // pub(crate) async fn handle_peer_message_test(
+    //     &mut self,
+    //     msg: PeerMessage,
+    //     peer: &mut crate::tests::shared::Mock<PeerMessage>,
+    //     peer_state_info: &mut MutablePeerState,
+    // ) -> Result<bool> {self.handle_peer_message(msg, peer, peer_state_info).await}
 
     /// Handle peer messages and returns Ok(true) if connection should be closed.
     /// Connection should also be closed if an error is returned.
@@ -1706,6 +1714,7 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        dbg!("into the very PeerLoop loop");
         loop {
             select! {
                 // Handle peer messages

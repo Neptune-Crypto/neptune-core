@@ -61,6 +61,7 @@ impl HasDiscriminant for BlockBodyField {
 // We likewise skip the field for `BFieldCodec`, and `GetSize` because there
 // exist no impls for `OnceLock<_>` so derive fails.
 #[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize, TasmObject)]
+// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm.
@@ -90,6 +91,27 @@ pub struct BlockBody {
     #[get_size(ignore)]
     #[tasm_object(ignore)]
     merkle_tree: OnceLock<MerkleTree>,
+}
+#[cfg(test)]
+use proptest_arbitrary_interop::arb;
+#[cfg(test)]
+proptest::prop_compose! {
+    pub fn block_body_prop_compose() (
+        transaction_kernel in arb::<TransactionKernel>(),
+        mutator_set_accumulator in arb::<MutatorSetAccumulator>(),
+        lock_free_mmr_accumulator in arb::<MmrAccumulator>(),
+        block_mmr_accumulator in arb::<MmrAccumulator>(),
+        // mt in arb::<MerkleTree>(),
+    ) -> BlockBody {
+        let /* mut */ r = BlockBody::new(
+            transaction_kernel,
+            mutator_set_accumulator,
+            lock_free_mmr_accumulator,
+            block_mmr_accumulator,
+        );
+        let _ = r.merkle_tree.set(r.merkle_tree());
+        r
+    }
 }
 
 impl PartialEq for BlockBody {

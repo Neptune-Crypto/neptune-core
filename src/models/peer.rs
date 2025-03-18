@@ -4,6 +4,7 @@ pub mod peer_info;
 pub mod transaction_notification;
 pub mod transfer_block;
 pub mod transfer_transaction;
+pub mod utils;
 
 use std::fmt::Display;
 use std::net::SocketAddr;
@@ -430,7 +431,10 @@ impl BlockProposalRequest {
     }
 }
 
+// #[cfg(any(test, feature = "arbitrary-impls"))]
+// use arbitrary::Arbitrary;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) enum PeerMessage {
     Handshake(Box<(Vec<u8>, HandshakeData)>),
     Block(Box<TransferBlock>),
@@ -597,6 +601,7 @@ impl IssuedSyncChallenge {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub(crate) struct SyncChallenge {
     pub(crate) tip_digest: Digest,
 
@@ -627,7 +632,7 @@ impl SyncChallenge {
         let mut heights = vec![];
 
         assert!(
-            block_notification.height - own_tip_height >= 10,
+            dbg!(block_notification.height - own_tip_height) >= 10,
             "Cannot issue sync challenge when height difference ({} - {} = {}) is less than 10.",
             block_notification.height,
             own_tip_height,
@@ -676,6 +681,7 @@ impl SyncChallenge {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub(crate) struct SyncChallengeResponse {
     /// (parent, child) blocks. blocks are assumed to be ordered from small to
     /// big block height.
@@ -906,15 +912,20 @@ impl SyncChallengeResponse {
     }
 }
 
+// #[cfg(any(test, feature = "arbitrary-impls"))]
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    mod automaton;
+
+    use proptest_arbitrary_interop::arb;
     use rand::random;
 
     use super::*;
     use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
     use crate::models::blockchain::block::Block;
+    use crate::models::peer::transfer_block::block_transfer_prop_compose_random;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared_tokio_runtime;
 
@@ -930,6 +941,24 @@ mod tests {
                 latest_punishment,
                 latest_reward,
                 peer_tolerance,
+            }
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn syncchallenge_response_prop_compose_random() (
+            blocks in proptest::collection::vec((block_transfer_prop_compose_random(), block_transfer_prop_compose_random()), SYNC_CHALLENGE_NUM_BLOCK_PAIRS),
+            membership_proofs in proptest::collection::vec(arb::<MmrMembershipProof>(), SYNC_CHALLENGE_NUM_BLOCK_PAIRS),
+            tip_parent in block_transfer_prop_compose_random(),
+            tip in block_transfer_prop_compose_random(),
+            pow_witnesses in proptest::collection::vec(arb::<BlockHeaderWithBlockHashWitness>(), SYNC_CHALLENGE_POW_WITNESS_LENGTH),
+        ) -> SyncChallengeResponse {
+            SyncChallengeResponse{
+                blocks: blocks.try_into().unwrap(),
+                membership_proofs: membership_proofs.try_into().unwrap(),
+                tip_parent,
+                tip,
+                pow_witnesses: pow_witnesses.try_into().unwrap(),
             }
         }
     }

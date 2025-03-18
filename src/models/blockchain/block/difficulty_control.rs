@@ -960,3 +960,13 @@ mod tests {
         assert!(calculated < ProofOfWork::MAXIMUM);
     }
 }
+
+#[cfg(test)]
+pub mod propteststrategy {
+    use super::ProofOfWork;
+    use proptest::{prelude::any, prop_compose};
+
+    prop_compose! {
+        pub fn random() (limbs in [any::<u32>(); super::POW_NUM_LIMBS]) -> ProofOfWork {ProofOfWork(limbs)}
+    }
+}

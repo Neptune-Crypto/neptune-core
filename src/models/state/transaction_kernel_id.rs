@@ -13,7 +13,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, GetSize, Hash, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Default))]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct TransactionKernelId(Digest);
 
 impl Display for TransactionKernelId {
