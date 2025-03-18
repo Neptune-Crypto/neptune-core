@@ -150,7 +150,7 @@ pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
     HashMap::new()
 }
 
-// Return empty database objects, and root directory for this unit test instantiation's
+/// Return empty database objects, and root directory for this unit test instantiation's
 /// data directory.
 pub async fn unit_test_databases(
     network: Network,
@@ -1209,3 +1209,15 @@ pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::R
     }
     Ok(())
 }
+// TODO should the identity of the base field be included here?
+// proptest::prop_compose! {
+//     pub fn random_digest() (
+//         limbs in proptest::collection::vec(0..BFieldElement::P, Digest::LEN)
+//     ) -> Digest {
+//         Digest(
+//             limbs.into_iter().map(|limb| tasm_lib::twenty_first::bfe![limb]).collect::<Vec<BFieldElement>>().try_into()
+//             // [tasm_lib::twenty_first::bfe_vec![limbs]].try_into::<[BFieldElement; Digest::LEN]>()
+//             .expect("the correct length is insured by the input `Strategy`")
+//         )
+//     }
+// }

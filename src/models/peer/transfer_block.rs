@@ -15,11 +15,32 @@ use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 /// Data structure for communicating blocks with peers. The hash digest is not
 /// communicated such that the receiver is forced to calculate it themselves.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Eq)]
+// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct TransferBlock {
     pub header: BlockHeader,
     pub body: BlockBody,
     pub(crate) appendix: BlockAppendix,
     pub proof: Proof,
+}
+
+// TODO check that Genesis is improbable to get via this
+#[cfg(test)]
+use proptest_arbitrary_interop::arb;
+#[cfg(test)]
+proptest::prop_compose! {
+    pub fn block_transfer_propcompose_random() (
+        header in arb::<BlockHeader>(),
+        body in crate::models::blockchain::block::block_body::block_body_prop_compose(),
+        appendix in arb::<BlockAppendix>(),
+        proof in arb::<Proof>()
+    ) -> TransferBlock {
+        TransferBlock {
+            header,
+            body,
+            appendix,
+            proof
+        }
+    }
 }
 
 impl TryFrom<TransferBlock> for Block {
@@ -46,6 +67,23 @@ impl TryFrom<Block> for TransferBlock {
 
     fn try_from(value: Block) -> Result<Self> {
         (&value).try_into()
+    }
+}
+#[cfg(test)]
+impl TransferBlock {
+    /// Ommits any checks simulating a bad incoming block.
+    pub fn from_random(block: &Block) -> Self {
+        let crate::models::blockchain::block::block_kernel::BlockKernel {
+            header,
+            body,
+            appendix,
+        } = block.kernel.clone();
+        Self {
+            header,
+            body,
+            proof: Proof(Vec::new()),
+            appendix,
+        }
     }
 }
 
