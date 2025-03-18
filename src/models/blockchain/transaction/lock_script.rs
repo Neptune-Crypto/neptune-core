@@ -40,7 +40,6 @@ impl From<&[LabelledInstruction]> for LockScript {
 }
 
 impl LockScript {
-    #[cfg(test)]
     const BURN_ERROR: i128 = 1_000_300;
 
     pub fn new(program: Program) -> Self {
@@ -58,6 +57,15 @@ impl LockScript {
 
     pub fn hash(&self) -> Digest {
         self.program.hash()
+    }
+
+    /// A lock script that is guaranteed to fail
+    pub(crate) fn burn() -> Self {
+        Self {
+            program: triton_program! {
+                push 0 assert error_id {Self::BURN_ERROR}
+            },
+        }
     }
 }
 
@@ -184,18 +192,6 @@ mod test {
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-
-    impl LockScript {
-        /// A lock script that is guaranteed to fail
-        #[cfg(test)]
-        pub(crate) fn burn() -> Self {
-            Self {
-                program: triton_program! {
-                    push 0 assert error_id {Self::BURN_ERROR}
-                },
-            }
-        }
-    }
 
     #[proptest]
     fn lock_script_halts_gracefully_prop(

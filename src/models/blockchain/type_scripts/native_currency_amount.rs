@@ -300,6 +300,14 @@ impl NativeCurrencyAmount {
     }
 }
 
+// mostly so that 0.into() works.  but also handy for any whole number amounts,
+// so it is not necessary to `use NativeCurrencyAmount` or `NumTraits::Zero`.
+impl From<u32> for NativeCurrencyAmount {
+    fn from(n: u32) -> Self {
+        Self::coins(n)
+    }
+}
+
 impl NativeCurrencyAmount {
     pub fn is_negative(&self) -> bool {
         self.0.is_negative()

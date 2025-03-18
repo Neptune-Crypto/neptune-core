@@ -6,6 +6,15 @@ use clap::Parser;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+
+// note: we should consider merging TransactionProofType and TxProvingCapability
+
+/// represents which type of proof a given device is capable of generating
+///
+/// see also:
+/// * [TransactionProofType]
+/// * [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof)
 #[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TxProvingCapability {
     #[default]
@@ -13,6 +22,36 @@ pub enum TxProvingCapability {
     PrimitiveWitness,
     ProofCollection,
     SingleProof,
+}
+
+impl From<TxProvingCapability> for TransactionProofType {
+    fn from(c: TxProvingCapability) -> Self {
+        match c {
+            // TransactionProofType and TxProvingCapability need to be
+            // reconciled with regards to LockScript, or merged into single type.
+            TxProvingCapability::LockScript => unimplemented!(),
+            TxProvingCapability::PrimitiveWitness => Self::PrimitiveWitness,
+            TxProvingCapability::ProofCollection => Self::ProofCollection,
+            TxProvingCapability::SingleProof => Self::SingleProof,
+        }
+    }
+}
+
+impl TxProvingCapability {
+    pub(crate) fn can_prove(&self, proof_type: TransactionProofType) -> bool {
+        assert!(proof_type as u8 > 0);
+
+        let self_val = match *self {
+            // TransactionProofType and TxProvingCapability need to be
+            // reconciled with regards to LockScript, or merged into single type.
+            Self::LockScript => 0,
+            Self::PrimitiveWitness => TransactionProofType::PrimitiveWitness as u8,
+            Self::ProofCollection => TransactionProofType::ProofCollection as u8,
+            Self::SingleProof => TransactionProofType::SingleProof as u8,
+        };
+
+        self_val >= proof_type as u8
+    }
 }
 
 impl Display for TxProvingCapability {

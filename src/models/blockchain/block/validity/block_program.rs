@@ -512,13 +512,14 @@ pub(crate) mod test {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx = alice
-            .lock_guard()
-            .await
+        let tx: Transaction = alice
+            .api()
+            .tx_initiator_internal()
             .create_transaction(vec![tx_output].into(), fee, now, config)
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
         let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
 
         // Update transaction, stick it into block 2, and verify that block 2
@@ -538,7 +539,7 @@ pub(crate) mod test {
 
         let block2 = mine_tx(&alice, tx, &block1, later).await;
         assert!(
-            !block2.is_valid(&block1, later).await,
+            !block2.is_valid(&block1, later, network).await,
             "Block doing a double-spend must be invalid."
         );
     }

@@ -28,6 +28,11 @@ use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
+use crate::api::export::TxInputList;
+use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::config_models::network::Network;
+use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -47,13 +52,11 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
@@ -74,7 +77,7 @@ async fn compose_block(
 ) -> Result<()> {
     let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
 
-    let triton_vm_job_queue = global_state_lock.vm_job_queue();
+    let triton_vm_job_queue = vm_job_queue();
 
     let job_options = TritonVmProofJobOptions {
         job_priority: TritonVmJobPriority::High,
@@ -381,17 +384,28 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     proving_power: TxProvingCapability,
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
+    network: Network,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_outputs, transaction_details) =
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
 
     info!("Start: generate single proof for coinbase transaction");
-    let config = TxCreationConfig::default()
-        .use_job_queue(vm_job_queue)
-        .with_proof_job_options(job_options)
-        .with_prover_capability(proving_power);
-    let transaction = GlobalState::create_raw_transaction(&transaction_details, config).await?;
+
+    let tx_details_arc = Arc::new(transaction_details);
+    let proof = TransactionProofBuilder::new()
+        .transaction_details(tx_details_arc.clone())
+        .job_queue(vm_job_queue)
+        .proof_job_options(job_options)
+        .tx_proving_capability(proving_power)
+        .build(network)
+        .await?;
+
     info!("Done: generating single proof for coinbase transaction");
+
+    let transaction = TransactionBuilder::new()
+        .transaction_details(tx_details_arc)
+        .transaction_proof(proof)
+        .build_transaction()?;
 
     Ok((transaction, composer_outputs))
 }
@@ -496,7 +510,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
     ]
     .into();
     let transaction_details = TransactionDetails::new_with_coinbase(
-        vec![],
+        TxInputList::empty(),
         composer_outputs.clone(),
         coinbase_amount,
         guesser_fee,
@@ -565,7 +579,7 @@ pub(crate) async fn create_block_transaction_from(
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
-    let vm_job_queue = global_state_lock.vm_job_queue();
+    let vm_job_queue = vm_job_queue();
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters.clone(),
@@ -573,6 +587,7 @@ pub(crate) async fn create_block_transaction_from(
         TxProvingCapability::SingleProof,
         vm_job_queue.clone(),
         job_options.clone(),
+        global_state_lock.cli().network,
     )
     .await?;
 
@@ -914,7 +929,7 @@ pub(crate) async fn mine(
 
                         if !new_block_found.block.has_proof_of_work(latest_block.header()) {
                             error!("Own mined block did not have valid PoW Discarding.");
-                        } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now()).await {
+                        } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now(), global_state_lock.cli().network).await {
                                 // Block could be invalid if for instance the proof and proof-of-work
                                 // took less time than the minimum block time.
                                 error!("Found block with valid proof-of-work but block is invalid.");
@@ -1017,7 +1032,7 @@ pub(crate) mod mine_loop_tests {
         // lead to an inconsistent witness higher up in the call graph. This is
         // done to avoid holding a read-lock throughout this function.
         let next_block_height: BlockHeight = latest_block.header().height.next();
-        let vm_job_queue = global_state_lock.vm_job_queue();
+        let vm_job_queue = vm_job_queue();
 
         let composer_parameters = global_state_lock
             .lock_guard()
@@ -1030,6 +1045,7 @@ pub(crate) mod mine_loop_tests {
             proving_power,
             vm_job_queue,
             job_options,
+            global_state_lock.cli().network,
         )
         .await?;
 
@@ -1192,8 +1208,8 @@ pub(crate) mod mine_loop_tests {
             .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_from_alice = alice
-            .lock_guard()
-            .await
+            .api()
+            .tx_initiator_internal()
             .create_transaction(
                 vec![output_to_alice].into(),
                 NativeCurrencyAmount::coins(1),
@@ -1265,14 +1281,16 @@ pub(crate) mod mine_loop_tests {
             .await
             .unwrap();
             assert!(
-                block_1_empty_mempool.is_valid(&genesis_block, now).await,
+                block_1_empty_mempool
+                    .is_valid(&genesis_block, now, network)
+                    .await,
                 "Block template created by miner with empty mempool must be valid"
             );
 
             {
                 let mut alice_gsm = alice.lock_guard_mut().await;
                 alice_gsm
-                    .mempool_insert(tx_from_alice.clone(), TransactionOrigin::Own)
+                    .mempool_insert((*tx_from_alice).clone(), TransactionOrigin::Own)
                     .await;
                 assert_eq!(1, alice_gsm.mempool.len());
             }
@@ -1308,7 +1326,7 @@ pub(crate) mod mine_loop_tests {
             .unwrap();
             assert!(
                 block_1_nonempty_mempool
-                    .is_valid(&genesis_block, now + Timestamp::seconds(2))
+                    .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
                     .await,
                 "Block template created by miner with non-empty mempool must be valid"
             );
@@ -1348,7 +1366,7 @@ pub(crate) mod mine_loop_tests {
         .await
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
-        assert!(block_1.is_valid(&genesis_block, mocked_now).await);
+        assert!(block_1.is_valid(&genesis_block, mocked_now, network).await);
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
@@ -1362,7 +1380,7 @@ pub(crate) mod mine_loop_tests {
         .await
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
-        assert!(block_2.is_valid(&block_1, mocked_now).await);
+        assert!(block_2.is_valid(&block_1, mocked_now, network).await);
     }
 
     /// This test mines a single block at height 1 on the main network

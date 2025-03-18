@@ -297,7 +297,9 @@ impl PeerLoopHandler {
         for new_block in &received_blocks {
             let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
-            let new_block_is_valid = new_block.is_valid(previous_block, now).await;
+            let new_block_is_valid = new_block
+                .is_valid(previous_block, now, self.global_state_lock.cli().network)
+                .await;
             debug!("new block is valid? {new_block_is_valid}");
             if !new_block_has_proof_of_work {
                 warn!(
@@ -420,7 +422,11 @@ impl PeerLoopHandler {
             peer_state.fork_reconciliation_blocks.last()
         {
             let valid = successor
-                .is_valid(received_block.as_ref(), self.now())
+                .is_valid(
+                    received_block.as_ref(),
+                    self.now(),
+                    self.global_state_lock.cli().network,
+                )
                 .await;
             if !valid {
                 warn!(
@@ -791,7 +797,10 @@ impl PeerLoopHandler {
                 // Does response verify?
                 let claimed_tip_height = challenge_response.tip.header.height;
                 let now = self.now();
-                if !challenge_response.is_valid(now).await {
+                if !challenge_response
+                    .is_valid(now, self.global_state_lock.cli().network)
+                    .await
+                {
                     self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1525,7 +1534,10 @@ impl PeerLoopHandler {
                         }
                     } else {
                         // Verify validity and that proposal is child of current tip
-                        if block.is_valid(&tip, self.now()).await {
+                        if block
+                            .is_valid(&tip, self.now(), self.global_state_lock.cli().network)
+                            .await
+                        {
                             None // all is well, no punishment.
                         } else {
                             Some(NegativePeerSanction::InvalidBlockProposal)
@@ -2245,7 +2257,7 @@ mod peer_loop_tests {
         let block_1 =
             fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).random()).await;
         assert!(
-            block_1.is_valid(&genesis_block, now).await,
+            block_1.is_valid(&genesis_block, now, network).await,
             "Block must be valid for this test to make sense"
         );
         alice.set_new_tip(block_1.clone()).await?;
@@ -3395,9 +3407,9 @@ mod peer_loop_tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
-        let transaction_1 = state_lock
-            .lock_guard()
-            .await
+        let transaction_1: Transaction = state_lock
+            .api()
+            .tx_initiator_internal()
             .create_transaction(
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
@@ -3406,7 +3418,8 @@ mod peer_loop_tests {
             )
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
 
         // Build the resulting transaction notification
         let tx_notification: TransactionNotification = (&transaction_1).try_into().unwrap();
@@ -3479,9 +3492,9 @@ mod peer_loop_tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
-        let transaction_1 = state_lock
-            .lock_guard()
-            .await
+        let transaction_1: Transaction = state_lock
+            .api()
+            .tx_initiator_internal()
             .create_transaction(
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
@@ -3490,7 +3503,8 @@ mod peer_loop_tests {
             )
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let mut peer_loop_handler = PeerLoopHandler::new(
@@ -3667,6 +3681,7 @@ mod peer_loop_tests {
         use crate::config_models::cli_args;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
+        use crate::models::state::wallet::transaction_output::TxOutput;
         use crate::tests::shared::mock_genesis_global_state;
 
         async fn tx_of_proof_quality(
@@ -3675,10 +3690,10 @@ mod peer_loop_tests {
         ) -> Transaction {
             let wallet_secret = WalletEntropy::devnet_wallet();
             let alice_key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let alice =
+            let alice_gsl =
                 mock_genesis_global_state(network, 1, wallet_secret, cli_args::Args::default())
                     .await;
-            let alice = alice.lock_guard().await;
+            let alice = alice_gsl.lock_guard().await;
             let genesis_block = alice.chain.light_state();
             let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
             let prover_capability = match quality {
@@ -3688,16 +3703,19 @@ mod peer_loop_tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(alice_key.into())
                 .with_prover_capability(prover_capability);
-            alice
+            alice_gsl
+                .api()
+                .tx_initiator_internal()
                 .create_transaction(
-                    vec![].into(),
+                    Vec::<TxOutput>::new().into(),
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,
                     config,
                 )
                 .await
                 .unwrap()
-                .transaction
+                .transaction()
+                .clone()
         }
 
         #[traced_test]
@@ -3741,7 +3759,7 @@ mod peer_loop_tests {
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(own_tx.to_owned(), TransactionOrigin::Foreign)
+                    .mempool_insert((*own_tx).to_owned(), TransactionOrigin::Foreign)
                     .await;
 
                 let tx_notification: TransactionNotification = new_tx.try_into().unwrap();
@@ -3976,7 +3994,7 @@ mod peer_loop_tests {
             let now = genesis_block.header().timestamp + Timestamp::hours(1);
             let block_1 = fake_valid_block_for_tests(&alice, rng.random()).await;
             assert!(
-                block_1.is_valid(&genesis_block, now).await,
+                block_1.is_valid(&genesis_block, now, network).await,
                 "Block must be valid for this test to make sense"
             );
             let alice_tip = &block_1;

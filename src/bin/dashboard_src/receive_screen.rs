@@ -80,7 +80,6 @@ impl ReceiveScreen {
                     .next_receiving_address(context::current(), token, KeyType::Generation)
                     .await
                     .unwrap()
-                    .unwrap()
                     .unwrap();
                 *data.lock().unwrap() = Some(receiving_address);
                 *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
@@ -101,7 +100,6 @@ impl ReceiveScreen {
             let receiving_address = rpc_client
                 .next_receiving_address(context::current(), token, KeyType::Generation)
                 .await
-                .unwrap()
                 .unwrap()
                 .unwrap();
             *data.lock().unwrap() = Some(receiving_address);

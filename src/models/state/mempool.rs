@@ -871,6 +871,7 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -884,10 +885,8 @@ mod tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
-    use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
@@ -1054,12 +1053,17 @@ mod tests {
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let high_fee = NativeCurrencyAmount::coins(15);
         let config = TxCreationConfig::default()
-            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
+            .recover_change_on_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
         let tx_by_bob = bob
-            .lock_guard()
-            .await
-            .create_transaction(vec![].into(), high_fee, in_seven_months, config)
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                Vec::<TxOutput>::new().into(),
+                high_fee,
+                in_seven_months,
+                config,
+            )
             .await
             .unwrap()
             .transaction;
@@ -1073,7 +1077,7 @@ mod tests {
         );
 
         let tx_by_bob_txid = tx_by_bob.kernel.txid();
-        mempool.insert(tx_by_bob, TransactionOrigin::Foreign);
+        mempool.insert(tx_by_bob.into(), TransactionOrigin::Foreign);
         assert_eq!(
             mempool
                 .most_dense_proof_collection(bob.cli.max_num_proofs)
@@ -1311,7 +1315,7 @@ mod tests {
         bob.set_new_tip(block_1.clone()).await.unwrap();
 
         // Create a transaction that's valid to be included in block 2
-        let mut utxos_from_bob = TxOutputList::from(vec![]);
+        let mut utxos_from_bob = TxOutputList::from(Vec::<TxOutput>::new());
         for i in 0..4 {
             let amount: NativeCurrencyAmount = NativeCurrencyAmount::coins(i);
             utxos_from_bob.push(TxOutput::onchain_native_currency(
@@ -1326,11 +1330,11 @@ mod tests {
         let in_seven_months = now + Timestamp::months(7);
         let in_eight_months = now + Timestamp::months(8);
         let config_bob = TxCreationConfig::default()
-            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
+            .recover_change_on_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_bob = bob
-            .lock_guard()
-            .await
+            .api()
+            .tx_initiator_internal()
             .create_transaction(
                 utxos_from_bob.clone(),
                 NativeCurrencyAmount::coins(1),
@@ -1339,11 +1343,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let tx_by_bob = artifacts_bob.transaction;
+        let tx_by_bob: Transaction = artifacts_bob.transaction.into();
 
         // inform wallet of any expected utxos from this tx.
         let expected_utxos = bob.lock_guard().await.wallet_state.extract_expected_utxos(
-            utxos_from_bob.concat_with(artifacts_bob.change_output),
+            utxos_from_bob
+                .concat_with(Vec::from(artifacts_bob.details.tx_outputs.clone()))
+                .iter(),
             UtxoNotifier::Myself,
         );
         bob.lock_guard_mut()
@@ -1368,11 +1374,11 @@ mod tests {
             true,
         )];
         let config_alice = TxCreationConfig::default()
-            .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
+            .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_from_alice_original = alice
-            .lock_guard()
-            .await
+            .api()
+            .tx_initiator_internal()
             .create_transaction(
                 utxos_from_alice.into(),
                 NativeCurrencyAmount::coins(1),
@@ -1382,7 +1388,7 @@ mod tests {
             .await
             .unwrap()
             .transaction;
-        mempool.insert(tx_from_alice_original, TransactionOrigin::Own);
+        mempool.insert(tx_from_alice_original.into(), TransactionOrigin::Own);
 
         {
             // Verify that `most_dense_single_proof_pair` returns expected value
@@ -1667,11 +1673,11 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_years = now + Timestamp::months(7 * 12);
         let config = TxCreationConfig::default()
-            .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
+            .recover_change_off_chain(alice_key.into())
             .with_prover_capability(proving_capability);
         let unmined_tx = alice
-            .lock_guard()
-            .await
+            .api()
+            .tx_initiator_internal()
             .create_transaction(
                 vec![tx_receiver_data].into(),
                 NativeCurrencyAmount::coins(1),
@@ -1690,7 +1696,7 @@ mod tests {
             .lock_guard_mut()
             .await
             .mempool
-            .insert(unmined_tx, TransactionOrigin::Own);
+            .insert(unmined_tx.into(), TransactionOrigin::Own);
 
         // Add some blocks. The transaction must stay in the mempool, since it
         // is not being mined.
@@ -1801,9 +1807,8 @@ mod tests {
                     .recover_change_on_chain(premine_spending_key.into())
                     .with_prover_capability(TxProvingCapability::ProofCollection);
                 preminer_clone
-                    .clone()
-                    .lock_guard()
-                    .await
+                    .api()
+                    .tx_initiator_internal()
                     .create_transaction(tx_outputs.clone(), fee, in_seven_months, config)
                     .await
                     .expect("producing proof collection should succeed")
@@ -1821,9 +1826,9 @@ mod tests {
         .transaction;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
-            mempool.insert(tx_low_fee.clone(), TransactionOrigin::Foreign);
+            mempool.insert(tx_low_fee.clone().into(), TransactionOrigin::Foreign);
             assert_eq!(1, mempool.len());
-            assert_eq!(&tx_low_fee, mempool.get(tx_low_fee.kernel.txid()).unwrap());
+            assert_eq!(*tx_low_fee, *mempool.get(tx_low_fee.kernel.txid()).unwrap());
         }
 
         // Insert a transaction that spends the same UTXO and has a higher fee.
@@ -1837,11 +1842,11 @@ mod tests {
         .transaction;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
-            mempool.insert(tx_high_fee.clone(), TransactionOrigin::Foreign);
+            mempool.insert(tx_high_fee.clone().into(), TransactionOrigin::Foreign);
             assert_eq!(1, mempool.len());
             assert_eq!(
-                &tx_high_fee,
-                mempool.get(tx_high_fee.kernel.txid()).unwrap()
+                *tx_high_fee,
+                *mempool.get(tx_high_fee.kernel.txid()).unwrap()
             );
         }
 
@@ -1856,11 +1861,11 @@ mod tests {
             .await
             .transaction;
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
-            mempool.insert(tx_medium_fee.clone(), TransactionOrigin::Foreign);
+            mempool.insert(tx_medium_fee.clone().into(), TransactionOrigin::Foreign);
             assert_eq!(1, mempool.len());
             assert_eq!(
-                &tx_high_fee,
-                mempool.get(tx_high_fee.kernel.txid()).unwrap()
+                *tx_high_fee,
+                *mempool.get(tx_high_fee.kernel.txid()).unwrap()
             );
             assert!(mempool.get(tx_medium_fee.kernel.txid()).is_none());
             assert!(mempool.get(tx_low_fee.kernel.txid()).is_none());
@@ -1989,7 +1994,7 @@ mod tests {
             proof_type: TxProvingCapability,
             network: Network,
             fee: NativeCurrencyAmount,
-        ) -> Transaction {
+        ) -> std::sync::Arc<Transaction> {
             let genesis_block = Block::genesis(network);
             let bob_wallet_secret = WalletEntropy::devnet_wallet();
             let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -2008,9 +2013,9 @@ mod tests {
             // Clippy is wrong here. You can *not* eliminate the binding.
             #[allow(clippy::let_and_return)]
             let transaction = bob
-                .lock_guard()
-                .await
-                .create_transaction(vec![].into(), fee, in_seven_months, config)
+                .api()
+                .tx_initiator_internal()
+                .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
                 .transaction;
@@ -2029,14 +2034,14 @@ mod tests {
             .await;
             let genesis_block = Block::genesis(network);
             let mut mempool = setup_mock_mempool(0, TransactionOrigin::Foreign, &genesis_block);
-            mempool.insert(pw_high_fee, TransactionOrigin::Own);
+            mempool.insert(pw_high_fee.into(), TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
                 tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
             let txid = sp_low_fee.kernel.txid();
-            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            mempool.insert(sp_low_fee.into(), TransactionOrigin::Own);
             assert!(
                 mempool.len().is_one(),
                 "One tx after 2nd insertion. Because pw-tx was replaced."
@@ -2060,14 +2065,14 @@ mod tests {
             .await;
             let genesis_block = Block::genesis(network);
             let mut mempool = setup_mock_mempool(0, TransactionOrigin::Foreign, &genesis_block);
-            mempool.insert(pc_high_fee, TransactionOrigin::Own);
+            mempool.insert(pc_high_fee.into(), TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
                 tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
             let txid = sp_low_fee.kernel.txid();
-            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            mempool.insert(sp_low_fee.into(), TransactionOrigin::Own);
             assert!(
                 mempool.len().is_one(),
                 "One tx after 2nd insertion. Because pc-tx was replaced."
@@ -2091,14 +2096,14 @@ mod tests {
             .await;
             let genesis_block = Block::genesis(network);
             let mut mempool = setup_mock_mempool(0, TransactionOrigin::Foreign, &genesis_block);
-            mempool.insert(pc_high_fee, TransactionOrigin::Own);
+            mempool.insert(pc_high_fee.into(), TransactionOrigin::Own);
             assert!(mempool.len().is_one(), "One tx after insertion");
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
                 tx_with_proof_type(TxProvingCapability::ProofCollection, network, low_fee).await;
             let txid = sp_low_fee.kernel.txid();
-            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            mempool.insert(sp_low_fee.into(), TransactionOrigin::Own);
             assert!(
                 mempool.len().is_one(),
                 "One tx after 2nd insertion. Because pw-tx was replaced."

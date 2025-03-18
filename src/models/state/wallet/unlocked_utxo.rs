@@ -2,7 +2,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 
-use super::address::SpendingKey;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
@@ -22,12 +21,12 @@ pub struct UnlockedUtxo {
 impl UnlockedUtxo {
     pub fn unlock(
         utxo: Utxo,
-        spending_key: SpendingKey,
+        lock_script_and_witness: LockScriptAndWitness,
         membership_proof: MsMembershipProof,
     ) -> Self {
         Self {
             utxo,
-            lock_script_and_witness: spending_key.lock_script_and_witness(),
+            lock_script_and_witness,
             membership_proof,
         }
     }

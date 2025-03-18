@@ -488,12 +488,8 @@ impl UpgradeJob {
                 SpendingKey::from(own_wallet_entropy.nth_generation_spending_key(0))
             }
         };
-        let receiver_preimage = gobble_beneficiary_key
-            .privacy_preimage()
-            .expect("gobble beneficiary key cannot be a raw hash lock");
-        let gobble_beneficiary_address = gobble_beneficiary_key
-            .to_address()
-            .expect("gobble beneficiary should have a corresponding address");
+        let receiver_preimage = gobble_beneficiary_key.privacy_preimage();
+        let gobble_beneficiary_address = gobble_beneficiary_key.to_address();
 
         let fee_notification_method = match notification_policy {
             FeeNotificationPolicy::OffChain => {
@@ -824,7 +820,7 @@ mod test {
         seed: u64,
         proof_quality: TxProvingCapability,
         fee: NativeCurrencyAmount,
-    ) -> Transaction {
+    ) -> Arc<Transaction> {
         let mut rng: StdRng = SeedableRng::seed_from_u64(seed);
         let receiving_address = GenerationReceivingAddress::derive_from_seed(rng.random());
         let tx_outputs = vec![TxOutput::onchain_native_currency(
@@ -834,8 +830,9 @@ mod test {
             false,
         )]
         .into();
-        let mut state = state.lock_guard_mut().await;
-        let change_key = state.wallet_state.next_unused_symmetric_key().await;
+        let mut gsm = state.lock_guard_mut().await;
+        let change_key = gsm.wallet_state.next_unused_symmetric_key().await;
+        drop(gsm);
         let dummy = TritonVmJobQueue::dummy();
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
         let config = TxCreationConfig::default()
@@ -843,6 +840,8 @@ mod test {
             .with_prover_capability(proof_quality)
             .use_job_queue(dummy);
         state
+            .api()
+            .tx_initiator_internal()
             .create_transaction(tx_outputs, fee, timestamp, config)
             .await
             .unwrap()
@@ -881,7 +880,9 @@ mod test {
             )
             .await;
             let mut rando = rando.lock_guard_mut().await;
-            rando.mempool_insert(pc_tx_low_fee.clone(), tx_origin).await;
+            rando
+                .mempool_insert(pc_tx_low_fee.clone().into(), tx_origin)
+                .await;
             if tx_origin == TransactionOrigin::Own {
                 assert!(get_upgrade_task_from_mempool(&rando).is_some());
             } else {
@@ -898,7 +899,7 @@ mod test {
             )
             .await;
             rando
-                .mempool_insert(pc_tx_high_fee.clone(), TransactionOrigin::Foreign)
+                .mempool_insert(pc_tx_high_fee.clone().into(), TransactionOrigin::Foreign)
                 .await;
             let job = get_upgrade_task_from_mempool(&rando).unwrap().0;
             let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
@@ -938,7 +939,7 @@ mod test {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
+                .mempool_insert((*pwtx).clone(), TransactionOrigin::Own)
                 .await;
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
@@ -1016,7 +1017,7 @@ mod test {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
+                .mempool_insert((*pwtx).clone(), TransactionOrigin::Own)
                 .await;
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
@@ -1114,7 +1115,7 @@ mod test {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(single_proof_tx.clone(), TransactionOrigin::Own)
+                .mempool_insert(single_proof_tx.clone().into(), TransactionOrigin::Own)
                 .await;
             transactions.push(single_proof_tx);
         }
@@ -1139,9 +1140,14 @@ mod test {
         let block1 = alice.lock_guard().await.chain.light_state().to_owned();
 
         let now = block1.header().timestamp + Timestamp::hours(1);
-        let block2 =
-            fake_block_successor_with_merged_tx(&block1, now, rng.random(), false, vec![mined_tx])
-                .await;
+        let block2 = fake_block_successor_with_merged_tx(
+            &block1,
+            now,
+            rng.random(),
+            false,
+            vec![mined_tx.into()],
+        )
+        .await;
         alice.set_new_tip(block2).await.unwrap();
 
         let (main_to_peer_tx, mut main_to_peer_rx) =

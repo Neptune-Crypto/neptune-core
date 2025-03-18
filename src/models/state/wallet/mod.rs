@@ -1,4 +1,5 @@
 pub mod address;
+pub mod change_policy;
 pub mod coin_with_possible_timelock;
 pub(crate) mod expected_utxo;
 pub(crate) mod incoming_utxo;
@@ -7,7 +8,8 @@ pub(crate) mod rusty_wallet_database;
 pub(crate) mod scan_mode_configuration;
 pub mod secret_key_material;
 pub mod sent_transaction;
-pub(crate) mod transaction_output;
+pub mod transaction_input;
+pub mod transaction_output;
 pub(crate) mod unlocked_utxo;
 pub mod utxo_notification;
 pub(crate) mod wallet_configuration;
@@ -37,6 +39,7 @@ mod wallet_tests {
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
     use super::*;
+    use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
@@ -525,10 +528,12 @@ mod wallet_tests {
                 .wallet_entropy;
         let mut bob_global_lock =
             mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args.clone()).await;
-        let mut bob = bob_global_lock.lock_guard_mut().await;
+        let mut tx_initiator_internal = bob_global_lock.api().tx_initiator_internal();
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
-        let bobs_original_balance = bob
+        let bobs_original_balance = bob_global_lock
+            .lock_guard()
+            .await
             .get_wallet_status_for_tip()
             .await
             .synced_unspent_available_amount(in_seven_months);
@@ -537,10 +542,16 @@ mod wallet_tests {
             "Premine must have non-zero synced balance"
         );
 
-        let bob_sender_randomness = bob.wallet_state.wallet_entropy.generate_sender_randomness(
-            genesis_block.kernel.header.height,
-            alice_address.privacy_digest(),
-        );
+        let bob_sender_randomness = bob_global_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_entropy
+            .generate_sender_randomness(
+                genesis_block.kernel.header.height,
+                alice_address.privacy_digest(),
+            );
+
         let receiver_data_12_to_alice = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(12),
             bob_sender_randomness,
@@ -560,7 +571,7 @@ mod wallet_tests {
         let config_1 = TxCreationConfig::default()
             .recover_change_on_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx_1 = bob
+        let tx_1 = tx_initiator_internal
             .create_transaction(
                 receiver_data_to_alice.clone(),
                 NativeCurrencyAmount::coins(2),
@@ -568,7 +579,8 @@ mod wallet_tests {
                 config_1,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         let block_1 = invalid_block_with_transaction(&genesis_block, tx_1.into());
 
@@ -582,13 +594,16 @@ mod wallet_tests {
 
         // Notification for Bob's change happens on-chain. No need to ask
         // wallet to expect change UTXO.
-        bob.set_new_tip(block_1.clone()).await.unwrap();
+        bob_global_lock.set_new_tip(block_1.clone()).await.unwrap();
 
         assert_eq!(
             bobs_original_balance
                 .checked_sub(&NativeCurrencyAmount::coins(15))
                 .unwrap(),
-            bob.get_wallet_status_for_tip()
+            bob_global_lock
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
                 .await
                 .synced_unspent_available_amount(in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
@@ -598,7 +613,7 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(receiver_data_to_alice, UtxoNotifier::Cli);
+            .extract_expected_utxos(receiver_data_to_alice.iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await
@@ -651,7 +666,10 @@ mod wallet_tests {
                 .add_expected_utxos(expected)
                 .await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
-            bob.set_new_tip(next_block.clone()).await.unwrap();
+            bob_global_lock
+                .set_new_tip(next_block.clone())
+                .await
+                .unwrap();
         }
 
         let first_block_after_spree = next_block;
@@ -710,13 +728,18 @@ mod wallet_tests {
         );
 
         // Bob mines a block, ignoring Alice's spree and forking instead
-        let bob_key = bob
+        let bob_key = bob_global_lock
+            .lock_guard()
+            .await
             .wallet_state
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
-        bob.set_new_tip(block_2_b.clone()).await.unwrap();
+        bob_global_lock
+            .set_new_tip(block_2_b.clone())
+            .await
+            .unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
@@ -797,7 +820,8 @@ mod wallet_tests {
         let config_2b = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx_from_bob = bob
+
+        let tx_from_bob: Transaction = tx_initiator_internal
             .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 NativeCurrencyAmount::coins(4),
@@ -805,7 +829,9 @@ mod wallet_tests {
                 config_2b,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction
+            .into();
 
         let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction_from_state(
             &alice
@@ -824,7 +850,7 @@ mod wallet_tests {
         .unwrap();
         let merged_tx = coinbase_tx
             .merge_with(
-                tx_from_bob.into(),
+                tx_from_bob,
                 Default::default(),
                 TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -843,7 +869,7 @@ mod wallet_tests {
         .await
         .unwrap();
         assert!(
-            block_3_b.is_valid(&block_2_b, timestamp).await,
+            block_3_b.is_valid(&block_2_b, timestamp, network).await,
             "Block must be valid after accumulating txs"
         );
         let expected_utxos_for_alice_cb = expected_composer_utxos
@@ -1008,13 +1034,14 @@ mod wallet_tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let sender_tx = bob
-            .lock_guard()
-            .await
+        let sender_tx: Transaction = bob
+            .api()
+            .tx_initiator_internal()
             .create_transaction(vec![tx_output].into(), one_money, in_seven_months, config)
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
         let tx_for_block = sender_tx
             .merge_with(
                 cbtx,
@@ -1037,7 +1064,11 @@ mod wallet_tests {
 
         // The entire block must be valid, i.e., have a valid block proof, and
         // be valid in other respects. We don't care about PoW, though.
-        assert!(block_1.is_valid(&genesis_block, in_seven_months).await);
+        assert!(
+            block_1
+                .is_valid(&genesis_block, in_seven_months, network)
+                .await
+        );
 
         // 4 outputs: 2 coinbases, 1 for recipient of tx, 1 for change.
         assert_eq!(4, block_1.body().transaction_kernel.outputs.len());

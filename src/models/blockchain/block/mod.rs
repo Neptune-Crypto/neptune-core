@@ -7,6 +7,7 @@ pub mod block_kernel;
 pub mod block_selector;
 mod block_validation_error;
 pub mod difficulty_control;
+pub mod mock_block_generator;
 pub mod mutator_set_update;
 pub mod validity;
 
@@ -694,9 +695,19 @@ impl Block {
     /// Note that this function does **not** check that the block has enough
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
-    pub(crate) async fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
+    pub(crate) async fn is_valid(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+    ) -> bool {
         match self
-            .is_valid_internal(previous_block, now, None, None)
+            .is_valid_internal(
+                previous_block,
+                now,
+                Some(network.target_block_interval()),
+                Some(network.minimum_block_time()),
+            )
             .await
         {
             Ok(_) => true,
@@ -746,11 +757,13 @@ impl Block {
         }
 
         // 0.d)
-        let minimum_block_time = minimum_block_time.unwrap_or(MINIMUM_BLOCK_TIME);
-        if previous_block.kernel.header.timestamp + minimum_block_time
-            > self.kernel.header.timestamp
         {
-            return Err(BlockValidationError::MinimumBlockTime);
+            let minimum_block_time = minimum_block_time.unwrap_or(MINIMUM_BLOCK_TIME);
+            if previous_block.kernel.header.timestamp + minimum_block_time
+                > self.kernel.header.timestamp
+            {
+                return Err(BlockValidationError::MinimumBlockTime);
+            }
         }
 
         // 0.e)
@@ -1237,6 +1250,7 @@ pub(crate) mod block_tests {
         assert_eq!(NativeCurrencyAmount::coins(128), total_amount);
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn test_difficulty_control_matches() {
         let network = Network::Main;
@@ -1260,7 +1274,7 @@ pub(crate) mod block_tests {
                     block.kernel.header.timestamp,
                     block_prev.header().timestamp,
                     block_prev.header().difficulty,
-                    None,
+                    None, // target_block_interval
                     block_prev.header().height,
                 );
                 assert_eq!(block.kernel.header.difficulty, control);
@@ -1310,7 +1324,7 @@ pub(crate) mod block_tests {
         let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
 
         let timestamp = block1.kernel.header.timestamp;
-        assert!(block1.is_valid(&genesis_block, timestamp).await);
+        assert!(block1.is_valid(&genesis_block, timestamp, network).await);
 
         let mut mutated_leaf = genesis_block.body().block_mmr_accumulator.clone();
         let mp = mutated_leaf.append(genesis_block.hash());
@@ -1327,7 +1341,7 @@ pub(crate) mod block_tests {
 
         for bad_new_mmr in bad_new_mmrs {
             block1.kernel.body.block_mmr_accumulator = bad_new_mmr;
-            assert!(!block1.is_valid(&genesis_block, timestamp).await);
+            assert!(!block1.is_valid(&genesis_block, timestamp, network).await);
         }
     }
 
@@ -1456,12 +1470,11 @@ pub(crate) mod block_tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .nth_spending_key(KeyType::Generation, 0)
-                .unwrap();
+                .nth_spending_key(KeyType::Generation, 0);
             let output_to_self = TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
                 rng.random(),
-                alice_key.to_address().unwrap(),
+                alice_key.to_address(),
                 true,
             );
 
@@ -1492,8 +1505,8 @@ pub(crate) mod block_tests {
                     .recover_change_on_chain(alice_key)
                     .with_prover_capability(TxProvingCapability::SingleProof);
                 let tx2 = alice
-                    .lock_guard_mut()
-                    .await
+                    .api()
+                    .tx_initiator_internal()
                     .create_transaction(outputs.into(), fee, plus_eight_months, config2)
                     .await
                     .unwrap()
@@ -1501,7 +1514,7 @@ pub(crate) mod block_tests {
                 let block2_tx = coinbase_for_block2
                     .clone()
                     .merge_with(
-                        tx2,
+                        (*tx2).clone(),
                         rng.random(),
                         TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
@@ -1521,7 +1534,7 @@ pub(crate) mod block_tests {
 
                 assert!(
                     block2_without_valid_pow
-                        .is_valid(&block1, plus_eight_months)
+                        .is_valid(&block1, plus_eight_months, network)
                         .await,
                     "Block with {i} inputs must be valid"
                 );
@@ -1543,8 +1556,8 @@ pub(crate) mod block_tests {
                     .recover_change_on_chain(alice_key)
                     .with_prover_capability(TxProvingCapability::SingleProof);
                 let tx3 = alice
-                    .lock_guard_mut()
-                    .await
+                    .api()
+                    .tx_initiator_internal()
                     .create_transaction(
                         vec![output_to_self.clone()].into(),
                         fee,
@@ -1557,7 +1570,7 @@ pub(crate) mod block_tests {
                 let block3_tx = coinbase_for_block3
                     .clone()
                     .merge_with(
-                        tx3,
+                        (*tx3).clone(),
                         rng.random(),
                         TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
@@ -1581,7 +1594,7 @@ pub(crate) mod block_tests {
 
                 assert!(
                     block3_without_valid_pow
-                        .is_valid(&block2_without_valid_pow, plus_nine_months)
+                        .is_valid(&block2_without_valid_pow, plus_nine_months, network)
                         .await,
                     "Block of height 3 after block 2 with {i} inputs must be valid"
                 );
@@ -1602,29 +1615,29 @@ pub(crate) mod block_tests {
             // Set block timestamp 4 minutes in the future.  (is valid)
             let future_time1 = now + Timestamp::minutes(4);
             block1.kernel.header.timestamp = future_time1;
-            assert!(block1.is_valid(&genesis_block, now).await);
+            assert!(block1.is_valid(&genesis_block, now, network).await);
 
             now = block1.kernel.header.timestamp;
 
             // Set block timestamp 5 minutes - 1 sec in the future.  (is valid)
             let future_time2 = now + Timestamp::minutes(5) - Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time2;
-            assert!(block1.is_valid(&genesis_block, now).await);
+            assert!(block1.is_valid(&genesis_block, now, network).await);
 
             // Set block timestamp 5 minutes in the future. (not valid)
             let future_time3 = now + Timestamp::minutes(5);
             block1.kernel.header.timestamp = future_time3;
-            assert!(!block1.is_valid(&genesis_block, now).await);
+            assert!(!block1.is_valid(&genesis_block, now, network).await);
 
             // Set block timestamp 5 minutes + 1 sec in the future. (not valid)
             let future_time4 = now + Timestamp::minutes(5) + Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time4;
-            assert!(!block1.is_valid(&genesis_block, now).await);
+            assert!(!block1.is_valid(&genesis_block, now, network).await);
 
             // Set block timestamp 2 days in the future. (not valid)
             let future_time5 = now + Timestamp::seconds(86400 * 2);
             block1.kernel.header.timestamp = future_time5;
-            assert!(!block1.is_valid(&genesis_block, now).await);
+            assert!(!block1.is_valid(&genesis_block, now, network).await);
         }
     }
 
@@ -1744,6 +1757,7 @@ pub(crate) mod block_tests {
                 rng.random(),
                 0.4,
                 guesser_preimage,
+                Network::Main,
             )
             .await;
             let ars = block1.guesser_fee_addition_records();
@@ -1826,29 +1840,34 @@ pub(crate) mod block_tests {
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let tx1 = alice
-                .lock_guard()
-                .await
+                .api()
+                .tx_initiator_internal()
                 .create_transaction(vec![output.clone()].into(), fee, in_seven_months, config1)
                 .await
                 .unwrap()
                 .transaction;
 
-            let block1 =
-                Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
+            let block1 = Block::block_template_invalid_proof(
+                &genesis_block,
+                (*tx1).clone(),
+                in_seven_months,
+                None,
+            );
             alice.set_new_tip(block1.clone()).await.unwrap();
 
             let config2 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let tx2 = alice
-                .lock_guard()
-                .await
+                .api()
+                .tx_initiator_internal()
                 .create_transaction(vec![output].into(), fee, in_eight_months, config2)
                 .await
                 .unwrap()
                 .transaction;
 
-            let block2 = Block::block_template_invalid_proof(&block1, tx2, in_eight_months, None);
+            let block2 =
+                Block::block_template_invalid_proof(&block1, (*tx2).clone(), in_eight_months, None);
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
@@ -1937,9 +1956,7 @@ pub(crate) mod block_tests {
                     .wallet_state
                     .next_unused_spending_key(KeyType::Generation)
                     .await
-                    .unwrap()
-                    .to_address()
-                    .unwrap();
+                    .to_address();
                 let tx_outputs = vec![TxOutput::onchain_native_currency(
                     NativeCurrencyAmount::coins(1),
                     rng.random(),
@@ -1952,8 +1969,8 @@ pub(crate) mod block_tests {
                     .with_prover_capability(TxProvingCapability::SingleProof)
                     .use_job_queue(job_queue.clone());
                 let transaction_creation_artifacts = alice
-                    .lock_guard_mut()
-                    .await
+                    .api()
+                    .tx_initiator_internal()
                     .create_transaction(tx_outputs, NativeCurrencyAmount::coins(0), now, config)
                     .await
                     .unwrap();
@@ -1962,7 +1979,7 @@ pub(crate) mod block_tests {
                 // merge that transaction in
                 transaction = transaction
                     .merge_with(
-                        self_spending_transaction,
+                        (*self_spending_transaction).clone(),
                         rng.random(),
                         job_queue.clone(),
                         TritonVmProofJobOptions::default(),

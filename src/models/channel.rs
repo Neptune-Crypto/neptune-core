@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -202,9 +203,10 @@ pub(crate) struct ClaimUtxoData {
     pub(crate) expected_utxo: ExpectedUtxo,
 }
 
+/// represents messages that can be sent from RPC server to main loop.
 #[derive(Clone, Debug)]
-pub(crate) enum RPCServerToMain {
-    BroadcastTx(Box<Transaction>),
+pub enum RPCServerToMain {
+    BroadcastTx(Arc<Transaction>),
     BroadcastMempoolTransactions,
     ClearMempool,
     ProofOfWorkSolution(Box<Block>),

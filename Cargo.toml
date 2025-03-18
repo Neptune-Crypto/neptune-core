@@ -108,7 +108,7 @@ tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.7", features = ["codec", "rt"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter", "time", "fmt"] }
-tracing-test = "0.2"
+tracing-test = {version = "0.2"}
 unicode-width = "0.1"
 zeroize = "1.8.1"
 rs-leveldb = "0.1.5"
