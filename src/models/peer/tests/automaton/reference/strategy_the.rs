@@ -1,4 +1,5 @@
 use super::super::super::PeerMessage;
+use super::strategy_variants::block_notif_req;
 use super::utils::block_new;
 use super::{strategy_variants, Automaton, SyncStage, Transition};
 use crate::config_models::network::Network;
@@ -77,7 +78,14 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
         /* TODO is it possible to add a check here that the `Strategy` covers all the variants? */
         /* the book recommends to have these from simple to complex */
         prop_oneof![
+            // `BlockNotificationRequest`
+            prop_oneof![
+                Just(Transition(PeerMessage::BlockNotificationRequest, None)),
+                block_notif_req()
+            ],
+            // `SyncChallengeResponse`
             crate::models::peer::syncchallenge_response_prop_compose_random().prop_map(|r| r.into()),
+            // `SyncChallenge`
             {
                 let syncchallenge_random_mapped =
                     proptest_arbitrary_interop::arb::<SyncChallenge>().prop_map(|ch| Transition(ch.into(), None)).boxed();
@@ -103,19 +111,6 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                     ].boxed()
                 } else {syncchallenge_random_mapped}
             },
-            (any::<bool>(), arb::<crate::models::proof_abstractions::timestamp::Timestamp>(), any::<[u8; 32]>())
-            .prop_map(|(is_makenew, ts, seed_an)|
-                if is_makenew {
-                    Transition(PeerMessage::BlockNotificationRequest, None)
-                } else {
-                    Transition(
-                        PeerMessage::BlockNotificationRequest,
-                        Some(AssosiatedData::MakeNewBlocks(
-                            ts, seed_an
-                        ))
-                    )
-                }
-            ),
             /* When you are in sync mode, you are asking for blocks from multiple peers 
             so that you can catch up as quickly as possible. You're not mining either 
             because what's the point. The issue is, what if a peer announces a block that 

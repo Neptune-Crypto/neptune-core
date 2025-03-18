@@ -7,7 +7,21 @@ use crate::models::{
     state::wallet::address::generation_address::GenerationSpendingKey,
 };
 
-use super::Transition;
+use super::{AssosiatedData, Transition};
+
+prop_compose! {
+    pub fn block_notif_req() (
+        ts in arb::<crate::models::proof_abstractions::timestamp::Timestamp>(),
+        seed_an in any::<[u8; 32]>()
+    ) -> Transition {
+        Transition(
+            PeerMessage::BlockNotificationRequest,
+            Some(AssosiatedData::MakeNewBlocks(
+                ts, seed_an
+            ))
+        )
+    }
+}
 
 prop_compose! {
     pub fn tx(is_notif: bool) (
