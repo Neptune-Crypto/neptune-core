@@ -59,6 +59,7 @@ use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -1660,7 +1661,7 @@ impl WalletState {
         &self,
         wallet_status: WalletStatus,
         timestamp: Timestamp,
-    ) -> impl IntoIterator<Item = UnlockedUtxo> + use<'_> {
+    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .mempool_spent_utxos
             .iter()
@@ -1687,13 +1688,6 @@ impl WalletState {
                     return None;
                 };
 
-                // Create the transaction input object
-                let unlocked_utxo = UnlockedUtxo::unlock(
-                    wallet_status_element.utxo.clone(),
-                    spending_key,
-                    membership_proof.clone(),
-                );
-
                 // Don't use inputs that are already spent by txs in mempool.
                 let absolute_index_set =
                     membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
@@ -1701,8 +1695,15 @@ impl WalletState {
                     return None;
                 }
 
-                // Select the input
-                Some(unlocked_utxo)
+                // Create the transaction input object
+                Some(
+                    UnlockedUtxo::unlock(
+                        wallet_status_element.utxo.clone(),
+                        spending_key,
+                        membership_proof.clone(),
+                    )
+                    .into(),
+                )
             },
         )
     }
@@ -1733,7 +1734,7 @@ impl WalletState {
 
             // Select the input
             allocated_amount = allocated_amount + input.utxo.get_native_currency_amount();
-            input_funds.push(input);
+            input_funds.push(input.into());
         }
 
         // If there aren't enough funds, catch and report error gracefully

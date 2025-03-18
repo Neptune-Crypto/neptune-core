@@ -1,21 +1,35 @@
 //! provides an interface to transaction inputs
 
+use std::ops::Deref;
+use std::ops::DerefMut;
+
+use serde::Deserialize;
+use serde::Serialize;
+
 use super::unlocked_utxo::UnlockedUtxo;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use serde::Deserialize;
-use serde::Serialize;
-use std::ops::Deref;
-use std::ops::DerefMut;
 
 /// represents a transaction input
 ///
 /// this is a newtype wrapper around UnlockedUtxo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxInput(UnlockedUtxo);
+
+impl From<UnlockedUtxo> for TxInput {
+    fn from(unlocked_utxo: UnlockedUtxo) -> Self {
+        Self(unlocked_utxo)
+    }
+}
+
+impl From<TxInput> for UnlockedUtxo {
+    fn from(tx_input: TxInput) -> Self {
+        tx_input.0
+    }
+}
 
 impl Deref for TxInput {
     type Target = UnlockedUtxo;
@@ -104,9 +118,7 @@ impl TxInputList {
         &'a self,
         msa: &'a MutatorSetAccumulator,
     ) -> impl IntoIterator<Item = RemovalRecord> + 'a {
-        self.0
-            .iter()
-            .map(|u| u.removal_record(msa))
+        self.0.iter().map(|u| u.removal_record(msa))
     }
 
     /// retrieves removal records
@@ -115,31 +127,31 @@ impl TxInputList {
     }
 
     /*
-    /// retrieves lock scripts
-    pub fn lock_scripts_iter(&self) -> impl IntoIterator<Item = LockScript> + '_ {
-        self.0.iter().map(|u| &u.lock_script).cloned()
-    }
+        /// retrieves lock scripts
+        pub fn lock_scripts_iter(&self) -> impl IntoIterator<Item = LockScript> + '_ {
+            self.0.iter().map(|u| &u.lock_script).cloned()
+        }
 
-    /// retrieves lock scripts
-    pub fn lock_scripts(&self) -> Vec<LockScript> {
-        self.lock_scripts_iter().into_iter().collect()
-    }
+        /// retrieves lock scripts
+        pub fn lock_scripts(&self) -> Vec<LockScript> {
+            self.lock_scripts_iter().into_iter().collect()
+        }
 
-    /// retrieves unlock keys
-    pub fn unlock_keys_iter(&self) -> impl Iterator<Item = Digest> + '_ {
-        self.0.iter().map(|u| u.unlock_key)
-    }
+        /// retrieves unlock keys
+        pub fn unlock_keys_iter(&self) -> impl Iterator<Item = Digest> + '_ {
+            self.0.iter().map(|u| u.unlock_key)
+        }
 
-    /// retrieves unlock keys
-    pub fn unlock_keys(&self) -> Vec<Digest> {
-        self.unlock_keys_iter().collect()
-    }
+        /// retrieves unlock keys
+        pub fn unlock_keys(&self) -> Vec<Digest> {
+            self.unlock_keys_iter().collect()
+        }
 
-    /// retrieves unlock keys as lock script witnesses
-    pub fn lock_script_witnesses(&self) -> Vec<Vec<BFieldElement>> {
-        self.unlock_keys_iter().map(|uk| uk.encode()).collect()
-    }
-*/
+        /// retrieves unlock keys as lock script witnesses
+        pub fn lock_script_witnesses(&self) -> Vec<Vec<BFieldElement>> {
+            self.unlock_keys_iter().map(|uk| uk.encode()).collect()
+        }
+    */
     /// retrieves membership proofs
     pub fn ms_membership_proofs_iter(&self) -> impl IntoIterator<Item = MsMembershipProof> + '_ {
         self.0.iter().map(|u| u.mutator_set_mp()).cloned()
