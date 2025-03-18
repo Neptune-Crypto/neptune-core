@@ -77,50 +77,28 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
 
         /* TODO is it possible to add a check here that the `Strategy` covers all the variants? */
         /* the book recommends to have these from simple to complex */
-        prop_oneof![
+        let mut the = prop_oneof![
             // `BlockNotificationRequest`
             prop_oneof![
                 Just(Transition(PeerMessage::BlockNotificationRequest, None)),
                 block_notif_req()
             ],
             // `SyncChallengeResponse`
-            crate::models::peer::syncchallenge_response_prop_compose_random().prop_map(|r| r.into()),
-            // `SyncChallenge`
-            {
-                let syncchallenge_random_mapped =
-                    proptest_arbitrary_interop::arb::<SyncChallenge>().prop_map(|ch| Transition(ch.into(), None)).boxed();
-                /* we only have `SyncChallenge::generate` for this, which `assert` 10 blocks difference between the tips */
-                let mut syncchallenge_is_generate = None;
-                if let Some(SyncStage::WaitingForChallenge(challenge_pre, tip_of_request)) = state.sync_stage.clone() {
-                    // let height_cloned = current_tip.header().height.clone();
-                    if current_tip.header().height - challenge_pre.height >= 10 {
-                        syncchallenge_is_generate = Some((challenge_pre, tip_of_request.header().height));
-                    }
-                }
-                if let Some((challenge_pre, tip_of_request_height)) = syncchallenge_is_generate {
-                    prop_oneof![
-                        any::<[u8; 32]>().prop_map(move |randomness|
-                            Transition(
-                                SyncChallenge::generate(
-                                    &challenge_pre, tip_of_request_height, randomness
-                                ).into(),
-                                Some(AssosiatedData::Randomness(/* randomness */))
-                            )
-                        ),
-                        syncchallenge_random_mapped
-                    ].boxed()
-                } else {syncchallenge_random_mapped}
-            },
-            /* When you are in sync mode, you are asking for blocks from multiple peers 
-            so that you can catch up as quickly as possible. You're not mining either 
-            because what's the point. The issue is, what if a peer announces a block that 
-            would send your node into sync mode? If they are honest, great! If not, they can 
-            trick you into halting your mining operation while you figure out that 
+            crate::models::peer::syncchallenge_response_prop_compose_random()
+                .prop_map(|r| r.into()),
+            // `SyncChallenge` random
+            proptest_arbitrary_interop::arb::<SyncChallenge>()
+                .prop_map(|ch| Transition(ch.into(), None)),
+            /* When you are in sync mode, you are asking for blocks from multiple peers
+            so that you can catch up as quickly as possible. You're not mining either
+            because what's the point. The issue is, what if a peer announces a block that
+            would send your node into sync mode? If they are honest, great! If not, they can
+            trick you into halting your mining operation while you figure out that
             the announced block is bogus.
 
-            So you can't enter into sync mode just based on the announced block. You first need 
-            to verify that there really is a valid chain ending in that announced block. You 
-            don't make 100% certain with the sync challenge, but you do make 99% certain. 
+            So you can't enter into sync mode just based on the announced block. You first need
+            to verify that there really is a valid chain ending in that announced block. You
+            don't make 100% certain with the sync challenge, but you do make 99% certain.
             Phrased differently, you're very likely to catch cheaters.
 
             So in the honest case, this is what happens:
@@ -129,27 +107,39 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             - you send them a sync challenge
             - they send a sync challenge response back
             - you validate the sync challenge response, and punish the peer if it does not go through
-            - if valid, you enter into sync mode and halt miner and start requesting blocks from all peers that report knowledge of 
+            - if valid, you enter into sync mode and halt miner and start requesting blocks from all peers that report knowledge of
             the same tip */
-            /* The difference between a block proposal and a block is the nonce, which makes the hash 
+            /* The difference between a block proposal and a block is the nonce, which makes the hash
             of the block smaller than the target whereas the hash of the block proposal is not. */
             // mostly taken from `sync_challenges`
             prop_oneof![
                 (
                     proptest::collection::vec(0..BFieldElement::P, Digest::LEN),
                     0..BFieldElement::P,
-                    crate::models::blockchain::block::difficulty_control::propteststrategy::random()
-                ).prop_map(|(digest_raw, height_u64, pow)| Transition(PeerMessage::BlockNotification(PeerBlockNotification {
-                    hash: Digest(
-                        digest_raw.into_iter().map(|limb| tasm_lib::twenty_first::bfe![limb]).collect::<Vec<BFieldElement>>().try_into()
-                        .expect("the correct length is insured by the input `Strategy`")
-                    ),
-                    height: bfe![height_u64].into(),
-                    cumulative_proof_of_work: pow
-                }), None)),
-                block_new(current_tip.clone()).prop_map(
-                    |b| Transition(PeerMessage::BlockNotification(PeerBlockNotification::from(&b)), Some(AssosiatedData::NewBlock(b)))
+                    crate::models::blockchain::block::difficulty_control::propteststrategy::random(
+                    )
                 )
+                    .prop_map(|(digest_raw, height_u64, pow)| Transition(
+                        PeerMessage::BlockNotification(PeerBlockNotification {
+                            hash: Digest(
+                                digest_raw
+                                    .into_iter()
+                                    .map(|limb| tasm_lib::twenty_first::bfe![limb])
+                                    .collect::<Vec<BFieldElement>>()
+                                    .try_into()
+                                    .expect(
+                                        "the correct length is insured by the input `Strategy`"
+                                    )
+                            ),
+                            height: bfe![height_u64].into(),
+                            cumulative_proof_of_work: pow
+                        }),
+                        None
+                    )),
+                block_new(current_tip.clone()).prop_map(|b| Transition(
+                    PeerMessage::BlockNotification(PeerBlockNotification::from(&b)),
+                    Some(AssosiatedData::NewBlock(b))
+                ))
             ],
             /* Works:
             - BlockNotificationRequest
@@ -161,68 +151,70 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             - Block
             - BlockRequestByHeight
             - TransactionRequest
-            Excluded: 
+            Excluded:
             - `Bye`: nothing to test here and `proptest` doesn't like finite automata
             - Handshake: an existing peer can only punish for a `Handshake` hence it doesn't matter at all what's inside such a `PeerMessage` (TODO add a simplified `Transition` for this)
             - `ConnectionStatus`
             */
-
             strategy_variants::tx(false),
             strategy_variants::tx(true),
-
             prop_oneof![
                 (0..state.blocks.len()).prop_map(move |i| Transition(
-                    PeerMessage::TransactionRequest(blocks_tx_id[i]), None
+                    PeerMessage::TransactionRequest(blocks_tx_id[i]),
+                    None
                 )),
                 crate::models::state::transaction_kernel_id::propteststrategy::random_tx_kernelid()
-                .prop_map(|r| Transition(
-                    PeerMessage::TransactionRequest(r), None
-                ))
+                    .prop_map(|r| Transition(PeerMessage::TransactionRequest(r), None))
             ],
             prop_oneof![
-                super::utils::block_invalid().prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None)),
-                block_new(current_tip.clone()).prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None))
+                super::utils::block_invalid()
+                    .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None)),
+                block_new(current_tip.clone())
+                    .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None))
             ],
             Just(Transition(PeerMessage::PeerListRequest, None)),
             // super::strategy_variants::block_response,
-            Just(Transition(PeerMessage::BlockRequestByHeight(
-                BlockHeight::from(state.blocks.len() as u64)
-            ), None)),
-
+            Just(Transition(
+                PeerMessage::BlockRequestByHeight(BlockHeight::from(state.blocks.len() as u64)),
+                None
+            )),
             // from Sourcegraph
-                // Block strategy
+            // Block strategy
             prop_oneof![
-                crate::models::peer::transfer_block::block_transfer_propcompose_random().prop_map(|tb|
-                    Transition(PeerMessage::Block(Box::new(tb)), None)
-                ),
+                crate::models::peer::transfer_block::block_transfer_propcompose_random()
+                    .prop_map(|tb| Transition(PeerMessage::Block(Box::new(tb)), None)),
                 // TODO add this into `apply`
                 block_new(current_tip.clone()).prop_map(|b| Transition(
-                    PeerMessage::Block(Box::new(b.clone().try_into().unwrap())), Some(AssosiatedData::NewBlock(b))
+                    PeerMessage::Block(Box::new(b.clone().try_into().unwrap())),
+                    Some(AssosiatedData::NewBlock(b))
                 )),
             ],
-
             // BlockRequestByHash strategy
             // TODO add the `Just` strategy for genesis (as `blocks_digests[0]`) -- now the peer thread just panics on this, and it's not clear if that's an intended behaviour
             {
-                let strategy_random = arb::<Digest>().prop_map(|digest| Transition(PeerMessage::BlockRequestByHash(digest), None));
+                let strategy_random = arb::<Digest>()
+                    .prop_map(|digest| Transition(PeerMessage::BlockRequestByHash(digest), None));
                 let len = state.blocks.len();
                 if len > 1 {
                     prop_oneof![
                         strategy_random,
                         (1..len).prop_map(move |i| Transition(
-                            PeerMessage::BlockRequestByHash(blocks_digests[i]), None
+                            PeerMessage::BlockRequestByHash(blocks_digests[i]),
+                            None
                         )),
-                    ].boxed()
-                } else {strategy_random.boxed()}
+                    ]
+                    .boxed()
+                } else {
+                    strategy_random.boxed()
+                }
             },
-
             // BlockRequestBatch strategy
             // TODO need an example of the MMR part
             // (
             //     proptest::collection::vec(arb::<Digest>(), 0..crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST),
             //     1u16..100u16,
             //     arb::<Digest>()
-            // ).prop_map(|(known_blocks, max_response_len, anchor)| 
+            // ).prop_map(|(known_blocks, max_response_len, anchor)|
             //     Transition(PeerMessage::BlockRequestBatch(
             //         crate::models::peer::BlockRequestBatch {
             //             known_blocks,
@@ -234,14 +226,37 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
 
             // BlockProposalRequest strategy
             prop_oneof![
-                arb::<Digest>().prop_map(|d|
-                    Transition(PeerMessage::BlockProposalRequest(BlockProposalRequest::new(d)), None)
-                ),
-                block_new(current_tip).prop_map(|b|
-                    Transition(PeerMessage::BlockProposalRequest(BlockProposalRequest::new(b.hash())), Some(AssosiatedData::NewBlock(b)))
-                )
+                arb::<Digest>().prop_map(|d| Transition(
+                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(d)),
+                    None
+                )),
+                block_new(current_tip.clone()).prop_map(|b| Transition(
+                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(b.hash())),
+                    Some(AssosiatedData::NewBlock(b))
+                ))
             ],
-        ].boxed()
+        ]
+        .boxed();
+        if let Some(SyncStage::WaitingForChallenge(challenge_pre, tip_of_request)) =
+            state.sync_stage.clone()
+        {
+            // let height_cloned = current_tip.header().height.clone();
+            /* we only have `SyncChallenge::generate` for this, which `assert` 10 blocks difference between the tips */
+            if current_tip.header().height - challenge_pre.height >= 10 {
+                the = the.prop_union(any::<[u8; 32]>().prop_map(move |randomness| {
+                    Transition(
+                        SyncChallenge::generate(
+                            &challenge_pre,
+                            tip_of_request.header().height,
+                            randomness,
+                        )
+                        .into(),
+                        Some(AssosiatedData::Randomness(/* randomness */)),
+                    )
+                }).boxed()).boxed();
+            }
+        }
+        the
     }
 
     fn apply(mut state: Self::State, transition: &Self::Transition) -> Self::State {
