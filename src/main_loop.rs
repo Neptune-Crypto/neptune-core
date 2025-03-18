@@ -798,21 +798,23 @@ impl MainLoopHandler {
                     pt2m_transaction.transaction.kernel.mutator_set_hash
                 );
 
-                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-                if pt2m_transaction.confirmable_for_block
-                    != global_state_mut.chain.light_state().hash()
                 {
-                    warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
-                    return Ok(());
-                }
+                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                    if pt2m_transaction.confirmable_for_block
+                        != global_state_mut.chain.light_state().hash()
+                    {
+                        warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
+                        return Ok(());
+                    }
 
-                // Insert into mempool
-                global_state_mut
-                    .mempool_insert(
-                        pt2m_transaction.transaction.to_owned(),
-                        TransactionOrigin::Foreign,
-                    )
-                    .await;
+                    // Insert into mempool
+                    global_state_mut
+                        .mempool_insert(
+                            pt2m_transaction.transaction.to_owned(),
+                            TransactionOrigin::Foreign,
+                        )
+                        .await;
+                }
 
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
