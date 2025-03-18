@@ -700,29 +700,6 @@ pub(crate) struct SyncChallengeResponse {
     pub(crate) pow_witnesses: [BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH],
 }
 
-#[cfg(test)]
-use crate::models::peer::transfer_block::block_transfer_propcompose_random;
-#[cfg(test)]
-use proptest_arbitrary_interop::arb;
-#[cfg(test)]
-proptest::prop_compose! {
-    pub fn syncchallenge_response_prop_compose_random() (
-        blocks in proptest::collection::vec((block_transfer_propcompose_random(), block_transfer_propcompose_random()), SYNC_CHALLENGE_NUM_BLOCK_PAIRS),
-        membership_proofs in proptest::collection::vec(arb::<MmrMembershipProof>(), SYNC_CHALLENGE_NUM_BLOCK_PAIRS),
-        tip_parent in block_transfer_propcompose_random(),
-        tip in block_transfer_propcompose_random(),
-        pow_witnesses in proptest::collection::vec(arb::<BlockHeaderWithBlockHashWitness>(), SYNC_CHALLENGE_POW_WITNESS_LENGTH),
-    ) -> SyncChallengeResponse {
-        SyncChallengeResponse{
-            blocks: blocks.try_into().unwrap(),
-            membership_proofs: membership_proofs.try_into().unwrap(),
-            tip_parent,
-            tip,
-            pow_witnesses: pow_witnesses.try_into().unwrap(),
-        }
-    }
-}
-
 impl SyncChallengeResponse {
     fn pow_witnesses_form_chain_from_tip(
         tip_digest: Digest,
@@ -934,11 +911,13 @@ impl SyncChallengeResponse {
 mod tests {
     mod automaton;
 
+    use proptest_arbitrary_interop::arb;
     use rand::random;
 
     use super::*;
     use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
     use crate::models::blockchain::block::Block;
+    use crate::models::peer::transfer_block::block_transfer_prop_compose_random;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
 
     impl PeerStanding {
@@ -953,6 +932,24 @@ mod tests {
                 latest_punishment,
                 latest_reward,
                 peer_tolerance,
+            }
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn syncchallenge_response_prop_compose_random() (
+            blocks in proptest::collection::vec((block_transfer_prop_compose_random(), block_transfer_prop_compose_random()), SYNC_CHALLENGE_NUM_BLOCK_PAIRS),
+            membership_proofs in proptest::collection::vec(arb::<MmrMembershipProof>(), SYNC_CHALLENGE_NUM_BLOCK_PAIRS),
+            tip_parent in block_transfer_prop_compose_random(),
+            tip in block_transfer_prop_compose_random(),
+            pow_witnesses in proptest::collection::vec(arb::<BlockHeaderWithBlockHashWitness>(), SYNC_CHALLENGE_POW_WITNESS_LENGTH),
+        ) -> SyncChallengeResponse {
+            SyncChallengeResponse{
+                blocks: blocks.try_into().unwrap(),
+                membership_proofs: membership_proofs.try_into().unwrap(),
+                tip_parent,
+                tip,
+                pow_witnesses: pow_witnesses.try_into().unwrap(),
             }
         }
     }

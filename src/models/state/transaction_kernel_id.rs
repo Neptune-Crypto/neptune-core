@@ -13,6 +13,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, GetSize, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct TransactionKernelId(Digest);
 
 impl Display for TransactionKernelId {
@@ -121,17 +122,5 @@ mod tests {
             Transaction::new_with_primitive_witness_ms_data(to_be_updated, additions, removals);
 
         assert_eq!(tx_id_original, updated.kernel.txid());
-    }
-}
-
-#[cfg(test)]
-pub mod propteststrategy {
-    use super::TransactionKernelId;
-    use proptest::prop_compose;
-
-    prop_compose! {
-        pub fn random_tx_kernelid() (
-            digest_an in proptest_arbitrary_interop::arb::<tasm_lib::prelude::Digest>()
-        ) -> TransactionKernelId {TransactionKernelId(digest_an)}
     }
 }

@@ -28,7 +28,7 @@ pub struct TransferBlock {
 use proptest_arbitrary_interop::arb;
 #[cfg(test)]
 proptest::prop_compose! {
-    pub fn block_transfer_propcompose_random() (
+    pub fn block_transfer_prop_compose_random() (
         header in arb::<BlockHeader>(),
         body in crate::models::blockchain::block::block_body::block_body_prop_compose(),
         appendix in arb::<BlockAppendix>(),
