@@ -12,19 +12,6 @@ use tasm_lib::{prelude::Digest, twenty_first::util_types::mmr::mmr_accumulator::
 use tokio::runtime::Runtime;
 
 prop_compose! {
-    // adaptation of `fake_valid_block_for_tests`
-    pub fn block_new(current_tip: Block) (seed in prop::array::uniform32(any::<u8>())) -> Block {
-        tokio::runtime::Runtime::new().unwrap().block_on(
-            crate::tests::shared::fake_valid_successor_for_tests(
-                &current_tip,
-                current_tip.header().timestamp + crate::models::proof_abstractions::timestamp::Timestamp::hours(1),
-                seed,
-            )
-        )
-    }
-}
-
-prop_compose! {
     pub fn blocks_new(predecessor: Block) (
         timestamp in arb::<Timestamp>(),
         seed in any::<[u8;32]>()
@@ -34,6 +21,20 @@ prop_compose! {
                 crate::tests::shared::fake_valid_sequence_of_blocks_for_tests::<10>(&predecessor, timestamp, seed)
             ),
             seed
+        )
+    }
+}
+
+prop_compose! {
+    // adaptation of `fake_valid_block_for_tests`
+    pub fn block_new(current_tip: Block)
+    (seed in prop::array::uniform32(any::<u8>())) -> Block {
+        tokio::runtime::Runtime::new().unwrap().block_on(
+            crate::tests::shared::fake_valid_successor_for_tests(
+                &current_tip,
+                current_tip.header().timestamp + crate::models::proof_abstractions::timestamp::Timestamp::hours(1),
+                seed,
+            )
         )
     }
 }

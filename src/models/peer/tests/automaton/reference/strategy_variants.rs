@@ -1,5 +1,6 @@
 use proptest::{prelude::any, prop_compose};
 use proptest_arbitrary_interop::arb;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tokio::runtime::Runtime;
 
 use crate::models::{
@@ -8,6 +9,25 @@ use crate::models::{
 };
 
 use super::{AssosiatedData, Transition};
+
+prop_compose! {
+    pub fn block_notif() (
+        hash in arb::<tasm_lib::prelude::Digest>(),
+        height_u64 in 0..BFieldElement::P,
+        pow in crate::models::blockchain::block::difficulty_control::propteststrategy::random()
+    ) -> Transition {
+        Transition(
+            PeerMessage::BlockNotification(
+                crate::models::peer::peer_block_notifications::PeerBlockNotification {
+                    hash,
+                    height: tasm_lib::twenty_first::bfe![height_u64].into(),
+                    cumulative_proof_of_work: pow
+                }
+            ),
+            None
+        )
+    }
+}
 
 prop_compose! {
     pub fn block_notif_req() (
@@ -41,7 +61,9 @@ prop_compose! {
             )
         };
         if is_notif {Transition(PeerMessage::TransactionNotification((&tx_instance).try_into().unwrap()), None)}
-        else {Transition(PeerMessage::Transaction(Box::new(crate::models::peer::transfer_transaction::TransferTransaction::try_from(&tx_instance).unwrap())), None)}
+        else {Transition(
+            PeerMessage::Transaction(Box::new(crate::models::peer::transfer_transaction::TransferTransaction::try_from(&tx_instance).unwrap())), None
+        )}
     }
 }
 

@@ -1,6 +1,5 @@
 use super::super::super::PeerMessage;
-use super::strategy_variants::block_notif_req;
-use super::utils::block_new;
+use super::utils::{self, block_new};
 use super::{strategy_variants, Automaton, SyncStage, Transition};
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
@@ -11,8 +10,6 @@ use proptest::prelude::*;
 use proptest::strategy::{Just, Strategy};
 use proptest_arbitrary_interop::arb;
 use tasm_lib::prelude::Digest;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::twenty_first::bfe;
 use tokio::runtime::Runtime;
 
 impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
@@ -78,117 +75,71 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
         /* TODO is it possible to add a check here that the `Strategy` covers all the variants? */
         /* the book recommends to have these from simple to complex */
         let mut the = prop_oneof![
-            // `BlockNotificationRequest`
-            prop_oneof![
-                Just(Transition(PeerMessage::BlockNotificationRequest, None)),
-                block_notif_req()
-            ],
-            // `SyncChallengeResponse`
-            crate::models::peer::syncchallenge_response_prop_compose_random()
-                .prop_map(|r| r.into()),
-            // `SyncChallenge` random
-            proptest_arbitrary_interop::arb::<SyncChallenge>()
-                .prop_map(|ch| Transition(ch.into(), None)),
-            /* When you are in sync mode, you are asking for blocks from multiple peers
-            so that you can catch up as quickly as possible. You're not mining either
-            because what's the point. The issue is, what if a peer announces a block that
-            would send your node into sync mode? If they are honest, great! If not, they can
-            trick you into halting your mining operation while you figure out that
-            the announced block is bogus.
-
-            So you can't enter into sync mode just based on the announced block. You first need
-            to verify that there really is a valid chain ending in that announced block. You
-            don't make 100% certain with the sync challenge, but you do make 99% certain.
-            Phrased differently, you're very likely to catch cheaters.
-
-            So in the honest case, this is what happens:
-            - you are on what you think is the tip, mining
-            - a peer announces a block of a different height and more cumulative proof of work
-            - you send them a sync challenge
-            - they send a sync challenge response back
-            - you validate the sync challenge response, and punish the peer if it does not go through
-            - if valid, you enter into sync mode and halt miner and start requesting blocks from all peers that report knowledge of
-            the same tip */
-            /* The difference between a block proposal and a block is the nonce, which makes the hash
-            of the block smaller than the target whereas the hash of the block proposal is not. */
-            // mostly taken from `sync_challenges`
-            prop_oneof![
-                (
-                    proptest::collection::vec(0..BFieldElement::P, Digest::LEN),
-                    0..BFieldElement::P,
-                    crate::models::blockchain::block::difficulty_control::propteststrategy::random(
-                    )
-                )
-                    .prop_map(|(digest_raw, height_u64, pow)| Transition(
-                        PeerMessage::BlockNotification(PeerBlockNotification {
-                            hash: Digest(
-                                digest_raw
-                                    .into_iter()
-                                    .map(|limb| tasm_lib::twenty_first::bfe![limb])
-                                    .collect::<Vec<BFieldElement>>()
-                                    .try_into()
-                                    .expect(
-                                        "the correct length is insured by the input `Strategy`"
-                                    )
-                            ),
-                            height: bfe![height_u64].into(),
-                            cumulative_proof_of_work: pow
-                        }),
-                        None
-                    )),
-                block_new(current_tip.clone()).prop_map(|b| Transition(
-                    PeerMessage::BlockNotification(PeerBlockNotification::from(&b)),
-                    Some(AssosiatedData::NewBlock(b))
-                ))
-            ],
-            /* Works:
-            - BlockNotificationRequest
-            - Transaction
-            - TransactionRequest
-            - BlockProposal
-            - BlockNotification
-            - PeerListRequest
-            - Block
-            - BlockRequestByHeight
-            - TransactionRequest
-            Excluded:
-            - `Bye`: nothing to test here and `proptest` doesn't like finite automata
-            - Handshake: an existing peer can only punish for a `Handshake` hence it doesn't matter at all what's inside such a `PeerMessage` (TODO add a simplified `Transition` for this)
-            - `ConnectionStatus`
+            /* Few variants are excluded from the strateegy.
+            - Handshake: an existing peer can only punish for a `Handshake` hence it doesn't matter at all what's inside such a `PeerMessage` (TODO add a simple `Transition` for this)
+            - nothing to test and `proptest` doesn't like finite automata
+                - `Bye`
+                - `ConnectionStatus`
             */
-            strategy_variants::tx(false),
-            strategy_variants::tx(true),
+            // `PeerListRequest`
+            Just(Transition(PeerMessage::PeerListRequest, None)),
+            // `BlockRequestByHeight`
+            Just(Transition(
+                PeerMessage::BlockRequestByHeight(BlockHeight::from(state.blocks.len() as u64)),
+                None
+            )),
+            // `TransactionRequest`
             prop_oneof![
                 (0..state.blocks.len()).prop_map(move |i| Transition(
                     PeerMessage::TransactionRequest(blocks_tx_id[i]),
                     None
                 )),
-                crate::models::state::transaction_kernel_id::propteststrategy::random_tx_kernelid()
+                arb::<crate::models::state::transaction_kernel_id::TransactionKernelId>()
                     .prop_map(|r| Transition(PeerMessage::TransactionRequest(r), None))
             ],
+            // `BlockNotificationRequest`
             prop_oneof![
-                super::utils::block_invalid()
-                    .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None)),
-                block_new(current_tip.clone())
-                    .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None))
+                Just(Transition(PeerMessage::BlockNotificationRequest, None)),
+                strategy_variants::block_notif_req()
             ],
-            Just(Transition(PeerMessage::PeerListRequest, None)),
-            // super::strategy_variants::block_response,
-            Just(Transition(
-                PeerMessage::BlockRequestByHeight(BlockHeight::from(state.blocks.len() as u64)),
-                None
-            )),
-            // from Sourcegraph
-            // Block strategy
+            // `SyncChallengeResponse`
+            super::super::super::syncchallenge_response_prop_compose_random()
+                .prop_map(|r| r.into()),
+            // `SyncChallenge` random (a valid is chained based on the state in the end)
+            proptest_arbitrary_interop::arb::<SyncChallenge>()
+                .prop_map(|ch| Transition(ch.into(), None)),
+            // `Transaction`
+            strategy_variants::tx(false),
+            // `TransactionNotification`
+            strategy_variants::tx(true),
+            // `Block`
             prop_oneof![
-                crate::models::peer::transfer_block::block_transfer_propcompose_random()
+                crate::models::peer::transfer_block::block_transfer_prop_compose_random()
                     .prop_map(|tb| Transition(PeerMessage::Block(Box::new(tb)), None)),
                 // TODO add this into `apply`
-                block_new(current_tip.clone()).prop_map(|b| Transition(
+                utils::block_new(current_tip.clone()).prop_map(|b| Transition(
                     PeerMessage::Block(Box::new(b.clone().try_into().unwrap())),
                     Some(AssosiatedData::NewBlock(b))
                 )),
             ],
+            // `BlockProposal`
+            prop_oneof![
+                utils::block_invalid()
+                    .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None)),
+                utils::block_new(current_tip.clone()).prop_map(|b| Transition(
+                    PeerMessage::BlockProposal(Box::new(b.clone())),
+                    Some(AssosiatedData::NewBlock(b))
+                ))
+            ],
+            // `BlockNotification`
+            prop_oneof![
+                utils::block_new(current_tip.clone()).prop_map(|b| Transition(
+                    PeerMessage::BlockNotification(PeerBlockNotification::from(&b)),
+                    Some(AssosiatedData::NewBlock(b))
+                )),
+                strategy_variants::block_notif()
+            ],
+            // from Sourcegraph
             // BlockRequestByHash strategy
             // TODO add the `Just` strategy for genesis (as `blocks_digests[0]`) -- now the peer thread just panics on this, and it's not clear if that's an intended behaviour
             {
