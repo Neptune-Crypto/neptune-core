@@ -131,7 +131,6 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             prop_oneof![
                 crate::models::peer::transfer_block::block_transfer_prop_compose_random()
                     .prop_map(|tb| Transition(PeerMessage::Block(Box::new(tb)), None)),
-                // TODO add this into `apply`
                 utils::block_new(current_tip.clone()).prop_map(|b| Transition(
                     PeerMessage::Block(Box::new(b.clone().try_into().unwrap())),
                     Some(AssosiatedData::NewBlock(b))
@@ -202,7 +201,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                                         randomness,
                                     )
                                     .into(),
-                                    Some(AssosiatedData::Randomness(/* randomness */)),
+                                    Some(AssosiatedData::Randomness(randomness)),
                                 )
                             })
                             .boxed(),
@@ -215,32 +214,34 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
 
     fn apply(mut state: Self::State, transition: &Self::Transition) -> Self::State {
         match transition {
-            Transition(PeerMessage::BlockNotificationRequest, news) => {
-                let tip_on_request = state.blocks.last().unwrap().clone();
-                if let Some(AssosiatedData::MakeNewBlocks(ts, seed_the)) = news {
-                    state.blocks.append(&mut Runtime::new().unwrap().block_on(
-                        crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn(
-                            state.blocks.last().unwrap(),
-                            *ts,
-                            *seed_the,
-                            11,
-                        ),
+            Transition(variant, Some(AssosiatedData::MakeNewBlocks(ts, seed_the))) => {
+                let tip_at_request = state.blocks.last().unwrap().clone();
+                state.blocks.append(&mut Runtime::new().unwrap().block_on(
+                    crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn(
+                        &tip_at_request,
+                        *ts,
+                        *seed_the,
+                        11,
+                    ),
+                ));
+                if &PeerMessage::BlockNotificationRequest == variant {
+                    state.sync_stage = Some(SyncStage::WaitingForChallenge(
+                        // a possible problem is a testing system will be responding with another block
+                        state.blocks.last().unwrap().into(),
+                        tip_at_request,
                     ));
                 }
-                state.sync_stage = Some(SyncStage::WaitingForChallenge(
-                    // a possible problem is a testing system will be responding with another block
-                    state.blocks.last().unwrap().into(),
-                    tip_on_request,
-                ));
             }
-            &Transition(PeerMessage::BlockNotification(_), None) => {}
-            Transition(PeerMessage::BlockNotification(_), Some(AssosiatedData::NewBlock(new))) => {
-                state.blocks.push(new.clone());
-                state.sync_stage = Some(SyncStage::WaitingForChallengeResponse);
+            Transition(variant, Some(AssosiatedData::NewBlock(b))) => {
+                state.blocks.push(b.clone());
+                if let &PeerMessage::BlockNotification(_) = variant {
+                    state.sync_stage = Some(SyncStage::WaitingForChallengeResponse);
+                }
             }
-            &Transition(PeerMessage::SyncChallenge(_), _) => {
-                // TODO should we exclude the chance that our node just emited `BlockNotification`? I guees no.
-                state.sync_stage = None;
+            Transition(PeerMessage::SyncChallenge(_), Some(AssosiatedData::Randomness(_))) => {
+                state.sync_stage =
+                    // Some(SyncStage::DoneWithRandomness(randomness.clone()));
+                    None;
             }
             // #noValidProp #SyncChallengeResponse
             &Transition(PeerMessage::SyncChallengeResponse(_), _) => {

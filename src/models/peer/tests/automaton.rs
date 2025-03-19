@@ -1,17 +1,9 @@
 // should be ok for tests
 #![allow(clippy::large_enum_variant)]
 
-/*
-After further progressing on the task I start to feel that making a `Strategy` for `Mock` would differ only in a facility to check invariants between sending a `PeerMessage`. But it would naturally work towards [test-case generating] since it would require to develop `Strategy` down the types used in `PeerMessage`
-
-I mean the whole `proptest` state machine testing is basically a `Strategy` over transitions (which are literally `PeerMessage` here), feeding it into the system (which is `PeerLoopHandler` for us, probably after `run_wrapper` like `Mock` do), and then shrinking the strategy. Hence I found myself with implementations of both state machines and adapting `Mock` for their approach when it seems that just making (an equally complex) `Strategy` for `Mock` would be a cleaner and more maintainable solution.
-
-I wonder how should I finish that
-
-[test-case generating]: https://github.com/Neptune-Crypto/neptune-core/issues/110 */
-
 use futures::SinkExt;
 use proptest_state_machine::ReferenceStateMachine;
+use reference::AssosiatedData;
 use tokio::runtime::Runtime;
 
 use crate::{
@@ -32,6 +24,7 @@ struct TheSut {
     hold_the_end: tokio::sync::broadcast::Sender<MainToPeerTask>,
     g: GlobalStateLock,
     peer_address: std::net::SocketAddr,
+    // h: PeerLoopHandler,
 }
 impl proptest_state_machine::StateMachineTest for TheSut {
     type SystemUnderTest = Self;
@@ -89,6 +82,7 @@ impl proptest_state_machine::StateMachineTest for TheSut {
             hold_the_end: peer_broadcast_tx,
             g: g.clone(),
             peer_address,
+            // h
         }
     }
 
@@ -108,9 +102,14 @@ impl proptest_state_machine::StateMachineTest for TheSut {
             hold_the_end,
             g,
             peer_address,
+            // h
         } = state;
 
         let g_cloned = g.clone();
+
+        if let Some(AssosiatedData::Randomness(_r)) = transition.1 {
+            todo!("h.set_rng(StdRng::from(r));");
+        }
         rt.block_on(async {
             // h.handle_peer_message_test(transition, &mut sink, &mut counter)
             sock.send(transition.0).await.unwrap();
@@ -136,6 +135,7 @@ impl proptest_state_machine::StateMachineTest for TheSut {
             hold_the_end,
             g,
             peer_address,
+            // h
         }
     }
 }
