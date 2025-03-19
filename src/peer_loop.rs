@@ -137,7 +137,7 @@ impl PeerLoopHandler {
     ///
     /// Useful for derandomizing tests.
     #[cfg(test)]
-    fn set_rng(&mut self, rng: StdRng) {
+    pub(crate) fn set_rng(&mut self, rng: StdRng) {
         self.rng = rng;
     }
 
