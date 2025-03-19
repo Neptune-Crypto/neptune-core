@@ -3,7 +3,6 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -72,7 +71,24 @@ impl TxOutput {
         unowned_utxo_notify_medium: UtxoNotificationMedium,
     ) -> Self {
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
+        Self::auto_utxo(
+            wallet_state,
+            utxo,
+            address,
+            sender_randomness,
+            owned_utxo_notify_medium,
+            unowned_utxo_notify_medium,
+        )
+    }
 
+    pub fn auto_utxo(
+        wallet_state: &WalletState,
+        utxo: Utxo,
+        address: ReceivingAddress,
+        sender_randomness: Digest,
+        owned_utxo_notify_medium: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
+    ) -> Self {
         let has_matching_spending_key = wallet_state.can_unlock(&utxo);
 
         let receiver_digest = address.privacy_digest();
@@ -112,6 +128,40 @@ impl TxOutput {
             sender_randomness,
             receiver_digest: privacy_digest,
             notification_method: UtxoNotifyMethod::None,
+            owned,
+        }
+    }
+
+    /// Instantiate a [TxOutput] for any utxo intended for on-chain UTXO
+    /// notification.
+    pub(crate) fn onchain_utxo(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        owned: bool,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            owned,
+        }
+    }
+
+    /// Instantiate a [TxOutput] for any utxo intended for off-chain UTXO
+    /// notification.
+    pub(crate) fn offchain_utxo(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        owned: bool,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
             owned,
         }
     }
@@ -224,25 +274,9 @@ impl Deref for TxOutputList {
     }
 }
 
-impl IntoIterator for TxOutputList {
-    type Item = TxOutput;
-
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
 impl DerefMut for TxOutputList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-impl From<Vec<TxOutput>> for TxOutputList {
-    fn from(v: Vec<TxOutput>) -> Self {
-        Self(v)
     }
 }
 
@@ -258,9 +292,9 @@ impl From<&TxOutputList> for Vec<Utxo> {
     }
 }
 
-impl From<Option<TxOutput>> for TxOutputList {
-    fn from(value: Option<TxOutput>) -> Self {
-        value.into_iter().collect_vec().into()
+impl<I: Into<TxOutput>, T: IntoIterator<Item = I>> From<T> for TxOutputList {
+    fn from(v: T) -> Self {
+        Self(v.into_iter().map(|i| i.into()).collect())
     }
 }
 
