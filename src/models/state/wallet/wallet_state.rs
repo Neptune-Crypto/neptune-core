@@ -397,7 +397,7 @@ impl WalletState {
     /// notifications and that are destined for this wallet.
     pub(crate) fn extract_expected_utxos(
         &self,
-        tx_outputs: TxOutputList,
+        tx_outputs: &TxOutputList,
         notifier: UtxoNotifier,
     ) -> Vec<ExpectedUtxo> {
         tx_outputs

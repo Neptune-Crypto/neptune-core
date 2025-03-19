@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -204,7 +205,7 @@ pub(crate) struct ClaimUtxoData {
 
 #[derive(Clone, Debug)]
 pub(crate) enum RPCServerToMain {
-    BroadcastTx(Box<Transaction>),
+    BroadcastTx(Arc<Transaction>),
     BroadcastMempoolTransactions,
     ProofOfWorkSolution(Box<Block>),
     Shutdown,

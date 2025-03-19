@@ -28,6 +28,7 @@ use tracing::warn;
 
 use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
+use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::macros::fn_name;
@@ -1319,7 +1320,7 @@ impl MainLoopHandler {
         // like mining, or proving our own transaction. Running the prover takes
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
-        let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+        let vm_job_queue = vm_job_queue();
         let perform_ms_update_if_needed =
             self.global_state_lock.cli().proving_capability() == TxProvingCapability::SingleProof;
 
@@ -1355,7 +1356,7 @@ impl MainLoopHandler {
     ) {
         // job completion of the spawned task is communicated through the
         // `update_mempool_txs_handle` channel.
-        let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+        let vm_job_queue = vm_job_queue();
         if let Some(handle) = main_loop_state.update_mempool_txs_handle.as_ref() {
             handle.abort();
         }
@@ -1666,12 +1667,8 @@ impl MainLoopHandler {
                     transaction.kernel.mutator_set_hash
                 );
 
-                // insert transaction into mempool
-                self.global_state_lock
-                    .lock_guard_mut()
-                    .await
-                    .mempool_insert(*transaction.clone(), TransactionOrigin::Own)
-                    .await;
+                // note: this Tx must already have been added to the mempool by
+                // sender.
 
                 // Is this a transaction we can share with peers? If so, share
                 // it immediately.
@@ -1681,11 +1678,12 @@ impl MainLoopHandler {
                 } else {
                     // Otherwise, upgrade its proof quality, and share it by
                     // spinning up the proof upgrader.
-                    let TransactionProof::Witness(primitive_witness) = transaction.proof else {
+                    let TransactionProof::Witness(primitive_witness) = transaction.proof.clone()
+                    else {
                         panic!("Expected Primitive witness. Got: {:?}", transaction.proof);
                     };
 
-                    let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+                    let vm_job_queue = vm_job_queue();
 
                     let proving_capability = self.global_state_lock.cli().proving_capability();
                     let upgrade_job =

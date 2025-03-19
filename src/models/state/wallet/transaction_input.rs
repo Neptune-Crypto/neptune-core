@@ -78,9 +78,9 @@ impl From<TxInput> for TxInputList {
     }
 }
 
-impl From<Vec<TxInput>> for TxInputList {
-    fn from(v: Vec<TxInput>) -> Self {
-        Self(v)
+impl<I: Into<TxInput>, T: IntoIterator<Item = I>> From<T> for TxInputList {
+    fn from(v: T) -> Self {
+        Self(v.into_iter().map(|i| i.into()).collect())
     }
 }
 
@@ -93,6 +93,12 @@ impl From<TxInputList> for Vec<TxInput> {
 impl From<&TxInputList> for Vec<MsMembershipProof> {
     fn from(list: &TxInputList) -> Self {
         list.ms_membership_proofs_iter().into_iter().collect()
+    }
+}
+
+impl From<TxInputList> for Vec<UnlockedUtxo> {
+    fn from(list: TxInputList) -> Self {
+        list.0.into_iter().map(|v| v.into()).collect()
     }
 }
 

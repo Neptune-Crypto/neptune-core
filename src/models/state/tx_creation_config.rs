@@ -4,53 +4,86 @@ use std::sync::Arc;
 use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 /// When the selected inputs represent more coins than the outputs (with fee)
 /// where does this change go?
 #[derive(Debug, Clone, Default)]
-pub(crate) enum ChangePolicy {
-    /// If the change is nonzero, crash the transaction creator.
+pub enum ChangePolicy {
+    /// Inputs must exactly equal spend amount, or else an error will result.
     #[default]
-    None,
+    ExactChange,
 
     /// If the change is nonzero, create a new UTXO spendable by this key and
     /// via this notification medium. Otherwise, do not create a change output.
     Recover {
-        key: Box<SpendingKey>,
+        key: Arc<SpendingKey>,
         medium: UtxoNotificationMedium,
     },
 
-    /// If the change is nonzero, ignore it.
-    #[cfg(test)]
+    /// If the change is nonzero, the excess funds will be lost forever.
     Burn,
+}
+impl ChangePolicy {
+    /// Enable change-recovery and configure which key and notification medium
+    /// to use for that purpose.
+    pub fn recover_change(
+        change_key: Arc<SpendingKey>,
+        notification_medium: UtxoNotificationMedium,
+    ) -> Self {
+        Self::Recover {
+            key: change_key,
+            medium: notification_medium,
+        }
+    }
 }
 
 /// Options and configuration settings for creating transactions
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct TxCreationConfig {
-    change_policy: ChangePolicy,
     prover_capability: TxProvingCapability,
-    triton_vm_job_queue: Option<Arc<TritonVmJobQueue>>,
-    record_details: bool,
+    triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
+    change_policy: ChangePolicy,
+}
+
+impl Default for TxCreationConfig {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TxCreationConfig {
+    pub fn new() -> Self {
+        Self {
+            triton_vm_job_queue: vm_job_queue(),
+            ..Default::default() // Default for the rest
+        }
+    }
+
+    pub(crate) fn exact_change(mut self) -> Self {
+        self.change_policy = ChangePolicy::ExactChange;
+        self
+    }
+
     /// Enable change-recovery and configure which key and notification medium
     /// to use for that purpose.
     pub(crate) fn recover_change(
         mut self,
-        change_key: SpendingKey,
+        change_key: Arc<SpendingKey>,
         notification_medium: UtxoNotificationMedium,
     ) -> Self {
-        self.change_policy = ChangePolicy::Recover {
-            key: Box::new(change_key),
-            medium: notification_medium,
-        };
+        self.change_policy = ChangePolicy::recover_change(change_key, notification_medium);
         self
     }
+
+    // pub(crate) fn burn_change(
+    //     mut self) -> Self {
+    //     self.change_policy = ChangePolicy::Burn;
+    //     self
+    // }
 
     /// Configure the proving capacity.
     pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {
@@ -60,14 +93,7 @@ impl TxCreationConfig {
 
     /// Configure which job queue to use.
     pub(crate) fn use_job_queue(mut self, job_queue: Arc<TritonVmJobQueue>) -> Self {
-        self.triton_vm_job_queue = Some(job_queue);
-        self
-    }
-
-    /// Produce a [`TransactionDetails`](super::TransactionDetails) object along
-    /// with the other artifacts.
-    pub(crate) fn record_details(mut self) -> Self {
-        self.record_details = true;
+        self.triton_vm_job_queue = job_queue;
         self
     }
 
@@ -83,12 +109,6 @@ impl TxCreationConfig {
         self
     }
 
-    /// Determine whether a [`TransactionDetails`](super::TransactionDetails)
-    /// object should be produced.
-    pub(crate) fn details_are_recorded(&self) -> bool {
-        self.record_details
-    }
-
     /// Get the change key and notification medium, if any.
     pub(crate) fn change_policy(&self) -> ChangePolicy {
         self.change_policy.clone()
@@ -99,13 +119,9 @@ impl TxCreationConfig {
         self.prover_capability
     }
 
-    /// Get (a smart pointer to) the job queue, or create a new job queue and
-    /// return a pointer to that.
+    /// Get (a smart pointer to) the job queue
     pub(crate) fn job_queue(&self) -> Arc<TritonVmJobQueue> {
-        self.triton_vm_job_queue
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| Arc::new(TritonVmJobQueue::start()))
+        self.triton_vm_job_queue.clone()
     }
 
     pub(crate) fn proof_job_options(&self) -> TritonVmProofJobOptions {

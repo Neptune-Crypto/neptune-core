@@ -7,6 +7,7 @@ pub(crate) mod rusty_wallet_database;
 pub(crate) mod scan_mode_configuration;
 pub mod secret_key_material;
 pub mod sent_transaction;
+pub mod transaction_builder;
 pub mod transaction_input;
 pub mod transaction_output;
 pub(crate) mod unlocked_utxo;

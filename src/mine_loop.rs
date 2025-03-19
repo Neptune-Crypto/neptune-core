@@ -28,6 +28,7 @@ use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
+use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -74,7 +75,7 @@ async fn compose_block(
 ) -> Result<()> {
     let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
 
-    let triton_vm_job_queue = global_state_lock.vm_job_queue();
+    let triton_vm_job_queue = vm_job_queue();
 
     let job_options = TritonVmProofJobOptions {
         job_priority: TritonVmJobPriority::High,
@@ -387,10 +388,12 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 
     info!("Start: generate single proof for coinbase transaction");
     let config = TxCreationConfig::default()
+        .exact_change()
         .use_job_queue(vm_job_queue)
         .with_proof_job_options(job_options)
         .with_prover_capability(proving_power);
-    let transaction = GlobalState::create_raw_transaction(&transaction_details, config).await?;
+    let transaction =
+        GlobalState::create_raw_transaction(Arc::new(transaction_details), config).await?;
     info!("Done: generating single proof for coinbase transaction");
 
     Ok((transaction, composer_outputs))
@@ -533,7 +536,7 @@ pub(crate) async fn create_block_transaction_from(
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
-    let vm_job_queue = global_state_lock.vm_job_queue();
+    let vm_job_queue = vm_job_queue();
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters,
@@ -1016,7 +1019,7 @@ pub(crate) mod mine_loop_tests {
             .wallet_state
             .wallet_entropy
             .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
-        let vm_job_queue = global_state_lock.vm_job_queue();
+        let vm_job_queue = vm_job_queue();
 
         let composer_parameters = ComposerParameters::new(
             receiving_address.into(),

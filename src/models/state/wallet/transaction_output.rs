@@ -101,7 +101,6 @@ impl TxOutput {
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.
-    #[cfg(test)]
     pub(crate) fn no_notification(
         utxo: Utxo,
         sender_randomness: Digest,
@@ -354,13 +353,13 @@ impl TxOutputList {
         self.0.push(tx_output);
     }
 
-    pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
-    where
-        T: IntoIterator<Item = TxOutput>,
-    {
-        self.0.extend(maybe_tx_output);
-        self
-    }
+    // pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
+    // where
+    //     T: IntoIterator<Item = TxOutput>,
+    // {
+    //     self.0.extend(maybe_tx_output);
+    //     self
+    // }
 }
 
 #[cfg(test)]

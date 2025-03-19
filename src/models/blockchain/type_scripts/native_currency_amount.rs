@@ -298,6 +298,12 @@ impl NativeCurrencyAmount {
     }
 }
 
+impl From<u32> for NativeCurrencyAmount {
+    fn from(n: u32) -> Self {
+        Self::coins(n)
+    }
+}
+
 impl NativeCurrencyAmount {
     pub fn is_negative(&self) -> bool {
         self.0.is_negative()

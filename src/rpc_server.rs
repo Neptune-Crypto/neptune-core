@@ -88,7 +88,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
@@ -98,6 +97,7 @@ use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleT
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::wallet_status::WalletStatus;
@@ -106,6 +106,7 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::tx_initiation::send;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -1510,6 +1511,8 @@ pub trait RPC {
     /// ```
     async fn clear_standing_by_ip(token: rpc_auth::Token, ip: IpAddr) -> RpcResult<()>;
 
+    async fn spendable_inputs(token: rpc_auth::Token) -> RpcResult<TxInputList>;
+
     /// Send coins to a single recipient.
     ///
     /// See docs for [send_to_many()](Self::send_to_many())
@@ -1914,246 +1917,6 @@ impl NeptuneRPCServer {
     fn cpu_temp_inner() -> Option<f32> {
         let current_system = System::new();
         current_system.cpu_temp().ok()
-    }
-
-    async fn send_to_many_inner_with_mock_proof_option(
-        mut self,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
-        fee: NativeCurrencyAmount,
-        now: Timestamp,
-        tx_proving_capability: TxProvingCapability,
-        mocked_invalid_proof: Option<TransactionProof>,
-    ) -> Result<(Transaction, Vec<PrivateNotificationData>), error::SendError> {
-        let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
-            utxo_notification_media;
-
-        // check if this send would exceed the send rate-limit (per block)
-        {
-            // send rate limiting only applies below height 25000
-            // which is approx 5.6 months after launch.
-            // after that, the training wheel come off.
-            const RATE_LIMIT_UNTIL_HEIGHT: u64 = 25000;
-            let state = self.state.lock_guard().await;
-
-            if state.chain.light_state().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {
-                const RATE_LIMIT: usize = 2;
-                let tip_digest = state.chain.light_state().hash();
-                let send_count_at_tip = state
-                    .wallet_state
-                    .count_sent_transactions_at_block(tip_digest)
-                    .await;
-                tracing::debug!(
-                    "send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}",
-                    send_count_at_tip,
-                    RATE_LIMIT
-                );
-                if send_count_at_tip >= RATE_LIMIT {
-                    let height = state.chain.light_state().header().height;
-                    let e = error::SendError::RateLimit {
-                        height,
-                        tip_digest,
-                        max: RATE_LIMIT,
-                    };
-                    tracing::warn!("{}", e.to_string());
-                    return Err(e);
-                }
-            }
-        }
-
-        tracing::debug!("stmi: step 1. get change key. need write-lock");
-
-        // obtain next unused symmetric key for change utxo
-        let change_key = {
-            let mut s = self.state.lock_guard_mut().await;
-            let key = s
-                .wallet_state
-                .next_unused_spending_key(KeyType::Symmetric)
-                .await
-                .expect("wallet should be capable of generating symmetric spending keys");
-
-            // write state to disk. create_transaction() may be slow.
-            s.persist_wallet().await.expect("flushed");
-            key
-        };
-
-        tracing::debug!("stmi: step 2. generate outputs. need read-lock");
-
-        let state = self.state.lock_guard().await;
-        let tx_outputs = state.generate_tx_outputs(
-            outputs,
-            owned_utxo_notification_medium,
-            unowned_utxo_notification_medium,
-        );
-
-        tracing::debug!("stmi: step 3. create tx. have read-lock");
-
-        // Create the transaction
-        //
-        // Note that create_transaction() does not modify any state and only
-        // requires acquiring a read-lock which does not block other tasks.
-        // This is important because internally it calls prove() which is a very
-        // lengthy operation.
-        //
-        // note: A change output will be added to tx_outputs if needed.
-        let config = TxCreationConfig::default()
-            .recover_change(change_key, owned_utxo_notification_medium)
-            .with_prover_capability(tx_proving_capability)
-            .record_details()
-            .use_job_queue(self.state.vm_job_queue());
-        let transaction_creation_artifacts = match state
-            .create_transaction(tx_outputs.clone(), fee, now, config)
-            .await
-        {
-            Ok(tx) => tx,
-            Err(e) => {
-                tracing::error!("Could not create transaction: {}", e);
-                return Err(e.into());
-            }
-        };
-        drop(state);
-        let mut transaction = transaction_creation_artifacts.transaction;
-        let transaction_details = transaction_creation_artifacts
-            .details
-            .expect("details should be some when configured to track details");
-        let maybe_change_output = transaction_creation_artifacts.change_output;
-
-        if let Some(invalid_proof) = mocked_invalid_proof {
-            transaction.proof = invalid_proof;
-        }
-
-        tracing::debug!("stmi: step 4. extract expected utxo. need read-lock");
-
-        let offchain_notifications = tx_outputs.private_notifications(self.state.cli().network);
-        tracing::debug!(
-            "Generated {} offchain notifications",
-            offchain_notifications.len()
-        );
-
-        let utxos_sent_to_self = self
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .extract_expected_utxos(
-                tx_outputs.clone().concat_with(maybe_change_output),
-                UtxoNotifier::Myself,
-            );
-
-        // if the tx created offchain expected_utxos we must inform wallet.
-        if !utxos_sent_to_self.is_empty() {
-            tracing::debug!("stmi: step 5. add expected utxos. need write-lock");
-
-            // acquire write-lock
-            let mut gsm = self.state.lock_guard_mut().await;
-
-            // Inform wallet of any expected incoming utxos.
-            // note that this (briefly) mutates self.
-            gsm.wallet_state
-                .add_expected_utxos(utxos_sent_to_self)
-                .await;
-
-            // ensure we write new wallet state out to disk.
-            gsm.persist_wallet().await.expect("flushed wallet");
-        }
-
-        // write-lock block.
-        {
-            tracing::debug!("stmi: step 6. add sent-transaction to wallet. with write-lock");
-
-            let mut gsm = self.state.lock_guard_mut().await;
-            // inform wallet about the details of this sent transaction, so it can
-            // group inputs and outputs together, eg for history purposes.
-            let tip_digest = gsm.chain.light_state().hash();
-            gsm.wallet_state
-                .add_sent_transaction((transaction_details, tip_digest).into())
-                .await;
-
-            tracing::debug!("stmi: step 7. flush dbs.  with write-lock");
-            gsm.flush_databases().await.expect("flushed DBs");
-        }
-
-        tracing::debug!("stmi: step 8. send messages. no lock needed");
-
-        // Send transaction message to main
-        let response = self
-            .rpc_server_to_main_tx
-            .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
-            .await;
-
-        if let Err(e) = response {
-            tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
-            return Err(error::SendError::NotBroadcast);
-        };
-
-        tracing::debug!("stmi: step 8. all done with send_to_many_inner().");
-
-        Ok((transaction, offchain_notifications))
-    }
-
-    /// Method to create a transaction with a given timestamp and prover
-    /// capability.
-    ///
-    /// Factored out from [NeptuneRPCServer::send_to_many] in order to generate
-    /// deterministic transaction kernels where tests can reuse previously
-    /// generated proofs.
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn send_to_many_inner(
-        self,
-        _ctx: context::Context,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
-        fee: NativeCurrencyAmount,
-        now: Timestamp,
-        tx_proving_capability: TxProvingCapability,
-    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), error::SendError> {
-        let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
-            utxo_notification_media;
-        let ret = self
-            .send_to_many_inner_with_mock_proof_option(
-                outputs,
-                (
-                    owned_utxo_notification_medium,
-                    unowned_utxo_notification_medium,
-                ),
-                fee,
-                now,
-                tx_proving_capability,
-                None,
-            )
-            .await;
-
-        ret.map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))
-    }
-
-    /// Like [Self::send_to_many_inner] but without attempting to create a valid
-    /// SingleProof, since this is a time-consuming process.
-    ///
-    /// Also returns the full transaction and not just its kernel ID.
-    #[cfg(test)]
-    async fn send_to_many_inner_invalid_proof(
-        self,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notification_medium: UtxoNotificationMedium,
-        unowned_utxo_notification_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
-        now: Timestamp,
-    ) -> Option<(Transaction, Vec<PrivateNotificationData>)> {
-        self.send_to_many_inner_with_mock_proof_option(
-            outputs,
-            (
-                owned_utxo_notification_medium,
-                unowned_utxo_notification_medium,
-            ),
-            fee,
-            now,
-            TxProvingCapability::PrimitiveWitness,
-            Some(TransactionProof::invalid()),
-        )
-        .await
-        .ok()
     }
 
     /// Assemble a data for the wallet to register the UTXO. Returns `Ok(None)`
@@ -3038,6 +2801,24 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn spendable_inputs(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<TxInputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .lock_guard()
+            .await
+            .wallet_spendable_inputs()
+            .await
+            .into())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn send(
         self,
         ctx: context::Context,
@@ -3071,7 +2852,7 @@ impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
     async fn send_to_many(
         self,
-        ctx: context::Context,
+        _ctx: context::Context,
         token: rpc_auth::Token,
         outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
@@ -3083,43 +2864,19 @@ impl RPC for NeptuneRPCServer {
 
         tracing::debug!("stm: entered fn");
 
-        if self.state.cli().no_transaction_initiation {
-            warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
-            return Err(error::SendError::Unsupported.into());
-        }
-
-        // abort early on negative fee
-        if fee.is_negative() {
-            warn!("Cannot send negative-fee transaction.");
-            return Err(error::SendError::NegativeFee.into());
-        }
-
-        match self.state.cli().proving_capability() {
-            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness => {
-                warn!("Cannot initiate transaction because transaction proving capability is too weak.");
-                return Err(error::SendError::TooWeak.into());
-            }
-            TxProvingCapability::ProofCollection | TxProvingCapability::SingleProof => (),
-        };
-
-        // The proving capability is set to the lowest possible value here,
-        // since we don't want the client (CLI or dashboard) to hang while
-        // producing proofs. Instead, we let (a task started by) main loop
-        // handle the proving.
-        let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
-        Ok(self
-            .send_to_many_inner(
-                ctx,
-                outputs,
-                (
-                    owned_utxo_notification_medium,
-                    unowned_utxo_notification_medium,
-                ),
-                fee,
-                Timestamp::now(),
-                tx_proving_capability,
-            )
-            .await?)
+        Ok(
+            send::TransactionSender::new(self.state.clone(), self.rpc_server_to_main_tx.clone())
+                .send_to_many(
+                    outputs,
+                    (
+                        owned_utxo_notification_medium,
+                        unowned_utxo_notification_medium,
+                    ),
+                    fee,
+                    Timestamp::now(),
+                )
+                .await.map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))?,
+        )
     }
 
     // // documented in trait. do not add doc-comment.
@@ -3578,7 +3335,7 @@ pub mod error {
         ExportedBlockProposalStorageCapacityExceeded,
 
         #[error(transparent)]
-        SendError(#[from] SendError),
+        SendError(#[from] send::error::SendError),
 
         #[error(transparent)]
         ClaimError(#[from] ClaimError),
@@ -3587,42 +3344,6 @@ pub mod error {
     // convert anyhow::Error to an RpcError::Failed.
     // note that anyhow Error is not serializable.
     impl From<anyhow::Error> for RpcError {
-        fn from(e: anyhow::Error) -> Self {
-            Self::Failed(e.to_string())
-        }
-    }
-
-    /// enumerates possible transaction send errors
-    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
-    #[non_exhaustive]
-    pub enum SendError {
-        #[error("send() is not supported by this node")]
-        Unsupported,
-
-        #[error("transaction could not be broadcast.")]
-        NotBroadcast,
-
-        // catch-all error, eg for anyhow errors
-        #[error("transaction could not be sent.  reason: {0}")]
-        Failed(String),
-
-        #[error("Transaction with negative fees not allowed")]
-        NegativeFee,
-
-        #[error("machine too weak to initiate transactions")]
-        TooWeak,
-
-        #[error("Send rate limit reached for block height {height} ({digest}). A maximum of {max} tx may be sent per block.", digest = tip_digest.to_hex())]
-        RateLimit {
-            height: BlockHeight,
-            tip_digest: Digest,
-            max: usize,
-        },
-    }
-
-    // convert anyhow::Error to a SendError::Failed.
-    // note that anyhow Error is not serializable.
-    impl From<anyhow::Error> for SendError {
         fn from(e: anyhow::Error) -> Self {
             Self::Failed(e.to_string())
         }
