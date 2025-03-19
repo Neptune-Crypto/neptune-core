@@ -4732,7 +4732,7 @@ pub(crate) mod tests {
                 genesis_block.mutator_set_accumulator_after(),
                 new_block.mutator_set_update(),
             ));
-            let (channel_to_nowhere, _) =
+            let (channel_to_nowhere, nowhere) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
             upgrade_job
                 .handle_upgrade(
@@ -4743,6 +4743,7 @@ pub(crate) mod tests {
                     channel_to_nowhere,
                 )
                 .await;
+            drop(nowhere);
             let transactions_for_block = rando_global_state_lock
                 .lock_guard()
                 .await
