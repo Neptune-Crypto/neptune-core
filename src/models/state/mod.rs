@@ -1236,7 +1236,7 @@ impl GlobalState {
             .handle_mempool_events(mempool_events)
             .await;
 
-        self.chain.light_state_mut().set_block(new_block);
+        *self.chain.light_state_mut() = std::sync::Arc::new(new_block);
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip. Also reset set of exported block proposals.

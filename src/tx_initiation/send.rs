@@ -13,9 +13,9 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
+use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -102,21 +102,22 @@ impl TransactionSender {
     /// note: this is a helper wrapper around TransactionDetailsBuilder,
     /// TransactionProofBuilder and TransactionBuilder
     pub async fn create_transaction(
-        &self,
+        &mut self,
         tx_outputs: TxOutputList,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         tx_creation_config: TxCreationConfig,
     ) -> anyhow::Result<TxCreationArtifacts> {
-        let gs = self.global_state_lock.lock_guard().await;
+        let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
+        let light_state = gsm.chain.light_state_clone(); // cheap Arc clone
         let tx_details = TransactionDetailsBuilder::new()
             .inputs(
-                gs.wallet_state
+                gsm.wallet_state
                     .allocate_sufficient_input_funds(
                         tx_outputs.total_native_coins(),
-                        gs.chain.light_state().hash(),
-                        &gs.chain.light_state().mutator_set_accumulator_after(),
+                        light_state.hash(),
+                        &light_state.mutator_set_accumulator_after(),
                         timestamp,
                     )
                     .await?
@@ -125,10 +126,11 @@ impl TransactionSender {
             .outputs(tx_outputs)
             .fee(fee)
             .change_policy(tx_creation_config.change_policy())
-            .build(&gs.wallet_state, gs.chain.light_state())?;
+            .build(&light_state, &mut gsm.wallet_state)
+            .await?;
+        drop(gsm);
 
         let tx_details_rc = Arc::new(tx_details);
-        drop(gs);
 
         let proof = TransactionProofBuilder::new()
             .transaction_details(tx_details_rc.clone())
@@ -177,6 +179,7 @@ impl TransactionSender {
         outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
         unowned_utxo_notification_medium: UtxoNotificationMedium,
+        change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         now: Timestamp,
     ) -> Result<TxCreationArtifacts, error::SendError> {
@@ -188,23 +191,7 @@ impl TransactionSender {
         // handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
 
-        tracing::debug!("send-to-many: step 1. get change key. need write-lock");
-
-        // obtain next unused symmetric key for change utxo
-        let change_key = {
-            let mut s = self.global_state_lock.lock_guard_mut().await;
-            let key = s
-                .wallet_state
-                .next_unused_spending_key(KeyType::Symmetric)
-                .await
-                .expect("wallet should be capable of generating symmetric spending keys");
-
-            // write state to disk. create_transaction() may be slow.
-            s.persist_wallet().await.expect("flushed");
-            key
-        };
-
-        tracing::debug!("send-to-many: step 2. generate outputs. need read-lock");
+        tracing::debug!("send-to-many: step 1. generate outputs. need read-lock");
 
         let tx_outputs = self
             .generate_tx_outputs(
@@ -214,7 +201,7 @@ impl TransactionSender {
             )
             .await;
 
-        tracing::debug!("send-to-many: step 3. create tx.");
+        tracing::debug!("send-to-many: step 2. create tx.");
 
         // Create the transaction
         //
@@ -225,7 +212,7 @@ impl TransactionSender {
         //
         // note: A change output will be added to tx_outputs if needed.
         let config = TxCreationConfig::default()
-            .recover_change(Arc::new(change_key), owned_utxo_notification_medium)
+            .use_change_policy(change_policy)
             .with_prover_capability(tx_proving_capability)
             .use_job_queue(vm_job_queue());
 

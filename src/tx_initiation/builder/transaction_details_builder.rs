@@ -74,10 +74,10 @@ impl TransactionDetailsBuilder {
 
     // build impl could look something like:
     // pub fn build(mut self) -> Result<TransactionDetails, TransactionDetailsBuildError> {
-    pub fn build(
+    pub async fn build(
         self,
-        wallet_state: &WalletState,
         tip: &Block,
+        wallet_state: &mut WalletState,
     ) -> anyhow::Result<TransactionDetails> {
         let mutator_set_accumulator = tip.mutator_set_accumulator_after();
 
@@ -108,7 +108,21 @@ impl TransactionDetailsBuilder {
                     anyhow::bail!("ChangePolicy = ExactChange, but inputs exceed outputs.")
                 }
 
-                ChangePolicy::Recover { key, medium } => Self::create_change_output(
+                ChangePolicy::RecoverToNextUnusedKey { key_type, medium } => {
+                    let Some(key) = wallet_state.next_unused_spending_key(key_type).await else {
+                        anyhow::bail!("provided key_type cannot be used for receiving change.");
+                    };
+
+                    Self::create_change_output(
+                        wallet_state,
+                        tip.header().height,
+                        change_amount,
+                        key,
+                        medium,
+                    )?
+                }
+
+                ChangePolicy::RecoverToProvidedKey { key, medium } => Self::create_change_output(
                     wallet_state,
                     tip.header().height,
                     change_amount,

@@ -89,6 +89,7 @@ use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
+use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
@@ -1513,6 +1514,11 @@ pub trait RPC {
 
     async fn spendable_inputs(token: rpc_auth::Token) -> RpcResult<TxInputList>;
 
+    // async fn generate_tx_details(
+    //     tx_inputs: TxInputList,
+    //     tx_outputs: TxOutputList,
+    // ) -> RpcResult<TransactionDetails>;
+
     /// Send coins to a single recipient.
     ///
     /// See docs for [send_to_many()](Self::send_to_many())
@@ -2818,6 +2824,27 @@ impl RPC for NeptuneRPCServer {
             .into())
     }
 
+    // // documented in trait. do not add doc-comment.
+    // async fn generate_tx_details(
+    //     self,
+    //     _: context::Context,
+    //     token: rpc_auth::Token,
+    //     tx_inputs: TxInputList,
+    //     tx_outputs: TxOutputList,
+    //     fee: NativeCurrencyAmount,
+    // ) -> RpcResult<TransactionDetails> {
+    //     log_slow_scope!(fn_name!());
+    //     token.auth(&self.valid_tokens)?;
+
+    //     Ok(self
+    //         .state
+    //         .lock_guard()
+    //         .await
+    //         .wallet_spendable_inputs()
+    //         .await
+    //         .into())
+    // }
+
     // documented in trait. do not add doc-comment.
     async fn send(
         self,
@@ -2837,6 +2864,10 @@ impl RPC for NeptuneRPCServer {
                 vec![(address, amount)],
                 owned_utxo_notification_medium,
                 unowned_utxo_notification_medium,
+                ChangePolicy::recover_to_next_unused_key(
+                    KeyType::Symmetric,
+                    owned_utxo_notification_medium,
+                ),
                 fee,
                 Timestamp::now(),
             )
@@ -2861,6 +2892,10 @@ impl RPC for NeptuneRPCServer {
                 outputs,
                 owned_utxo_notification_medium,
                 unowned_utxo_notification_medium,
+                ChangePolicy::recover_to_next_unused_key(
+                    KeyType::Symmetric,
+                    owned_utxo_notification_medium,
+                ),
                 fee,
                 Timestamp::now(),
             )

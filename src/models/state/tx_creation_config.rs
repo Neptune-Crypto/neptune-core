@@ -7,6 +7,7 @@ use super::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::models::state::wallet::address::KeyType;
 
 /// When the selected inputs represent more coins than the outputs (with fee)
 /// where does this change go?
@@ -16,9 +17,12 @@ pub enum ChangePolicy {
     #[default]
     ExactChange,
 
-    /// If the change is nonzero, create a new UTXO spendable by this key and
-    /// via this notification medium. Otherwise, do not create a change output.
-    Recover {
+    RecoverToNextUnusedKey {
+        key_type: KeyType,
+        medium: UtxoNotificationMedium,
+    },
+
+    RecoverToProvidedKey {
         key: Arc<SpendingKey>,
         medium: UtxoNotificationMedium,
     },
@@ -27,16 +31,34 @@ pub enum ChangePolicy {
     Burn,
 }
 impl ChangePolicy {
+    pub fn exact_change() -> Self {
+        Self::ExactChange
+    }
+
     /// Enable change-recovery and configure which key and notification medium
     /// to use for that purpose.
-    pub fn recover_change(
+    pub fn recover_to_provided_key(
         change_key: Arc<SpendingKey>,
         notification_medium: UtxoNotificationMedium,
     ) -> Self {
-        Self::Recover {
+        Self::RecoverToProvidedKey {
             key: change_key,
             medium: notification_medium,
         }
+    }
+
+    pub fn recover_to_next_unused_key(
+        key_type: KeyType,
+        notification_medium: UtxoNotificationMedium,
+    ) -> Self {
+        Self::RecoverToNextUnusedKey {
+            key_type,
+            medium: notification_medium,
+        }
+    }
+
+    pub fn burn() -> Self {
+        Self::Burn
     }
 }
 
@@ -63,27 +85,39 @@ impl TxCreationConfig {
         }
     }
 
-    pub(crate) fn exact_change(mut self) -> Self {
+    pub fn use_change_policy(mut self, change_policy: ChangePolicy) -> Self {
+        self.change_policy = change_policy;
+        self
+    }
+
+    pub fn exact_change(mut self) -> Self {
         self.change_policy = ChangePolicy::ExactChange;
         self
     }
 
-    /// Enable change-recovery and configure which key and notification medium
-    /// to use for that purpose.
-    pub(crate) fn recover_change(
+    pub fn recover_to_provided_key(
         mut self,
         change_key: Arc<SpendingKey>,
         notification_medium: UtxoNotificationMedium,
     ) -> Self {
-        self.change_policy = ChangePolicy::recover_change(change_key, notification_medium);
+        self.change_policy = ChangePolicy::recover_to_provided_key(change_key, notification_medium);
         self
     }
 
-    // pub(crate) fn burn_change(
-    //     mut self) -> Self {
-    //     self.change_policy = ChangePolicy::Burn;
-    //     self
-    // }
+    pub fn recover_to_next_unused_key(
+        mut self,
+        key_type: KeyType,
+        notification_medium: UtxoNotificationMedium,
+    ) -> Self {
+        self.change_policy =
+            ChangePolicy::recover_to_next_unused_key(key_type, notification_medium);
+        self
+    }
+
+    pub fn burn_change(mut self) -> Self {
+        self.change_policy = ChangePolicy::Burn;
+        self
+    }
 
     /// Configure the proving capacity.
     pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {

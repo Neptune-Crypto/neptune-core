@@ -163,7 +163,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
     let networking_state = NetworkingState::new(peer_map, peer_databases);
 
-    let light_state: LightState = LightState::from(latest_block.clone());
+    let light_state: LightState = LightState::from(latest_block);
     let blockchain_archival_state = BlockchainArchivalState {
         light_state,
         archival_state,
@@ -172,7 +172,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     let mempool = Mempool::new(
         cli_args.max_mempool_size,
         cli_args.max_mempool_num_tx,
-        latest_block.hash(),
+        blockchain_state.light_state().hash(),
     );
 
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
