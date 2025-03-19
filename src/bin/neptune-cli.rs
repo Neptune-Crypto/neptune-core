@@ -1099,7 +1099,7 @@ async fn main() -> Result<()> {
                     fee,
                 )
                 .await?;
-            let (txid, private_notifications) = match resp {
+            let tx_artifacts = match resp {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("{}", e);
@@ -1107,12 +1107,15 @@ async fn main() -> Result<()> {
                 }
             };
 
-            println!("Successfully created transaction: {txid}");
+            println!(
+                "Successfully created transaction: {}",
+                tx_artifacts.transaction().txid()
+            );
 
             process_utxo_notifications(
                 &data_directory,
                 network,
-                private_notifications,
+                tx_artifacts.offchain_notifications(network),
                 Some(receiver_tag),
             )?
         }
@@ -1133,8 +1136,18 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             match res {
-                Ok((txid, _offchain_notifications)) => {
-                    println!("Successfully created transaction: {txid}")
+                Ok(tx_artifacts) => {
+                    println!(
+                        "Successfully created transaction: {}",
+                        tx_artifacts.transaction().txid()
+                    );
+
+                    process_utxo_notifications(
+                        &data_directory,
+                        network,
+                        tx_artifacts.offchain_notifications(network),
+                        None, // todo:  parse receiver tags from cmd-line.
+                    )?
                 }
                 Err(e) => eprintln!("{}", e),
             }

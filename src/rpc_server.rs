@@ -88,6 +88,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
@@ -98,7 +99,6 @@ use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInputList;
-use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
@@ -1571,7 +1571,7 @@ pub trait RPC {
         owned_utxo_notify_method: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
+    ) -> RpcResult<TxCreationArtifacts>;
 
     /// Send coins to multiple recipients
     ///
@@ -1662,7 +1662,7 @@ pub trait RPC {
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
+    ) -> RpcResult<TxCreationArtifacts>;
 
     /// claim a utxo
     ///
@@ -2828,7 +2828,7 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notification_medium: UtxoNotificationMedium,
         unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+    ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2840,8 +2840,7 @@ impl RPC for NeptuneRPCServer {
                 fee,
                 Timestamp::now(),
             )
-            .await
-            .map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))?)
+            .await?)
     }
 
     // documented in trait. do not add doc-comment.
@@ -2853,7 +2852,7 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notification_medium: UtxoNotificationMedium,
         unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+    ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2865,8 +2864,7 @@ impl RPC for NeptuneRPCServer {
                 fee,
                 Timestamp::now(),
             )
-            .await
-            .map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))?)
+            .await?)
     }
 
     // // documented in trait. do not add doc-comment.

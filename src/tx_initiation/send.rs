@@ -18,7 +18,6 @@ use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
@@ -43,7 +42,10 @@ impl TransactionSender {
     pub async fn record_and_broadcast_tx(
         &mut self,
         tx: &TxCreationArtifacts,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), error::SendError> {
+        // should have been checked before, but just in case.
+        self.check_rate_limit().await?;
+
         // note: acquires write-lock.
         self.global_state_lock.record_transaction(tx).await?;
 
@@ -168,6 +170,8 @@ impl TransactionSender {
             .build()
     }
 
+    // caller should call offchain-notifications() on the returned value
+    // to retrieve (and store) offchain notifications, if any.
     pub async fn send_to_many(
         &mut self,
         outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
@@ -175,7 +179,7 @@ impl TransactionSender {
         unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
         now: Timestamp,
-    ) -> Result<(Arc<Transaction>, Vec<PrivateNotificationData>), error::SendError> {
+    ) -> Result<TxCreationArtifacts, error::SendError> {
         self.check_proceed_with_send(fee).await?;
 
         // The proving capability is set to the lowest possible value here,
@@ -184,7 +188,7 @@ impl TransactionSender {
         // handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
 
-        tracing::debug!("stmi: step 1. get change key. need write-lock");
+        tracing::debug!("send-to-many: step 1. get change key. need write-lock");
 
         // obtain next unused symmetric key for change utxo
         let change_key = {
@@ -200,7 +204,7 @@ impl TransactionSender {
             key
         };
 
-        tracing::debug!("stmi: step 2. generate outputs. need read-lock");
+        tracing::debug!("send-to-many: step 2. generate outputs. need read-lock");
 
         let tx_outputs = self
             .generate_tx_outputs(
@@ -210,7 +214,7 @@ impl TransactionSender {
             )
             .await;
 
-        tracing::debug!("stmi: step 3. create tx. have read-lock");
+        tracing::debug!("send-to-many: step 3. create tx.");
 
         // Create the transaction
         //
@@ -233,19 +237,18 @@ impl TransactionSender {
             }
         };
 
-        let offchain_notifications = tx_artifacts
-            .details
-            .tx_outputs
-            .private_notifications(self.global_state_lock.cli().network);
-
         tracing::debug!(
             "Generated {} offchain notifications",
-            offchain_notifications.len()
+            tx_artifacts
+                .offchain_notifications(self.global_state_lock.cli().network)
+                .len()
         );
+
+        tracing::debug!("send-to-many: step 4. record and broadcast tx.");
 
         self.record_and_broadcast_tx(&tx_artifacts).await?;
 
-        Ok((tx_artifacts.transaction, offchain_notifications))
+        Ok(tx_artifacts)
     }
 
     async fn check_proceed_with_send(

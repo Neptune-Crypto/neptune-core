@@ -2,6 +2,8 @@ use anyhow::bail;
 use anyhow::Result;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tracing::error;
 
@@ -16,7 +18,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 
 /// Information, fetched from the state of the node, required to generate a
 /// transaction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionDetails {
     pub tx_inputs: Vec<UnlockedUtxo>,
     pub tx_outputs: TxOutputList,

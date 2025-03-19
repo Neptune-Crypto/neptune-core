@@ -9,6 +9,7 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::prelude::twenty_first;
 
 pub mod lock_script;
@@ -136,6 +137,10 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    pub fn txid(&self) -> TransactionKernelId {
+        self.kernel.txid()
+    }
+
     /// Create a new `Transaction` by updating the given one with the mutator
     /// set update. If `new_timestamp` is `None`, the timestamp from the old
     /// transaction kernel will be used.

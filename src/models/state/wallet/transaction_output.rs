@@ -229,7 +229,7 @@ impl TxOutput {
         }
     }
 
-    pub(crate) fn private_notification(
+    pub(crate) fn offchain_notification(
         &self,
         network: Network,
     ) -> Option<(String, ReceivingAddress)> {
@@ -361,21 +361,24 @@ impl TxOutputList {
         public_announcements
     }
 
-    pub(crate) fn private_notifications(&self, network: Network) -> Vec<PrivateNotificationData> {
-        let mut private_utxo_notifications = vec![];
-        for tx_output in &self.0 {
-            if let Some((ciphertext, receiver_address)) = tx_output.private_notification(network) {
-                let notification_data = PrivateNotificationData {
-                    cleartext: tx_output.notification_payload(),
-                    ciphertext,
-                    recipient_address: receiver_address,
-                    owned: tx_output.owned,
-                };
-                private_utxo_notifications.push(notification_data)
-            }
-        }
-
-        private_utxo_notifications
+    pub(crate) fn offchain_notifications(&self, network: Network) -> Vec<PrivateNotificationData> {
+        self.0
+            .iter()
+            .filter_map(move |tx_output| {
+                if let Some((ciphertext, receiver_address)) =
+                    tx_output.offchain_notification(network)
+                {
+                    Some(PrivateNotificationData {
+                        cleartext: tx_output.notification_payload(),
+                        ciphertext,
+                        recipient_address: receiver_address,
+                        owned: tx_output.owned,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// indicates if any offchain notifications exist
