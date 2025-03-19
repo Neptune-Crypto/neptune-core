@@ -54,9 +54,9 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::tx_initiation::send::TransactionSender;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 /// Information related to the resources to be used for guessing.
@@ -392,8 +392,10 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .use_job_queue(vm_job_queue)
         .with_proof_job_options(job_options)
         .with_prover_capability(proving_power);
+
     let transaction =
-        GlobalState::create_raw_transaction(Arc::new(transaction_details), config).await?;
+        TransactionSender::create_raw_transaction(Arc::new(transaction_details), config).await?;
+
     info!("Done: generating single proof for coinbase transaction");
 
     Ok((transaction, composer_outputs))
@@ -1206,8 +1208,7 @@ pub(crate) mod mine_loop_tests {
             .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_from_alice = alice
-            .lock_guard()
-            .await
+            .tx_sender()
             .create_transaction(
                 vec![output_to_alice].into(),
                 NativeCurrencyAmount::coins(1),

@@ -11,13 +11,19 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
+use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 
@@ -65,10 +71,108 @@ impl TransactionSender {
         Ok(())
     }
 
+    /// generate TxOutputList from a list of Address:Amount pairs.
+    ///
+    /// callers should prefer [TxOutputListBuilder] instead which is much more flexible.
+    ///
+    /// This is a helper method for generating the `TxOutputList` that is
+    /// required by `create_transaction`.
+    ///
+    /// Each output may use either `OnChain` or `OffChain` notifications.
+    pub async fn generate_tx_outputs(
+        &self,
+        outputs: impl IntoIterator<Item = (ReceivingAddress, NativeCurrencyAmount)>,
+        owned_utxo_notify_medium: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
+    ) -> TxOutputList {
+        let mut builder = TxOutputListBuilder::new()
+            .owned_utxo_notification_medium(owned_utxo_notify_medium)
+            .unowned_utxo_notification_medium(unowned_utxo_notify_medium);
+
+        for (address, amount) in outputs {
+            builder = builder.address_and_amount(address, amount);
+        }
+
+        let gs = self.global_state_lock.lock_guard().await;
+        builder.build(&gs.wallet_state, gs.chain.light_state().header().height)
+    }
+
+    /// note: this is a helper wrapper around TransactionDetailsBuilder,
+    /// TransactionProofBuilder and TransactionBuilder
+    pub async fn create_transaction(
+        &self,
+        tx_outputs: TxOutputList,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+        tx_creation_config: TxCreationConfig,
+    ) -> anyhow::Result<TxCreationArtifacts> {
+        let gs = self.global_state_lock.lock_guard().await;
+
+        let tx_details = TransactionDetailsBuilder::new()
+            .inputs(
+                gs.wallet_state
+                    .allocate_sufficient_input_funds(
+                        tx_outputs.total_native_coins(),
+                        gs.chain.light_state().hash(),
+                        &gs.chain.light_state().mutator_set_accumulator_after(),
+                        timestamp,
+                    )
+                    .await?
+                    .into(),
+            )
+            .outputs(tx_outputs)
+            .fee(fee)
+            .change_policy(tx_creation_config.change_policy())
+            .build(&gs.wallet_state, gs.chain.light_state())?;
+
+        let tx_details_rc = Arc::new(tx_details);
+        drop(gs);
+
+        let proof = TransactionProofBuilder::new()
+            .transaction_details(tx_details_rc.clone())
+            .job_queue(tx_creation_config.job_queue())
+            .proof_job_options(tx_creation_config.proof_job_options())
+            .tx_proving_capability(tx_creation_config.prover_capability())
+            .build()
+            .await?;
+
+        let transaction = TransactionBuilder::new()
+            .transaction_details(tx_details_rc.clone())
+            .transaction_proof(proof)
+            .build()?;
+
+        let transaction_creation_artifacts = TxCreationArtifacts {
+            transaction: Arc::new(transaction),
+            details: tx_details_rc,
+        };
+
+        Ok(transaction_creation_artifacts)
+    }
+
+    /// note: this is a helper wrapper around TransactionProofBuilder and TransactionBuilder
+    pub(crate) async fn create_raw_transaction(
+        tx_details_arc: Arc<TransactionDetails>,
+        config: TxCreationConfig,
+    ) -> anyhow::Result<Transaction> {
+        let proof = TransactionProofBuilder::new()
+            .transaction_details(tx_details_arc.clone())
+            .job_queue(config.job_queue())
+            .proof_job_options(config.proof_job_options())
+            .tx_proving_capability(config.prover_capability())
+            .build()
+            .await?;
+
+        TransactionBuilder::new()
+            .transaction_details(tx_details_arc)
+            .transaction_proof(proof)
+            .build()
+    }
+
     pub async fn send_to_many(
         &mut self,
         outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
+        owned_utxo_notification_medium: UtxoNotificationMedium,
+        unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
         now: Timestamp,
     ) -> Result<(Arc<Transaction>, Vec<PrivateNotificationData>), error::SendError> {
@@ -79,9 +183,6 @@ impl TransactionSender {
         // producing proofs. Instead, we let (a task started by) main loop
         // handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
-
-        let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
-            utxo_notification_media;
 
         tracing::debug!("stmi: step 1. get change key. need write-lock");
 
@@ -101,12 +202,13 @@ impl TransactionSender {
 
         tracing::debug!("stmi: step 2. generate outputs. need read-lock");
 
-        let state = self.global_state_lock.lock_guard().await;
-        let tx_outputs = state.generate_tx_outputs(
-            outputs,
-            owned_utxo_notification_medium,
-            unowned_utxo_notification_medium,
-        );
+        let tx_outputs = self
+            .generate_tx_outputs(
+                outputs,
+                owned_utxo_notification_medium,
+                unowned_utxo_notification_medium,
+            )
+            .await;
 
         tracing::debug!("stmi: step 3. create tx. have read-lock");
 
@@ -123,14 +225,13 @@ impl TransactionSender {
             .with_prover_capability(tx_proving_capability)
             .use_job_queue(vm_job_queue());
 
-        let tx_artifacts = match state.create_transaction(tx_outputs, fee, now, config).await {
+        let tx_artifacts = match self.create_transaction(tx_outputs, fee, now, config).await {
             Ok(tx) => tx,
             Err(e) => {
                 tracing::error!("Could not create transaction: {}", e);
                 return Err(e.into());
             }
         };
-        drop(state);
 
         let offchain_notifications = tx_artifacts
             .details

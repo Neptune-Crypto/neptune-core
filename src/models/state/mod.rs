@@ -20,7 +20,6 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -39,10 +38,8 @@ use tasm_lib::triton_vm::prelude::*;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
-use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
-use tx_creation_config::TxCreationConfig;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::wallet_state::WalletState;
@@ -75,14 +72,9 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
-use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
-use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
-use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
-use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::tx_initiation::send::TransactionSender;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
@@ -214,6 +206,10 @@ impl GlobalStateLock {
     // flush databases (persist to disk)
     pub async fn flush_databases(&mut self) -> Result<()> {
         self.lock_guard_mut().await.flush_databases().await
+    }
+
+    pub fn tx_sender(&self) -> TransactionSender {
+        TransactionSender::new(self.clone())
     }
 
     /// Set tip to a block that we composed.
@@ -663,108 +659,6 @@ impl GlobalState {
         let wallet_status = self.get_wallet_status_for_tip().await;
         self.wallet_state
             .spendable_inputs(wallet_status, Timestamp::now())
-    }
-
-    /// deprecated API.  prefer TxOutputListBuilder instead which is much more flexible.
-    ///
-    /// generates `TxOutputList` from a list of address:amount pairs
-    /// (outputs).
-    ///
-    /// This is a helper method for generating the `TxOutputList` that is
-    /// required by `create_transaction`.
-    ///
-    /// Each output may use either `OnChain` or `OffChain` notifications.
-    ///
-    /// If a different behavior is desired, the TxOutputList can be
-    /// constructed manually.
-    pub(crate) fn generate_tx_outputs(
-        &self,
-        outputs: impl IntoIterator<Item = (ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notify_medium: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
-    ) -> TxOutputList {
-        let mut builder = TxOutputListBuilder::new()
-            .owned_utxo_notification_medium(owned_utxo_notify_medium)
-            .unowned_utxo_notification_medium(unowned_utxo_notify_medium);
-
-        for (address, amount) in outputs.into_iter() {
-            builder = builder.address_and_amount(address, amount);
-        }
-
-        builder.build(&self.wallet_state, self.chain.light_state().header().height)
-    }
-
-    /// deprecated internal API.
-    ///
-    /// caller should use TransactionDetailsBuilder, TransactionProofBuilder and TransactionBuilder
-    /// instead.
-    pub(crate) async fn create_transaction(
-        &self,
-        tx_outputs: TxOutputList,
-        fee: NativeCurrencyAmount,
-        timestamp: Timestamp,
-        tx_creation_config: TxCreationConfig,
-    ) -> Result<TxCreationArtifacts> {
-        let tx_details = TransactionDetailsBuilder::new()
-            .inputs(
-                self.wallet_state
-                    .allocate_sufficient_input_funds(
-                        tx_outputs.total_native_coins(),
-                        self.chain.light_state().hash(),
-                        &self.chain.light_state().mutator_set_accumulator_after(),
-                        timestamp,
-                    )
-                    .await?
-                    .into(),
-            )
-            .outputs(tx_outputs)
-            .fee(fee)
-            .change_policy(tx_creation_config.change_policy())
-            .build(&self.wallet_state, self.chain.light_state())?;
-
-        let tx_details_rc = Arc::new(tx_details);
-
-        let proof = TransactionProofBuilder::new()
-            .transaction_details(tx_details_rc.clone())
-            .job_queue(tx_creation_config.job_queue())
-            .proof_job_options(tx_creation_config.proof_job_options())
-            .tx_proving_capability(tx_creation_config.prover_capability())
-            .build()
-            .await?;
-
-        let transaction = TransactionBuilder::new()
-            .transaction_details(tx_details_rc.clone())
-            .transaction_proof(proof)
-            .build()?;
-
-        let transaction_creation_artifacts = TxCreationArtifacts {
-            transaction: Arc::new(transaction),
-            details: tx_details_rc,
-        };
-
-        Ok(transaction_creation_artifacts)
-    }
-
-    /// deprecated internal API.
-    ///
-    /// caller should use TransactionProofBuilder and TransactionBuilder
-    /// instead.
-    pub(crate) async fn create_raw_transaction(
-        tx_details_arc: Arc<TransactionDetails>,
-        config: TxCreationConfig,
-    ) -> anyhow::Result<Transaction> {
-        let proof = TransactionProofBuilder::new()
-            .transaction_details(tx_details_arc.clone())
-            .job_queue(config.job_queue())
-            .proof_job_options(config.proof_job_options())
-            .tx_proving_capability(config.prover_capability())
-            .build()
-            .await?;
-
-        TransactionBuilder::new()
-            .transaction_details(tx_details_arc)
-            .transaction_proof(proof)
-            .build()
     }
 
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {

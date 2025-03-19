@@ -2108,8 +2108,8 @@ mod test {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(change_key.into())
                 .with_prover_capability(tx_proof_type);
-            let global_state = global_state_lock.lock_guard().await;
-            global_state
+            global_state_lock
+                .tx_sender()
                 .create_transaction(vec![].into(), fee, in_seven_months, config)
                 .await
                 .unwrap()

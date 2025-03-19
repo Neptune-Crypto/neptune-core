@@ -42,7 +42,7 @@ impl ChangePolicy {
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]
-pub(crate) struct TxCreationConfig {
+pub struct TxCreationConfig {
     prover_capability: TxProvingCapability,
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,

@@ -2821,34 +2821,29 @@ impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
     async fn send(
         self,
-        ctx: context::Context,
+        _ctx: context::Context,
         token: rpc_auth::Token,
         amount: NativeCurrencyAmount,
         address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
+        owned_utxo_notification_medium: UtxoNotificationMedium,
+        unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
     ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
 
-        // note: we do not call token.auth() because send_to_many() does it.
-
-        self.send_to_many(
-            ctx,
-            token,
-            vec![(address, amount)],
-            owned_utxo_notify_method,
-            unowned_utxo_notify_medium,
-            fee,
-        )
-        .await
+        Ok(send::TransactionSender::new(self.state.clone())
+            .send_to_many(
+                vec![(address, amount)],
+                owned_utxo_notification_medium,
+                unowned_utxo_notification_medium,
+                fee,
+                Timestamp::now(),
+            )
+            .await
+            .map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))?)
     }
 
-    // Locking:
-    //   * acquires `global_state_lock` for write
-    //
-    // TODO: add an endpoint to get recommended fee density.
-    //
     // documented in trait. do not add doc-comment.
     async fn send_to_many(
         self,
@@ -2862,15 +2857,11 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        tracing::debug!("stm: entered fn");
-
         Ok(send::TransactionSender::new(self.state.clone())
             .send_to_many(
                 outputs,
-                (
-                    owned_utxo_notification_medium,
-                    unowned_utxo_notification_medium,
-                ),
+                owned_utxo_notification_medium,
+                unowned_utxo_notification_medium,
                 fee,
                 Timestamp::now(),
             )
