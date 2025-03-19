@@ -8,14 +8,15 @@ mod strategy_the;
 mod strategy_variants;
 mod utils;
 
-// both can go without a `...Request`
-
+/// both can shoot without a `...Request`
+///
 /// BlockNotificationRequest --> BlockNotification
 /// BlockNotification --> SyncChallenge
 /// SyncChallenge --> SyncChallengeResponse
 ///
 /// BlockProposalRequest --> BlockProposal
 ///
+/// doesn't need state tracking (yet?)
 /// BlockRequestBatch --> BlockResponseBatch
 /// BlockRequestBatch --> UnableToSatisfyBatchRequest
 ///
@@ -45,7 +46,7 @@ pub struct Transition(pub PeerMessage, pub Option<AssosiatedData>);
 #[derive(Debug, Clone)]
 pub enum AssosiatedData {
     NewBlock(Block),
-    Randomness(/* [u8; 32] */),
+    Randomness([u8; 32]),
     MakeNewBlocks(Timestamp, [u8; 32]),
 }
 impl From<SyncChallengeResponse> for Transition {
