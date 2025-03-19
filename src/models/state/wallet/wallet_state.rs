@@ -4729,7 +4729,7 @@ pub(crate) mod tests {
             let upgrade_job = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 transaction.kernel,
                 transaction.proof.into_single_proof(),
-                new_block.mutator_set_accumulator_after(),
+                genesis_block.mutator_set_accumulator_after(),
                 new_block.mutator_set_update(),
             ));
             let (channel_to_nowhere, _) =

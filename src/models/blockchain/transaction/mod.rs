@@ -152,6 +152,12 @@ impl Transaction {
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
     ) -> anyhow::Result<Transaction> {
+        if old_transaction_kernel.mutator_set_hash != previous_mutator_set_accumulator.hash() {
+            bail!(
+                "Old transaction kernel's mutator set hash does not agree \
+                with supplied mutator set accumulator."
+            )
+        }
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
         let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
