@@ -1310,12 +1310,11 @@ mod archival_state_tests {
 
         let network = Network::Alpha;
         let mut rng = StdRng::seed_from_u64(107221549301u64);
-        let cli_args = cli_args::Args::default();
+        let cli_args = cli_args::Args::default_with_network(network);
         let alice_wallet =
             mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
         let alice_wallet = alice_wallet.wallet_entropy;
-        let mut alice =
-            mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
+        let mut alice = mock_genesis_global_state(network, 0, alice_wallet, cli_args).await;
         let alice_key = alice
             .lock_guard()
             .await
@@ -1437,8 +1436,8 @@ mod archival_state_tests {
         let alice_wallet = WalletEntropy::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
-        let mut alice =
-            mock_genesis_global_state(network, 42, alice_wallet, cli_args::Args::default()).await;
+        let cli_args = cli_args::Args::default_with_network(network);
+        let mut alice = mock_genesis_global_state(network, 42, alice_wallet, cli_args).await;
         let genesis_block = Block::genesis(network);
 
         let num_premine_utxos = Block::premine_utxos(network).len();
@@ -1536,8 +1535,8 @@ mod archival_state_tests {
         let genesis_block = Block::genesis(network);
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
-        let mut alice =
-            mock_genesis_global_state(network, 42, alice_wallet, cli_args::Args::default()).await;
+        let cli_args = cli_args::Args::default_with_network(network);
+        let mut alice = mock_genesis_global_state(network, 42, alice_wallet, cli_args).await;
 
         let mut expected_num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();

@@ -1410,8 +1410,9 @@ impl WalletState {
             preprocess_own_mutxos(monitored_utxos, new_block).await;
 
         debug!(
-            "handling {} monitored UTXOs",
-            valid_membership_proofs_and_own_utxo_count.len()
+            "doing maintenance on {}/{} monitored UTXOs",
+            valid_membership_proofs_and_own_utxo_count.len(),
+            all_existing_mutxos.len()
         );
 
         // Loop over all output UTXOs, applying all addition records. In each iteration,
@@ -1913,13 +1914,9 @@ pub(crate) mod tests {
     #[traced_test]
     async fn find_monitored_utxo_test() {
         let network = Network::Testnet;
-        let alice_global_lock = mock_genesis_global_state(
-            network,
-            0,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+        let cli_args = cli_args::Args::default_with_network(network);
+        let alice_global_lock =
+            mock_genesis_global_state(network, 0, WalletEntropy::devnet_wallet(), cli_args).await;
 
         let premine_utxo = {
             let wallet = &alice_global_lock.lock_guard().await.wallet_state;
@@ -2779,7 +2776,7 @@ pub(crate) mod tests {
         let wallet = WalletEntropy::devnet_wallet();
         let genesis_block = Block::genesis(network);
 
-        let cli_args = cli_args::Args::default();
+        let cli_args = cli_args::Args::default_with_network(network);
         let wallet_state = mock_genesis_wallet_state(wallet, network, &cli_args).await;
 
         // are we synchronized to the genesis block?
