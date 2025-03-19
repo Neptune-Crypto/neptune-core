@@ -31,9 +31,11 @@ use neptune_cash::models::state::wallet::wallet_file::WalletFile;
 use neptune_cash::models::state::wallet::wallet_file::WalletFileContext;
 use neptune_cash::models::state::wallet::wallet_status::WalletStatus;
 use neptune_cash::models::state::wallet::wallet_status::WalletStatusExportFormat;
+use neptune_cash::models::state::ChangePolicy;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;
@@ -116,11 +118,8 @@ impl FromStr for TransactionOutput {
 }
 
 impl TransactionOutput {
-    pub fn to_receiving_address_amount_tuple(
-        &self,
-        network: Network,
-    ) -> Result<(ReceivingAddress, NativeCurrencyAmount)> {
-        Ok((
+    pub fn to_output_format(&self, network: Network) -> Result<OutputFormat> {
+        Ok(OutputFormat::AddressAndAmount(
             ReceivingAddress::from_bech32m(&self.address, network)?,
             self.amount,
         ))
@@ -1092,10 +1091,12 @@ async fn main() -> Result<()> {
                 .send(
                     ctx,
                     token,
-                    amount,
-                    receiving_address,
-                    notify_self,
-                    notify_other,
+                    OutputFormat::AddressAndAmountAndMedium(
+                        receiving_address,
+                        amount,
+                        notify_other,
+                    ),
+                    ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self),
                     fee,
                 )
                 .await?;
@@ -1122,7 +1123,7 @@ async fn main() -> Result<()> {
         Command::SendToMany { outputs, fee } => {
             let parsed_outputs = outputs
                 .into_iter()
-                .map(|o| o.to_receiving_address_amount_tuple(network))
+                .map(|o| o.to_output_format(network))
                 .collect::<Result<Vec<_>>>()?;
 
             let res = client
@@ -1130,8 +1131,10 @@ async fn main() -> Result<()> {
                     ctx,
                     token,
                     parsed_outputs,
-                    UtxoNotificationMedium::OnChain,
-                    UtxoNotificationMedium::OnChain,
+                    ChangePolicy::recover_to_next_unused_key(
+                        KeyType::Symmetric,
+                        UtxoNotificationMedium::OnChain,
+                    ),
                     fee,
                 )
                 .await?;

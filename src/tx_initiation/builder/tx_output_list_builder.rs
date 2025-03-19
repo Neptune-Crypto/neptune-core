@@ -1,3 +1,6 @@
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -7,8 +10,8 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::WalletState;
 
-#[derive(Debug)]
-enum OutputType {
+#[derive(Debug, Serialize, Deserialize)]
+pub enum OutputFormat {
     AddressAndAmount(ReceivingAddress, NativeCurrencyAmount),
     AddressAndAmountAndMedium(
         ReceivingAddress,
@@ -23,7 +26,7 @@ enum OutputType {
 // note: all fields intentionally private
 #[derive(Debug)]
 pub struct TxOutputListBuilder {
-    outputs: Vec<OutputType>,
+    outputs: Vec<OutputFormat>,
     owned_utxo_notification_medium: UtxoNotificationMedium,
     unowned_utxo_notification_medium: UtxoNotificationMedium,
 }
@@ -53,13 +56,18 @@ impl TxOutputListBuilder {
         self
     }
 
+    pub fn output_format(mut self, output_format: OutputFormat) -> Self {
+        self.outputs.push(output_format);
+        self
+    }
+
     pub fn address_and_amount(
         mut self,
         address: ReceivingAddress,
         amount: NativeCurrencyAmount,
     ) -> Self {
         self.outputs
-            .push(OutputType::AddressAndAmount(address, amount));
+            .push(OutputFormat::AddressAndAmount(address, amount));
         self
     }
 
@@ -69,14 +77,15 @@ impl TxOutputListBuilder {
         amount: NativeCurrencyAmount,
         medium: UtxoNotificationMedium,
     ) -> Self {
-        self.outputs.push(OutputType::AddressAndAmountAndMedium(
+        self.outputs.push(OutputFormat::AddressAndAmountAndMedium(
             address, amount, medium,
         ));
         self
     }
 
     pub fn address_and_utxo(mut self, address: ReceivingAddress, utxo: Utxo) -> Self {
-        self.outputs.push(OutputType::AddressAndUtxo(address, utxo));
+        self.outputs
+            .push(OutputFormat::AddressAndUtxo(address, utxo));
         self
     }
 
@@ -87,12 +96,12 @@ impl TxOutputListBuilder {
         medium: UtxoNotificationMedium,
     ) -> Self {
         self.outputs
-            .push(OutputType::AddressAndUtxoAndMedium(address, utxo, medium));
+            .push(OutputFormat::AddressAndUtxoAndMedium(address, utxo, medium));
         self
     }
 
     pub fn tx_output(mut self, tx_output: TxOutput) -> Self {
-        self.outputs.push(OutputType::TxOutput(tx_output));
+        self.outputs.push(OutputFormat::TxOutput(tx_output));
         self
     }
 
@@ -102,9 +111,9 @@ impl TxOutputListBuilder {
         // Convert outputs.  [address:amount] --> TxOutputList
         let outputs = self.outputs.into_iter().map(|output_type| {
             match output_type {
-                OutputType::TxOutput(o) => o,
+                OutputFormat::TxOutput(o) => o,
 
-                OutputType::AddressAndAmount(address, amt) => {
+                OutputFormat::AddressAndAmount(address, amt) => {
                     let sender_randomness = wallet_entropy
                         .generate_sender_randomness(block_height, address.privacy_digest());
 
@@ -120,7 +129,7 @@ impl TxOutputListBuilder {
                     )
                 }
 
-                OutputType::AddressAndAmountAndMedium(address, amt, medium) => {
+                OutputFormat::AddressAndAmountAndMedium(address, amt, medium) => {
                     let sender_randomness = wallet_entropy
                         .generate_sender_randomness(block_height, address.privacy_digest());
                     let utxo = Utxo::new_native_currency(address.lock_script(), amt);
@@ -142,7 +151,7 @@ impl TxOutputListBuilder {
                     }
                 }
 
-                OutputType::AddressAndUtxo(address, utxo) => {
+                OutputFormat::AddressAndUtxo(address, utxo) => {
                     let sender_randomness = wallet_entropy
                         .generate_sender_randomness(block_height, address.privacy_digest());
 
@@ -158,7 +167,7 @@ impl TxOutputListBuilder {
                     )
                 }
 
-                OutputType::AddressAndUtxoAndMedium(address, utxo, medium) => {
+                OutputFormat::AddressAndUtxoAndMedium(address, utxo, medium) => {
                     let sender_randomness = wallet_entropy
                         .generate_sender_randomness(block_height, address.privacy_digest());
                     let owned = wallet_state.can_unlock(&utxo);

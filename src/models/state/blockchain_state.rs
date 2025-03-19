@@ -14,7 +14,6 @@ use crate::Block;
 ///
 // silence possible clippy bug / false positive.
 // see: https://github.com/rust-lang/rust-clippy/issues/9798
-#[expect(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum BlockchainState {
     /// represents a Archival blockchain state

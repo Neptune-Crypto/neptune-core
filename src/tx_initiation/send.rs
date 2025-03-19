@@ -16,12 +16,12 @@ use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
@@ -32,9 +32,7 @@ pub struct TransactionSender {
 }
 
 impl TransactionSender {
-    // goal is for this type to be usable outside this crate, but
-    // we should not expose RPCServerToMain, so we will need to expose
-    // this type in some other way
+    // goal is for this type to be usable outside this crate
     pub(crate) fn new(global_state_lock: GlobalStateLock) -> Self {
         Self { global_state_lock }
     }
@@ -73,9 +71,29 @@ impl TransactionSender {
         Ok(())
     }
 
-    /// generate TxOutputList from a list of Address:Amount pairs.
+    pub async fn generate_tx_details(
+        &mut self,
+        inputs: TxInputList,
+        outputs: TxOutputList,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> anyhow::Result<TransactionDetails> {
+        let mut gsm = self.global_state_lock.lock_guard_mut().await;
+
+        let light_state = gsm.chain.light_state_clone(); // cheap Arc clone
+        TransactionDetailsBuilder::new()
+            .inputs(inputs)
+            .outputs(outputs)
+            .fee(fee)
+            .change_policy(change_policy)
+            .build(&light_state, &mut gsm.wallet_state)
+            .await
+    }
+
+    /// generate TxOutputList from a list of [OutputFormat].
     ///
-    /// callers should prefer [TxOutputListBuilder] instead which is much more flexible.
+    /// this is a wrapper around [TxOutputListBuilder], which callers can also
+    /// use directly.
     ///
     /// This is a helper method for generating the `TxOutputList` that is
     /// required by `create_transaction`.
@@ -83,16 +101,12 @@ impl TransactionSender {
     /// Each output may use either `OnChain` or `OffChain` notifications.
     pub async fn generate_tx_outputs(
         &self,
-        outputs: impl IntoIterator<Item = (ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notify_medium: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
+        outputs: impl IntoIterator<Item = OutputFormat>,
     ) -> TxOutputList {
-        let mut builder = TxOutputListBuilder::new()
-            .owned_utxo_notification_medium(owned_utxo_notify_medium)
-            .unowned_utxo_notification_medium(unowned_utxo_notify_medium);
+        let mut builder = TxOutputListBuilder::new();
 
-        for (address, amount) in outputs {
-            builder = builder.address_and_amount(address, amount);
+        for output_format in outputs {
+            builder = builder.output_format(output_format);
         }
 
         let gs = self.global_state_lock.lock_guard().await;
@@ -176,9 +190,7 @@ impl TransactionSender {
     // to retrieve (and store) offchain notifications, if any.
     pub async fn send_to_many(
         &mut self,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notification_medium: UtxoNotificationMedium,
-        unowned_utxo_notification_medium: UtxoNotificationMedium,
+        outputs: impl IntoIterator<Item = OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
         now: Timestamp,
@@ -193,13 +205,7 @@ impl TransactionSender {
 
         tracing::debug!("send-to-many: step 1. generate outputs. need read-lock");
 
-        let tx_outputs = self
-            .generate_tx_outputs(
-                outputs,
-                owned_utxo_notification_medium,
-                unowned_utxo_notification_medium,
-            )
-            .await;
+        let tx_outputs = self.generate_tx_outputs(outputs).await;
 
         tracing::debug!("send-to-many: step 2. create tx.");
 

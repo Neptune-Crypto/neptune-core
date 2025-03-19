@@ -87,6 +87,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::models::state::mining_status::MiningStatus;
+use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_creation_config::ChangePolicy;
@@ -100,13 +101,14 @@ use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::send;
 use crate::DataDirectory;
 
@@ -1514,10 +1516,13 @@ pub trait RPC {
 
     async fn spendable_inputs(token: rpc_auth::Token) -> RpcResult<TxInputList>;
 
-    // async fn generate_tx_details(
-    //     tx_inputs: TxInputList,
-    //     tx_outputs: TxOutputList,
-    // ) -> RpcResult<TransactionDetails>;
+    async fn generate_tx_details(
+        token: rpc_auth::Token,
+        tx_inputs: TxInputList,
+        tx_outputs: TxOutputList,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TransactionDetails>;
 
     /// Send coins to a single recipient.
     ///
@@ -1572,10 +1577,8 @@ pub trait RPC {
     /// ```
     async fn send(
         token: rpc_auth::Token,
-        amount: NativeCurrencyAmount,
-        address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
+        output: OutputFormat,
+        change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
@@ -1664,9 +1667,8 @@ pub trait RPC {
     /// ```
     async fn send_to_many(
         token: rpc_auth::Token,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notify_medium: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
@@ -2825,52 +2827,37 @@ impl RPC for NeptuneRPCServer {
     }
 
     // // documented in trait. do not add doc-comment.
-    // async fn generate_tx_details(
-    //     self,
-    //     _: context::Context,
-    //     token: rpc_auth::Token,
-    //     tx_inputs: TxInputList,
-    //     tx_outputs: TxOutputList,
-    //     fee: NativeCurrencyAmount,
-    // ) -> RpcResult<TransactionDetails> {
-    //     log_slow_scope!(fn_name!());
-    //     token.auth(&self.valid_tokens)?;
+    async fn generate_tx_details(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        tx_inputs: TxInputList,
+        tx_outputs: TxOutputList,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TransactionDetails> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
 
-    //     Ok(self
-    //         .state
-    //         .lock_guard()
-    //         .await
-    //         .wallet_spendable_inputs()
-    //         .await
-    //         .into())
-    // }
+        Ok(send::TransactionSender::new(self.state.clone())
+            .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
+            .await?)
+    }
 
     // documented in trait. do not add doc-comment.
     async fn send(
         self,
         _ctx: context::Context,
         token: rpc_auth::Token,
-        amount: NativeCurrencyAmount,
-        address: ReceivingAddress,
-        owned_utxo_notification_medium: UtxoNotificationMedium,
-        unowned_utxo_notification_medium: UtxoNotificationMedium,
+        output: OutputFormat,
+        change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         Ok(send::TransactionSender::new(self.state.clone())
-            .send_to_many(
-                vec![(address, amount)],
-                owned_utxo_notification_medium,
-                unowned_utxo_notification_medium,
-                ChangePolicy::recover_to_next_unused_key(
-                    KeyType::Symmetric,
-                    owned_utxo_notification_medium,
-                ),
-                fee,
-                Timestamp::now(),
-            )
+            .send_to_many(vec![output], change_policy, fee, Timestamp::now())
             .await?)
     }
 
@@ -2879,26 +2866,15 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         token: rpc_auth::Token,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notification_medium: UtxoNotificationMedium,
-        unowned_utxo_notification_medium: UtxoNotificationMedium,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         Ok(send::TransactionSender::new(self.state.clone())
-            .send_to_many(
-                outputs,
-                owned_utxo_notification_medium,
-                unowned_utxo_notification_medium,
-                ChangePolicy::recover_to_next_unused_key(
-                    KeyType::Symmetric,
-                    owned_utxo_notification_medium,
-                ),
-                fee,
-                Timestamp::now(),
-            )
+            .send_to_many(outputs, change_policy, fee, Timestamp::now())
             .await?)
     }
 

@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
@@ -11,7 +14,7 @@ use crate::models::state::wallet::address::KeyType;
 
 /// When the selected inputs represent more coins than the outputs (with fee)
 /// where does this change go?
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum ChangePolicy {
     /// Inputs must exactly equal spend amount, or else an error will result.
     #[default]

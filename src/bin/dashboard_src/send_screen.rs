@@ -9,10 +9,13 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::models::state::wallet::address::KeyType;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_cash::models::state::ChangePolicy;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use ratatui::layout::Alignment;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -151,10 +154,11 @@ impl SendScreen {
             .send(
                 send_ctx,
                 token,
-                valid_amount,
-                valid_address,
-                UtxoNotificationMedium::OnChain,
-                UtxoNotificationMedium::OnChain,
+                OutputFormat::AddressAndAmount(valid_address, valid_amount),
+                ChangePolicy::recover_to_next_unused_key(
+                    KeyType::Symmetric,
+                    UtxoNotificationMedium::OnChain,
+                ),
                 valid_fee,
             )
             .await
