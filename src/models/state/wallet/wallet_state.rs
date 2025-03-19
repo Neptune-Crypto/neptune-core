@@ -4473,7 +4473,8 @@ pub(crate) mod tests {
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::mempool::TransactionOrigin;
-        use crate::{MainToPeerTask, PEER_CHANNEL_CAPACITY};
+        use crate::MainToPeerTask;
+        use crate::PEER_CHANNEL_CAPACITY;
 
         use super::*;
 
@@ -4628,13 +4629,19 @@ pub(crate) mod tests {
             upgrade_fee_notification_policy: FeeNotificationPolicy,
         ) {
             // derandomize because we will need proofs
-            let seed: [u8; 32] = random();
+            let seed = [
+                155, 213, 11, 57, 97, 48, 59, 23, 111, 107, 153, 29, 219, 126, 204, 48, 17, 5, 105,
+                31, 185, 57, 156, 90, 7, 121, 39, 201, 232, 33, 159, 189,
+            ];
             dbg!(seed);
             let mut rng = StdRng::from_seed(seed);
 
             // set up premine recipient
             let network = Network::Main;
-            let cli_args = cli_args::Args::default();
+            let cli_args = cli_args::Args {
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                ..Default::default()
+            };
             let wallet_secret = WalletEntropy::devnet_wallet();
             let mut global_state_lock =
                 mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args).await;
@@ -4707,6 +4714,7 @@ pub(crate) mod tests {
             let rando_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
             let rando_cli_args = cli_args::Args {
                 fee_notification: upgrade_fee_notification_policy,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 ..Default::default()
             };
             let mut rando_global_state_lock =
