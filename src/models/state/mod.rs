@@ -2149,7 +2149,7 @@ mod global_state_tests {
             network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let mut alice = alice_state_lock.lock_guard_mut().await;
@@ -3422,14 +3422,16 @@ mod global_state_tests {
             let (block_3a, composer_expected_utxos_3a) =
                 make_mock_block(&block_2a, None, spending_key, rng.random()).await;
 
+            let cli_args = cli_args::Args {
+                number_of_mps_per_utxo: 30,
+                network,
+                ..Default::default()
+            };
+
             for claim_composer_fees in [false, true] {
-                let mut global_state_lock = mock_genesis_global_state(
-                    network,
-                    2,
-                    wallet_secret.clone(),
-                    cli_args::Args::default(),
-                )
-                .await;
+                let mut global_state_lock =
+                    mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args.clone())
+                        .await;
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
                 if claim_composer_fees {
