@@ -2864,19 +2864,18 @@ impl RPC for NeptuneRPCServer {
 
         tracing::debug!("stm: entered fn");
 
-        Ok(
-            send::TransactionSender::new(self.state.clone(), self.rpc_server_to_main_tx.clone())
-                .send_to_many(
-                    outputs,
-                    (
-                        owned_utxo_notification_medium,
-                        unowned_utxo_notification_medium,
-                    ),
-                    fee,
-                    Timestamp::now(),
-                )
-                .await.map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))?,
-        )
+        Ok(send::TransactionSender::new(self.state.clone())
+            .send_to_many(
+                outputs,
+                (
+                    owned_utxo_notification_medium,
+                    unowned_utxo_notification_medium,
+                ),
+                fee,
+                Timestamp::now(),
+            )
+            .await
+            .map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))?)
     }
 
     // // documented in trait. do not add doc-comment.

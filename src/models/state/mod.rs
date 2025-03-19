@@ -92,6 +92,7 @@ use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
+use crate::RPCServerToMain;
 use crate::VERSION;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
@@ -154,15 +155,18 @@ pub struct GlobalStateLock {
 
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
+
+    rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
 impl GlobalStateLock {
-    pub fn new(
+    pub(crate) fn new(
         wallet_state: WalletState,
         chain: BlockchainState,
         net: NetworkingState,
         cli: cli_args::Args,
         mempool: Mempool,
+        rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
     ) -> Self {
         let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool);
         let global_state_lock = sync_tokio::AtomicRw::from((
@@ -173,6 +177,7 @@ impl GlobalStateLock {
         Self {
             global_state_lock,
             cli,
+            rpc_server_to_main_tx,
         }
     }
 
@@ -255,6 +260,10 @@ impl GlobalStateLock {
     #[inline]
     pub fn cli(&self) -> &cli_args::Args {
         &self.cli
+    }
+
+    pub fn rpc_server_to_main_tx(&self) -> tokio::sync::mpsc::Sender<RPCServerToMain> {
+        self.rpc_server_to_main_tx.clone()
     }
 
     /// Test helper function for fine control of CLI parameters.

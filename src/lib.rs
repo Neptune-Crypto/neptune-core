@@ -174,12 +174,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         cli_args.max_mempool_num_tx,
         latest_block.hash(),
     );
+
+    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
+        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
         cli_args,
         mempool,
+        rpc_server_to_main_tx.clone(),
     );
 
     // See #239.  <https://github.com/Neptune-Crypto/neptune-core/issues/239>
@@ -279,8 +284,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
     // Start RPC server for CLI request and more. It's important that this is done as late
     // as possible, so requests do not hang while initialization code runs.
-    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
-        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
         format!("127.0.0.1:{}", global_state_lock.cli().rpc_port),
         Json::default,

@@ -204,7 +204,7 @@ pub(crate) struct ClaimUtxoData {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum RPCServerToMain {
+pub enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),
     BroadcastMempoolTransactions,
     ProofOfWorkSolution(Box<Block>),

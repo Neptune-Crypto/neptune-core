@@ -4,43 +4,40 @@
 
 use std::sync::Arc;
 
+use tasm_lib::prelude::Digest;
+
+use crate::job_queue::triton_vm::vm_job_queue;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
+use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
-use crate::models::state::wallet::address::KeyType;
-use crate::models::state::tx_creation_config::TxCreationConfig;
-use crate::job_queue::triton_vm::vm_job_queue;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use tasm_lib::prelude::Digest;
 
 #[derive(Debug)]
 pub struct TransactionSender {
     global_state_lock: GlobalStateLock,
-    rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
 impl TransactionSender {
     // goal is for this type to be usable outside this crate, but
     // we should not expose RPCServerToMain, so we will need to expose
     // this type in some other way
-    pub(crate) fn new(
-        global_state_lock: GlobalStateLock,
-        rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
-    ) -> Self {
-        Self {
-            global_state_lock,
-            rpc_server_to_main_tx,
-        }
+    pub(crate) fn new(global_state_lock: GlobalStateLock) -> Self {
+        Self { global_state_lock }
     }
 
-    pub async fn record_and_broadcast_tx(&mut self, tx: &TxCreationArtifacts) -> anyhow::Result<()> {
+    pub async fn record_and_broadcast_tx(
+        &mut self,
+        tx: &TxCreationArtifacts,
+    ) -> anyhow::Result<()> {
         // note: acquires write-lock.
         self.global_state_lock.record_transaction(tx).await?;
 
@@ -55,7 +52,8 @@ impl TransactionSender {
     ) -> Result<(), error::SendError> {
         // Send BroadcastTx message to main
         let response = self
-            .rpc_server_to_main_tx
+            .global_state_lock
+            .rpc_server_to_main_tx()
             .send(RPCServerToMain::BroadcastTx(transaction))
             .await;
 
@@ -74,9 +72,10 @@ impl TransactionSender {
         fee: NativeCurrencyAmount,
         now: Timestamp,
     ) -> Result<(Arc<Transaction>, Vec<PrivateNotificationData>), error::SendError> {
-
         if self.global_state_lock.cli().no_transaction_initiation {
-            tracing::warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
+            tracing::warn!(
+                "Cannot initiate transaction because `--no-transaction-initiation` flag is set."
+            );
             return Err(error::SendError::Unsupported.into());
         }
 
@@ -86,10 +85,14 @@ impl TransactionSender {
             return Err(error::SendError::NegativeFee.into());
         }
 
-        if matches!(self.global_state_lock.cli().proving_capability(),
-            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness) {
-                tracing::warn!("Cannot initiate transaction because transaction proving capability is too weak.");
-                return Err(error::SendError::TooWeak.into());
+        if matches!(
+            self.global_state_lock.cli().proving_capability(),
+            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness
+        ) {
+            tracing::warn!(
+                "Cannot initiate transaction because transaction proving capability is too weak."
+            );
+            return Err(error::SendError::TooWeak.into());
         }
 
         // The proving capability is set to the lowest possible value here,
@@ -203,10 +206,10 @@ impl TransactionSender {
 }
 
 pub mod error {
-    use super::*;
-
-    use serde::Serialize;
     use serde::Deserialize;
+    use serde::Serialize;
+
+    use super::*;
 
     /// enumerates possible transaction send errors
     #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
