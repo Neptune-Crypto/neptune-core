@@ -8,6 +8,8 @@
 # This will run the script daily, at 3am.
 # Make sure the command works by running this script manually first though,
 # after filling out the missing pieces below.
+# Don't forget to also backup your seed phrase!! This script does *not* handle
+# the backing up of `wallet.dat`.
 rsync -av --ignore-existing --backup --suffix=_$(date +'%Y-%m-%d_%H-%M-%S') \
       --backup-dir=~/neptune-core-mainnet-randomness-backup/<machine-id>/$(date +'%Y-%m-%d') \
       ~/.local/share/neptune/main/wallet/incoming_randomness.dat ~/.local/share/neptune/main/wallet/outgoing_randomness.dat <user>@<remote-server>:~/neptune-core-mainnet-randomness-backup/<machine-id>/
