@@ -45,6 +45,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
         state: & /* 'transition */ Self::State,
     ) -> proptest::prelude::BoxedStrategy<Self::Transition> {
         // let rt = Runtime::new().unwrap();
+        let blocks_len = state.blocks.len();
         let (blocks_tx_id, blocks_digests) = state
             .blocks
             .iter()
@@ -73,7 +74,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
         ``` */
 
         /* TODO is it possible to add a check here that the `Strategy` covers all the variants? */
-        /* the book recommends to have these from simple to complex */
+        /* attempted to be sorted from simple to complex as the book recommends */
         let mut the = prop_oneof![
             /* Few variants are excluded from the strateegy.
             - Handshake: an existing peer can only punish for a `Handshake` hence it doesn't matter at all what's inside such a `PeerMessage` (TODO add a simple `Transition` for this)
@@ -85,18 +86,21 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             Just(Transition(PeerMessage::PeerListRequest, None)),
             // `BlockRequestByHeight`
             Just(Transition(
-                PeerMessage::BlockRequestByHeight(BlockHeight::from(state.blocks.len() as u64)),
+                PeerMessage::BlockRequestByHeight(BlockHeight::from(blocks_len as u64)),
                 None
             )),
             // `TransactionRequest`
             prop_oneof![
-                (0..state.blocks.len()).prop_map(move |i| Transition(
+                (0..blocks_len).prop_map(move |i| Transition(
                     PeerMessage::TransactionRequest(blocks_tx_id[i]),
                     None
                 )),
                 arb::<crate::models::state::transaction_kernel_id::TransactionKernelId>()
                     .prop_map(|r| Transition(PeerMessage::TransactionRequest(r), None))
             ],
+            // `BlockRequestByHash` random. #validChained
+            arb::<Digest>()
+                .prop_map(|digest| Transition(PeerMessage::BlockRequestByHash(digest), None)),
             // `BlockNotificationRequest`
             prop_oneof![
                 Just(Transition(PeerMessage::BlockNotificationRequest, None)),
@@ -105,13 +109,24 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             // `SyncChallengeResponse`
             super::super::super::syncchallenge_response_prop_compose_random()
                 .prop_map(|r| r.into()),
-            // `SyncChallenge` random (a valid is chained based on the state in the end)
+            // `SyncChallenge` random (a valid is chained based on the state in the end) #validChained
             proptest_arbitrary_interop::arb::<SyncChallenge>()
                 .prop_map(|ch| Transition(ch.into(), None)),
             // `Transaction`
             strategy_variants::tx(false),
             // `TransactionNotification`
             strategy_variants::tx(true),
+            // `BlockProposalRequest`
+            prop_oneof![
+                arb::<Digest>().prop_map(|d| Transition(
+                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(d)),
+                    None
+                )),
+                block_new(current_tip.clone()).prop_map(|b| Transition(
+                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(b.hash())),
+                    Some(AssosiatedData::NewBlock(b))
+                ))
+            ],
             // `Block`
             prop_oneof![
                 crate::models::peer::transfer_block::block_transfer_prop_compose_random()
@@ -139,27 +154,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                 )),
                 strategy_variants::block_notif()
             ],
-            // from Sourcegraph
-            // BlockRequestByHash strategy
-            // TODO add the `Just` strategy for genesis (as `blocks_digests[0]`) -- now the peer thread just panics on this, and it's not clear if that's an intended behaviour
-            {
-                let strategy_random = arb::<Digest>()
-                    .prop_map(|digest| Transition(PeerMessage::BlockRequestByHash(digest), None));
-                let len = state.blocks.len();
-                if len > 1 {
-                    prop_oneof![
-                        strategy_random,
-                        (1..len).prop_map(move |i| Transition(
-                            PeerMessage::BlockRequestByHash(blocks_digests[i]),
-                            None
-                        )),
-                    ]
-                    .boxed()
-                } else {
-                    strategy_random.boxed()
-                }
-            },
-            // BlockRequestBatch strategy
+            // `BlockRequestBatch`
             // TODO need an example of the MMR part
             // (
             //     proptest::collection::vec(arb::<Digest>(), 0..crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST),
@@ -174,20 +169,22 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             //         }
             //     ), None)
             // ),
-
-            // BlockProposalRequest strategy
-            prop_oneof![
-                arb::<Digest>().prop_map(|d| Transition(
-                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(d)),
-                    None
-                )),
-                block_new(current_tip.clone()).prop_map(|b| Transition(
-                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(b.hash())),
-                    Some(AssosiatedData::NewBlock(b))
-                ))
-            ],
         ]
         .boxed();
+        // `BlockRequestByHash` from `blocks` except genesis
+        // TODO add the `Just` strategy for genesis (as `blocks_digests[0]`) -- now the peer thread just panics on this, and it's not clear if that's an intended behaviour
+        if blocks_len > 1 {
+            the = the
+                .prop_union(
+                    (1..blocks_len)
+                        .prop_map(move |i| {
+                            Transition(PeerMessage::BlockRequestByHash(blocks_digests[i]), None)
+                        })
+                        .boxed(),
+                )
+                .boxed();
+        }
+        // `SyncChallenge` from `BlockNotification`
         if let Some(SyncStage::WaitingForChallenge(challenge_pre, tip_of_request)) =
             state.sync_stage.clone()
         {
