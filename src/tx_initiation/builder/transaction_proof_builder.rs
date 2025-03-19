@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::state::PrimitiveWitness;
-use crate::models::state::ProofCollection;
-use crate::models::state::SingleProof;
-use crate::models::state::TransactionDetails;
-use crate::models::state::TransactionProof;
-use crate::models::state::TxProvingCapability;
+use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 #[derive(Debug, Default)]
 pub struct TransactionProofBuilder {

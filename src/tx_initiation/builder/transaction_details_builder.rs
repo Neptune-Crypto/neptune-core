@@ -1,20 +1,20 @@
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
+use tasm_lib::prelude::Digest;
 
-use super::super::transaction_input::TxInput;
-use super::super::transaction_input::TxInputList;
-use super::super::transaction_output::TxOutput;
-use super::super::transaction_output::TxOutputList;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::state::BlockHeight;
-use crate::models::state::ChangePolicy;
-use crate::models::state::Digest;
-use crate::models::state::NativeCurrencyAmount;
-use crate::models::state::SpendingKey;
-use crate::models::state::Timestamp;
-use crate::models::state::TransactionDetails;
-use crate::models::state::UtxoNotificationMedium;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_creation_config::ChangePolicy;
+use crate::models::state::wallet::address::SpendingKey;
+use crate::models::state::wallet::transaction_input::TxInput;
+use crate::models::state::wallet::transaction_input::TxInputList;
+use crate::models::state::wallet::transaction_output::TxOutput;
+use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::Block;
 use crate::WalletState;
 
@@ -126,14 +126,14 @@ impl TransactionDetailsBuilder {
             tx_outputs.push(change_output);
         }
 
-        Ok(TransactionDetails::new(
+        TransactionDetails::new(
             tx_inputs.into(),
             tx_outputs,
             fee,
             coinbase,
             timestamp,
             mutator_set_accumulator,
-        )?)
+        )
     }
 
     /// Generate a change UTXO to ensure that the difference in input amount

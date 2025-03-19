@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use crate::models::state::PrimitiveWitness;
-use crate::models::state::Transaction;
-use crate::models::state::TransactionDetails;
-use crate::models::state::TransactionProof;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::state::transaction_details::TransactionDetails;
 
 #[derive(Debug, Default)]
 pub struct TransactionBuilder {

@@ -155,13 +155,13 @@ impl TransactionSender {
             tracing::warn!(
                 "Cannot initiate transaction because `--no-transaction-initiation` flag is set."
             );
-            return Err(error::SendError::Unsupported.into());
+            return Err(error::SendError::Unsupported);
         }
 
         // abort early on negative fee
         if fee.is_negative() {
             tracing::warn!("Cannot send negative-fee transaction.");
-            return Err(error::SendError::NegativeFee.into());
+            return Err(error::SendError::NegativeFee);
         }
 
         if matches!(
@@ -171,7 +171,7 @@ impl TransactionSender {
             tracing::warn!(
                 "Cannot initiate transaction because transaction proving capability is too weak."
             );
-            return Err(error::SendError::TooWeak.into());
+            return Err(error::SendError::TooWeak);
         }
 
         self.check_rate_limit().await
