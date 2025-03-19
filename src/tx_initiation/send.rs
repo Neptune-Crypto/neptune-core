@@ -72,28 +72,7 @@ impl TransactionSender {
         fee: NativeCurrencyAmount,
         now: Timestamp,
     ) -> Result<(Arc<Transaction>, Vec<PrivateNotificationData>), error::SendError> {
-        if self.global_state_lock.cli().no_transaction_initiation {
-            tracing::warn!(
-                "Cannot initiate transaction because `--no-transaction-initiation` flag is set."
-            );
-            return Err(error::SendError::Unsupported.into());
-        }
-
-        // abort early on negative fee
-        if fee.is_negative() {
-            tracing::warn!("Cannot send negative-fee transaction.");
-            return Err(error::SendError::NegativeFee.into());
-        }
-
-        if matches!(
-            self.global_state_lock.cli().proving_capability(),
-            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness
-        ) {
-            tracing::warn!(
-                "Cannot initiate transaction because transaction proving capability is too weak."
-            );
-            return Err(error::SendError::TooWeak.into());
-        }
+        self.check_proceed_with_send(fee).await?;
 
         // The proving capability is set to the lowest possible value here,
         // since we don't want the client (CLI or dashboard) to hang while
@@ -103,39 +82,6 @@ impl TransactionSender {
 
         let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
             utxo_notification_media;
-
-        // check if this send would exceed the send rate-limit (per block)
-        {
-            // send rate limiting only applies below height 25000
-            // which is approx 5.6 months after launch.
-            // after that, the training wheel come off.
-            const RATE_LIMIT_UNTIL_HEIGHT: u64 = 25000;
-            let state = self.global_state_lock.lock_guard().await;
-
-            if state.chain.light_state().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {
-                const RATE_LIMIT: usize = 2;
-                let tip_digest = state.chain.light_state().hash();
-                let send_count_at_tip = state
-                    .wallet_state
-                    .count_sent_transactions_at_block(tip_digest)
-                    .await;
-                tracing::debug!(
-                    "send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}",
-                    send_count_at_tip,
-                    RATE_LIMIT
-                );
-                if send_count_at_tip >= RATE_LIMIT {
-                    let height = state.chain.light_state().header().height;
-                    let e = error::SendError::RateLimit {
-                        height,
-                        tip_digest,
-                        max: RATE_LIMIT,
-                    };
-                    tracing::warn!("{}", e.to_string());
-                    return Err(e);
-                }
-            }
-        }
 
         tracing::debug!("stmi: step 1. get change key. need write-lock");
 
@@ -177,10 +123,7 @@ impl TransactionSender {
             .with_prover_capability(tx_proving_capability)
             .use_job_queue(vm_job_queue());
 
-        let tx_artifacts = match state
-            .create_transaction(tx_outputs.clone(), fee, now, config)
-            .await
-        {
+        let tx_artifacts = match state.create_transaction(tx_outputs, fee, now, config).await {
             Ok(tx) => tx,
             Err(e) => {
                 tracing::error!("Could not create transaction: {}", e);
@@ -202,6 +145,70 @@ impl TransactionSender {
         self.record_and_broadcast_tx(&tx_artifacts).await?;
 
         Ok((tx_artifacts.transaction, offchain_notifications))
+    }
+
+    async fn check_proceed_with_send(
+        &self,
+        fee: NativeCurrencyAmount,
+    ) -> Result<(), error::SendError> {
+        if self.global_state_lock.cli().no_transaction_initiation {
+            tracing::warn!(
+                "Cannot initiate transaction because `--no-transaction-initiation` flag is set."
+            );
+            return Err(error::SendError::Unsupported.into());
+        }
+
+        // abort early on negative fee
+        if fee.is_negative() {
+            tracing::warn!("Cannot send negative-fee transaction.");
+            return Err(error::SendError::NegativeFee.into());
+        }
+
+        if matches!(
+            self.global_state_lock.cli().proving_capability(),
+            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness
+        ) {
+            tracing::warn!(
+                "Cannot initiate transaction because transaction proving capability is too weak."
+            );
+            return Err(error::SendError::TooWeak.into());
+        }
+
+        self.check_rate_limit().await
+    }
+
+    // check if send would exceed the send rate-limit (per block)
+    async fn check_rate_limit(&self) -> Result<(), error::SendError> {
+        // send rate limiting only applies below height 25000
+        // which is approx 5.6 months after launch.
+        // after that, the training wheel come off.
+        const RATE_LIMIT_UNTIL_HEIGHT: u64 = 25000;
+        let state = self.global_state_lock.lock_guard().await;
+
+        if state.chain.light_state().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {
+            const RATE_LIMIT: usize = 2;
+            let tip_digest = state.chain.light_state().hash();
+            let send_count_at_tip = state
+                .wallet_state
+                .count_sent_transactions_at_block(tip_digest)
+                .await;
+            tracing::debug!(
+                "send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}",
+                send_count_at_tip,
+                RATE_LIMIT
+            );
+            if send_count_at_tip >= RATE_LIMIT {
+                let height = state.chain.light_state().header().height;
+                let e = error::SendError::RateLimit {
+                    height,
+                    tip_digest,
+                    max: RATE_LIMIT,
+                };
+                tracing::warn!("{}", e.to_string());
+                return Err(e);
+            }
+        }
+        Ok(())
     }
 }
 
