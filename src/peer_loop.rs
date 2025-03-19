@@ -1829,34 +1829,32 @@ impl PeerLoopHandler {
 
         // There is potential for a race-condition in the peer_map here, as
         // we've previously counted the number of entries and checked if
-        // instance ID was already connected. But this check could have been
-        // invalidated by other tasks so we perform it again here under a write
-        // lock.
+        // instance ID was already connected. But other tasks could have made
+        // connections to a new node after the completion of that check, so we
+        // need to make the check while holding a lock to ensure that this
+        // check still holds. Since we're modifyin peer_map if this check is
+        // successful, we have to acquire a read-lock.
         {
             let mut global_state = self.global_state_lock.lock_guard_mut().await;
-            if global_state
-                .net
-                .peer_map
+            let peer_map = &mut global_state.net.peer_map;
+            if peer_map
                 .values()
                 .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
             {
                 bail!("Attempted to connect to already connected peer. Aborting connection.");
             }
 
-            if global_state.net.peer_map.len() >= cli_args.max_num_peers {
+            if peer_map.len() >= cli_args.max_num_peers {
                 bail!("Attempted to connect to more peers than allowed. Aborting connection.");
             }
 
-            if global_state.net.peer_map.contains_key(&self.peer_address) {
+            if peer_map.contains_key(&self.peer_address) {
                 // This shouldn't be possible, unless the peer reports a different instance ID than
                 // for the other connection. Only a malignant client would do that.
                 bail!("Already connected to peer. Aborting connection");
             }
 
-            global_state
-                .net
-                .peer_map
-                .insert(self.peer_address, new_peer);
+            peer_map.insert(self.peer_address, new_peer);
         }
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
