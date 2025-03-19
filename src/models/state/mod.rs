@@ -75,7 +75,6 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
-use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::prelude::twenty_first;
@@ -83,6 +82,7 @@ use crate::time_fn_call_async;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
@@ -665,6 +665,8 @@ impl GlobalState {
             .spendable_inputs(wallet_status, Timestamp::now())
     }
 
+    /// deprecated API.  prefer TxOutputListBuilder instead which is much more flexible.
+    ///
     /// generates `TxOutputList` from a list of address:amount pairs
     /// (outputs).
     ///
@@ -675,37 +677,21 @@ impl GlobalState {
     ///
     /// If a different behavior is desired, the TxOutputList can be
     /// constructed manually.
-    pub fn generate_tx_outputs(
+    pub(crate) fn generate_tx_outputs(
         &self,
         outputs: impl IntoIterator<Item = (ReceivingAddress, NativeCurrencyAmount)>,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
     ) -> TxOutputList {
-        let block_height = self.chain.light_state().header().height;
+        let mut builder = TxOutputListBuilder::new()
+            .owned_utxo_notification_medium(owned_utxo_notify_medium)
+            .unowned_utxo_notification_medium(unowned_utxo_notify_medium);
 
-        // Convert outputs.  [address:amount] --> TxOutputList
-        let tx_outputs: Vec<_> = outputs
-            .into_iter()
-            .map(|(address, amount)| {
-                let sender_randomness = self
-                    .wallet_state
-                    .wallet_entropy
-                    .generate_sender_randomness(block_height, address.privacy_digest());
+        for (address, amount) in outputs.into_iter() {
+            builder = builder.address_and_amount(address, amount);
+        }
 
-                // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
-                // based on whether the address belongs to our wallet or not
-                TxOutput::auto(
-                    &self.wallet_state,
-                    address,
-                    amount,
-                    sender_randomness,
-                    owned_utxo_notify_medium,
-                    unowned_utxo_notify_medium,
-                )
-            })
-            .collect();
-
-        tx_outputs.into()
+        builder.build(&self.wallet_state, self.chain.light_state().header().height)
     }
 
     /// deprecated internal API.

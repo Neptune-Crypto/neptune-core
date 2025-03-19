@@ -24,16 +24,16 @@ enum OutputType {
 #[derive(Debug)]
 pub struct TxOutputListBuilder {
     outputs: Vec<OutputType>,
-    owned_utxo_notify_medium: UtxoNotificationMedium,
-    unowned_utxo_notify_medium: UtxoNotificationMedium,
+    owned_utxo_notification_medium: UtxoNotificationMedium,
+    unowned_utxo_notification_medium: UtxoNotificationMedium,
 }
 
 impl Default for TxOutputListBuilder {
     fn default() -> Self {
         Self {
             outputs: vec![],
-            owned_utxo_notify_medium: UtxoNotificationMedium::OffChain,
-            unowned_utxo_notify_medium: UtxoNotificationMedium::OnChain,
+            owned_utxo_notification_medium: UtxoNotificationMedium::OffChain,
+            unowned_utxo_notification_medium: UtxoNotificationMedium::OnChain,
         }
     }
 }
@@ -43,13 +43,13 @@ impl TxOutputListBuilder {
         Default::default()
     }
 
-    pub fn owned_utxo_notify_medium(mut self, medium: UtxoNotificationMedium) -> Self {
-        self.owned_utxo_notify_medium = medium;
+    pub fn owned_utxo_notification_medium(mut self, medium: UtxoNotificationMedium) -> Self {
+        self.owned_utxo_notification_medium = medium;
         self
     }
 
-    pub fn unowned_utxo_notify_medium(mut self, medium: UtxoNotificationMedium) -> Self {
-        self.unowned_utxo_notify_medium = medium;
+    pub fn unowned_utxo_notification_medium(mut self, medium: UtxoNotificationMedium) -> Self {
+        self.unowned_utxo_notification_medium = medium;
         self
     }
 
@@ -96,12 +96,7 @@ impl TxOutputListBuilder {
         self
     }
 
-    // build impl could look something like:
-    pub fn build(
-        self,
-        wallet_state: &WalletState,
-        block_height: BlockHeight,
-    ) -> anyhow::Result<TxOutputList> {
+    pub fn build(self, wallet_state: &WalletState, block_height: BlockHeight) -> TxOutputList {
         let wallet_entropy = &wallet_state.wallet_entropy;
 
         // Convert outputs.  [address:amount] --> TxOutputList
@@ -120,8 +115,8 @@ impl TxOutputListBuilder {
                         address,
                         amt,
                         sender_randomness,
-                        self.owned_utxo_notify_medium,
-                        self.unowned_utxo_notify_medium,
+                        self.owned_utxo_notification_medium,
+                        self.unowned_utxo_notification_medium,
                     )
                 }
 
@@ -158,8 +153,8 @@ impl TxOutputListBuilder {
                         utxo,
                         address,
                         sender_randomness,
-                        self.owned_utxo_notify_medium,
-                        self.unowned_utxo_notify_medium,
+                        self.owned_utxo_notification_medium,
+                        self.unowned_utxo_notification_medium,
                     )
                 }
 
@@ -180,6 +175,6 @@ impl TxOutputListBuilder {
             }
         });
 
-        Ok(outputs.into())
+        outputs.into()
     }
 }
