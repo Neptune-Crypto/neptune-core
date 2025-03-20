@@ -46,6 +46,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -1524,6 +1525,13 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TransactionDetails>;
 
+    /// assemble a transaction from TransactionDetails and a TransactionProof.
+    async fn assemble_transaction(
+        token: rpc_auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction>;
+
     /// Send coins to a single recipient.
     ///
     /// See docs for [send_to_many()](Self::send_to_many())
@@ -2826,7 +2834,7 @@ impl RPC for NeptuneRPCServer {
             .into())
     }
 
-    // // documented in trait. do not add doc-comment.
+    // documented in trait. do not add doc-comment.
     async fn generate_tx_details(
         self,
         _: context::Context,
@@ -2842,6 +2850,21 @@ impl RPC for NeptuneRPCServer {
         Ok(send::TransactionSender::new(self.state.clone())
             .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
             .await?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn assemble_transaction(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(send::TransactionSender::new(self.state.clone())
+            .assemble_transaction(Arc::new(transaction_details), transaction_proof)?)
     }
 
     // documented in trait. do not add doc-comment.

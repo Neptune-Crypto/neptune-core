@@ -9,6 +9,7 @@ use tasm_lib::prelude::Digest;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -111,6 +112,17 @@ impl TransactionSender {
 
         let gs = self.global_state_lock.lock_guard().await;
         builder.build(&gs.wallet_state, gs.chain.light_state().header().height)
+    }
+
+    pub fn assemble_transaction(
+        &self,
+        transaction_details: Arc<TransactionDetails>,
+        transaction_proof: TransactionProof,
+    ) -> anyhow::Result<Transaction> {
+        TransactionBuilder::new()
+            .transaction_details(transaction_details)
+            .transaction_proof(transaction_proof)
+            .build()
     }
 
     /// note: this is a helper wrapper around TransactionDetailsBuilder,
