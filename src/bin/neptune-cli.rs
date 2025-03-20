@@ -1091,11 +1091,11 @@ async fn main() -> Result<()> {
                 .send(
                     ctx,
                     token,
-                    OutputFormat::AddressAndAmountAndMedium(
+                    vec![OutputFormat::AddressAndAmountAndMedium(
                         receiving_address,
                         amount,
                         notify_other,
-                    ),
+                    )],
                     ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self),
                     fee,
                 )
@@ -1127,7 +1127,7 @@ async fn main() -> Result<()> {
                 .collect::<Result<Vec<_>>>()?;
 
             let res = client
-                .send_to_many(
+                .send(
                     ctx,
                     token,
                     parsed_outputs,

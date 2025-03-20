@@ -8,6 +8,7 @@ use tasm_lib::prelude::Digest;
 
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -38,59 +39,6 @@ impl TransactionSender {
         Self { global_state_lock }
     }
 
-    pub async fn record_and_broadcast_transaction(
-        &mut self,
-        tx: &TxCreationArtifacts,
-    ) -> Result<(), error::SendError> {
-        // should have been checked before, but just in case.
-        self.check_rate_limit().await?;
-
-        // note: acquires write-lock.
-        self.global_state_lock.record_transaction(tx).await?;
-
-        self.broadcast_transaction(tx.transaction.clone()).await?;
-
-        Ok(())
-    }
-
-    pub async fn broadcast_transaction(
-        &self,
-        transaction: Arc<Transaction>,
-    ) -> Result<(), error::SendError> {
-        // Send BroadcastTx message to main
-        let response = self
-            .global_state_lock
-            .rpc_server_to_main_tx()
-            .send(RPCServerToMain::BroadcastTx(transaction))
-            .await;
-
-        if let Err(e) = response {
-            tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
-            return Err(error::SendError::NotBroadcast);
-        };
-
-        Ok(())
-    }
-
-    pub async fn generate_tx_details(
-        &mut self,
-        inputs: TxInputList,
-        outputs: TxOutputList,
-        change_policy: ChangePolicy,
-        fee: NativeCurrencyAmount,
-    ) -> anyhow::Result<TransactionDetails> {
-        let mut gsm = self.global_state_lock.lock_guard_mut().await;
-
-        let light_state = gsm.chain.light_state_clone(); // cheap Arc clone
-        TransactionDetailsBuilder::new()
-            .inputs(inputs)
-            .outputs(outputs)
-            .fee(fee)
-            .change_policy(change_policy)
-            .build(&light_state, &mut gsm.wallet_state)
-            .await
-    }
-
     /// generate TxOutputList from a list of [OutputFormat].
     ///
     /// this is a wrapper around [TxOutputListBuilder], which callers can also
@@ -114,6 +62,30 @@ impl TransactionSender {
         builder.build(&gs.wallet_state, gs.chain.light_state().header().height)
     }
 
+    pub async fn generate_tx_details(
+        &mut self,
+        inputs: TxInputList,
+        outputs: TxOutputList,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> anyhow::Result<TransactionDetails> {
+        let mut gsm = self.global_state_lock.lock_guard_mut().await;
+
+        let light_state = gsm.chain.light_state_clone(); // cheap Arc clone
+        TransactionDetailsBuilder::new()
+            .inputs(inputs)
+            .outputs(outputs)
+            .fee(fee)
+            .change_policy(change_policy)
+            .build(&light_state, &mut gsm.wallet_state)
+            .await
+    }
+
+    pub fn generate_witness_proof(&self, tx_details: Arc<TransactionDetails>) -> TransactionProof {
+        let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);
+        TransactionProof::Witness(primitive_witness)
+    }
+
     pub fn assemble_transaction(
         &self,
         transaction_details: Arc<TransactionDetails>,
@@ -125,9 +97,82 @@ impl TransactionSender {
             .build()
     }
 
+    pub async fn record_and_broadcast_transaction(
+        &mut self,
+        tx: &TxCreationArtifacts,
+    ) -> Result<(), error::SendError> {
+        // should have been checked before, but just in case.
+        self.check_rate_limit().await?;
+
+        // note: acquires write-lock.
+        self.global_state_lock.record_transaction(tx).await?;
+
+        self.broadcast_transaction(tx.transaction.clone()).await?;
+
+        Ok(())
+    }
+
+    // caller should call offchain-notifications() on the returned value
+    // to retrieve (and store) offchain notifications, if any.
+    pub async fn send(
+        &mut self,
+        outputs: impl IntoIterator<Item = OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        now: Timestamp,
+    ) -> Result<TxCreationArtifacts, error::SendError> {
+        self.check_proceed_with_send(fee).await?;
+
+        // The proving capability is set to the lowest possible value here,
+        // since we don't want the client (CLI or dashboard) to hang while
+        // producing proofs. Instead, we let (a task started by) main loop
+        // handle the proving.
+        let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
+
+        tracing::debug!("send-to-many: step 1. generate outputs. need read-lock");
+
+        let tx_outputs = self.generate_tx_outputs(outputs).await;
+
+        tracing::debug!("send-to-many: step 2. create tx.");
+
+        // Create the transaction
+        //
+        // Note that create_transaction() does not modify any state and only
+        // requires acquiring a read-lock which does not block other tasks.
+        // This is important because internally it calls prove() which is a very
+        // lengthy operation.
+        //
+        // note: A change output will be added to tx_outputs if needed.
+        let config = TxCreationConfig::default()
+            .use_change_policy(change_policy)
+            .with_prover_capability(tx_proving_capability)
+            .use_job_queue(vm_job_queue());
+
+        let tx_artifacts = match self.create_transaction(tx_outputs, fee, now, config).await {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!("Could not create transaction: {}", e);
+                return Err(e.into());
+            }
+        };
+
+        tracing::debug!(
+            "Generated {} offchain notifications",
+            tx_artifacts
+                .offchain_notifications(self.global_state_lock.cli().network)
+                .len()
+        );
+
+        tracing::debug!("send-to-many: step 4. record and broadcast tx.");
+
+        self.record_and_broadcast_transaction(&tx_artifacts).await?;
+
+        Ok(tx_artifacts)
+    }
+
     /// note: this is a helper wrapper around TransactionDetailsBuilder,
     /// TransactionProofBuilder and TransactionBuilder
-    pub async fn create_transaction(
+    pub(crate) async fn create_transaction(
         &mut self,
         tx_outputs: TxOutputList,
         fee: NativeCurrencyAmount,
@@ -198,62 +243,25 @@ impl TransactionSender {
             .build()
     }
 
-    // caller should call offchain-notifications() on the returned value
-    // to retrieve (and store) offchain notifications, if any.
-    pub async fn send_to_many(
-        &mut self,
-        outputs: impl IntoIterator<Item = OutputFormat>,
-        change_policy: ChangePolicy,
-        fee: NativeCurrencyAmount,
-        now: Timestamp,
-    ) -> Result<TxCreationArtifacts, error::SendError> {
-        self.check_proceed_with_send(fee).await?;
+    // note: not pub, as one should never call broadcast without
+    // recording first.
+    async fn broadcast_transaction(
+        &self,
+        transaction: Arc<Transaction>,
+    ) -> Result<(), error::SendError> {
+        // Send BroadcastTx message to main
+        let response = self
+            .global_state_lock
+            .rpc_server_to_main_tx()
+            .send(RPCServerToMain::BroadcastTx(transaction))
+            .await;
 
-        // The proving capability is set to the lowest possible value here,
-        // since we don't want the client (CLI or dashboard) to hang while
-        // producing proofs. Instead, we let (a task started by) main loop
-        // handle the proving.
-        let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
-
-        tracing::debug!("send-to-many: step 1. generate outputs. need read-lock");
-
-        let tx_outputs = self.generate_tx_outputs(outputs).await;
-
-        tracing::debug!("send-to-many: step 2. create tx.");
-
-        // Create the transaction
-        //
-        // Note that create_transaction() does not modify any state and only
-        // requires acquiring a read-lock which does not block other tasks.
-        // This is important because internally it calls prove() which is a very
-        // lengthy operation.
-        //
-        // note: A change output will be added to tx_outputs if needed.
-        let config = TxCreationConfig::default()
-            .use_change_policy(change_policy)
-            .with_prover_capability(tx_proving_capability)
-            .use_job_queue(vm_job_queue());
-
-        let tx_artifacts = match self.create_transaction(tx_outputs, fee, now, config).await {
-            Ok(tx) => tx,
-            Err(e) => {
-                tracing::error!("Could not create transaction: {}", e);
-                return Err(e.into());
-            }
+        if let Err(e) = response {
+            tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
+            return Err(error::SendError::NotBroadcast);
         };
 
-        tracing::debug!(
-            "Generated {} offchain notifications",
-            tx_artifacts
-                .offchain_notifications(self.global_state_lock.cli().network)
-                .len()
-        );
-
-        tracing::debug!("send-to-many: step 4. record and broadcast tx.");
-
-        self.record_and_broadcast_transaction(&tx_artifacts).await?;
-
-        Ok(tx_artifacts)
+        Ok(())
     }
 
     async fn check_proceed_with_send(

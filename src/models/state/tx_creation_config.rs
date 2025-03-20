@@ -67,7 +67,7 @@ impl ChangePolicy {
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]
-pub struct TxCreationConfig {
+pub(crate) struct TxCreationConfig {
     prover_capability: TxProvingCapability,
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
@@ -98,29 +98,29 @@ impl TxCreationConfig {
         self
     }
 
-    pub fn recover_to_provided_key(
-        mut self,
-        change_key: Arc<SpendingKey>,
-        notification_medium: UtxoNotificationMedium,
-    ) -> Self {
-        self.change_policy = ChangePolicy::recover_to_provided_key(change_key, notification_medium);
-        self
-    }
+    // pub fn recover_to_provided_key(
+    //     mut self,
+    //     change_key: Arc<SpendingKey>,
+    //     notification_medium: UtxoNotificationMedium,
+    // ) -> Self {
+    //     self.change_policy = ChangePolicy::recover_to_provided_key(change_key, notification_medium);
+    //     self
+    // }
 
-    pub fn recover_to_next_unused_key(
-        mut self,
-        key_type: KeyType,
-        notification_medium: UtxoNotificationMedium,
-    ) -> Self {
-        self.change_policy =
-            ChangePolicy::recover_to_next_unused_key(key_type, notification_medium);
-        self
-    }
+    // pub fn recover_to_next_unused_key(
+    //     mut self,
+    //     key_type: KeyType,
+    //     notification_medium: UtxoNotificationMedium,
+    // ) -> Self {
+    //     self.change_policy =
+    //         ChangePolicy::recover_to_next_unused_key(key_type, notification_medium);
+    //     self
+    // }
 
-    pub fn burn_change(mut self) -> Self {
-        self.change_policy = ChangePolicy::Burn;
-        self
-    }
+    // pub fn burn_change(mut self) -> Self {
+    //     self.change_policy = ChangePolicy::Burn;
+    //     self
+    // }
 
     /// Configure the proving capacity.
     pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {

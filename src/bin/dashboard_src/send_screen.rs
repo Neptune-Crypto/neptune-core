@@ -154,7 +154,7 @@ impl SendScreen {
             .send(
                 send_ctx,
                 token,
-                OutputFormat::AddressAndAmount(valid_address, valid_amount),
+                vec![OutputFormat::AddressAndAmount(valid_address, valid_amount)],
                 ChangePolicy::recover_to_next_unused_key(
                     KeyType::Symmetric,
                     UtxoNotificationMedium::OnChain,

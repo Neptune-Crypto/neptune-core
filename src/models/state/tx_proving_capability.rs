@@ -6,13 +6,23 @@ use clap::Parser;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, PartialOrd,
+)]
+#[repr(u8)]
 pub enum TxProvingCapability {
     #[default]
-    LockScript,
-    PrimitiveWitness,
-    ProofCollection,
-    SingleProof,
+    LockScript = 1,
+    PrimitiveWitness = 2,
+    ProofCollection = 3,
+    SingleProof = 4,
+}
+
+impl TxProvingCapability {
+    pub(crate) fn can_prove(&self, other: Self) -> bool {
+        // LockScript is not yet supported.
+        *self >= other && other != Self::LockScript
+    }
 }
 
 impl Display for TxProvingCapability {

@@ -15,6 +15,7 @@ pub struct TransactionProofBuilder {
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
     tx_proving_capability: TxProvingCapability,
+    proof_type: Option<TxProvingCapability>,
 }
 
 impl TransactionProofBuilder {
@@ -37,6 +38,11 @@ impl TransactionProofBuilder {
         self
     }
 
+    pub fn proof_type(mut self, proof_type: TxProvingCapability) -> Self {
+        self.proof_type = Some(proof_type);
+        self
+    }
+
     pub fn tx_proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
         self.tx_proving_capability = tx_proving_capability;
         self
@@ -50,13 +56,22 @@ impl TransactionProofBuilder {
 
         let TransactionProofBuilder {
             proof_job_options,
+            proof_type,
             tx_proving_capability,
             ..
         } = self;
 
+        // if proof_type is not provided, then we default to the max we are
+        // capable of.
+        let proof_type = proof_type.unwrap_or(tx_proving_capability);
+
+        if !tx_proving_capability.can_prove(proof_type) {
+            anyhow::bail!("cannot build: insufficient proving capability");
+        }
+
         let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);
 
-        let transaction_proof = match tx_proving_capability {
+        let transaction_proof = match proof_type {
             TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
