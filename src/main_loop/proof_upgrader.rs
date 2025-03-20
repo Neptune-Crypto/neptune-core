@@ -441,10 +441,12 @@ impl UpgradeJob {
                 SpendingKey::from(own_wallet_entropy.nth_generation_spending_key(0))
             }
         };
-        let receiver_preimage = gobble_beneficiary_key.privacy_preimage().unwrap();
+        let receiver_preimage = gobble_beneficiary_key
+            .privacy_preimage()
+            .expect("gobble beneficiary key cannot be a raw hash lock");
         let gobble_beneficiary_address = gobble_beneficiary_key
             .to_address()
-            .expect("gobble receiver should have a corresponding address");
+            .expect("gobble beneficiary should have a corresponding address");
 
         let fee_notification_method = match notification_policy {
             FeeNotificationPolicy::OffChain => {
