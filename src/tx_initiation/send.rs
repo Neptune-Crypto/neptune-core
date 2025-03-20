@@ -38,7 +38,7 @@ impl TransactionSender {
         Self { global_state_lock }
     }
 
-    pub async fn record_and_broadcast_tx(
+    pub async fn record_and_broadcast_transaction(
         &mut self,
         tx: &TxCreationArtifacts,
     ) -> Result<(), error::SendError> {
@@ -251,7 +251,7 @@ impl TransactionSender {
 
         tracing::debug!("send-to-many: step 4. record and broadcast tx.");
 
-        self.record_and_broadcast_tx(&tx_artifacts).await?;
+        self.record_and_broadcast_transaction(&tx_artifacts).await?;
 
         Ok(tx_artifacts)
     }

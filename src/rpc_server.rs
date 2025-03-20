@@ -1532,6 +1532,12 @@ pub trait RPC {
         transaction_proof: TransactionProof,
     ) -> RpcResult<Transaction>;
 
+    /// record transaction and initiate broadcast to peers
+    async fn record_and_broadcast_transaction(
+        token: rpc_auth::Token,
+        tx_artifacts: TxCreationArtifacts,
+    ) -> RpcResult<()>;
+
     /// Send coins to a single recipient.
     ///
     /// See docs for [send_to_many()](Self::send_to_many())
@@ -2865,6 +2871,21 @@ impl RPC for NeptuneRPCServer {
 
         Ok(send::TransactionSender::new(self.state.clone())
             .assemble_transaction(Arc::new(transaction_details), transaction_proof)?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn record_and_broadcast_transaction(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        tx_artifacts: TxCreationArtifacts,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(send::TransactionSender::new(self.state.clone())
+            .record_and_broadcast_transaction(&tx_artifacts)
+            .await?)
     }
 
     // documented in trait. do not add doc-comment.
