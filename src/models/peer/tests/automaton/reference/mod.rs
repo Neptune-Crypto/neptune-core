@@ -34,7 +34,7 @@ enum SyncStage {
 // Feels like for peering it's not relevant what mode the node is on: syncing or mining.
 #[derive(Debug, Clone)]
 pub(crate) struct Automaton {
-    blocks: Vec<Block>,
+    pub blocks: Vec<Block>,
     // inbound_connection: bool,
     // distance: u8,
     sync_stage: Option<SyncStage>,
@@ -46,7 +46,9 @@ pub struct Transition(pub PeerMessage, pub Option<AssosiatedData>);
 #[derive(Debug, Clone)]
 pub enum AssosiatedData {
     NewBlock(Block),
-    Randomness([u8; 32]),
+    /// feels like randomness is not interesting, but flagging validity could be
+    // Randomness([u8; 32]),
+    Valid,
     MakeNewBlocks(Timestamp, [u8; 32]),
 }
 impl From<SyncChallengeResponse> for Transition {

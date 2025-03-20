@@ -3,7 +3,7 @@
 
 use futures::SinkExt;
 use proptest_state_machine::ReferenceStateMachine;
-use reference::AssosiatedData;
+use reference::{AssosiatedData, Transition};
 use tokio::runtime::Runtime;
 
 use crate::{
@@ -12,6 +12,8 @@ use crate::{
 
 pub mod reference;
 mod stream_mock;
+
+const BLOCKS_NEW_LEN: usize = 11;
 
 struct TheSut {
     main_sim: crate::mpsc::Receiver<PeerTaskToMain>,
@@ -25,6 +27,7 @@ struct TheSut {
     g: GlobalStateLock,
     peer_address: std::net::SocketAddr,
     // h: PeerLoopHandler,
+    stopped: bool,
 }
 impl proptest_state_machine::StateMachineTest for TheSut {
     type SystemUnderTest = Self;
@@ -83,6 +86,7 @@ impl proptest_state_machine::StateMachineTest for TheSut {
             g: g.clone(),
             peer_address,
             // h
+            stopped: false,
         }
     }
 
@@ -91,6 +95,9 @@ impl proptest_state_machine::StateMachineTest for TheSut {
         _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
+        if state.stopped {
+            return state;
+        }
         let Self {
             // mut h,
             mut main_sim,
@@ -103,14 +110,54 @@ impl proptest_state_machine::StateMachineTest for TheSut {
             g,
             peer_address,
             // h
+            mut stopped,
         } = state;
 
+        let mut g_cloned = g.clone();
+        let mut blocks_stuff = async |bs: Vec<crate::models::blockchain::block::Block>| {
+            let jq = g_cloned.vm_job_queue().clone();
+            let mut g_guard = g_cloned.lock_guard_mut().await;
+            for b in bs {
+                dbg!(g_guard.set_new_tip(b).await.unwrap())
+                    .into_iter()
+                    .for_each(|j| {
+                        rt.block_on(async {
+                            j.upgrade(&jq, Default::default()).await.unwrap();
+                        })
+                    });
+            }
+        };
+        // this gives a path problem
+        // let mut g_cloned = g.clone();
+        // let mut blocks_stuff_t = async |bs: Vec<crate::models::blockchain::block::Block>| {
+        //     let mut g_guard = g_cloned.lock_guard_mut().await;
+        //     let archival = g_guard.chain.archival_state_mut();
+        //     for b in bs {
+        //         crate::tests::shared::add_block_to_archival_state(archival, b).await.unwrap();
+        //     }
+        // };
+        #[allow(clippy::shadow_unrelated)]
         let g_cloned = g.clone();
 
-        if let Some(AssosiatedData::Randomness(_r)) = transition.1 {
-            todo!("h.set_rng(StdRng::from(r));");
-        }
         rt.block_on(async {
+            dbg!(&transition);
+            match transition {
+                Transition(_, Some(AssosiatedData::MakeNewBlocks(..))) => {
+                    // blocks_stuff(ref_state.blocks[ref_state.blocks.len()-1 - BLOCKS_NEW_LEN..].into()).await;
+
+                    // let mut g_guard = g_cloned.lock_guard_mut().await;
+                    // let l = ref_state.blocks.len();
+                    // for i in BLOCKS_NEW_LEN..1 {
+                    //     // let _ = g_guard.store_block_not_tip(ref_state.blocks[l-1 -i].clone());
+                    // }
+                    // // let _ = dbg!(g_guard.set_new_tip(ref_state.blocks[l-1].clone()).await);
+                }
+                Transition(_, Some(AssosiatedData::NewBlock(b))) => {
+                    blocks_stuff(vec![b]).await;
+                }
+                _ => {}
+            };
+
             // h.handle_peer_message_test(transition, &mut sink, &mut counter)
             sock.send(transition.0).await.unwrap();
 
@@ -126,6 +173,18 @@ impl proptest_state_machine::StateMachineTest for TheSut {
             // .standing;
             // PeerTaskToMain::,
             // ];
+
+            if let Some(crate::models::peer::peer_info::PeerInfo { standing, .. }) = g_cloned
+                .lock_guard()
+                .await
+                .net
+                .peer_map
+                .get(&state.peer_address)
+            {
+                if standing.is_bad() {
+                    stopped = true;
+                }
+            }
         });
 
         Self {
@@ -136,6 +195,7 @@ impl proptest_state_machine::StateMachineTest for TheSut {
             g,
             peer_address,
             // h
+            stopped,
         }
     }
 }
