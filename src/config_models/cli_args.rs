@@ -82,13 +82,24 @@ pub struct Args {
     #[clap(long)]
     pub(crate) max_connections_per_ip: Option<usize>,
 
-    /// Whether to act as bootstrapper node.
+    /// Whether to act as a bootstrap node.
     ///
-    /// Bootstrapper nodes ensure that the maximum number of peers is never
-    /// reached by disconnecting from existing peers when the maximum is about
-    /// to be reached. As a result, they will respond with high likelihood to
-    /// incoming connection requests -- in contrast to regular nodes, which
-    /// refuse incoming connections when the max is reached.
+    /// Bootstrap nodes almost always accept new connections. This gives newcomers
+    /// to the network a chance to discover other nodes on the network through the
+    /// automatic peer discovery process.
+    ///
+    /// The differences between bootstrap nodes and non-bootstrap nodes are:
+    ///
+    /// - If the maximum number of peers is reached, non-bootstrap nodes refuse
+    ///   additional connection attempts, while bootstrap nodes terminate the
+    ///   longest-standing connection and accept the new connection.
+    /// - If a node that got disconnected recently tries to re-establish the same
+    ///   connection immediately, a non-bootstrap node might accept (depending on
+    ///   its current and maximum number of peers), while a bootstrap node will
+    ///   certainly refuse until the reconnect cooldown has expired.
+    /// - If a node is well-connected, it will stop trying to connect to known
+    ///   bootstrap nodes, even if this node's address is passed as an explicit peer
+    ///   via the corresponding command line argument.
     #[clap(long)]
     pub(crate) bootstrap: bool,
 
@@ -198,6 +209,10 @@ pub struct Args {
     pub(crate) sync_mode_threshold: usize,
 
     /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
+    ///
+    /// Connection attempts to bootstrap nodes will only be made if the own node is
+    /// not well-connected yet. Once enough connections to non-bootstrap peers have
+    /// been established, bootstrap nodes will not be bothered anymore.
     #[structopt(long)]
     pub(crate) peers: Vec<SocketAddr>,
 
