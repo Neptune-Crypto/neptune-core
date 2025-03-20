@@ -430,7 +430,7 @@ impl UpgradeJob {
         own_wallet_entropy: &WalletEntropy,
         notification_policy: FeeNotificationPolicy,
     ) -> (UtxoNotifyMethod, Digest) {
-        let gobble_receiver_key = match notification_policy {
+        let gobble_beneficiary_key = match notification_policy {
             FeeNotificationPolicy::OffChain => {
                 SpendingKey::from(own_wallet_entropy.nth_symmetric_key(0))
             }
@@ -441,18 +441,20 @@ impl UpgradeJob {
                 SpendingKey::from(own_wallet_entropy.nth_generation_spending_key(0))
             }
         };
-        let receiver_preimage = gobble_receiver_key.privacy_preimage().unwrap();
-        let gobble_receiver_address = gobble_receiver_key
+        let receiver_preimage = gobble_beneficiary_key.privacy_preimage().unwrap();
+        let gobble_beneficiary_address = gobble_beneficiary_key
             .to_address()
             .expect("gobble receiver should have a corresponding address");
 
         let fee_notification_method = match notification_policy {
-            FeeNotificationPolicy::OffChain => UtxoNotifyMethod::OffChain(gobble_receiver_address),
+            FeeNotificationPolicy::OffChain => {
+                UtxoNotifyMethod::OffChain(gobble_beneficiary_address)
+            }
             FeeNotificationPolicy::OnChainSymmetric => {
-                UtxoNotifyMethod::OnChain(gobble_receiver_address)
+                UtxoNotifyMethod::OnChain(gobble_beneficiary_address)
             }
             FeeNotificationPolicy::OnChainGeneration => {
-                UtxoNotifyMethod::OnChain(gobble_receiver_address)
+                UtxoNotifyMethod::OnChain(gobble_beneficiary_address)
             }
         };
 
