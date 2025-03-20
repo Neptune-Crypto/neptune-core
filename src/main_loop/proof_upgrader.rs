@@ -481,7 +481,7 @@ impl UpgradeJob {
         let mutator_set = self.mutator_set();
         let old_tx_timestamp = self.old_tx_timestamp();
 
-        let (maybe_gobbler_transaction, expected_utxos) = if gobbling_fee.is_positive() {
+        let (maybe_gobbler, expected_utxos) = if gobbling_fee.is_positive() {
             info!("Producing gobbler-transaction for a value of {gobbling_fee}");
             let (utxo_notification_method, receiver_preimage) =
                 Self::gobbler_notification_method_with_receiver_preimage(
@@ -489,7 +489,7 @@ impl UpgradeJob {
                     fee_notification_policy,
                 );
             let receiver_digest = receiver_preimage.hash();
-            let gobbler_transaction_details = TransactionDetails::fee_gobbler(
+            let gobbler = TransactionDetails::fee_gobbler(
                 gobbling_fee,
                 own_wallet_entropy
                     .generate_sender_randomness(current_block_height, receiver_digest),
@@ -500,7 +500,7 @@ impl UpgradeJob {
 
             let expected_utxos =
                 if matches!(fee_notification_policy, FeeNotificationPolicy::OffChain) {
-                    gobbler_transaction_details
+                    gobbler
                         .tx_outputs
                         .iter()
                         .map(|x| {
@@ -515,20 +515,16 @@ impl UpgradeJob {
                 } else {
                     vec![]
                 };
-            let gobbler_primitive_witness =
-                PrimitiveWitness::from_transaction_details(&gobbler_transaction_details);
-            let gobbler_proof = SingleProof::produce(
-                &gobbler_primitive_witness,
-                triton_vm_job_queue,
-                proof_job_options.clone(),
-            )
-            .await?;
+            let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
+            let gobbler_proof =
+                SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())
+                    .await?;
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
-            let gobbler_transaction = Transaction {
-                kernel: gobbler_primitive_witness.kernel,
+            let gobbler = Transaction {
+                kernel: gobbler.kernel,
                 proof: TransactionProof::SingleProof(gobbler_proof),
             };
-            (Some(gobbler_transaction), expected_utxos)
+            (Some(gobbler), expected_utxos)
         } else {
             (None, vec![])
         };
@@ -558,8 +554,8 @@ impl UpgradeJob {
                     proof: TransactionProof::SingleProof(single_proof),
                 };
 
-                let tx = if let Some(gobbler_transaction) = maybe_gobbler_transaction {
-                    let lhs = gobbler_transaction;
+                let tx = if let Some(gobbler) = maybe_gobbler {
+                    let lhs = gobbler;
                     let rhs = upgraded_tx;
 
                     info!("Proof-upgrader: Start merging with gobbler");
@@ -606,7 +602,7 @@ impl UpgradeJob {
                 .await?;
                 info!("Proof-upgrader, merge: Done");
 
-                if let Some(gobbler) = maybe_gobbler_transaction {
+                if let Some(gobbler) = maybe_gobbler {
                     ret = gobbler
                         .merge_with(
                             ret,
