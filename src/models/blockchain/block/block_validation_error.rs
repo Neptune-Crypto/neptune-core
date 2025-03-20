@@ -73,4 +73,13 @@ pub(super) enum BlockValidationError {
     ///   2.h) 0 <= transaction fee (also checked in block program).
     #[error("fee must be non-negative")]
     NegativeFee,
+    ///   2.i) restrict number of inputs.
+    #[error("number of inputs may not be too large")]
+    TooManyInputs,
+    ///   2.j) restrict number of outputs.
+    #[error("number of outputs may not be too large")]
+    TooManyOutputs,
+    ///   2.k) restrict number of public announcements.
+    #[error("number of public announcements may not be too large")]
+    TooManyPublicAnnouncements,
 }
