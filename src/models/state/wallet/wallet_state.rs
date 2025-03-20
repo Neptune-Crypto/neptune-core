@@ -4625,6 +4625,13 @@ pub(crate) mod tests {
         ///  - The upgraded transaction is confirmed in the next block.
         ///  - After updating state with the new block, Rando observes the
         ///    upgrader fee UTXOs.
+        ///
+        /// Note that the initial transaction is currently a `ProofCollection`
+        /// transaction, and is being upgraded twice: once from
+        /// `ProofCollection` to `SingleProof`, and once from `SingleProof` to
+        /// `SingleProof` but with a new mutator set. Only the first upgrade
+        /// generates a fee under the current policy. When this policy changes,
+        /// it may suffice to generate a `SingleProof` from the start.
         async fn wallet_recovers_upgrader_fee_utxos_given_notification_policy(
             upgrade_fee_notification_policy: FeeNotificationPolicy,
         ) {
@@ -4674,21 +4681,56 @@ pub(crate) mod tests {
             let change_medium = UtxoNotificationMedium::OnChain;
             let now = network.launch_date() + Timestamp::months(7);
             let dummy_queue = TritonVmJobQueue::dummy();
-            let (transaction, _change_outputs) = global_state_lock
+            let (proof_collection_transaction, _change_outputs, _) = global_state_lock
                 .lock_guard()
                 .await
-                .create_transaction(
+                .create_transaction_with_prover_capability(
                     tx_outputs.into(),
                     change_key.into(),
                     change_medium,
                     fee,
                     now,
+                    TxProvingCapability::ProofCollection,
                     &dummy_queue,
                 )
                 .await
                 .unwrap();
-            let old_num_outputs = transaction.kernel.outputs.len();
-            let old_num_public_announcements = transaction.kernel.public_announcements.len();
+            let old_num_public_announcements = proof_collection_transaction
+                .kernel
+                .public_announcements
+                .len();
+
+            // let Rando upgrade that transaction
+            // from proof collection to single proof
+            let rando_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let rando_cli_args = cli_args::Args {
+                fee_notification: upgrade_fee_notification_policy,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                // necessary to allow proof-collection -> single-proof upgrades for foreign transactions
+                compose: true,
+                ..Default::default()
+            };
+            let mut rando_global_state_lock =
+                mock_genesis_global_state(network, 2, rando_wallet_secret.clone(), rando_cli_args)
+                    .await;
+            let upgrade_job_one = UpgradeJob::ProofCollectionToSingleProof {
+                kernel: proof_collection_transaction.kernel,
+                proof: proof_collection_transaction.proof.into_proof_collection(),
+                mutator_set: genesis_block.mutator_set_accumulator_after(),
+                gobbling_fee: fee,
+            };
+            let (channel_to_nowhere_one, nowhere_one) =
+                broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+            upgrade_job_one
+                .handle_upgrade(
+                    &dummy_queue,
+                    TransactionOrigin::Foreign,
+                    true,
+                    rando_global_state_lock.clone(),
+                    channel_to_nowhere_one,
+                )
+                .await;
+            drop(nowhere_one); // drop must occur after message is sent
 
             // create block ignoring that transaction
             let (block_transaction, _composer_utxos) = create_block_transaction(
@@ -4699,7 +4741,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-            let new_block = Block::compose(
+            let block_one = Block::compose(
                 &genesis_block,
                 block_transaction,
                 now,
@@ -4709,41 +4751,47 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-
-            // let Rando update ignored transaction
-            let rando_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
-            let rando_cli_args = cli_args::Args {
-                fee_notification: upgrade_fee_notification_policy,
-                tx_proving_capability: Some(TxProvingCapability::SingleProof),
-                ..Default::default()
-            };
-            let mut rando_global_state_lock =
-                mock_genesis_global_state(network, 2, rando_wallet_secret.clone(), rando_cli_args)
-                    .await;
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_one.clone())
+                .await
+                .unwrap();
             rando_global_state_lock
                 .lock_guard_mut()
                 .await
-                .set_new_tip(new_block.clone())
+                .set_new_tip(block_one.clone())
                 .await
                 .unwrap();
-            let upgrade_job = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
-                transaction.kernel,
-                transaction.proof.into_single_proof(),
+
+            // upgrade transaction again
+            // this time mutator set data
+            let single_proof_transaction = rando_global_state_lock
+                .lock_guard()
+                .await
+                .mempool
+                .get_transactions_for_block(10_000_000, None, true)[0]
+                .clone();
+            let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
+                single_proof_transaction.kernel,
+                single_proof_transaction.proof.into_single_proof(),
                 genesis_block.mutator_set_accumulator_after(),
-                new_block.mutator_set_update(),
+                block_one.mutator_set_update(),
             ));
-            let (channel_to_nowhere, nowhere) =
+            let (channel_to_nowhere_two, nowhere_two) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
-            upgrade_job
+            upgrade_job_two
                 .handle_upgrade(
                     &dummy_queue,
                     TransactionOrigin::Foreign,
                     true,
                     rando_global_state_lock.clone(),
-                    channel_to_nowhere,
+                    channel_to_nowhere_two,
                 )
                 .await;
-            drop(nowhere);
+            drop(nowhere_two); // drop must occur after message is sent
+
+            // get upgraded transaction
             let transactions_for_block = rando_global_state_lock
                 .lock_guard()
                 .await
@@ -4751,18 +4799,38 @@ pub(crate) mod tests {
                 .get_transactions_for_block(10_000_000, None, true);
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
-            let new_num_outputs = upgraded_transaction.kernel.outputs.len();
-            assert_eq!(old_num_outputs, new_num_outputs);
             let new_num_public_announcements =
                 upgraded_transaction.kernel.public_announcements.len();
             if upgrade_fee_notification_policy == FeeNotificationPolicy::OffChain {
                 assert_eq!(old_num_public_announcements, new_num_public_announcements);
+            } else {
+                assert_ne!(old_num_public_announcements, new_num_public_announcements);
             }
 
+            // merge with some other transaction to set merge bit
+            let (some_other_transaction, _) = create_block_transaction(
+                &block_one,
+                &global_state_lock,
+                block_one.header().timestamp + Timestamp::minutes(10),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            let block_two_transaction = some_other_transaction
+                .merge_with(
+                    upgraded_transaction,
+                    rng.random(),
+                    &dummy_queue,
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+
             // create block with that transaction
-            let confirming_block = Block::compose(
-                &genesis_block,
-                transactions_for_block[0].clone(),
+            let block_two = Block::compose(
+                &block_one,
+                block_two_transaction,
                 now + Timestamp::minutes(10),
                 None,
                 &dummy_queue,
@@ -4775,7 +4843,7 @@ pub(crate) mod tests {
             rando_global_state_lock
                 .lock_guard_mut()
                 .await
-                .set_new_tip(confirming_block.clone())
+                .set_new_tip(block_two.clone())
                 .await
                 .unwrap();
 
@@ -4784,10 +4852,7 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(
-                    confirming_block.hash(),
-                    &confirming_block.mutator_set_accumulator_after(),
-                )
+                .get_wallet_status(block_two.hash(), &block_two.mutator_set_accumulator_after())
                 .await;
             assert_eq!(2, wallet_status.synced_unspent.len());
         }

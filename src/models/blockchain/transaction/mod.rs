@@ -92,6 +92,19 @@ impl TransactionProof {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn into_proof_collection(self) -> ProofCollection {
+        match self {
+            TransactionProof::Witness(_primitive_witness) => {
+                panic!("Expected ProofCollection, got Witness")
+            }
+            TransactionProof::SingleProof(_proof) => {
+                panic!("Expected ProofCollection, got SingleProof")
+            }
+            TransactionProof::ProofCollection(proof_collection) => proof_collection,
+        }
+    }
+
     pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
         match self {
             TransactionProof::Witness(_) => bail!("Primitive witness does not have a proof"),
