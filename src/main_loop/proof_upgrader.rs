@@ -336,14 +336,14 @@ impl UpgradeJob {
                 // Did we receive a new block while proving? If so, perform an
                 // update also, if this was requested.
 
-                let transaction_is_deprecated = upgraded.kernel.mutator_set_hash
-                    != global_state
+                let transaction_is_up_to_date = upgraded.kernel.mutator_set_hash
+                    == global_state
                         .chain
                         .light_state()
                         .mutator_set_accumulator_after()
                         .hash();
 
-                if !transaction_is_deprecated {
+                if transaction_is_up_to_date {
                     // Happy path
 
                     // Insert tx into mempool before notifying peers, so we're
