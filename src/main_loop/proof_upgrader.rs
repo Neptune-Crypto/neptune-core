@@ -155,6 +155,17 @@ impl UpgradeJob {
         }
     }
 
+    /// The gobbling fee charged for an upgrade job
+    ///
+    /// Gobbling fees are charged when a transaction is upgraded from
+    /// proof-collectino to single-proof, or when two single proofs are merged.
+    /// The other cases are either not worth it, as you need to create a single-
+    /// proof to gobble, or the proof upgrade relates to own funds.
+    ///
+    /// In particular, no fees are charged for updating a transaction's mutator
+    /// set data because doing so would require a single proof and a merge step,
+    /// which would delay that transaction's propagation and confirmation by the
+    /// network. This policy could be revised when proving gets faster.
     fn gobbling_fee(&self) -> NativeCurrencyAmount {
         match self {
             UpgradeJob::ProofCollectionToSingleProof { gobbling_fee, .. } => *gobbling_fee,

@@ -50,7 +50,7 @@ use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::database::NeptuneLevelDb;
-use crate::mine_loop::coinbase_outputs;
+use crate::mine_loop::composer_outputs;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -1208,7 +1208,7 @@ impl WalletState {
 
             // derive the composer fee UTXOs as the own miner would have
             let coinbase_amount = Block::block_subsidy(new_block.header().height);
-            let composer_txos = coinbase_outputs(
+            let composer_txos = composer_outputs(
                 coinbase_amount,
                 composer_parameters.clone(),
                 new_block.header().timestamp,
@@ -3470,9 +3470,8 @@ pub(crate) mod tests {
         mod worker {
             use super::*;
             use crate::database::storage::storage_schema::traits::StorageWriter;
-            use crate::tests::shared::{
-                mock_genesis_wallet_state_with_data_dir, unit_test_data_directory,
-            };
+            use crate::tests::shared::mock_genesis_wallet_state_with_data_dir;
+            use crate::tests::shared::unit_test_data_directory;
 
             /// tests that all known keys are unique for a given key-type
             ///
@@ -4408,7 +4407,7 @@ pub(crate) mod tests {
             let composer_parameters = global_state_lock
                 .lock_guard()
                 .await
-                .composer_parameters(Some(BlockHeight::genesis().next()));
+                .composer_parameters(BlockHeight::genesis().next());
             let (transaction, _composer_txos) = make_coinbase_transaction_stateless(
                 &previous_block,
                 composer_parameters.clone(),
@@ -4462,6 +4461,7 @@ pub(crate) mod tests {
 
     pub(crate) mod fee_notifications {
 
+        use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::main_loop::proof_upgrader::UpgradeJob;
@@ -4472,8 +4472,6 @@ pub(crate) mod tests {
         use crate::models::state::mempool::TransactionOrigin;
         use crate::MainToPeerTask;
         use crate::PEER_CHANNEL_CAPACITY;
-
-        use super::*;
 
         #[traced_test]
         #[tokio::test]
@@ -4524,7 +4522,7 @@ pub(crate) mod tests {
             let composer_parameters = global_state_lock
                 .lock_guard()
                 .await
-                .composer_parameters(Some(BlockHeight::genesis()));
+                .composer_parameters(BlockHeight::genesis());
             let (transaction, composer_txos) = make_coinbase_transaction_stateless(
                 &previous_block,
                 composer_parameters.clone(),

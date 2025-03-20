@@ -400,17 +400,9 @@ impl GlobalState {
     /// block from the state.
     ///
     /// The relevant CLI parameters are read from the CLI arguments living on
-    /// [`GlobalState`]. If `None` is passed for `maybe_next_block_height` then
-    /// the current block height is read from state. However, in some cases
-    /// (e.g., resolving race conditions) it is necessary to override that state
-    /// read, and in such cases the supplied `Some` block height is used
-    /// instead.
-    pub(crate) fn composer_parameters(
-        &self,
-        maybe_next_block_height: Option<BlockHeight>,
-    ) -> ComposerParameters {
-        let next_block_height = maybe_next_block_height
-            .unwrap_or_else(|| self.chain.light_state().header().height.next());
+    /// [`GlobalState`]. The next block height is passed as an argument since
+    /// the callers need to declare this, to resolve race conditions.
+    pub(crate) fn composer_parameters(&self, next_block_height: BlockHeight) -> ComposerParameters {
         self.wallet_state.composer_parameters(
             next_block_height,
             self.cli.guesser_fraction,

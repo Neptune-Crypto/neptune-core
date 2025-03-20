@@ -10,6 +10,7 @@ use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
 use zeroize::ZeroizeOnDrop;
 
+use super::address::ReceivingAddress;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::hash_lock_key;
@@ -17,8 +18,6 @@ use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::symmetric_key;
 use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use crate::prelude::twenty_first;
-
-use super::address::ReceivingAddress;
 
 /// The wallet's one source of randomness, from which all keys are derived.
 ///
