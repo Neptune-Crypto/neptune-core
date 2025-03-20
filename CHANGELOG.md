@@ -1,3 +1,110 @@
+## [0.2.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.1.3..v0.2.0) - 2025-03-20
+
+### 🔱 Fork
+
+- (!) Increase block size ([cbbd063d](https://github.com/Neptune-Crypto/neptune-core/commit/cbbd063d))
+
+### ✨ Features
+
+- *(CLI)* Show wallet status as table ([02a49e7a](https://github.com/Neptune-Crypto/neptune-core/commit/02a49e7a))
+- Display peer version in dashboard ([c68ff066](https://github.com/Neptune-Crypto/neptune-core/commit/c68ff066))
+- Make dashboard peers list scrollable ([89ce3fcd](https://github.com/Neptune-Crypto/neptune-core/commit/89ce3fcd))
+- Add peer column sorting ([b2d705c2](https://github.com/Neptune-Crypto/neptune-core/commit/b2d705c2))
+- Improve interactive peers sorting ([3e08e67c](https://github.com/Neptune-Crypto/neptune-core/commit/3e08e67c))
+- Use canonical ip in dashboard peers screen ([76c3a8ec](https://github.com/Neptune-Crypto/neptune-core/commit/76c3a8ec))
+- Mining status duration as human-time ([59304edc](https://github.com/Neptune-Crypto/neptune-core/commit/59304edc))
+- *(`WalletState`)* Automatically detect own guesser UTXOs ([c46eebe0](https://github.com/Neptune-Crypto/neptune-core/commit/c46eebe0))
+- Recognize own guesser UTXOs ([48c74077](https://github.com/Neptune-Crypto/neptune-core/commit/48c74077))
+- (!) Refuse connections from recent disconnects ([7fd78443](https://github.com/Neptune-Crypto/neptune-core/commit/7fd78443))
+- Add CLI subcommands for scan mode ([fffe51d4](https://github.com/Neptune-Crypto/neptune-core/commit/fffe51d4))
+- Add functions to scan for UTXOs with future keys ([31f3c145](https://github.com/Neptune-Crypto/neptune-core/commit/31f3c145))
+- Activate scanning with future keys ([0eb28311](https://github.com/Neptune-Crypto/neptune-core/commit/0eb28311))
+- Scan Mode ([69fe29d6](https://github.com/Neptune-Crypto/neptune-core/commit/69fe29d6))
+- *(rpc_server)* Support external PoW guesser programs ([dce5113b](https://github.com/Neptune-Crypto/neptune-core/commit/dce5113b))
+- *(rpc_server)* Add endpoint for external guesser, with external key ([e87ae40d](https://github.com/Neptune-Crypto/neptune-core/commit/e87ae40d))
+- *(PrimitiveWitness)* Allow updating wrt. MS update ([d145d367](https://github.com/Neptune-Crypto/neptune-core/commit/d145d367))
+- *(proof_upgrader)* Handle block/upgrade race condition for PC proofs ([9f2ad8d0](https://github.com/Neptune-Crypto/neptune-core/commit/9f2ad8d0))
+- *(rpc_server)* Add endpoint for sharing all txs in mempool ([dd345019](https://github.com/Neptune-Crypto/neptune-core/commit/dd345019))
+- *(rpc_server)* Get all public announcements in block ([c45f4bcc](https://github.com/Neptune-Crypto/neptune-core/commit/c45f4bcc))
+- Allow restricting num connections by IP ([d55ef2e4](https://github.com/Neptune-Crypto/neptune-core/commit/d55ef2e4))
+
+### 🐛 Bug Fixes
+
+- Report guessing time correctly ([da74d3ac](https://github.com/Neptune-Crypto/neptune-core/commit/da74d3ac))
+- Display peers port in dashboard peers ([d44fa976](https://github.com/Neptune-Crypto/neptune-core/commit/d44fa976))
+- Avoid holding locks across blocking send() ([4b9a2187](https://github.com/Neptune-Crypto/neptune-core/commit/4b9a2187))
+- *(main_loop)* Respect `secret_compositions` flag ([1972e8da](https://github.com/Neptune-Crypto/neptune-core/commit/1972e8da))
+- Potentially disconnect from multiple peers ([4a7cfe18](https://github.com/Neptune-Crypto/neptune-core/commit/4a7cfe18))
+- *(primitive_witness)* Actually check TVM result in validation ([b031c82d](https://github.com/Neptune-Crypto/neptune-core/commit/b031c82d))
+- *(Timestamp)* Ensure formatting cannot panic ([0a941348](https://github.com/Neptune-Crypto/neptune-core/commit/0a941348))
+- *(peer_loop)* Race condition in transaction-handling ([bba442d2](https://github.com/Neptune-Crypto/neptune-core/commit/bba442d2))
+
+### 🚀 Performance
+
+- Only assemble SingleProof program once ([264fccc9](https://github.com/Neptune-Crypto/neptune-core/commit/264fccc9))
+- Reduce time write-lock is held on new transaction ([c42e7cbf](https://github.com/Neptune-Crypto/neptune-core/commit/c42e7cbf))
+
+### 📚 Documentation
+
+- Update intra-doc links of private items ([26e52328](https://github.com/Neptune-Crypto/neptune-core/commit/26e52328))
+- Explain seeming duplication ([35a9a1ff](https://github.com/Neptune-Crypto/neptune-core/commit/35a9a1ff))
+- Fix docstring link ([14737085](https://github.com/Neptune-Crypto/neptune-core/commit/14737085))
+- Update deprecated comment on proof-updating ([94200540](https://github.com/Neptune-Crypto/neptune-core/commit/94200540))
+- Add various badges to README ([2240475f](https://github.com/Neptune-Crypto/neptune-core/commit/2240475f))
+
+### ♻️  Refactor
+
+- Improve PeerMessage::BlockProposal ([696a9cce](https://github.com/Neptune-Crypto/neptune-core/commit/696a9cce))
+- Avoid passing guesser preimages ([f3476e9b](https://github.com/Neptune-Crypto/neptune-core/commit/f3476e9b))
+- *(`Utxo`)* Remove confusing function ([fe94cd54](https://github.com/Neptune-Crypto/neptune-core/commit/fe94cd54))
+- Reduce ways of setting new tip to one ([1f5b7e69](https://github.com/Neptune-Crypto/neptune-core/commit/1f5b7e69))
+- Make `max_num_peers` a `usize` ([d6436cc6](https://github.com/Neptune-Crypto/neptune-core/commit/d6436cc6))
+- Separate reconnecter from peer discovery ([6c115f30](https://github.com/Neptune-Crypto/neptune-core/commit/6c115f30))
+- Track state for scan mode configuration ([c33a9b6d](https://github.com/Neptune-Crypto/neptune-core/commit/c33a9b6d))
+- Separate `WalletSecret` -> `WalletEntropy` + `WalletFile` ([79f2eeb4](https://github.com/Neptune-Crypto/neptune-core/commit/79f2eeb4))
+- Factor out `WalletConfiguration` ([07ab1ef7](https://github.com/Neptune-Crypto/neptune-core/commit/07ab1ef7))
+- *(`ScanModeConfiguration`)* Allow commuting constructor-helpers ([4b317b37](https://github.com/Neptune-Crypto/neptune-core/commit/4b317b37))
+- *(`WalletState`)* Improve scan mode logic and configuration ([68eca269](https://github.com/Neptune-Crypto/neptune-core/commit/68eca269))
+- Add new type `AuthenticatedItem` ([cbfcd770](https://github.com/Neptune-Crypto/neptune-core/commit/cbfcd770))
+- Remove redundant else for all features ([4066f753](https://github.com/Neptune-Crypto/neptune-core/commit/4066f753))
+- Use `tokio::interval` over `sleep` ([56fc3d80](https://github.com/Neptune-Crypto/neptune-core/commit/56fc3d80))
+
+### ✅ Testing
+
+- Test guesser fee scanner in isolation ([c7bcef48](https://github.com/Neptune-Crypto/neptune-core/commit/c7bcef48))
+- Only retrieve http response body if 2xx Ok. ([7131158a](https://github.com/Neptune-Crypto/neptune-core/commit/7131158a))
+- Reduce scope of MMR mutability ([0aa6f569](https://github.com/Neptune-Crypto/neptune-core/commit/0aa6f569))
+- Add test that genesis block is unchanged ([6ffd2d56](https://github.com/Neptune-Crypto/neptune-core/commit/6ffd2d56))
+- Test seed recovery of UTXOs with scan mode ([8b2fb4c3](https://github.com/Neptune-Crypto/neptune-core/commit/8b2fb4c3))
+- *(`WalletState`)* Add test of `scan_for_announced_utxos` ([5d2b8467](https://github.com/Neptune-Crypto/neptune-core/commit/5d2b8467))
+- *(proof_upgrader)* Also test PW->SP path ([fb96630e](https://github.com/Neptune-Crypto/neptune-core/commit/fb96630e))
+- *(Timestamp)* Add tests that constructors are sane and correct ([a2516ba4](https://github.com/Neptune-Crypto/neptune-core/commit/a2516ba4))
+- Verify size of block subsidy ([2e941edb](https://github.com/Neptune-Crypto/neptune-core/commit/2e941edb))
+- Link observed mining reward with expected block subsidy ([ac9d7454](https://github.com/Neptune-Crypto/neptune-core/commit/ac9d7454))
+
+### ⏱ Benchmark
+
+- Add PoW benchmark showing hash rate ([81e1264a](https://github.com/Neptune-Crypto/neptune-core/commit/81e1264a))
+
+### ⚙️  Miscellaneous
+
+- Simplify start_guessing check in mine-loop ([8f137255](https://github.com/Neptune-Crypto/neptune-core/commit/8f137255))
+- Add a script to display unique log msgs by type ([5da0a73c](https://github.com/Neptune-Crypto/neptune-core/commit/5da0a73c))
+- Do not log slow scope across peer.send() ([6546829f](https://github.com/Neptune-Crypto/neptune-core/commit/6546829f))
+- Work around deprecation of ubuntu runner image ([d646753f](https://github.com/Neptune-Crypto/neptune-core/commit/d646753f))
+- Skip flaky (on GitHub CI) test ([4b90018a](https://github.com/Neptune-Crypto/neptune-core/commit/4b90018a))
+- Add new proof server to list ([5aea2770](https://github.com/Neptune-Crypto/neptune-core/commit/5aea2770))
+- Report code coverage ([2433e25f](https://github.com/Neptune-Crypto/neptune-core/commit/2433e25f))
+- Make clippy more pedantic ([61d8be47](https://github.com/Neptune-Crypto/neptune-core/commit/61d8be47))
+- Make clippy more pedantic ([512c705e](https://github.com/Neptune-Crypto/neptune-core/commit/512c705e))
+- Avoid `async fn`s without `await` points ([4d9c87a6](https://github.com/Neptune-Crypto/neptune-core/commit/4d9c87a6))
+- Avoid `as` keyword for lossless casts ([46971c30](https://github.com/Neptune-Crypto/neptune-core/commit/46971c30))
+
+### Devops
+
+- Add script for backing up incoming/outgoing randomness ([f8c61c68](https://github.com/Neptune-Crypto/neptune-core/commit/f8c61c68))
+- Add warning about also backing up `wallet.dat` ([a9d502a8](https://github.com/Neptune-Crypto/neptune-core/commit/a9d502a8))
+
 
 ## [0.1.3](https://github.com/Neptune-Crypto/neptune-core/compare/v0.1.2..v0.1.3) - 2025-02-17
 

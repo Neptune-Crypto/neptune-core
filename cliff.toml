@@ -52,13 +52,14 @@ commit_parsers = [
   { message = "^chore\\(pr\\)",     skip = true },
   { message = "^chore\\(pull\\)",   skip = true },
   { body = ".*security",            group = "<!-- 040 --> 🔒️ Security" },
-  { message = "^refactor",          group = "<!-- 050 --> ♻️ Refactor" },
+  { message = "^refactor",          group = "<!-- 050 --> ♻️  Refactor" },
   { message = "^test",              group = "<!-- 060 --> ✅ Testing" },
   { message = "^bench",             group = "<!-- 070 --> ⏱ Benchmark" },
   { message = "^style",             group = "<!-- 080 --> 🎨 Styling" },
-  { message = "^build",             group = "<!-- 090 --> 🛠 Build" },
+  { message = "^build",             group = "<!-- 090 --> 🛠  Build" },
   { message = "^revert",            group = "<!-- 100 --> ⏪️ Revert" },
-  { message = "^chore|ci|misc",     group = "<!-- 110 --> ⚙️ Miscellaneous" },
+  { message = "^chore|ci|misc",     group = "<!-- 110 --> ⚙️  Miscellaneous" },
+  { message = "^fork",              group = "<!-- 120 --> 🔱 Fork" },
   { footer = "^changelog: ?ignore", skip = true },
 ]
 
