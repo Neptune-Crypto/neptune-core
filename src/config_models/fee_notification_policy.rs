@@ -103,6 +103,7 @@ mod test {
             "onchain",
             "invalid",
             "error",
+            "",
         ];
         for argument in vectors_fail {
             assert!(FeeNotificationPolicy::parse(argument).is_err());
