@@ -19,6 +19,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time;
+use tokio::time::Instant;
 use tokio::time::MissedTickBehavior;
 use tracing::debug;
 use tracing::error;
@@ -1401,7 +1402,13 @@ impl MainLoopHandler {
         // is almost certainly a no-op.
         // Similarly, tasks performing network operations (e.g., peer discovery)
         // should probably not try to “catch up” if some ticks were missed.
-        let mut peer_discovery_interval = time::interval(PEER_DISCOVERY_INTERVAL);
+
+        // Don't run peer discovery immediately at startup since outgoing
+        // connections started from lib.rs may not have finished yet.
+        let mut peer_discovery_interval = time::interval_at(
+            Instant::now() + PEER_DISCOVERY_INTERVAL,
+            PEER_DISCOVERY_INTERVAL,
+        );
         peer_discovery_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         let mut block_sync_interval = time::interval(SYNC_REQUEST_INTERVAL);
