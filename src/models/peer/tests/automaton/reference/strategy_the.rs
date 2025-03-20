@@ -155,6 +155,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             ],
             // `BlockRequestBatch`
             // TODO need an example of the MMR part
+            //      look into `peer_loop_tests::sync_challenges`
             // (
             //     proptest::collection::vec(arb::<Digest>(), 0..crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST),
             //     1u16..100u16,
@@ -201,7 +202,8 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                                         randomness,
                                     )
                                     .into(),
-                                    Some(AssosiatedData::Randomness(randomness)),
+                                    // Some(AssosiatedData::Randomness(randomness)),
+                                    Some(AssosiatedData::Valid),
                                 )
                             })
                             .boxed(),
@@ -221,7 +223,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                         &tip_at_request,
                         *ts,
                         *seed_the,
-                        11,
+                        super::super::BLOCKS_NEW_LEN,
                     ),
                 ));
                 if &PeerMessage::BlockNotificationRequest == variant {
@@ -238,7 +240,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                     state.sync_stage = Some(SyncStage::WaitingForChallengeResponse);
                 }
             }
-            Transition(PeerMessage::SyncChallenge(_), Some(AssosiatedData::Randomness(_))) => {
+            Transition(PeerMessage::SyncChallenge(_), Some(AssosiatedData::Valid)) => {
                 state.sync_stage =
                     // Some(SyncStage::DoneWithRandomness(randomness.clone()));
                     None;
