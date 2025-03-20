@@ -10,7 +10,6 @@ use block_header::BlockHeaderField;
 use block_header::MINIMUM_BLOCK_TIME;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
-use itertools::Itertools;
 use num_traits::CheckedSub;
 use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
@@ -28,6 +27,7 @@ use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
+use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::JobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -398,13 +398,14 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     Ok((transaction, composer_outputs))
 }
 
-/// Produce two outputs spending a given portion of the coinbase.
+/// Produce two outputs spending a given portion of the coinbase amount which is
+/// usually set to the block subsidy for this block height.
 ///
-/// The coinbase is the block subsidy plus the anticipated transaction fee.
 /// There are two outputs because one is liquid immediately, and the other is
-/// locked for 3 years. The portion is determined by the guesser fee fraction
-/// field of the composer parameters.
-pub(crate) fn coinbase_outputs(
+/// locked for 3 years. The portion of the block subsidy that goes to the
+/// composer is determined by the guesser fee fraction field of the composer
+/// parameters.
+pub(crate) fn composer_outputs(
     coinbase_amount: NativeCurrencyAmount,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
@@ -420,9 +421,12 @@ pub(crate) fn coinbase_outputs(
         );
     };
 
+    // Note that this calculation guarantees that at least half of the coinbase
+    // is timelocked, as a rounding error in the last digit subtracts from the
+    // liquid amount. This quality is required by the NativeCurrency type
+    // script.
     let mut liquid_composer_amount = amount_to_composer;
     liquid_composer_amount.div_two();
-
     let timelocked_composer_amount = amount_to_composer
         .checked_sub(&liquid_composer_amount)
         .expect("Amount to composer must be larger than liquid amount to composer.");
@@ -437,7 +441,10 @@ pub(crate) fn coinbase_outputs(
     );
 
     // Set the time lock to 3 years (minimum) plus 30 minutes margin, since the
-    // timestamp might be bumped by future merges.
+    // timestamp might be bumped by future merges. These timestamp bumps affect
+    // only the `timestamp` field of the transaction kernel and not the state
+    // of the `TimeLock` type script. So in the end you might end up with a
+    // transaction whose time-locked portion is not time-locked long enough.
     let timelocked_coinbase_output = TxOutput::native_currency(
         timelocked_composer_amount,
         composer_parameters.sender_randomness(),
@@ -463,16 +470,16 @@ pub(super) fn prepare_coinbase_transaction_stateless(
 
     let coinbase_amount = Block::block_subsidy(next_block_height);
     let [liquid_coinbase_output, timelocked_coinbase_output] =
-        coinbase_outputs(coinbase_amount, composer_parameters, timestamp)?;
+        composer_outputs(coinbase_amount, composer_parameters, timestamp)?;
     let total_composer_fee = liquid_coinbase_output.utxo().get_native_currency_amount()
         + timelocked_coinbase_output
             .utxo()
             .get_native_currency_amount();
-    let total_guesser_fee = coinbase_amount.checked_sub(&total_composer_fee).unwrap();
+    let guesser_fee = coinbase_amount.checked_sub(&total_composer_fee).unwrap();
 
     info!(
         "Coinbase amount is set to {coinbase_amount} and is divided between \
-        composer fee ({total_composer_fee}) and guesser fee ({total_guesser_fee})."
+        composer fee ({total_composer_fee}) and guesser fee ({guesser_fee})."
     );
 
     let composer_outputs: TxOutputList = vec![
@@ -484,7 +491,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         vec![],
         composer_outputs.clone(),
         coinbase_amount,
-        total_guesser_fee,
+        guesser_fee,
         timestamp,
         mutator_set_accumulator,
     )
@@ -548,7 +555,7 @@ pub(crate) async fn create_block_transaction_from(
     let composer_parameters = global_state_lock
         .lock_guard()
         .await
-        .composer_parameters(Some(predecessor_block.header().height.next()));
+        .composer_parameters(predecessor_block.header().height.next());
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
@@ -615,22 +622,23 @@ pub(crate) async fn create_block_transaction_from(
         .expect("Must be able to merge transactions in mining context");
     }
 
-    let own_expected_utxos =
-        composer_parameters
-            .maybe_receiver_preimage()
-            .map_or(vec![], |receiver_preimage| {
-                composer_txos
-                    .iter()
-                    .map(|txo| {
-                        ExpectedUtxo::new(
-                            txo.utxo(),
-                            txo.sender_randomness(),
-                            receiver_preimage,
-                            UtxoNotifier::OwnMinerComposeBlock,
-                        )
-                    })
-                    .collect_vec()
-            });
+    // If composer UTXO notifications are sent onchain, the wallet does not need
+    // to expect them. If they are handled offchain, the wallet must be
+    // notified, but only if the receiver preimage is known (otherwise which
+    // wallet to notify?).
+    let mut own_expected_utxos = vec![];
+    if composer_parameters.notification_policy() == FeeNotificationPolicy::OffChain {
+        if let Some(receiver_preimage) = composer_parameters.maybe_receiver_preimage() {
+            own_expected_utxos.extend(composer_txos.into_iter().map(|txo| {
+                ExpectedUtxo::new(
+                    txo.utxo(),
+                    txo.sender_randomness(),
+                    receiver_preimage,
+                    UtxoNotifier::OwnMinerComposeBlock,
+                )
+            }));
+        }
+    }
 
     Ok((block_transaction, own_expected_utxos))
 }
@@ -1021,7 +1029,7 @@ pub(crate) mod mine_loop_tests {
         let composer_parameters = global_state_lock
             .lock_guard()
             .await
-            .composer_parameters(Some(next_block_height));
+            .composer_parameters(next_block_height);
         let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
             latest_block,
             composer_parameters.clone(),
@@ -1227,7 +1235,7 @@ pub(crate) mod mine_loop_tests {
 
             cli.guesser_fraction = guesser_fee_fraction;
             alice.set_cli(cli.clone()).await;
-            let (transaction_empty_mempool, _coinbase_utxo_info) = {
+            let (transaction_empty_mempool, coinbase_utxo_info) = {
                 create_block_transaction(
                     &genesis_block,
                     &alice,
@@ -1237,6 +1245,11 @@ pub(crate) mod mine_loop_tests {
                 .await
                 .unwrap()
             };
+            assert!(
+                coinbase_utxo_info.is_empty(),
+                "Default composer UTXO notification policy is onchain. \
+             So no expected UTXOs should be returned here."
+            );
 
             let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
             let cb_tx_claim = SingleProof::claim(cb_txkmh);
