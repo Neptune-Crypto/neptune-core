@@ -348,12 +348,6 @@ impl Mempool {
 
         let mut events = vec![];
 
-        match new_tx.proof {
-            TransactionProof::Witness(_) => {}
-            TransactionProof::SingleProof(_) => {}
-            TransactionProof::ProofCollection(_) => {}
-        };
-
         // If transaction to be inserted conflicts with transactions already in
         // the mempool, we replace them -- but only if the new transaction has a
         // higher fee-density than the ones already in mempool. This should have
