@@ -9,6 +9,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::tx_initiation::error::CreateProofError;
 
 #[derive(Debug, Default)]
 pub struct TransactionProofBuilder {
@@ -50,9 +51,9 @@ impl TransactionProofBuilder {
     }
 
     // fn build(self) -> Result<TransactionProof, TransactionProofBuildError> {
-    pub async fn build(self) -> anyhow::Result<TransactionProof> {
+    pub async fn build(self) -> Result<TransactionProof, CreateProofError> {
         let (Some(tx_details), Some(job_queue)) = (self.transaction_details, self.job_queue) else {
-            anyhow::bail!("cannot build: missing component(s)");
+            return Err(CreateProofError::MissingRequirement);
         };
 
         let TransactionProofBuilder {
@@ -67,7 +68,7 @@ impl TransactionProofBuilder {
         let proof_type = proof_type.unwrap_or(tx_proving_capability.into());
 
         if !tx_proving_capability.can_prove(proof_type) {
-            anyhow::bail!("cannot build: insufficient proving capability");
+            return Err(CreateProofError::TooWeak);
         }
 
         let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);

@@ -1,13 +1,12 @@
-//! This is the start of an API layer for sending transactions
-//! that is callable by rust users of this crate as well
-//! as the RPC server.
+//! This is the start of an API layer for creating and sending transactions.  It
+//! is callable by rust users of this crate as well as the RPC server.
+//!
+//! The intent is to present the same API for both rust callers and RPC callers.
 
 use std::sync::Arc;
 
-use tasm_lib::prelude::Digest;
-
+use super::error;
 use crate::job_queue::triton_vm::vm_job_queue;
-use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
@@ -106,7 +105,7 @@ impl TransactionSender {
         outputs: TxOutputList,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
-    ) -> anyhow::Result<TransactionDetails> {
+    ) -> Result<TransactionDetails, error::CreateTxError> {
         let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
         let light_state = gsm.chain.light_state_clone(); // cheap Arc clone
@@ -128,7 +127,7 @@ impl TransactionSender {
         &self,
         transaction_details: Arc<TransactionDetails>,
         transaction_proof: TransactionProof,
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction, error::CreateTxError> {
         TransactionBuilder::new()
             .transaction_details(transaction_details)
             .transaction_proof(transaction_proof)
@@ -216,25 +215,25 @@ impl TransactionSender {
         &mut self,
         transaction_id: TransactionKernelId,
         transaction_proof: TransactionProof,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), error::UpgradeProofError> {
         let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
         let Some(tx) = gsm.mempool.get_mut(transaction_id) else {
-            anyhow::bail!("transaction not found in mempool");
+            return Err(error::UpgradeProofError::TxNotInMempool);
         };
 
         let new = TransactionProofType::from(&transaction_proof);
         let old = TransactionProofType::from(&tx.proof);
 
         if new <= old {
-            anyhow::bail!("input proof is not an upgrade");
+            return Err(error::UpgradeProofError::ProofNotAnUpgrade);
         }
 
         // tbd: how long does this verify take?   If too slow,
         // we could obtain tx with a read-lock first, verify,
         // then obtain again with write-lock to mutate it.
         if !transaction_proof.verify(tx.kernel.mast_hash()).await {
-            anyhow::bail!("invalid proof");
+            return Err(error::UpgradeProofError::InvalidProof);
         }
 
         // mutate
@@ -250,17 +249,19 @@ impl TransactionSender {
     pub async fn proof_type(
         &self,
         txid: TransactionKernelId,
-    ) -> anyhow::Result<TransactionProofType> {
+    ) -> Result<TransactionProofType, error::UpgradeProofError> {
         self.global_state_lock
             .lock_guard()
             .await
             .mempool
             .get(txid)
             .map(|tx| (&tx.proof).into())
-            .ok_or_else(|| anyhow::anyhow!("transaction not in mempool"))
+            .ok_or(error::UpgradeProofError::TxNotInMempool)
     }
 
-    /// note: this is a helper wrapper around TransactionDetailsBuilder,
+    /// note: this is a legacy internal (private) API.
+    ///
+    /// it is now just a wrapper around TransactionDetailsBuilder,
     /// TransactionProofBuilder and TransactionBuilder
     pub(crate) async fn create_transaction(
         &mut self,
@@ -314,7 +315,10 @@ impl TransactionSender {
         Ok(transaction_creation_artifacts)
     }
 
-    /// note: this is a helper wrapper around TransactionProofBuilder and TransactionBuilder
+    /// note: this is a legacy internal (private) API.
+    ///
+    /// note: this is now just a wrapper around TransactionProofBuilder and
+    /// TransactionBuilder
     pub(crate) async fn create_raw_transaction(
         tx_details_arc: Arc<TransactionDetails>,
         config: TxCreationConfig,
@@ -327,10 +331,10 @@ impl TransactionSender {
             .build()
             .await?;
 
-        TransactionBuilder::new()
+        Ok(TransactionBuilder::new()
             .transaction_details(tx_details_arc)
             .transaction_proof(proof)
-            .build()
+            .build()?)
     }
 
     // note: not pub, as one should never call broadcast without
@@ -368,7 +372,7 @@ impl TransactionSender {
         // abort early on negative fee
         if fee.is_negative() {
             tracing::warn!("Cannot send negative-fee transaction.");
-            return Err(error::SendError::NegativeFee);
+            return Err(error::CreateTxError::NegativeFee.into());
         }
 
         if matches!(
@@ -378,7 +382,7 @@ impl TransactionSender {
             tracing::warn!(
                 "Cannot initiate transaction because transaction proving capability is too weak."
             );
-            return Err(error::SendError::TooWeak);
+            return Err(error::CreateProofError::TooWeak.into());
         }
 
         self.check_rate_limit().await
@@ -416,48 +420,5 @@ impl TransactionSender {
             }
         }
         Ok(())
-    }
-}
-
-pub mod error {
-    use serde::Deserialize;
-    use serde::Serialize;
-
-    use super::*;
-
-    /// enumerates possible transaction send errors
-    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
-    #[non_exhaustive]
-    pub enum SendError {
-        #[error("send() is not supported by this node")]
-        Unsupported,
-
-        #[error("transaction could not be broadcast.")]
-        NotBroadcast,
-
-        // catch-all error, eg for anyhow errors
-        #[error("transaction could not be sent.  reason: {0}")]
-        Failed(String),
-
-        #[error("Transaction with negative fees not allowed")]
-        NegativeFee,
-
-        #[error("machine too weak to initiate transactions")]
-        TooWeak,
-
-        #[error("Send rate limit reached for block height {height} ({digest}). A maximum of {max} tx may be sent per block.", digest = tip_digest.to_hex())]
-        RateLimit {
-            height: BlockHeight,
-            tip_digest: Digest,
-            max: usize,
-        },
-    }
-
-    // convert anyhow::Error to a SendError::Failed.
-    // note that anyhow Error is not serializable.
-    impl From<anyhow::Error> for SendError {
-        fn from(e: anyhow::Error) -> Self {
-            Self::Failed(e.to_string())
-        }
     }
 }

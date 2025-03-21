@@ -4,6 +4,7 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::tx_initiation::error::CreateTxError;
 
 #[derive(Debug, Default)]
 pub struct TransactionBuilder {
@@ -26,10 +27,10 @@ impl TransactionBuilder {
         self
     }
 
-    pub fn build(self) -> anyhow::Result<Transaction> {
+    pub fn build(self) -> Result<Transaction, CreateTxError> {
         let (Some(tx_details), Some(proof)) = (self.transaction_details, self.transaction_proof)
         else {
-            anyhow::bail!("cannot build: missing component(s)");
+            return Err(CreateTxError::MissingRequirement);
         };
 
         let kernel = PrimitiveWitness::from_transaction_details(&tx_details).kernel;

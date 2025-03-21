@@ -110,6 +110,7 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::tx_initiation;
 use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::send;
@@ -3414,7 +3415,13 @@ pub mod error {
         ExportedBlockProposalStorageCapacityExceeded,
 
         #[error(transparent)]
-        SendError(#[from] send::error::SendError),
+        CreateTxError(#[from] tx_initiation::error::CreateTxError),
+
+        #[error(transparent)]
+        UpgradeProofError(#[from] tx_initiation::error::UpgradeProofError),
+
+        #[error(transparent)]
+        SendError(#[from] tx_initiation::error::SendError),
 
         #[error(transparent)]
         ClaimError(#[from] ClaimError),

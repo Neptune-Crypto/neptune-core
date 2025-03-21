@@ -15,6 +15,7 @@ use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::tx_initiation::error::CreateTxError;
 use crate::Block;
 use crate::WalletState;
 
@@ -54,9 +55,6 @@ impl TransactionDetailsBuilder {
         self
     }
 
-    // maybe?
-    // pub fn output_address_and_amount(mut self, ReceivingAddress, amount: NativeCurrencyAmount) -> Self;
-
     pub fn fee(mut self, amount: NativeCurrencyAmount) -> Self {
         self.fee = amount;
         self
@@ -72,13 +70,11 @@ impl TransactionDetailsBuilder {
         self
     }
 
-    // build impl could look something like:
-    // pub fn build(mut self) -> Result<TransactionDetails, TransactionDetailsBuildError> {
     pub async fn build(
         self,
         tip: &Block,
         wallet_state: &mut WalletState,
-    ) -> anyhow::Result<TransactionDetails> {
+    ) -> Result<TransactionDetails, CreateTxError> {
         let mutator_set_accumulator = tip.mutator_set_accumulator_after();
 
         let TransactionDetailsBuilder {
@@ -94,23 +90,26 @@ impl TransactionDetailsBuilder {
         let total_outbound_amount = tx_outputs
             .total_native_coins()
             .checked_add(&fee)
-            .ok_or(anyhow::anyhow!("total spend amount is too large"))?;
+            .ok_or(CreateTxError::TotalSpendTooLarge)?;
         let total_unlocked_amount = tx_inputs.total_native_coins();
 
         let change_amount = total_unlocked_amount
             .checked_sub(&total_outbound_amount)
-            .ok_or(anyhow::anyhow!("insufficient funds"))?;
+            .ok_or(CreateTxError::InsufficientFunds)?;
 
         // Add change output, if required to balance transaction
         if change_amount > 0.into() {
             let change_output = match change_policy {
                 ChangePolicy::ExactChange => {
-                    anyhow::bail!("ChangePolicy = ExactChange, but inputs exceed outputs.")
+                    return Err(CreateTxError::NotExactChange);
                 }
 
                 ChangePolicy::RecoverToNextUnusedKey { key_type, medium } => {
                     let Some(key) = wallet_state.next_unused_spending_key(key_type).await else {
-                        anyhow::bail!("provided key_type cannot be used for receiving change.");
+                        // it is gross there is now a key-type that can't be
+                        // used for change, so the call can fail, and we must
+                        // have this error variant.
+                        return Err(CreateTxError::InvalidKeyForChange);
                     };
 
                     Self::create_change_output(
@@ -140,14 +139,14 @@ impl TransactionDetailsBuilder {
             tx_outputs.push(change_output);
         }
 
-        TransactionDetails::new(
+        Ok(TransactionDetails::new(
             tx_inputs.into(),
             tx_outputs,
             fee,
             coinbase,
             timestamp,
             mutator_set_accumulator,
-        )
+        )?)
     }
 
     /// Generate a change UTXO to ensure that the difference in input amount
@@ -161,9 +160,12 @@ impl TransactionDetailsBuilder {
         change_amount: NativeCurrencyAmount,
         change_key: SpendingKey,
         change_utxo_notify_method: UtxoNotificationMedium,
-    ) -> anyhow::Result<TxOutput> {
+    ) -> Result<TxOutput, CreateTxError> {
         let Some(own_receiving_address) = change_key.to_address() else {
-            anyhow::bail!("Cannot create change output when supplied spending key has no corresponding address.");
+            // it's gross that there is now a key-type without any corresponding
+            // address, so to_address() can now fail, and we must have this
+            // error variant and return Result instead of being correct by construction.
+            return Err(CreateTxError::InvalidKeyForChange);
         };
 
         let receiver_digest = own_receiving_address.privacy_digest();
