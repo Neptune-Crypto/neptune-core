@@ -75,6 +75,7 @@ use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -149,13 +150,6 @@ pub struct DashBoardOverviewDataFromClient {
 
     /// CPU temperature in degrees Celsius
     pub cpu_temp: Option<f32>,
-}
-
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, strum::Display)]
-pub enum TransactionProofType {
-    SingleProof,
-    ProofCollection,
-    PrimitiveWitness,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
@@ -1670,7 +1664,7 @@ pub trait RPC {
     async fn proof_type(
         token: rpc_auth::Token,
         txid: TransactionKernelId,
-    ) -> RpcResult<TxProvingCapability>;
+    ) -> RpcResult<TransactionProofType>;
 
     /// claim a utxo
     ///
@@ -2955,7 +2949,7 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         token: rpc_auth::Token,
         txid: TransactionKernelId,
-    ) -> RpcResult<TxProvingCapability> {
+    ) -> RpcResult<TransactionProofType> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 

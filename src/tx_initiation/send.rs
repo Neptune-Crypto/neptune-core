@@ -9,6 +9,7 @@ use tasm_lib::prelude::Digest;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -222,8 +223,8 @@ impl TransactionSender {
             anyhow::bail!("transaction not found in mempool");
         };
 
-        let new = TxProvingCapability::from(&transaction_proof);
-        let old = TxProvingCapability::from(&tx.proof);
+        let new = TransactionProofType::from(&transaction_proof);
+        let old = TransactionProofType::from(&tx.proof);
 
         if new <= old {
             anyhow::bail!("input proof is not an upgrade");
@@ -249,7 +250,7 @@ impl TransactionSender {
     pub async fn proof_type(
         &self,
         txid: TransactionKernelId,
-    ) -> anyhow::Result<TxProvingCapability> {
+    ) -> anyhow::Result<TransactionProofType> {
         self.global_state_lock
             .lock_guard()
             .await

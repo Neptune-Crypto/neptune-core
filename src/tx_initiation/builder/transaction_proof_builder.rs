@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -15,7 +16,7 @@ pub struct TransactionProofBuilder {
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
     tx_proving_capability: TxProvingCapability,
-    proof_type: Option<TxProvingCapability>,
+    proof_type: Option<TransactionProofType>,
 }
 
 impl TransactionProofBuilder {
@@ -38,7 +39,7 @@ impl TransactionProofBuilder {
         self
     }
 
-    pub fn proof_type(mut self, proof_type: TxProvingCapability) -> Self {
+    pub fn proof_type(mut self, proof_type: TransactionProofType) -> Self {
         self.proof_type = Some(proof_type);
         self
     }
@@ -63,7 +64,7 @@ impl TransactionProofBuilder {
 
         // if proof_type is not provided, then we default to the max we are
         // capable of.
-        let proof_type = proof_type.unwrap_or(tx_proving_capability);
+        let proof_type = proof_type.unwrap_or(tx_proving_capability.into());
 
         if !tx_proving_capability.can_prove(proof_type) {
             anyhow::bail!("cannot build: insufficient proving capability");
@@ -72,12 +73,11 @@ impl TransactionProofBuilder {
         let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);
 
         let transaction_proof = match proof_type {
-            TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
-            TxProvingCapability::LockScript => todo!(),
-            TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
+            TransactionProofType::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
+            TransactionProofType::ProofCollection => TransactionProof::ProofCollection(
                 ProofCollection::produce(&primitive_witness, job_queue, proof_job_options).await?,
             ),
-            TxProvingCapability::SingleProof => TransactionProof::SingleProof(
+            TransactionProofType::SingleProof => TransactionProof::SingleProof(
                 SingleProof::produce(&primitive_witness, job_queue, proof_job_options).await?,
             ),
         };

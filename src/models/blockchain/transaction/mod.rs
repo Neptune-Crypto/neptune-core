@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -15,10 +14,10 @@ use crate::prelude::twenty_first;
 pub mod lock_script;
 pub mod primitive_witness;
 pub mod transaction_kernel;
+pub mod transaction_proof;
 pub mod utxo;
 pub mod validity;
 
-use anyhow::bail;
 use anyhow::Result;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -28,10 +27,10 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tracing::info;
+pub(crate) use transaction_proof::TransactionProof;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use validity::proof_collection::ProofCollection;
@@ -44,7 +43,6 @@ use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
 use self::transaction_kernel::TransactionKernelModifier;
 use self::transaction_kernel::TransactionKernelProxy;
-use crate::models::proof_abstractions::verifier::verify;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::proof::Proof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -67,66 +65,6 @@ impl PublicAnnouncement {
     pub fn new(message: Vec<BFieldElement>) -> Self {
         Self { message }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub enum TransactionProof {
-    Witness(PrimitiveWitness),
-    SingleProof(Proof),
-    ProofCollection(ProofCollection),
-}
-
-impl TransactionProof {
-    /// A proof that will always be invalid
-    #[cfg(test)]
-    pub(crate) fn invalid() -> Self {
-        Self::SingleProof(Proof(vec![]))
-    }
-
-    pub(crate) fn into_single_proof(self) -> Proof {
-        match self {
-            TransactionProof::SingleProof(proof) => proof,
-            TransactionProof::Witness(_) => {
-                panic!("Expected SingleProof, got Witness")
-            }
-            TransactionProof::ProofCollection(_) => {
-                panic!("Expected SingleProof, got ProofCollection")
-            }
-        }
-    }
-
-    pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
-        match self {
-            TransactionProof::Witness(_) => bail!("Primitive witness does not have a proof"),
-            TransactionProof::ProofCollection(_) => Ok(TransactionProofQuality::ProofCollection),
-            TransactionProof::SingleProof(_) => Ok(TransactionProofQuality::SingleProof),
-        }
-    }
-
-    pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
-        match self {
-            TransactionProof::Witness(primitive_witness) => {
-                !primitive_witness.kernel.merge_bit
-                    && primitive_witness.validate().await
-                    && primitive_witness.kernel.mast_hash() == kernel_mast_hash
-            }
-            TransactionProof::SingleProof(single_proof) => {
-                let claim = SingleProof::claim(kernel_mast_hash);
-                verify(claim, single_proof.clone()).await
-            }
-            TransactionProof::ProofCollection(proof_collection) => {
-                proof_collection.verify(kernel_mast_hash).await
-            }
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum TransactionProofError {
-    CannotUpdateProofVariant,
-    CannotUpdatePrimitiveWitness,
-    CannotUpdateSingleProof,
-    ProverLockWasTaken,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]

@@ -6,34 +6,44 @@ use clap::Parser;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 
-#[derive(
-    Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, PartialOrd,
-)]
-#[repr(u8)]
+#[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TxProvingCapability {
     #[default]
-    LockScript = 1,
-    PrimitiveWitness = 2,
-    ProofCollection = 3,
-    SingleProof = 4,
+    LockScript,
+    PrimitiveWitness,
+    ProofCollection,
+    SingleProof,
 }
 
-impl From<&TransactionProof> for TxProvingCapability {
-    fn from(proof: &TransactionProof) -> Self {
-        match *proof {
-            TransactionProof::Witness(_) => Self::PrimitiveWitness,
-            TransactionProof::ProofCollection(_) => Self::ProofCollection,
-            TransactionProof::SingleProof(_) => Self::SingleProof,
+impl From<TxProvingCapability> for TransactionProofType {
+    fn from(c: TxProvingCapability) -> Self {
+        match c {
+            // TransactionProofType and TxProvingCapability need to be
+            // reconciled with regards to LockScript, or merged into single type.
+            TxProvingCapability::LockScript => unimplemented!(),
+            TxProvingCapability::PrimitiveWitness => Self::PrimitiveWitness,
+            TxProvingCapability::ProofCollection => Self::ProofCollection,
+            TxProvingCapability::SingleProof => Self::SingleProof,
         }
     }
 }
 
 impl TxProvingCapability {
-    pub(crate) fn can_prove(&self, other: Self) -> bool {
-        // LockScript is not yet supported.
-        *self >= other && other != Self::LockScript
+    pub(crate) fn can_prove(&self, proof_type: TransactionProofType) -> bool {
+        assert!(proof_type as u8 > 0);
+
+        let self_val = match *self {
+            // TransactionProofType and TxProvingCapability need to be
+            // reconciled with regards to LockScript, or merged into single type.
+            Self::LockScript => 0,
+            Self::PrimitiveWitness => TransactionProofType::PrimitiveWitness as u8,
+            Self::ProofCollection => TransactionProofType::ProofCollection as u8,
+            Self::SingleProof => TransactionProofType::SingleProof as u8,
+        };
+
+        self_val >= proof_type as u8
     }
 }
 
