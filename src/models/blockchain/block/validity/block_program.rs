@@ -340,7 +340,6 @@ pub(crate) mod test {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::create_block_transaction_from;
     use crate::mine_loop::TxMergeOrigin;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
@@ -480,7 +479,6 @@ pub(crate) mod test {
                 block_tx,
                 timestamp,
                 None,
-                &TritonVmJobQueue::dummy(),
                 TritonVmProofJobOptions::default(),
             )
             .await
@@ -519,7 +517,6 @@ pub(crate) mod test {
                 fee,
                 now,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -533,7 +530,6 @@ pub(crate) mod test {
             &genesis_block.mutator_set_accumulator_after(),
             &block1.mutator_set_update(),
             tx.proof.into_single_proof(),
-            &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
             Some(later),
         )

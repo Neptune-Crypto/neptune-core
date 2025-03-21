@@ -41,7 +41,6 @@ mod wallet_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -555,7 +554,6 @@ mod wallet_tests {
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -792,7 +790,6 @@ mod wallet_tests {
                 NativeCurrencyAmount::coins(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -818,7 +815,6 @@ mod wallet_tests {
             .merge_with(
                 tx_from_bob,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -829,7 +825,6 @@ mod wallet_tests {
             merged_tx,
             timestamp,
             None,
-            &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -1006,7 +1001,6 @@ mod wallet_tests {
                 one_money,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1014,7 +1008,6 @@ mod wallet_tests {
             .merge_with(
                 cbtx,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1024,7 +1017,6 @@ mod wallet_tests {
             tx_for_block,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await

@@ -1915,7 +1915,6 @@ mod peer_loop_tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
@@ -3339,7 +3338,6 @@ mod peer_loop_tests {
                 NativeCurrencyAmount::coins(0),
                 now,
                 TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -3422,7 +3420,6 @@ mod peer_loop_tests {
                 NativeCurrencyAmount::coins(0),
                 now,
                 TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -3628,7 +3625,6 @@ mod peer_loop_tests {
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,
                     prover_capability,
-                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap()

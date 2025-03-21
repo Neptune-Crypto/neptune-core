@@ -1148,7 +1148,6 @@ mod archival_state_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -1357,7 +1356,6 @@ mod archival_state_tests {
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1463,7 +1461,6 @@ mod archival_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1479,7 +1476,6 @@ mod archival_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1564,7 +1560,6 @@ mod archival_state_tests {
                     fee,
                     timestamp,
                     TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap();
@@ -1813,7 +1808,6 @@ mod archival_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1841,7 +1835,6 @@ mod archival_state_tests {
             .merge_with(
                 tx_to_alice_and_bob,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1853,7 +1846,6 @@ mod archival_state_tests {
             block_tx,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -2013,7 +2005,6 @@ mod archival_state_tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2059,7 +2050,6 @@ mod archival_state_tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2093,7 +2083,6 @@ mod archival_state_tests {
             .merge_with(
                 tx_from_alice,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2101,7 +2090,6 @@ mod archival_state_tests {
             .merge_with(
                 tx_from_bob,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2111,7 +2099,6 @@ mod archival_state_tests {
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
             None,
-            &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await

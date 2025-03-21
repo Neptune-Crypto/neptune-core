@@ -30,7 +30,6 @@ use tracing::warn;
 use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -432,7 +431,6 @@ impl MainLoopHandler {
     /// Sends the result back through the provided channel.
     async fn update_mempool_jobs(
         update_jobs: Vec<UpdateMutatorSetDataJob>,
-        job_queue: &TritonVmJobQueue,
         transaction_update_sender: mpsc::Sender<Vec<Transaction>>,
         proof_job_options: TritonVmProofJobOptions,
     ) {
@@ -445,10 +443,7 @@ impl MainLoopHandler {
             // Jobs for updating txs in the mempool have highest priority since
             // they block the composer from continuing.
             // TODO: Handle errors better here.
-            let job_result = job
-                .upgrade(job_queue, proof_job_options.clone())
-                .await
-                .unwrap();
+            let job_result = job.upgrade(proof_job_options.clone()).await.unwrap();
             result.push(job_result);
         }
 
@@ -1317,7 +1312,6 @@ impl MainLoopHandler {
         // like mining, or proving our own transaction. Running the prover takes
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
-        let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
         let perform_ms_update_if_needed =
             self.global_state_lock.cli().proving_capability() == TxProvingCapability::SingleProof;
 
@@ -1329,7 +1323,6 @@ impl MainLoopHandler {
                 .spawn(async move {
                     upgrade_candidate
                         .handle_upgrade(
-                            &vm_job_queue,
                             tx_origin,
                             perform_ms_update_if_needed,
                             global_state_lock_clone,
@@ -1353,7 +1346,6 @@ impl MainLoopHandler {
     ) {
         // job completion of the spawned task is communicated through the
         // `update_mempool_txs_handle` channel.
-        let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
         if let Some(handle) = main_loop_state.update_mempool_txs_handle.as_ref() {
             handle.abort();
         }
@@ -1371,13 +1363,7 @@ impl MainLoopHandler {
             tokio::task::Builder::new()
                 .name("mempool tx ms-updater")
                 .spawn(async move {
-                    Self::update_mempool_jobs(
-                        update_jobs,
-                        &vm_job_queue,
-                        update_sender,
-                        job_options,
-                    )
-                    .await
+                    Self::update_mempool_jobs(update_jobs, update_sender, job_options).await
                 })
                 .unwrap(),
         );
@@ -1670,8 +1656,6 @@ impl MainLoopHandler {
                         panic!("Expected Primitive witness. Got: {:?}", transaction.proof);
                     };
 
-                    let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
-
                     let proving_capability = self.global_state_lock.cli().proving_capability();
                     let upgrade_job =
                         UpgradeJob::from_primitive_witness(proving_capability, primitive_witness);
@@ -1687,7 +1671,6 @@ impl MainLoopHandler {
                         .spawn(async move {
                         upgrade_job
                             .handle_upgrade(
-                                &vm_job_queue,
                                 TransactionOrigin::Own,
                                 true,
                                 global_state_lock_clone,
@@ -2063,7 +2046,6 @@ mod test {
 
     mod proof_upgrader {
         use super::*;
-        use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -2100,7 +2082,6 @@ mod test {
                     fee,
                     in_seven_months,
                     tx_proof_type,
-                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap()

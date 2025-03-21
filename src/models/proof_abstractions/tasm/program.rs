@@ -10,8 +10,8 @@ use super::prover_job::ProverJob;
 use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
+use crate::job_queue::triton_vm::global_triton_vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -64,17 +64,9 @@ where
         &self,
         claim: Claim,
         nondeterminism: NonDeterminism,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        prove_consensus_program(
-            self.program(),
-            claim,
-            nondeterminism,
-            triton_vm_job_queue,
-            proof_job_options,
-        )
-        .await
+        prove_consensus_program(self.program(), claim, nondeterminism, proof_job_options).await
     }
 }
 
@@ -93,7 +85,6 @@ pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
-    triton_vm_job_queue: &TritonVmJobQueue,
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // create a triton-vm-job-queue job for generating this proof.
@@ -106,7 +97,8 @@ pub(crate) async fn prove_consensus_program(
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
-    let job_handle = triton_vm_job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
+    let job_queue = global_triton_vm_job_queue();
+    let job_handle = job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
 
     // satisfy borrow checker.
     // instead of calling job_handle.cancel() inside select!()
@@ -568,7 +560,6 @@ pub mod test {
             program,
             claim.clone(),
             NonDeterminism::default(),
-            &TritonVmJobQueue::dummy(),
             TritonVmProofJobOptions::default(),
         )
         .await

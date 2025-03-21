@@ -832,7 +832,6 @@ mod tests {
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
-    use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::make_plenty_mock_transaction_with_primitive_witness;
@@ -900,10 +899,7 @@ mod tests {
         let mut updated_txs = vec![];
         for job in update_jobs {
             let updated = job
-                .upgrade(
-                    &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::Highest.into(),
-                )
+                .upgrade(TritonVmJobPriority::Highest.into())
                 .await
                 .unwrap();
             updated_txs.push(updated);
@@ -986,7 +982,6 @@ mod tests {
                 high_fee,
                 in_seven_months,
                 TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1140,7 +1135,6 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1181,7 +1175,6 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1223,7 +1216,6 @@ mod tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1296,7 +1288,6 @@ mod tests {
             .merge_with(
                 tx_by_alice_updated,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1338,20 +1329,14 @@ mod tests {
             .unwrap()
             .current();
 
-            let left_single_proof = SingleProof::produce(
-                &left,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
-            let right_single_proof = SingleProof::produce(
-                &right,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
+            let left_single_proof =
+                SingleProof::produce(&left, TritonVmJobPriority::default().into())
+                    .await
+                    .unwrap();
+            let right_single_proof =
+                SingleProof::produce(&right, TritonVmJobPriority::default().into())
+                    .await
+                    .unwrap();
 
             let left = Transaction {
                 kernel: left.kernel,
@@ -1370,7 +1355,6 @@ mod tests {
                 left.clone(),
                 right.clone(),
                 shuffle_seed,
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1474,7 +1458,6 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_years,
                 proving_capability,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1603,7 +1586,6 @@ mod tests {
                         fee,
                         in_seven_months,
                         TxProvingCapability::ProofCollection,
-                        &TritonVmJobQueue::dummy(),
                     )
                     .await
                     .expect("producing proof collection should succeed");
@@ -1804,7 +1786,6 @@ mod tests {
                     fee,
                     in_seven_months,
                     proof_type,
-                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap();

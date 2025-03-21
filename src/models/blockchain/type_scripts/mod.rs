@@ -19,7 +19,6 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Coin;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -104,7 +103,6 @@ impl TypeScriptAndWitness {
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
@@ -116,7 +114,6 @@ impl TypeScriptAndWitness {
             self.program.clone(),
             claim,
             self.nondeterminism(),
-            triton_vm_job_queue,
             proof_job_options,
         )
         .await
