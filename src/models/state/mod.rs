@@ -396,20 +396,17 @@ impl GlobalState {
         )
     }
 
-    pub(crate) fn composer_parameters(
-        &self,
-        reward_address: ReceivingAddress,
-    ) -> ComposerParameters {
-        let next_block_height: BlockHeight = self.chain.light_state().header().height.next();
-        let sender_randomness_for_composer = self
-            .wallet_state
-            .wallet_entropy
-            .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
-
-        ComposerParameters::new(
-            reward_address,
-            sender_randomness_for_composer,
+    /// Automatically assemble the composer parameters for composing the next
+    /// block from the state.
+    ///
+    /// The relevant CLI parameters are read from the CLI arguments living on
+    /// [`GlobalState`]. The next block height is passed as an argument since
+    /// the callers need to declare this, to resolve race conditions.
+    pub(crate) fn composer_parameters(&self, next_block_height: BlockHeight) -> ComposerParameters {
+        self.wallet_state.composer_parameters(
+            next_block_height,
             self.cli.guesser_fraction,
+            self.cli.fee_notification,
         )
     }
 
@@ -2144,7 +2141,7 @@ mod global_state_tests {
             network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let mut alice = alice_state_lock.lock_guard_mut().await;
@@ -2495,13 +2492,12 @@ mod global_state_tests {
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce12210c467f93u64);
         let network = Network::Main;
 
-        let mut premine_receiver = mock_genesis_global_state(
-            network,
-            3,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+        let cli_args = cli_args::Args {
+            guesser_fraction: 0.0,
+            ..Default::default()
+        };
+        let mut premine_receiver =
+            mock_genesis_global_state(network, 3, WalletEntropy::devnet_wallet(), cli_args).await;
         let genesis_spending_key = premine_receiver
             .lock_guard()
             .await
@@ -2525,11 +2521,9 @@ mod global_state_tests {
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
-        let guesser_fraction = 0f64;
         let (coinbase_transaction, coinbase_expected_utxos) = make_coinbase_transaction_from_state(
             &genesis_block,
             &premine_receiver,
-            guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
@@ -2840,7 +2834,6 @@ mod global_state_tests {
                 .light_state()
                 .clone(),
             &premine_receiver,
-            guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
@@ -2935,16 +2928,12 @@ mod global_state_tests {
 
     #[tokio::test]
     async fn favor_incoming_block_proposal_test() {
-        async fn block1_proposal(
-            guesser_fraction: f64,
-            global_state_lock: &GlobalStateLock,
-        ) -> Block {
+        async fn block1_proposal(global_state_lock: &GlobalStateLock) -> Block {
             let genesis_block = Block::genesis(global_state_lock.cli().network);
             let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
             let (cb, _) = make_coinbase_transaction_from_state(
                 &genesis_block,
                 global_state_lock,
-                guesser_fraction,
                 timestamp,
                 TxProvingCapability::PrimitiveWitness,
                 (TritonVmJobPriority::Normal, None).into(),
@@ -2956,17 +2945,35 @@ mod global_state_tests {
         }
 
         let network = Network::Main;
-        let mut global_state_lock = mock_genesis_global_state(
+        let mut global_state_lock_small = mock_genesis_global_state(
             network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default_with_network(network),
+            cli_args::Args {
+                network,
+                guesser_fraction: 0.1,
+                ..Default::default()
+            },
         )
         .await;
-        let small_guesser_fraction = block1_proposal(0.1, &global_state_lock).await;
-        let big_guesser_fraction = block1_proposal(0.5, &global_state_lock).await;
+        let global_state_lock_big = mock_genesis_global_state(
+            network,
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args {
+                network,
+                guesser_fraction: 0.5,
+                ..Default::default()
+            },
+        )
+        .await;
+        let small_guesser_fraction = block1_proposal(&global_state_lock_small).await;
+        let big_guesser_fraction = block1_proposal(&global_state_lock_big).await;
 
-        let mut state = global_state_lock.global_state_lock.lock_guard_mut().await;
+        let mut state = global_state_lock_small
+            .global_state_lock
+            .lock_guard_mut()
+            .await;
         assert!(
             state
                 .favor_incoming_block_proposal(
@@ -3407,14 +3414,16 @@ mod global_state_tests {
             let (block_3a, composer_expected_utxos_3a) =
                 make_mock_block(&block_2a, None, spending_key, rng.random()).await;
 
+            let cli_args = cli_args::Args {
+                number_of_mps_per_utxo: 30,
+                network,
+                ..Default::default()
+            };
+
             for claim_composer_fees in [false, true] {
-                let mut global_state_lock = mock_genesis_global_state(
-                    network,
-                    2,
-                    wallet_secret.clone(),
-                    cli_args::Args::default(),
-                )
-                .await;
+                let mut global_state_lock =
+                    mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args.clone())
+                        .await;
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
                 if claim_composer_fees {
@@ -3673,6 +3682,13 @@ mod global_state_tests {
                 cli_args::Args::default(),
             )
             .await;
+            let charlie_state_lock = mock_genesis_global_state(
+                network,
+                3,
+                WalletEntropy::new_pseudorandom(rng.random()),
+                cli_args::Args::default(),
+            )
+            .await;
 
             // in bob wallet: create receiving address for bob
             let bob_address = {
@@ -3755,11 +3771,11 @@ mod global_state_tests {
                     .await;
 
                 // the block gets mined.
-                // Alice's wallet does not register the composer reward because
-                // it is not expecting it.
+                // Charlie mines the block so that Alice's wallet is not
+                // complicated by composer fees.
                 let (block_1_tx, _) = create_block_transaction_from(
                     &genesis_block,
-                    &alice_state_lock,
+                    &charlie_state_lock,
                     seven_months_post_launch,
                     (TritonVmJobPriority::Normal, None).into(),
                     TxMergeOrigin::ExplicitList(vec![alice_to_bob_tx]),
