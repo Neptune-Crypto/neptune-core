@@ -138,7 +138,6 @@ mod tests {
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 
     #[test]
@@ -202,7 +201,6 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
-                    &TritonVmJobQueue::dummy(),
                     TritonVmJobPriority::default().into(),
                 ))
                 .unwrap();

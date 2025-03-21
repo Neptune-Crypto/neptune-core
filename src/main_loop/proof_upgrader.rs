@@ -11,7 +11,6 @@ use tracing::info;
 
 use super::TransactionOrigin;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -97,7 +96,6 @@ impl UpdateMutatorSetDataJob {
 
     pub(crate) async fn upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         let UpdateMutatorSetDataJob {
@@ -112,7 +110,6 @@ impl UpdateMutatorSetDataJob {
             &old_mutator_set,
             &mutator_set_update,
             old_single_proof,
-            triton_vm_job_queue,
             proof_job_options,
             None,
         )
@@ -255,7 +252,6 @@ impl UpgradeJob {
     /// informs peers of this new transaction.
     pub(crate) async fn handle_upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
         tx_origin: TransactionOrigin,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
@@ -299,12 +295,7 @@ impl UpgradeJob {
             // No locks may be held here!
             let (upgraded, expected_utxos) = match upgrade_job
                 .clone()
-                .upgrade(
-                    triton_vm_job_queue,
-                    job_options,
-                    &wallet_entropy,
-                    block_height,
-                )
+                .upgrade(job_options, &wallet_entropy, block_height)
                 .await
             {
                 Ok((upgraded_tx, expected_utxos)) => {
@@ -430,7 +421,6 @@ impl UpgradeJob {
     /// prover is busy.
     pub(crate) async fn upgrade(
         self,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
         own_wallet_entropy: &WalletEntropy,
         current_block_height: BlockHeight,
@@ -472,9 +462,7 @@ impl UpgradeJob {
                 })
                 .collect_vec();
             let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
-            let gobbler_proof =
-                SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())
-                    .await?;
+            let gobbler_proof = SingleProof::produce(&gobbler, proof_job_options.clone()).await?;
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
             let gobbler = Transaction {
                 kernel: gobbler.kernel,
@@ -496,12 +484,7 @@ impl UpgradeJob {
                 let nondeterminism = single_proof_witness.nondeterminism();
                 info!("Proof-upgrader: Start generate single proof");
                 let single_proof = SingleProof
-                    .prove(
-                        claim,
-                        nondeterminism,
-                        triton_vm_job_queue,
-                        proof_job_options.clone(),
-                    )
+                    .prove(claim, nondeterminism, proof_job_options.clone())
                     .await?;
                 info!("Proof-upgrader, to single proof: Done");
 
@@ -516,12 +499,7 @@ impl UpgradeJob {
 
                     info!("Proof-upgrader: Start merging with gobbler");
                     let ret = lhs
-                        .merge_with(
-                            rhs,
-                            gobble_shuffle_seed,
-                            triton_vm_job_queue,
-                            proof_job_options,
-                        )
+                        .merge_with(rhs, gobble_shuffle_seed, proof_job_options)
                         .await?;
                     info!("Proof-upgrader merging with gobbler: Done");
                     ret
@@ -552,7 +530,6 @@ impl UpgradeJob {
                     left,
                     right,
                     shuffle_seed.to_owned(),
-                    triton_vm_job_queue,
                     proof_job_options.clone(),
                 )
                 .await?;
@@ -560,12 +537,7 @@ impl UpgradeJob {
 
                 if let Some(gobbler) = gobbler {
                     ret = gobbler
-                        .merge_with(
-                            ret,
-                            gobble_shuffle_seed,
-                            triton_vm_job_queue,
-                            proof_job_options,
-                        )
+                        .merge_with(ret, gobble_shuffle_seed, proof_job_options)
                         .await?
                 };
 
@@ -576,8 +548,7 @@ impl UpgradeJob {
             } => {
                 info!("Proof-upgrader: Start producing proof collection");
                 let proof_collection =
-                    ProofCollection::produce(&witness, triton_vm_job_queue, proof_job_options)
-                        .await?;
+                    ProofCollection::produce(&witness, proof_job_options).await?;
                 info!("Proof-upgrader, proof collection: Done");
                 Ok((
                     Transaction {
@@ -591,8 +562,7 @@ impl UpgradeJob {
                 primitive_witness: witness,
             } => {
                 info!("Proof-upgrader: Start producing single proof");
-                let proof =
-                    SingleProof::produce(&witness, triton_vm_job_queue, proof_job_options).await?;
+                let proof = SingleProof::produce(&witness, proof_job_options).await?;
                 info!("Proof-upgrader, single proof: Done");
                 Ok((
                     Transaction {
@@ -603,9 +573,7 @@ impl UpgradeJob {
                 ))
             }
             UpgradeJob::UpdateMutatorSetData(update_job) => {
-                let ret = update_job
-                    .upgrade(triton_vm_job_queue, proof_job_options)
-                    .await?;
+                let ret = update_job.upgrade(proof_job_options).await?;
                 Ok((ret, vec![]))
             }
         }
@@ -741,7 +709,6 @@ mod test {
                 fee,
                 timestamp,
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -776,13 +743,7 @@ mod test {
             let pw_to_tx_upgrade_job =
                 UpgradeJob::from_primitive_witness(proving_capability, pw.to_owned());
             pw_to_tx_upgrade_job
-                .handle_upgrade(
-                    &TritonVmJobQueue::dummy(),
-                    TransactionOrigin::Own,
-                    true,
-                    alice.clone(),
-                    main_to_peer_tx,
-                )
+                .handle_upgrade(TransactionOrigin::Own, true, alice.clone(), main_to_peer_tx)
                 .await;
 
             let peer_msg = main_to_peer_rx.recv().await.unwrap();
@@ -854,13 +815,7 @@ mod test {
             let block1 = invalid_empty_block_with_timestamp(&genesis_block, pwtx.kernel.timestamp);
             alice.set_new_tip(block1).await.unwrap();
             upgrade_job
-                .handle_upgrade(
-                    &TritonVmJobQueue::dummy(),
-                    TransactionOrigin::Own,
-                    true,
-                    alice.clone(),
-                    main_to_peer_tx,
-                )
+                .handle_upgrade(TransactionOrigin::Own, true, alice.clone(), main_to_peer_tx)
                 .await;
 
             let peer_msg = main_to_peer_rx.recv().await.unwrap();

@@ -1,4 +1,3 @@
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -148,7 +147,6 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: &MutatorSetUpdate,
         old_single_proof: Proof,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
     ) -> anyhow::Result<Transaction> {
@@ -211,7 +209,6 @@ impl Transaction {
             .prove(
                 new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
                 proof_job_options,
             )
             .await?;
@@ -245,7 +242,6 @@ impl Transaction {
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
         assert_eq!(
@@ -276,7 +272,6 @@ impl Transaction {
             .prove(
                 new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
                 proof_job_options,
             )
             .await?;
@@ -420,13 +415,10 @@ mod transaction_tests {
     #[tokio::test]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
-            let as_single_proof = SingleProof::produce(
-                &to_be_updated,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
+            let as_single_proof =
+                SingleProof::produce(&to_be_updated, TritonVmJobPriority::default().into())
+                    .await
+                    .unwrap();
             let original_tx = Transaction {
                 kernel: to_be_updated.kernel,
                 proof: TransactionProof::SingleProof(as_single_proof),
@@ -440,7 +432,6 @@ mod transaction_tests {
                 &to_be_updated.mutator_set_accumulator,
                 &mutator_set_update,
                 original_tx.proof.into_single_proof(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
                 None,
             )

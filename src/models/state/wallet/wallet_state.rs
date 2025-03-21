@@ -1773,7 +1773,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -2030,7 +2029,6 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2074,7 +2072,6 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(22),
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2134,7 +2131,6 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2234,7 +2230,6 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2949,7 +2944,6 @@ pub(crate) mod tests {
                     fee,
                     block2_timestamp,
                     TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap();
@@ -3036,7 +3030,6 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::config_models::cli_args;
-        use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -3130,7 +3123,6 @@ pub(crate) mod tests {
                         NativeCurrencyAmount::zero(),
                         timestamp,
                         TxProvingCapability::PrimitiveWitness,
-                        &TritonVmJobQueue::dummy(),
                     )
                     .await?;
                 tx
@@ -3217,7 +3209,6 @@ pub(crate) mod tests {
                         fee,
                         timestamp,
                         TxProvingCapability::PrimitiveWitness,
-                        &TritonVmJobQueue::dummy(),
                     )
                     .await
                     .map(|x| x.0)
@@ -3718,7 +3709,6 @@ pub(crate) mod tests {
                         fee,
                         timestamp,
                         TxProvingCapability::PrimitiveWitness,
-                        &TritonVmJobQueue::dummy(),
                     )
                     .await
                     .unwrap();
@@ -3922,7 +3912,6 @@ pub(crate) mod tests {
         use rand::rng;
 
         use super::*;
-        use crate::job_queue::JobQueue;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
@@ -3982,7 +3971,6 @@ pub(crate) mod tests {
                     NativeCurrencyAmount::coins(0),
                     now,
                     TxProvingCapability::PrimitiveWitness,
-                    &JobQueue::dummy(),
                 )
                 .await
                 .unwrap();

@@ -1051,7 +1051,6 @@ pub mod test {
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
@@ -1496,7 +1495,6 @@ pub mod test {
                 txk_mast_hash,
                 salted_input_utxos_hash,
                 salted_output_utxos_hash,
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await

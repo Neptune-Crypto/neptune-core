@@ -64,7 +64,6 @@ use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
@@ -148,8 +147,6 @@ pub struct GlobalStateLock {
 
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
-
-    vm_job_queue: TritonVmJobQueue,
 }
 
 impl GlobalStateLock {
@@ -169,17 +166,7 @@ impl GlobalStateLock {
         Self {
             global_state_lock,
             cli,
-            vm_job_queue: TritonVmJobQueue::start(),
         }
-    }
-
-    /// returns reference-counted clone of the triton vm job queue.
-    ///
-    /// callers should execute resource intensive triton-vm tasks in this
-    /// queue to avoid running simultaneous tasks that could exceed hardware
-    /// capabilities.
-    pub(crate) fn vm_job_queue(&self) -> &TritonVmJobQueue {
-        &self.vm_job_queue
     }
 
     // check if mining
@@ -742,7 +729,6 @@ impl GlobalState {
         change_utxo_notify_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
-        triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         self.create_transaction_with_prover_capability(
             tx_outputs,
@@ -751,7 +737,6 @@ impl GlobalState {
             fee,
             timestamp,
             self.proving_capability(),
-            triton_vm_job_queue,
         )
         .await
         .map(|(tx, _tx_details, output)| (tx, output))
@@ -760,7 +745,6 @@ impl GlobalState {
     /// Variant of [Self::create_transaction] that allows caller to specify
     /// prover capability. [Self::create_transaction] is the preferred interface
     /// for anything but tests.
-    #[expect(clippy::too_many_arguments)]
     pub(crate) async fn create_transaction_with_prover_capability(
         &self,
         mut tx_outputs: TxOutputList,
@@ -769,7 +753,6 @@ impl GlobalState {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, TransactionDetails, Option<TxOutput>)> {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
@@ -825,7 +808,6 @@ impl GlobalState {
         let transaction = Self::create_raw_transaction(
             &transaction_details,
             prover_capability,
-            triton_vm_job_queue,
             (
                 TritonVmJobPriority::High,
                 self.cli.max_log2_padded_height_for_proofs,
@@ -867,7 +849,6 @@ impl GlobalState {
     pub(crate) async fn create_raw_transaction(
         transaction_details: &TransactionDetails,
         proving_power: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         // note: this executes the prover which can take a very
@@ -876,7 +857,6 @@ impl GlobalState {
         Self::create_transaction_from_data_worker(
             transaction_details,
             proving_power,
-            triton_vm_job_queue,
             proof_job_options,
         )
         .await
@@ -890,7 +870,6 @@ impl GlobalState {
     async fn create_transaction_from_data_worker(
         transaction_details: &TransactionDetails,
         proving_power: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         let primitive_witness = PrimitiveWitness::from_transaction_details(transaction_details);
@@ -907,16 +886,10 @@ impl GlobalState {
             TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(
-                    &primitive_witness,
-                    triton_vm_job_queue,
-                    proof_job_options,
-                )
-                .await?,
+                ProofCollection::produce(&primitive_witness, proof_job_options).await?,
             ),
             TxProvingCapability::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, triton_vm_job_queue, proof_job_options)
-                    .await?,
+                SingleProof::produce(&primitive_witness, proof_job_options).await?,
             ),
         };
 
@@ -1892,7 +1865,6 @@ mod global_state_tests {
                 NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy()
             )
             .await
             .is_err());
@@ -1908,7 +1880,6 @@ mod global_state_tests {
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1948,7 +1919,6 @@ mod global_state_tests {
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2594,7 +2564,6 @@ mod global_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2624,7 +2593,6 @@ mod global_state_tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2638,7 +2606,6 @@ mod global_state_tests {
             block_transaction,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -2772,7 +2739,6 @@ mod global_state_tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2815,7 +2781,6 @@ mod global_state_tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2855,7 +2820,6 @@ mod global_state_tests {
             .merge_with(
                 tx_from_alice,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2863,7 +2827,6 @@ mod global_state_tests {
             .merge_with(
                 tx_from_bob,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2878,7 +2841,6 @@ mod global_state_tests {
             block_transaction2,
             in_eight_months,
             None,
-            &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -3689,9 +3651,6 @@ mod global_state_tests {
 
             // in alice wallet: send pre-mined funds to bob
             let block_1 = {
-                let vm_job_queue = alice_state_lock.vm_job_queue().clone();
-                // let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
-
                 // store and verify alice's initial balance from pre-mine.
                 let alice_initial_balance = alice_state_lock
                     .lock_guard()
@@ -3729,7 +3688,6 @@ mod global_state_tests {
                         alice_to_bob_fee,
                         seven_months_post_launch,
                         TxProvingCapability::SingleProof,
-                        &vm_job_queue,
                     )
                     .await
                     .unwrap();
@@ -3771,7 +3729,6 @@ mod global_state_tests {
                     block_1_tx,
                     seven_months_post_launch,
                     None,
-                    &TritonVmJobQueue::dummy(),
                     TritonVmJobPriority::default().into(),
                 )
                 .await

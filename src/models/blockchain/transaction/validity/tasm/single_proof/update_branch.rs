@@ -673,7 +673,6 @@ pub(crate) mod test {
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
@@ -917,13 +916,9 @@ pub(crate) mod test {
         MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone())
             .apply_to_accumulator(&mut new_mutator_set_accumulator)
             .unwrap();
-        let old_proof = SingleProof::produce(
-            &old_pw,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
+        let old_proof = SingleProof::produce(&old_pw, TritonVmJobPriority::default().into())
+            .await
+            .unwrap();
         let num_seconds = (0u64..=10).new_tree(&mut test_runner).unwrap().current();
 
         updated.kernel = TransactionKernelModifier::default()
@@ -983,13 +978,10 @@ pub(crate) mod test {
             &primitive_witness.mutator_set_accumulator.aocl,
             &newly_confirmed_records,
         );
-        let old_proof = SingleProof::produce(
-            &primitive_witness,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
+        let old_proof =
+            SingleProof::produce(&primitive_witness, TritonVmJobPriority::default().into())
+                .await
+                .unwrap();
 
         UpdateWitness::from_old_transaction(
             primitive_witness.kernel,

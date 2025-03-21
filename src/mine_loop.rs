@@ -28,7 +28,6 @@ use tracing::*;
 use twenty_first::math::digest::Digest;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::JobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -72,8 +71,6 @@ async fn compose_block(
 ) -> Result<()> {
     let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
 
-    let triton_vm_job_queue = global_state_lock.vm_job_queue();
-
     let job_options = TritonVmProofJobOptions {
         job_priority: TritonVmJobPriority::High,
         job_settings: ProverJobSettings {
@@ -92,15 +89,8 @@ async fn compose_block(
     )
     .await?;
 
-    let compose_result = Block::compose(
-        &latest_block,
-        transaction,
-        timestamp,
-        None,
-        triton_vm_job_queue,
-        job_options,
-    )
-    .await;
+    let compose_result =
+        Block::compose(&latest_block, transaction, timestamp, None, job_options).await;
 
     let proposal = match compose_result {
         Ok(template) => template,
@@ -377,20 +367,15 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     proving_power: TxProvingCapability,
-    vm_job_queue: &JobQueue<TritonVmJobPriority>,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_outputs, transaction_details) =
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
 
     info!("Start: generate single proof for coinbase transaction");
-    let transaction = GlobalState::create_raw_transaction(
-        &transaction_details,
-        proving_power,
-        vm_job_queue,
-        job_options,
-    )
-    .await?;
+    let transaction =
+        GlobalState::create_raw_transaction(&transaction_details, proving_power, job_options)
+            .await?;
     info!("Done: generating single proof for coinbase transaction");
 
     Ok((transaction, composer_outputs))
@@ -533,13 +518,11 @@ pub(crate) async fn create_block_transaction_from(
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
-    let vm_job_queue = global_state_lock.vm_job_queue();
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters,
         timestamp,
         TxProvingCapability::SingleProof,
-        vm_job_queue,
         job_options.clone(),
     )
     .await?;
@@ -566,7 +549,7 @@ pub(crate) async fn create_block_transaction_from(
         let nop =
             TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
         let nop = PrimitiveWitness::from_transaction_details(&nop);
-        let nop_proof = SingleProof::produce(&nop, vm_job_queue, job_options.clone()).await?;
+        let nop_proof = SingleProof::produce(&nop, job_options.clone()).await?;
         let nop = Transaction {
             kernel: nop.kernel,
             proof: TransactionProof::SingleProof(nop_proof),
@@ -589,7 +572,6 @@ pub(crate) async fn create_block_transaction_from(
             block_transaction,
             tx_to_include,
             rng.random(),
-            vm_job_queue,
             job_options.clone(),
         )
         .await
@@ -958,7 +940,6 @@ pub(crate) mod mine_loop_tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1015,7 +996,6 @@ pub(crate) mod mine_loop_tests {
             .wallet_state
             .wallet_entropy
             .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
-        let vm_job_queue = global_state_lock.vm_job_queue();
 
         let composer_parameters = ComposerParameters::new(
             receiving_address.into(),
@@ -1027,7 +1007,6 @@ pub(crate) mod mine_loop_tests {
             composer_parameters,
             timestamp,
             proving_power,
-            vm_job_queue,
             job_options,
         )
         .await?;
@@ -1208,7 +1187,6 @@ pub(crate) mod mine_loop_tests {
                 NativeCurrencyAmount::coins(1),
                 now,
                 TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1263,7 +1241,6 @@ pub(crate) mod mine_loop_tests {
                 transaction_empty_mempool,
                 now,
                 None,
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::High.into(),
             )
             .await
@@ -1305,7 +1282,6 @@ pub(crate) mod mine_loop_tests {
                 transaction_non_empty_mempool,
                 now,
                 None,
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await

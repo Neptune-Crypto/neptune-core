@@ -910,7 +910,6 @@ pub(crate) mod test {
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -1102,20 +1101,14 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let single_proof_1 = SingleProof::produce(
-            &primitive_witness_1,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
-        let single_proof_2 = SingleProof::produce(
-            &primitive_witness_2,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
+        let single_proof_1 =
+            SingleProof::produce(&primitive_witness_1, TritonVmJobPriority::default().into())
+                .await
+                .unwrap();
+        let single_proof_2 =
+            SingleProof::produce(&primitive_witness_2, TritonVmJobPriority::default().into())
+                .await
+                .unwrap();
 
         MergeWitness::from_transactions(
             primitive_witness_1.kernel,
@@ -1147,20 +1140,12 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let left_proof = SingleProof::produce(
-            &left,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
-        let right_proof = SingleProof::produce(
-            &right,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
+        let left_proof = SingleProof::produce(&left, TritonVmJobPriority::default().into())
+            .await
+            .unwrap();
+        let right_proof = SingleProof::produce(&right, TritonVmJobPriority::default().into())
+            .await
+            .unwrap();
 
         MergeWitness::from_transactions(
             left.kernel,

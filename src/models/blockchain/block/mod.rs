@@ -48,7 +48,6 @@ use super::transaction::Transaction;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::config_models::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
@@ -227,7 +226,6 @@ impl Block {
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let body = primitive_witness.body().to_owned();
@@ -240,7 +238,6 @@ impl Block {
                 .prove(
                     claim,
                     block_proof_witness.nondeterminism(),
-                    triton_vm_job_queue,
                     proof_job_options,
                 )
                 .await?;
@@ -255,7 +252,6 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let tx_claim = SingleProof::claim(transaction.kernel.mast_hash());
@@ -276,7 +272,6 @@ impl Block {
             primitive_witness,
             block_timestamp,
             target_block_interval,
-            triton_vm_job_queue,
             proof_job_options,
         )
         .await
@@ -290,7 +285,6 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         Self::make_block_template_with_valid_proof(
@@ -298,7 +292,6 @@ impl Block {
             transaction,
             block_timestamp,
             target_block_interval,
-            triton_vm_job_queue,
             proof_job_options,
         )
         .await
@@ -1484,18 +1477,12 @@ pub(crate) mod block_tests {
                         fee,
                         plus_eight_months,
                         TxProvingCapability::SingleProof,
-                        &TritonVmJobQueue::dummy(),
                     )
                     .await
                     .unwrap();
                 let block2_tx = coinbase_for_block2
                     .clone()
-                    .merge_with(
-                        tx2,
-                        rng.random(),
-                        &TritonVmJobQueue::dummy(),
-                        TritonVmProofJobOptions::default(),
-                    )
+                    .merge_with(tx2, rng.random(), TritonVmProofJobOptions::default())
                     .await
                     .unwrap();
                 let block2_without_valid_pow = Block::compose(
@@ -1503,7 +1490,6 @@ pub(crate) mod block_tests {
                     block2_tx,
                     plus_eight_months,
                     None,
-                    &TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1540,18 +1526,12 @@ pub(crate) mod block_tests {
                         fee,
                         plus_nine_months,
                         TxProvingCapability::SingleProof,
-                        &TritonVmJobQueue::dummy(),
                     )
                     .await
                     .unwrap();
                 let block3_tx = coinbase_for_block3
                     .clone()
-                    .merge_with(
-                        tx3,
-                        rng.random(),
-                        &TritonVmJobQueue::dummy(),
-                        TritonVmProofJobOptions::default(),
-                    )
+                    .merge_with(tx3, rng.random(), TritonVmProofJobOptions::default())
                     .await
                     .unwrap();
                 assert!(
@@ -1563,7 +1543,6 @@ pub(crate) mod block_tests {
                     block3_tx,
                     plus_nine_months,
                     None,
-                    &TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1821,7 +1800,6 @@ pub(crate) mod block_tests {
                     fee,
                     in_seven_months,
                     TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap();
@@ -1840,7 +1818,6 @@ pub(crate) mod block_tests {
                     fee,
                     in_eight_months,
                     TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap();

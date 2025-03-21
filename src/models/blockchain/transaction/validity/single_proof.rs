@@ -29,7 +29,6 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -227,27 +226,17 @@ impl SingleProof {
     /// This involves generating a [ProofCollection] as an intermediate step.
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        let proof_collection = ProofCollection::produce(
-            primitive_witness,
-            triton_vm_job_queue,
-            proof_job_options.clone(),
-        )
-        .await?;
+        let proof_collection =
+            ProofCollection::produce(primitive_witness, proof_job_options.clone()).await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
         let single_proof = SingleProof
-            .prove(
-                claim,
-                nondeterminism,
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+            .prove(claim, nondeterminism, proof_job_options)
             .await?;
         info!("Done");
 
@@ -846,7 +835,6 @@ mod test {
 
             let good_proof_collection = ProofCollection::produce(
                 &good_primitive_witness,
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -865,7 +853,6 @@ mod test {
 
             let bad_proof_collection = ProofCollection::produce(
                 &bad_primitive_witness,
-                &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -894,13 +881,10 @@ mod test {
                 .current();
             let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-            let proof_collection = ProofCollection::produce(
-                &primitive_witness,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
+            let proof_collection =
+                ProofCollection::produce(&primitive_witness, TritonVmJobPriority::default().into())
+                    .await
+                    .unwrap();
             assert!(proof_collection.verify(txk_mast_hash).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
@@ -933,13 +917,10 @@ mod test {
                     .current();
             let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-            let proof_collection = ProofCollection::produce(
-                &primitive_witness,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
+            let proof_collection =
+                ProofCollection::produce(&primitive_witness, TritonVmJobPriority::default().into())
+                    .await
+                    .unwrap();
             assert!(proof_collection.verify(txk_mast_hash).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
