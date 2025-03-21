@@ -1780,9 +1780,11 @@ impl PeerLoopHandler {
         const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
 
         let cli_args = self.global_state_lock.cli().clone();
-        let global_state = self.global_state_lock.lock_guard().await;
 
-        let standing = global_state
+        let standing = self
+            .global_state_lock
+            .lock_guard()
+            .await
             .net
             .peer_databases
             .peer_standings
@@ -1821,33 +1823,35 @@ impl PeerLoopHandler {
                 own_datetime_utc.format("%Y-%m-%d %H:%M:%S"));
         }
 
-        // There is potential for a race-condition in the peer_map here, as we've previously
-        // counted the number of entries and checked if instance ID was already connected. But
-        // this check could have been invalidated by other tasks so we perform it again
-
-        if global_state
-            .net
-            .peer_map
-            .values()
-            .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
+        // There is potential for a race-condition in the peer_map here, as
+        // we've previously counted the number of entries and checked if
+        // instance ID was already connected. But other tasks could have made
+        // connections to a new node after the completion of that check, so we
+        // need to make the check while holding a lock to ensure that this
+        // check still holds. Since we're modifyin peer_map if this check is
+        // successful, we have to acquire a read-lock.
         {
-            bail!("Attempted to connect to already connected peer. Aborting connection.");
-        }
+            let mut global_state = self.global_state_lock.lock_guard_mut().await;
+            let peer_map = &mut global_state.net.peer_map;
+            if peer_map
+                .values()
+                .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
+            {
+                bail!("Attempted to connect to already connected peer. Aborting connection.");
+            }
 
-        if global_state.net.peer_map.len() >= cli_args.max_num_peers {
-            bail!("Attempted to connect to more peers than allowed. Aborting connection.");
-        }
+            if peer_map.len() >= cli_args.max_num_peers {
+                bail!("Attempted to connect to more peers than allowed. Aborting connection.");
+            }
 
-        if global_state.net.peer_map.contains_key(&self.peer_address) {
-            // This shouldn't be possible, unless the peer reports a different instance ID than
-            // for the other connection. Only a malignant client would do that.
-            bail!("Already connected to peer. Aborting connection");
-        }
-        drop(global_state);
+            if peer_map.contains_key(&self.peer_address) {
+                // This shouldn't be possible, unless the peer reports a different instance ID than
+                // for the other connection. Only a malignant client would do that.
+                bail!("Already connected to peer. Aborting connection");
+            }
 
-        self.global_state_lock
-            .lock_mut(|s| s.net.peer_map.insert(self.peer_address, new_peer))
-            .await;
+            peer_map.insert(self.peer_address, new_peer);
+        }
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
