@@ -18,11 +18,14 @@ use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::GlobalStateLock;
@@ -37,6 +40,44 @@ impl TransactionSender {
     // goal is for this type to be usable outside this crate
     pub(crate) fn new(global_state_lock: GlobalStateLock) -> Self {
         Self { global_state_lock }
+    }
+
+    pub async fn spendable_inputs(&self) -> TxInputList {
+        // sadly we have to collect here because we can't hold ref after lock guard is dropped.
+        self.global_state_lock
+            .lock_guard()
+            .await
+            .wallet_spendable_inputs()
+            .await
+            .into_iter()
+            .into()
+    }
+
+    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
+    ///
+    /// InputSelectionPolicy might be something like:
+    ///
+    /// pub enum InputSelectionPolicy {
+    ///     Random,
+    ///     ByNativeCoinAmount(Ordering),
+    ///     ByBlockHeight(Ordering),
+    ///     BySize(Ordering),
+    /// }
+    ///
+    /// questions:
+    ///   how to handle input Utxos for non-native coins?
+    ///   if Utxo has native-coin and another Coin, what then?
+    ///   Should we add a Coin param, to support eg tokens?
+    pub async fn select_spendable_inputs(
+        &self,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> impl IntoIterator<Item = TxInput> {
+        TxInputListBuilder::new()
+            .spendable_inputs(self.spendable_inputs().await.into())
+            .policy(policy)
+            .spend_amount(spend_amount)
+            .build()
     }
 
     /// generate TxOutputList from a list of [OutputFormat].

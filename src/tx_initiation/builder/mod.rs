@@ -57,4 +57,5 @@
 pub mod transaction_builder;
 pub mod transaction_details_builder;
 pub mod transaction_proof_builder;
+pub mod tx_input_list_builder;
 pub mod tx_output_list_builder;
