@@ -14,6 +14,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::tx_creation_config::TxCreationConfig;
@@ -203,6 +204,19 @@ impl TransactionSender {
         self.record_and_broadcast_transaction(&tx_artifacts).await?;
 
         Ok(tx_artifacts)
+    }
+
+    pub async fn proof_type(
+        &self,
+        txid: TransactionKernelId,
+    ) -> anyhow::Result<TxProvingCapability> {
+        self.global_state_lock
+            .lock_guard()
+            .await
+            .mempool
+            .get(txid)
+            .map(|tx| (&tx.proof).into())
+            .ok_or_else(|| anyhow::anyhow!("transaction not in mempool"))
     }
 
     /// note: this is a helper wrapper around TransactionDetailsBuilder,

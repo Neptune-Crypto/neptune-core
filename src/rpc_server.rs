@@ -64,7 +64,6 @@ use tracing::info;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
 
-use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
@@ -110,6 +109,7 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::send;
 use crate::DataDirectory;
@@ -1657,6 +1657,11 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
+    async fn proof_type(
+        token: rpc_auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TxProvingCapability>;
+
     /// claim a utxo
     ///
     /// The input string must be a valid bech32m encoded `UtxoTransferEncrypted`
@@ -2820,7 +2825,8 @@ impl RPC for NeptuneRPCServer {
 
         Ok(send::TransactionSender::new(self.state.clone())
             .select_spendable_inputs(policy, spend_amount)
-            .await.into())
+            .await
+            .into())
     }
 
     // documented in trait. do not add doc-comment.
@@ -2914,6 +2920,20 @@ impl RPC for NeptuneRPCServer {
 
         Ok(send::TransactionSender::new(self.state.clone())
             .send(outputs, change_policy, fee, Timestamp::now())
+            .await?)
+    }
+
+    async fn proof_type(
+        self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TxProvingCapability> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(send::TransactionSender::new(self.state.clone())
+            .proof_type(txid)
             .await?)
     }
 

@@ -6,6 +6,8 @@ use clap::Parser;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::models::blockchain::transaction::TransactionProof;
+
 #[derive(
     Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, PartialOrd,
 )]
@@ -16,6 +18,16 @@ pub enum TxProvingCapability {
     PrimitiveWitness = 2,
     ProofCollection = 3,
     SingleProof = 4,
+}
+
+impl From<&TransactionProof> for TxProvingCapability {
+    fn from(proof: &TransactionProof) -> Self {
+        match *proof {
+            TransactionProof::Witness(_) => Self::PrimitiveWitness,
+            TransactionProof::ProofCollection(_) => Self::ProofCollection,
+            TransactionProof::SingleProof(_) => Self::SingleProof,
+        }
+    }
 }
 
 impl TxProvingCapability {
