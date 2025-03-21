@@ -1657,6 +1657,16 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
+    // upgrades a transaction's proof.
+    //
+    // ignored if the transaction is already upgraded to level of supplied
+    // proof (or higher)
+    async fn upgrade_tx_proof(
+        token: rpc_auth::Token,
+        transaction_id: TransactionKernelId,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<()>;
+
     async fn proof_type(
         token: rpc_auth::Token,
         txid: TransactionKernelId,
@@ -2923,6 +2933,23 @@ impl RPC for NeptuneRPCServer {
             .await?)
     }
 
+    // documented in trait. do not add doc-comment.
+    async fn upgrade_tx_proof(
+        self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        transaction_id: TransactionKernelId,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(send::TransactionSender::new(self.state.clone())
+            .upgrade_tx_proof(transaction_id, transaction_proof)
+            .await?)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn proof_type(
         self,
         _ctx: context::Context,

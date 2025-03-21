@@ -12,6 +12,7 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
@@ -165,11 +166,11 @@ impl TransactionSender {
         // handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
 
-        tracing::debug!("send-to-many: step 1. generate outputs. need read-lock");
+        tracing::debug!("step 1. generate outputs. need read-lock");
 
         let tx_outputs = self.generate_tx_outputs(outputs).await;
 
-        tracing::debug!("send-to-many: step 2. create tx.");
+        tracing::debug!("step 2. create tx.");
 
         // Create the transaction
         //
@@ -199,13 +200,52 @@ impl TransactionSender {
                 .len()
         );
 
-        tracing::debug!("send-to-many: step 4. record and broadcast tx.");
+        tracing::debug!("step 3. record and broadcast tx.");
 
         self.record_and_broadcast_transaction(&tx_artifacts).await?;
 
         Ok(tx_artifacts)
     }
 
+    /// upgrades a transaction's proof.
+    ///
+    /// ignored if the transaction is already upgraded to level of supplied
+    /// proof (or higher)
+    pub async fn upgrade_tx_proof(
+        &mut self,
+        transaction_id: TransactionKernelId,
+        transaction_proof: TransactionProof,
+    ) -> anyhow::Result<()> {
+        let mut gsm = self.global_state_lock.lock_guard_mut().await;
+
+        let Some(tx) = gsm.mempool.get_mut(transaction_id) else {
+            anyhow::bail!("transaction not found in mempool");
+        };
+
+        let new = TxProvingCapability::from(&transaction_proof);
+        let old = TxProvingCapability::from(&tx.proof);
+
+        if new <= old {
+            anyhow::bail!("input proof is not an upgrade");
+        }
+
+        // tbd: how long does this verify take?   If too slow,
+        // we could obtain tx with a read-lock first, verify,
+        // then obtain again with write-lock to mutate it.
+        if !transaction_proof.verify(tx.kernel.mast_hash()).await {
+            anyhow::bail!("invalid proof");
+        }
+
+        // mutate
+        tx.proof = transaction_proof;
+
+        Ok(())
+    }
+
+    /// returns the type of proof that the queried transaction (in mempool)
+    /// presently has.
+    ///
+    /// returns an error if the transaction is not in the mempool.
     pub async fn proof_type(
         &self,
         txid: TransactionKernelId,
