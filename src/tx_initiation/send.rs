@@ -55,19 +55,13 @@ impl TransactionSender {
 
     /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
     ///
-    /// InputSelectionPolicy might be something like:
+    /// see [InputSelectionPolicy]
     ///
     /// pub enum InputSelectionPolicy {
     ///     Random,
-    ///     ByNativeCoinAmount(Ordering),
-    ///     ByBlockHeight(Ordering),
-    ///     BySize(Ordering),
+    ///     ByNativeCoinAmount(SortOrder),
+    ///     ByUtxoSize(SortOrder),
     /// }
-    ///
-    /// questions:
-    ///   how to handle input Utxos for non-native coins?
-    ///   if Utxo has native-coin and another Coin, what then?
-    ///   Should we add a Coin param, to support eg tokens?
     pub async fn select_spendable_inputs(
         &self,
         policy: InputSelectionPolicy,

@@ -64,6 +64,7 @@ use tracing::info;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
 
+use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
@@ -1517,6 +1518,21 @@ pub trait RPC {
 
     async fn spendable_inputs(token: rpc_auth::Token) -> RpcResult<TxInputList>;
 
+    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
+    ///
+    /// see [InputSelectionPolicy]
+    ///
+    /// pub enum InputSelectionPolicy {
+    ///     Random,
+    ///     ByNativeCoinAmount(SortOrder),
+    ///     ByUtxoSize(SortOrder),
+    /// }
+    async fn select_spendable_inputs(
+        token: rpc_auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList>;
+
     /// generate tx outputs from list of OutputFormat, which can be
     /// address:amount, address:amount:medium, address:utxo,
     /// address:utxo:medium, tx_output
@@ -2786,13 +2802,25 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self
-            .state
-            .lock_guard()
-            .await
-            .wallet_spendable_inputs()
-            .await
-            .into())
+        Ok(send::TransactionSender::new(self.state.clone())
+            .spendable_inputs()
+            .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn select_spendable_inputs(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(send::TransactionSender::new(self.state.clone())
+            .select_spendable_inputs(policy, spend_amount)
+            .await.into())
     }
 
     // documented in trait. do not add doc-comment.
