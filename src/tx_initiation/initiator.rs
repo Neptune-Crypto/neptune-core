@@ -19,6 +19,7 @@ use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::StateLock;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
@@ -27,7 +28,6 @@ use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::tx_initiation::export::Timestamp;
 use crate::GlobalStateLock;
-use crate::models::state::StateLock;
 
 #[derive(Debug)]
 pub struct TransactionInitiator {

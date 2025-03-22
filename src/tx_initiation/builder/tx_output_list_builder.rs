@@ -12,6 +12,7 @@ use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::models::state::StateLock;
 use crate::WalletState;
 
 /// enumerates various ways to specify a transaction output.
@@ -177,6 +178,22 @@ impl TxOutputListBuilder {
     pub fn tx_output(mut self, tx_output: TxOutput) -> Self {
         self.outputs.push(OutputFormat::TxOutput(tx_output));
         self
+    }
+
+    /// build the list of [TxOutput], with [StateLock]
+    pub async fn build_with_state(self, state_lock: &mut StateLock<'_>) -> TxOutputList {
+        match state_lock {
+            StateLock::Lock(gsl) => {
+                let gs = gsl.lock_guard().await;
+                self.build(&gs.wallet_state, gs.chain.light_state().header().height)
+            }
+            StateLock::ReadGuard(gs) => {
+                self.build(&gs.wallet_state, gs.chain.light_state().header().height)
+            }
+            StateLock::WriteGuard(gs) => {
+                self.build(&gs.wallet_state, gs.chain.light_state().header().height)
+            }
+        }
     }
 
     /// build the list of [TxOutput]
