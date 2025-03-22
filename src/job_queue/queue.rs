@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::OnceLock;
 
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -17,7 +16,6 @@ use super::traits::JobCompletion;
 use super::traits::JobResult;
 use super::traits::JobResultReceiver;
 use super::traits::JobResultSender;
-use super::triton_vm::TritonVmJobPriority;
 
 /// A job-handle enables cancelling a job and awaiting results
 #[derive(Debug)]
@@ -128,7 +126,7 @@ impl<P> Drop for JobQueue<P> {
 
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     /// creates job queue and starts it processing.  returns immediately.
-    fn start() -> Self {
+    pub fn start() -> Self {
         struct CurrentJob {
             job_num: usize,
             cancel_tx: JobCancelSender,
@@ -278,18 +276,6 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             cancel_tx,
         })
     }
-}
-
-/// A job queue for Triton VM Jobs.
-pub type TritonVmJobQueue = JobQueue<TritonVmJobPriority>;
-
-/// Global singleton accessor for the Triton VM Job Queue
-//
-// Ideally we implement a generic function `instance` on JobQueue but it seems
-// as though generic type arguments do not play ball with static pointers.
-pub fn global_triton_vm_job_queue() -> &'static TritonVmJobQueue {
-    static REGISTRY: OnceLock<TritonVmJobQueue> = OnceLock::new();
-    REGISTRY.get_or_init(TritonVmJobQueue::start)
 }
 
 #[cfg(test)]

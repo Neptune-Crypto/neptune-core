@@ -1,5 +1,5 @@
-mod triton_vm_job_priority;
+pub(crate) mod triton_vm_job_queue;
 
-pub use super::queue::global_triton_vm_job_queue;
-pub use super::queue::TritonVmJobQueue;
-pub use triton_vm_job_priority::TritonVmJobPriority;
+pub use triton_vm_job_queue::global_triton_vm_job_queue;
+pub use triton_vm_job_queue::TritonVmJobPriority;
+pub use triton_vm_job_queue::TritonVmJobQueue;
