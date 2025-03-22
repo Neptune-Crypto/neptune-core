@@ -41,10 +41,10 @@ impl TransactionInitiatorInternal {
         timestamp: Timestamp,
         tx_creation_config: TxCreationConfig,
     ) -> anyhow::Result<TxCreationArtifacts> {
-        // acquire write-lock.  write-lock is only needed if we must generate a
+
+        // acquire lock.  write-lock is only needed if we must generate a
         // new change receiving address.  However, that is also the most common
         // scenario.
-
         let mut state_lock = match tx_creation_config.change_policy() {
             ChangePolicy::RecoverToNextUnusedKey{..} => StateLock::WriteGuard(self.global_state_lock.lock_guard_mut().await),
             _ => StateLock::ReadGuard(self.global_state_lock.lock_guard().await),
