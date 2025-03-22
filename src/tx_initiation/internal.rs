@@ -16,6 +16,7 @@ use crate::tx_initiation::export::Timestamp;
 use crate::tx_initiation::export::TxCreationArtifacts;
 use crate::tx_initiation::export::TxOutputList;
 use crate::GlobalStateLock;
+use crate::tx_initiation::export::ChangePolicy;
 
 // provides crate-internal API(s)
 pub(crate) struct TransactionInitiatorInternal {
@@ -43,12 +44,16 @@ impl TransactionInitiatorInternal {
         // acquire write-lock.  write-lock is only needed if we must generate a
         // new change receiving address.  However, that is also the most common
         // scenario.
-        let gsm = self.global_state_lock.lock_guard_mut().await;
+
+        let mut state_lock = match tx_creation_config.change_policy() {
+            ChangePolicy::RecoverToNextUnusedKey{..} => StateLock::WriteGuard(self.global_state_lock.lock_guard_mut().await),
+            _ => StateLock::ReadGuard(self.global_state_lock.lock_guard().await),
+        };
 
         // select inputs
         let tx_inputs = TxInputListBuilder::new()
             .spendable_inputs(
-                gsm.wallet_spendable_inputs(timestamp)
+                state_lock.gs().wallet_spendable_inputs(timestamp)
                     .await
                     .into_iter()
                     .collect(),
@@ -60,7 +65,6 @@ impl TransactionInitiatorInternal {
             .build();
 
         // generate tx details
-        let mut state_lock = StateLock::WriteGuard(gsm);
         let tx_details = TransactionDetailsBuilder::new()
             .inputs(tx_inputs.into_iter().into())
             .outputs(tx_outputs)

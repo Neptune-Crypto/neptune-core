@@ -379,6 +379,15 @@ impl<'a> From<AtomicRwWriteGuard<'a, GlobalState>> for StateLock<'a> {
 }
 
 impl<'a> StateLock<'a> {
+
+    pub fn gs(&self) -> &GlobalState {
+        match self {
+            Self::ReadGuard(g) => &*g,
+            Self::WriteGuard(g) => &*g,
+            _ => panic!("wrong usage: not a guard"),
+        }
+    }
+
     pub fn into_lock(self) -> GlobalStateLock {
         match self {
             Self::Lock(g) => g,
@@ -3442,6 +3451,7 @@ mod global_state_tests {
         use super::*;
         use crate::mine_loop::create_block_transaction_from;
         use crate::mine_loop::TxMergeOrigin;
+        use num_traits::CheckedSub;
 
         /// test scenario: onchain/symmetric.
         /// pass outcome: no funds loss
@@ -3600,11 +3610,12 @@ mod global_state_tests {
                     alice_to_bob_amount,
                     UtxoNotificationMedium::OnChain,
                 )];
-                let tx_outputs = alice_state_lock.tx_initiator().generate_tx_outputs(outputs);
+                let tx_outputs = alice_state_lock.tx_initiator().generate_tx_outputs(outputs).await;
+                let outputs_len = tx_outputs.len();
 
                 // create tx.  utxo_notify_method is a test param.
                 let config = TxCreationConfig::default()
-                    .recover_to_provided_key(alice_change_key, change_notification_medium)
+                    .recover_to_provided_key(Arc::new(alice_change_key), change_notification_medium)
                     .with_prover_capability(TxProvingCapability::SingleProof);
                 let artifacts = alice_state_lock
                     .tx_initiator_internal_mut()
@@ -3617,9 +3628,7 @@ mod global_state_tests {
                     .await
                     .unwrap();
                 let alice_to_bob_tx = artifacts.transaction;
-                let Some(change_output) = artifacts.change_output else {
-                    panic!("A change Tx-output was expected");
-                };
+                assert_eq!(artifacts.details.tx_outputs.len(), outputs_len+1, "A change Tx-output was expected");
 
                 // Inform alice wallet of any expected incoming utxos.
                 // note: no-op when all utxo notifications are sent on-chain.
@@ -3628,7 +3637,7 @@ mod global_state_tests {
                     .await
                     .wallet_state
                     .extract_expected_utxos(
-                        tx_outputs.concat_with(vec![change_output]),
+                        &artifacts.details.tx_outputs,
                         UtxoNotifier::Myself,
                     );
                 alice_state_lock
@@ -3646,7 +3655,7 @@ mod global_state_tests {
                     &alice_state_lock,
                     seven_months_post_launch,
                     (TritonVmJobPriority::Normal, None).into(),
-                    TxMergeOrigin::ExplicitList(vec![alice_to_bob_tx]),
+                    TxMergeOrigin::ExplicitList(vec![Arc::into_inner(alice_to_bob_tx).unwrap()]),
                 )
                 .await
                 .unwrap();

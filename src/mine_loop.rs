@@ -393,9 +393,11 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .with_proof_job_options(job_options)
         .with_prover_capability(proving_power);
 
-    let transaction =
-        tx_initiation::internal::create_raw_transaction(Arc::new(transaction_details), config)
-            .await?;
+    let transaction = tx_initiation::internal::create_raw_transaction(
+        Arc::new(transaction_details),
+        config,
+    )
+    .await?;
 
     info!("Done: generating single proof for coinbase transaction");
 

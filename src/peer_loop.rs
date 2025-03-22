@@ -3616,10 +3616,10 @@ mod peer_loop_tests {
         ) -> Transaction {
             let wallet_secret = WalletEntropy::devnet_wallet();
             let alice_key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let alice =
+            let alice_gsl =
                 mock_genesis_global_state(network, 1, wallet_secret, cli_args::Args::default())
                     .await;
-            let alice = alice.lock_guard().await;
+            let alice = alice_gsl.lock_guard().await;
             let genesis_block = alice.chain.light_state();
             let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
             let prover_capability = match quality {
@@ -3629,9 +3629,10 @@ mod peer_loop_tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(alice_key.into())
                 .with_prover_capability(prover_capability);
-            alice
+            alice_gsl
+                .tx_initiator_internal()
                 .create_transaction(
-                    vec![].into(),
+                    Vec::<TxOutput>::new().into(),
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,
                     config,
