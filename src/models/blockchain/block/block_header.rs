@@ -214,6 +214,7 @@ impl MastHash for BlockHeader {
 /// The data needed to calculate the block hash, apart from the data present
 /// in the block header.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct HeaderToBlockHashWitness {
     /// The "body" leaf of the Merkle tree from which block hash is calculated.
     body_leaf: Digest,
@@ -233,6 +234,7 @@ impl From<&Block> for HeaderToBlockHashWitness {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub(crate) struct BlockHeaderWithBlockHashWitness {
     pub(crate) header: BlockHeader,
     witness: HeaderToBlockHashWitness,
