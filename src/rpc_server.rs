@@ -2930,7 +2930,7 @@ impl RPC for NeptuneRPCServer {
 
         Ok(self
             .state
-            .tx_initiator()
+            .tx_sender()
             .send(outputs, change_policy, fee, Timestamp::now())
             .await?)
     }
