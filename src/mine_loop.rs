@@ -56,7 +56,7 @@ use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use crate::tx_initiation::send::TransactionSender;
+use crate::tx_initiation;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 /// Information related to the resources to be used for guessing.
@@ -393,8 +393,11 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .with_proof_job_options(job_options)
         .with_prover_capability(proving_power);
 
-    let transaction =
-        TransactionSender::create_raw_transaction(Arc::new(transaction_details), config).await?;
+    let transaction = tx_initiation::send::internal::create_raw_transaction(
+        Arc::new(transaction_details),
+        config,
+    )
+    .await?;
 
     info!("Done: generating single proof for coinbase transaction");
 

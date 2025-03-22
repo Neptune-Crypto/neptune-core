@@ -75,7 +75,7 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
-use crate::tx_initiation::send::TransactionSender;
+use crate::tx_initiation::send::TransactionInitiator;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
@@ -209,8 +209,8 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.flush_databases().await
     }
 
-    pub fn tx_sender(&self) -> TransactionSender {
-        TransactionSender::new(self.clone())
+    pub fn tx_initiator(&self) -> TransactionInitiator {
+        TransactionInitiator::new(self.clone())
     }
 
     /// Set tip to a block that we composed.

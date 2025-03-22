@@ -2812,7 +2812,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .spendable_inputs()
             .await)
     }
@@ -2828,7 +2828,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .select_spendable_inputs(policy, spend_amount)
             .await
             .into())
@@ -2844,7 +2844,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .generate_tx_outputs(outputs)
             .await)
     }
@@ -2862,7 +2862,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
             .await?)
     }
@@ -2877,7 +2877,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .generate_witness_proof(Arc::new(tx_details)))
     }
 
@@ -2892,7 +2892,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .assemble_transaction(Arc::new(transaction_details), transaction_proof)?)
     }
 
@@ -2906,7 +2906,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .record_and_broadcast_transaction(&tx_artifacts)
             .await?)
     }
@@ -2923,7 +2923,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .send(outputs, change_policy, fee, Timestamp::now())
             .await?)
     }
@@ -2939,7 +2939,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .upgrade_tx_proof(transaction_id, transaction_proof)
             .await?)
     }
@@ -2954,7 +2954,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionSender::new(self.state.clone())
+        Ok(send::TransactionInitiator::new(self.state.clone())
             .proof_type(txid)
             .await?)
     }
