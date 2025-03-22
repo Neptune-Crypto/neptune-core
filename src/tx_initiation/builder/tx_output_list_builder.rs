@@ -37,6 +37,48 @@ pub enum OutputFormat {
     TxOutput(TxOutput),
 }
 
+impl From<(ReceivingAddress, NativeCurrencyAmount)> for OutputFormat {
+    fn from(v: (ReceivingAddress, NativeCurrencyAmount)) -> Self {
+        Self::AddressAndAmount(v.0, v.1)
+    }
+}
+
+impl
+    From<(
+        ReceivingAddress,
+        NativeCurrencyAmount,
+        UtxoNotificationMedium,
+    )> for OutputFormat
+{
+    fn from(
+        v: (
+            ReceivingAddress,
+            NativeCurrencyAmount,
+            UtxoNotificationMedium,
+        ),
+    ) -> Self {
+        Self::AddressAndAmountAndMedium(v.0, v.1, v.2)
+    }
+}
+
+impl From<(ReceivingAddress, Utxo)> for OutputFormat {
+    fn from(v: (ReceivingAddress, Utxo)) -> Self {
+        Self::AddressAndUtxo(v.0, v.1)
+    }
+}
+
+impl From<(ReceivingAddress, Utxo, UtxoNotificationMedium)> for OutputFormat {
+    fn from(v: (ReceivingAddress, Utxo, UtxoNotificationMedium)) -> Self {
+        Self::AddressAndUtxoAndMedium(v.0, v.1, v.2)
+    }
+}
+
+impl From<TxOutput> for OutputFormat {
+    fn from(v: TxOutput) -> Self {
+        Self::TxOutput(v)
+    }
+}
+
 /// a builder for generating a list of transaction outputs.
 #[derive(Debug)]
 pub struct TxOutputListBuilder {
@@ -83,8 +125,8 @@ impl TxOutputListBuilder {
     }
 
     /// add an output
-    pub fn output_format(mut self, output_format: OutputFormat) -> Self {
-        self.outputs.push(output_format);
+    pub fn output_format(mut self, output_format: impl Into<OutputFormat>) -> Self {
+        self.outputs.push(output_format.into());
         self
     }
 

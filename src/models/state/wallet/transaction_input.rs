@@ -41,7 +41,8 @@ impl Deref for TxInput {
 
 #[cfg(test)]
 impl TxInput {
-    pub fn new_random(amount: NeptuneCoins) -> Self {
+    pub fn new_random(amount: NativeCurrencyAmount) -> Self {
+        use crate::models::blockchain::transaction::lock_script::LockScript;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 

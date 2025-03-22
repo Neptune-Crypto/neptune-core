@@ -2901,7 +2901,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn record_and_broadcast_transaction(
-        self,
+        mut self,
         _: context::Context,
         token: rpc_auth::Token,
         tx_artifacts: TxCreationArtifacts,
@@ -2911,14 +2911,14 @@ impl RPC for NeptuneRPCServer {
 
         Ok(self
             .state
-            .tx_initiator()
+            .tx_initiator_mut()
             .record_and_broadcast_transaction(&tx_artifacts)
             .await?)
     }
 
     // documented in trait. do not add doc-comment.
     async fn send(
-        self,
+        mut self,
         _ctx: context::Context,
         token: rpc_auth::Token,
         outputs: Vec<OutputFormat>,
@@ -2930,14 +2930,14 @@ impl RPC for NeptuneRPCServer {
 
         Ok(self
             .state
-            .tx_sender()
+            .tx_sender_mut()
             .send(outputs, change_policy, fee, Timestamp::now())
             .await?)
     }
 
     // documented in trait. do not add doc-comment.
     async fn upgrade_tx_proof(
-        self,
+        mut self,
         _ctx: context::Context,
         token: rpc_auth::Token,
         transaction_id: TransactionKernelId,
@@ -2948,7 +2948,7 @@ impl RPC for NeptuneRPCServer {
 
         Ok(self
             .state
-            .tx_initiator()
+            .tx_initiator_mut()
             .upgrade_tx_proof(transaction_id, transaction_proof)
             .await?)
     }
@@ -3485,6 +3485,7 @@ mod rpc_server_tests {
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::rpc_server::NeptuneRPCServer;
     use crate::tests::shared::invalid_block_with_transaction;
@@ -5074,7 +5075,10 @@ mod rpc_server_tests {
                 // any attempts after the 2nd send should result in RateLimit error.
                 match i {
                     0..2 => assert!(result.is_ok()),
-                    _ => assert!(matches!(result, Err(error::SendError::RateLimit { .. }))),
+                    _ => assert!(matches!(
+                        result,
+                        Err(tx_initiation::error::SendError::RateLimit { .. })
+                    )),
                 }
             }
 

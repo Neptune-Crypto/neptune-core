@@ -25,6 +25,7 @@ use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::tx_initiation::export::Timestamp;
 use crate::GlobalStateLock;
 
 #[derive(Debug)]
@@ -44,7 +45,7 @@ impl TransactionInitiator {
         self.global_state_lock
             .lock_guard()
             .await
-            .wallet_spendable_inputs()
+            .wallet_spendable_inputs(Timestamp::now())
             .await
             .into_iter()
             .into()
@@ -76,13 +77,10 @@ impl TransactionInitiator {
     /// this is a wrapper around [TxOutputListBuilder], which callers can also
     /// use directly.
     ///
-    /// This is a helper method for generating the `TxOutputList` that is
-    /// required by `create_transaction`.
-    ///
     /// Each output may use either `OnChain` or `OffChain` notifications.
     pub async fn generate_tx_outputs(
         &self,
-        outputs: impl IntoIterator<Item = OutputFormat>,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
     ) -> TxOutputList {
         let mut builder = TxOutputListBuilder::new();
 
@@ -101,15 +99,12 @@ impl TransactionInitiator {
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
     ) -> Result<TransactionDetails, error::CreateTxError> {
-        let mut gsm = self.global_state_lock.lock_guard_mut().await;
-
-        let light_state = gsm.chain.light_state_clone(); // cheap Arc clone
         TransactionDetailsBuilder::new()
             .inputs(inputs)
             .outputs(outputs)
             .fee(fee)
             .change_policy(change_policy)
-            .build(&light_state, &mut gsm.wallet_state)
+            .build(self.global_state_lock.clone().into())
             .await
     }
 

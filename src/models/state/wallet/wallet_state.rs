@@ -1713,6 +1713,11 @@ impl WalletState {
     ///
     /// Requested amount `total_spend` must include fees that are paid in the
     /// transaction.
+    ///
+    /// note: this fn is replaced by TxInputListBuilder and
+    /// TransactionInitiator::select_spendable_inputs().  It can be removed once
+    /// tests are updated.
+    #[cfg(test)]
     pub(crate) async fn allocate_sufficient_input_funds(
         &self,
         total_spend: NativeCurrencyAmount,
@@ -1788,6 +1793,8 @@ impl WalletState {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::sync::Arc;
+
     use generation_address::GenerationSpendingKey;
     use rand::random;
     use rand::Rng;
@@ -2968,10 +2975,8 @@ pub(crate) mod tests {
                 .recover_change_on_chain(a_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let mut tx_spending_guesser_fee = bob
-                .global_state_lock
-                .lock_guard()
-                .await
-                .create_transaction(vec![].into(), fee, block2_timestamp, config)
+                .tx_initiator_internal_mut()
+                .create_transaction(Vec::<TxOutput>::new().into(), fee, block2_timestamp, config)
                 .await
                 .unwrap()
                 .transaction;
@@ -3135,13 +3140,10 @@ pub(crate) mod tests {
                         rng.random(),
                     )),
                     send_amt,
+                    UtxoNotificationMedium::OnChain,
                 )];
 
-                let tx_outputs = gs.generate_tx_outputs(
-                    outputs,
-                    UtxoNotificationMedium::OnChain,
-                    UtxoNotificationMedium::OnChain,
-                );
+                let tx_outputs = gs.tx_initiator().generate_tx_outputs(outputs);
 
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
@@ -3207,12 +3209,12 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs() {
             async fn outgoing_transaction(
-                alice_global_lock: &GlobalStateLock,
+                alice_global_lock: &mut GlobalStateLock,
                 amount: NativeCurrencyAmount,
                 fee: NativeCurrencyAmount,
                 timestamp: Timestamp,
                 change_key: SpendingKey,
-            ) -> Result<Transaction> {
+            ) -> Result<Arc<Transaction>> {
                 let mut rng = rand::rng();
                 let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
                 let tx_output = TxOutput::onchain_native_currency(
@@ -3226,12 +3228,10 @@ pub(crate) mod tests {
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
-                    .global_state_lock
-                    .lock_guard()
-                    .await
+                    .tx_initiator_internal_mut()
                     .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
-                    .map(|tx| tx.into())
+                    .map(|tx| tx.transaction)
             }
 
             let network = Network::Main;
@@ -3704,12 +3704,12 @@ pub(crate) mod tests {
         async fn mutxos_spent_in_orphaned_blocks_are_still_spendable() {
             /// Crate an outgoing transaction. Panics on insufficient balance.
             async fn outgoing_transaction(
-                alice_global_lock: &GlobalStateLock,
+                alice_global_lock: &mut GlobalStateLock,
                 amount: NativeCurrencyAmount,
                 fee: NativeCurrencyAmount,
                 timestamp: Timestamp,
                 change_key: SpendingKey,
-            ) -> Transaction {
+            ) -> std::sync::Arc<Transaction> {
                 let mut rng = rand::rng();
                 let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
                 let tx_output = TxOutput::onchain_native_currency(
@@ -3723,9 +3723,7 @@ pub(crate) mod tests {
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
-                    .global_state_lock
-                    .lock_guard()
-                    .await
+                    .tx_initiator_internal_mut()
                     .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
                     .unwrap()

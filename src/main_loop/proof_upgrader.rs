@@ -723,7 +723,10 @@ mod test {
     /// Returns a PrimitiveWitness-backed transaction initiated by the global
     /// state provided as argument. Assumes balance is sufficient to make this
     /// transaction.
-    async fn primitive_witness_backed_tx(mut state: GlobalStateLock, seed: u64) -> Transaction {
+    async fn primitive_witness_backed_tx(
+        mut state: GlobalStateLock,
+        seed: u64,
+    ) -> Arc<Transaction> {
         let mut rng: StdRng = SeedableRng::seed_from_u64(seed);
         let receiving_address = GenerationReceivingAddress::derive_from_seed(rng.random());
         let tx_outputs = vec![TxOutput::onchain_native_currency(
@@ -733,8 +736,9 @@ mod test {
             false,
         )]
         .into();
-        let mut state = state.lock_guard_mut().await;
-        let change_key = state.wallet_state.next_unused_symmetric_key().await;
+        let mut gsm = state.lock_guard_mut().await;
+        let change_key = gsm.wallet_state.next_unused_symmetric_key().await;
+        drop(gsm);
         let fee = NativeCurrencyAmount::from_nau(100);
         let dummy = TritonVmJobQueue::dummy();
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
@@ -743,6 +747,7 @@ mod test {
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(dummy);
         state
+            .tx_initiator_internal()
             .create_transaction(tx_outputs, fee, timestamp, config)
             .await
             .unwrap()

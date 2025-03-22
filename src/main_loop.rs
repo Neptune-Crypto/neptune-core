@@ -2084,12 +2084,13 @@ mod test {
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
         use crate::models::state::tx_creation_config::TxCreationConfig;
+        use crate::models::state::wallet::transaction_output::TxOutput;
 
         async fn tx_no_outputs(
-            global_state_lock: &GlobalStateLock,
+            global_state_lock: &mut GlobalStateLock,
             tx_proof_type: TxProvingCapability,
             fee: NativeCurrencyAmount,
-        ) -> Transaction {
+        ) -> Arc<Transaction> {
             let change_key = global_state_lock
                 .lock_guard()
                 .await
@@ -2109,8 +2110,8 @@ mod test {
                 .recover_change_off_chain(change_key.into())
                 .with_prover_capability(tx_proof_type);
             global_state_lock
-                .tx_sender()
-                .create_transaction(vec![].into(), fee, in_seven_months, config)
+                .tx_initiator_internal_mut()
+                .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
                 .transaction

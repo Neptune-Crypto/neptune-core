@@ -36,9 +36,10 @@ impl TransactionSender {
         now: Timestamp,
     ) -> Result<TxCreationArtifacts, error::SendError> {
         let mut initiator = self.global_state_lock.tx_initiator();
-        let mut worker = self.worker();
+        let mut initiator_internal = self.global_state_lock.tx_initiator_internal();
+        let initiator_private = self.private();
 
-        worker.check_proceed_with_send(fee).await?;
+        initiator_private.check_proceed_with_send(fee).await?;
 
         // The proving capability is set to the lowest possible value here,
         // since we don't want the client (CLI or dashboard) to hang while
@@ -65,7 +66,7 @@ impl TransactionSender {
             .with_prover_capability(tx_proving_capability)
             .use_job_queue(vm_job_queue());
 
-        let tx_artifacts = worker
+        let tx_artifacts = initiator_internal
             .create_transaction(tx_outputs, fee, now, config)
             .await
             .map_err(|e| {
@@ -89,7 +90,7 @@ impl TransactionSender {
         Ok(tx_artifacts)
     }
 
-    fn worker(&self) -> super::private::TransactionInitiatorPrivate {
+    fn private(&self) -> super::private::TransactionInitiatorPrivate {
         super::private::TransactionInitiatorPrivate::new(self.global_state_lock.clone())
     }
 }

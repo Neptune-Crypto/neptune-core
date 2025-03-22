@@ -824,6 +824,7 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -839,7 +840,6 @@ mod tests {
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
-    use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::make_plenty_mock_transaction_with_primitive_witness;
@@ -989,7 +989,12 @@ mod tests {
         let tx_by_bob = bob
             .lock_guard()
             .await
-            .create_transaction(vec![].into(), high_fee, in_seven_months, config)
+            .create_transaction(
+                Vec::<TxOutput>::new().into(),
+                high_fee,
+                in_seven_months,
+                config,
+            )
             .await
             .unwrap()
             .transaction;
@@ -1785,11 +1790,11 @@ mod tests {
             proof_type: TxProvingCapability,
             network: Network,
             fee: NativeCurrencyAmount,
-        ) -> Transaction {
+        ) -> std::sync::Arc<Transaction> {
             let genesis_block = Block::genesis(network);
             let bob_wallet_secret = WalletEntropy::devnet_wallet();
             let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-            let bob = mock_genesis_global_state(
+            let mut bob = mock_genesis_global_state(
                 network,
                 2,
                 bob_wallet_secret.clone(),
@@ -1804,9 +1809,8 @@ mod tests {
             // Clippy is wrong here. You can *not* eliminate the binding.
             #[allow(clippy::let_and_return)]
             let transaction = bob
-                .lock_guard()
-                .await
-                .create_transaction(vec![].into(), fee, in_seven_months, config)
+                .tx_initiator_internal_mut()
+                .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
                 .transaction;

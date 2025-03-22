@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -63,6 +64,8 @@ use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
+use crate::locks::tokio::AtomicRwReadGuard;
+use crate::locks::tokio::AtomicRwWriteGuard;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
@@ -76,6 +79,7 @@ use crate::models::state::wallet::transaction_input::TxInput;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::tx_initiation::initiator::TransactionInitiator;
+use crate::tx_initiation::internal::TransactionInitiatorInternal;
 use crate::tx_initiation::send::TransactionSender;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -210,11 +214,24 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.flush_databases().await
     }
 
+    #[cfg(test)]
+    pub(crate) fn tx_initiator_internal_mut(&mut self) -> TransactionInitiatorInternal {
+        TransactionInitiatorInternal::new(self.clone())
+    }
+
+    pub(crate) fn tx_initiator_internal(&self) -> TransactionInitiatorInternal {
+        TransactionInitiatorInternal::new(self.clone())
+    }
+
+    pub fn tx_initiator_mut(&mut self) -> TransactionInitiator {
+        TransactionInitiator::new(self.clone())
+    }
+
     pub fn tx_initiator(&self) -> TransactionInitiator {
         TransactionInitiator::new(self.clone())
     }
 
-    pub fn tx_sender(&self) -> TransactionSender {
+    pub fn tx_sender_mut(&mut self) -> TransactionSender {
         TransactionSender::new(self.clone())
     }
 
@@ -327,6 +344,68 @@ impl Deref for GlobalStateLock {
 impl DerefMut for GlobalStateLock {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.global_state_lock
+    }
+}
+
+#[derive(Debug)]
+pub enum StateLock<'a> {
+    Lock(GlobalStateLock),
+    ReadGuard(AtomicRwReadGuard<'a, GlobalState>),
+    WriteGuard(AtomicRwWriteGuard<'a, GlobalState>),
+}
+
+impl<'a> From<GlobalStateLock> for StateLock<'a> {
+    fn from(g: GlobalStateLock) -> Self {
+        Self::Lock(g)
+    }
+}
+
+impl<'a> From<&GlobalStateLock> for StateLock<'a> {
+    fn from(g: &GlobalStateLock) -> Self {
+        Self::Lock(g.clone()) // cheap Arc clone.
+    }
+}
+
+impl<'a> From<AtomicRwReadGuard<'a, GlobalState>> for StateLock<'a> {
+    fn from(g: AtomicRwReadGuard<'a, GlobalState>) -> Self {
+        Self::ReadGuard(g)
+    }
+}
+
+impl<'a> From<AtomicRwWriteGuard<'a, GlobalState>> for StateLock<'a> {
+    fn from(g: AtomicRwWriteGuard<'a, GlobalState>) -> Self {
+        Self::WriteGuard(g)
+    }
+}
+
+impl<'a> StateLock<'a> {
+    pub fn into_lock(self) -> GlobalStateLock {
+        match self {
+            Self::Lock(g) => g,
+            _ => panic!("wrong usage: not a lock"),
+        }
+    }
+
+    pub fn into_read_guard(self) -> AtomicRwReadGuard<'a, GlobalState> {
+        match self {
+            Self::ReadGuard(g) => g,
+            _ => panic!("wrong usage: not a read guard"),
+        }
+    }
+
+    pub fn into_write_guard(self) -> AtomicRwWriteGuard<'a, GlobalState> {
+        match self {
+            Self::WriteGuard(g) => g,
+            _ => panic!("wrong usage: not a write guard"),
+        }
+    }
+
+    pub async fn tip(&self) -> Arc<Block> {
+        match self {
+            Self::Lock(gsl) => gsl.lock_guard().await.chain.light_state_clone(),
+            Self::WriteGuard(gsm) => gsm.chain.light_state_clone(),
+            Self::ReadGuard(gs) => gs.chain.light_state_clone(),
+        }
     }
 }
 
@@ -661,10 +740,12 @@ impl GlobalState {
     //     Ok(change_output)
     // }
 
-    pub async fn wallet_spendable_inputs(&self) -> impl IntoIterator<Item = TxInput> + use<'_> {
+    pub async fn wallet_spendable_inputs(
+        &self,
+        timestamp: Timestamp,
+    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
         let wallet_status = self.get_wallet_status_for_tip().await;
-        self.wallet_state
-            .spendable_inputs(wallet_status, Timestamp::now())
+        self.wallet_state.spendable_inputs(wallet_status, timestamp)
     }
 
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
@@ -1476,15 +1557,22 @@ mod global_state_tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+    use crate::models::state::wallet::address::SpendingKey;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
+    use crate::tx_initiation::export::TxOutputList;
 
     mod handshake {
         use super::*;
@@ -3507,20 +3595,19 @@ mod global_state_tests {
                     .unwrap();
 
                 // create an output for bob, worth 20.
-                let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let tx_outputs = alice_state_lock.lock_guard().await.generate_tx_outputs(
-                    outputs,
-                    change_notification_medium,
+                let outputs = vec![(
+                    bob_address,
+                    alice_to_bob_amount,
                     UtxoNotificationMedium::OnChain,
-                );
+                )];
+                let tx_outputs = alice_state_lock.tx_initiator().generate_tx_outputs(outputs);
 
                 // create tx.  utxo_notify_method is a test param.
                 let config = TxCreationConfig::default()
-                    .recover_change(alice_change_key, change_notification_medium)
+                    .recover_to_provided_key(alice_change_key, change_notification_medium)
                     .with_prover_capability(TxProvingCapability::SingleProof);
                 let artifacts = alice_state_lock
-                    .lock_guard()
-                    .await
+                    .tx_initiator_internal_mut()
                     .create_transaction(
                         tx_outputs.clone(),
                         alice_to_bob_fee,

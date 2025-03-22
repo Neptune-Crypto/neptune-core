@@ -8,14 +8,7 @@ use std::sync::Arc;
 use super::error;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
-use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
-use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
-use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 
@@ -26,62 +19,6 @@ pub(super) struct TransactionInitiatorPrivate {
 impl TransactionInitiatorPrivate {
     pub(super) fn new(global_state_lock: GlobalStateLock) -> Self {
         Self { global_state_lock }
-    }
-
-    /// note: this is a internal internal (private) API.
-    ///
-    /// it is now just a wrapper around TransactionDetailsBuilder,
-    /// TransactionProofBuilder and TransactionBuilder
-    pub(super) async fn create_transaction(
-        &mut self,
-        tx_outputs: TxOutputList,
-        fee: NativeCurrencyAmount,
-        timestamp: Timestamp,
-        tx_creation_config: TxCreationConfig,
-    ) -> anyhow::Result<TxCreationArtifacts> {
-        let mut gsm = self.global_state_lock.lock_guard_mut().await;
-
-        let light_state = gsm.chain.light_state_clone(); // cheap Arc clone
-        let tx_details = TransactionDetailsBuilder::new()
-            .inputs(
-                gsm.wallet_state
-                    .allocate_sufficient_input_funds(
-                        tx_outputs.total_native_coins(),
-                        light_state.hash(),
-                        &light_state.mutator_set_accumulator_after(),
-                        timestamp,
-                    )
-                    .await?
-                    .into(),
-            )
-            .outputs(tx_outputs)
-            .fee(fee)
-            .change_policy(tx_creation_config.change_policy())
-            .build(&light_state, &mut gsm.wallet_state)
-            .await?;
-        drop(gsm);
-
-        let tx_details_rc = Arc::new(tx_details);
-
-        let proof = TransactionProofBuilder::new()
-            .transaction_details(tx_details_rc.clone())
-            .job_queue(tx_creation_config.job_queue())
-            .proof_job_options(tx_creation_config.proof_job_options())
-            .tx_proving_capability(tx_creation_config.prover_capability())
-            .build()
-            .await?;
-
-        let transaction = TransactionBuilder::new()
-            .transaction_details(tx_details_rc.clone())
-            .transaction_proof(proof)
-            .build()?;
-
-        let transaction_creation_artifacts = TxCreationArtifacts {
-            transaction: Arc::new(transaction),
-            details: tx_details_rc,
-        };
-
-        Ok(transaction_creation_artifacts)
     }
 
     // note: not pub, as one should never call broadcast without

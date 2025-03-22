@@ -26,6 +26,9 @@ pub enum CreateTxError {
     #[error("provided key_type cannot be used for receiving change.")]
     InvalidKeyForChange,
 
+    #[error("cannot generate change key for immutable wallet.")]
+    CantGenChangeKeyForImmutableWallet,
+
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]
     Failed(String),

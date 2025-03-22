@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
@@ -9,12 +11,15 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_creation_config::ChangePolicy;
+use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::models::state::GlobalState;
+use crate::models::state::StateLock;
 use crate::tx_initiation::error::CreateTxError;
 use crate::Block;
 use crate::WalletState;
@@ -70,13 +75,22 @@ impl TransactionDetailsBuilder {
         self
     }
 
+    /// build [TransactionDetails] and possibly mutate wallet state, acquiring write-lock if necessary.
+    ///
+    /// important: this method will generate a new wallet-key for change if
+    /// necessary. This occurs if change_policy is
+    /// ChangePolicy::RecoverToNextUnusedKey and change is needed.
+    ///
+    /// note: this method accepts a StateLock.
+    /// A write-lock will be acquired only if it is necesary to generate a
+    /// new change key.  Otherwise a read-lock will be acquired.
+    ///
+    /// If caller already holds a write lock or read lock for other purposes
+    /// then build_immutable() or build_mutable() should be used.
     pub async fn build(
         self,
-        tip: &Block,
-        wallet_state: &mut WalletState,
+        state_lock: StateLock<'_>,
     ) -> Result<TransactionDetails, CreateTxError> {
-        let mutator_set_accumulator = tip.mutator_set_accumulator_after();
-
         let TransactionDetailsBuilder {
             tx_inputs,
             mut tx_outputs,
@@ -98,46 +112,99 @@ impl TransactionDetailsBuilder {
             .ok_or(CreateTxError::InsufficientFunds)?;
 
         // Add change output, if required to balance transaction
-        if change_amount > 0.into() {
-            let change_output = match change_policy {
+        let tip_block = if change_amount > 0.into() {
+            let (change_output, tip) = match change_policy {
                 ChangePolicy::ExactChange => {
                     return Err(CreateTxError::NotExactChange);
                 }
 
                 ChangePolicy::RecoverToNextUnusedKey { key_type, medium } => {
-                    let Some(key) = wallet_state.next_unused_spending_key(key_type).await else {
-                        // it is gross there is now a key-type that can't be
-                        // used for change, so the call can fail, and we must
-                        // have this error variant.
-                        return Err(CreateTxError::InvalidKeyForChange);
-                    };
+                    async fn create_change(
+                        gsm: &mut GlobalState,
+                        key_type: KeyType,
+                        change_amount: NativeCurrencyAmount,
+                        medium: UtxoNotificationMedium,
+                    ) -> Result<(TxOutput, Arc<Block>), CreateTxError> {
+                        let tip = gsm.chain.light_state_clone();
 
-                    Self::create_change_output(
-                        wallet_state,
-                        tip.header().height,
-                        change_amount,
-                        key,
-                        medium,
-                    )?
+                        let Some(key) = gsm.wallet_state.next_unused_spending_key(key_type).await
+                        else {
+                            // it is gross there is now a key-type that can't be
+                            // used for change, so the call can fail, and we must
+                            // have this error variant.
+                            return Err(CreateTxError::InvalidKeyForChange);
+                        };
+
+                        Ok((
+                            TransactionDetailsBuilder::create_change_output(
+                                &gsm.wallet_state,
+                                tip.header().height,
+                                change_amount,
+                                key,
+                                medium,
+                            )?,
+                            tip,
+                        ))
+                    }
+
+                    match state_lock {
+                        StateLock::Lock(mut global_state_lock) => {
+                            create_change(
+                                &mut *global_state_lock.lock_guard_mut().await,
+                                key_type,
+                                change_amount,
+                                medium,
+                            )
+                            .await?
+                        }
+                        StateLock::WriteGuard(mut gsm) => {
+                            create_change(&mut *gsm, key_type, change_amount, medium).await?
+                        }
+                        StateLock::ReadGuard(_) => {
+                            return Err(CreateTxError::CantGenChangeKeyForImmutableWallet)
+                        }
+                    }
                 }
 
-                ChangePolicy::RecoverToProvidedKey { key, medium } => Self::create_change_output(
-                    wallet_state,
-                    tip.header().height,
-                    change_amount,
-                    *key,
-                    medium,
-                )?,
+                ChangePolicy::RecoverToProvidedKey { key, medium } => {
+                    let create_change = |gs: &GlobalState| -> Result<_, CreateTxError> {
+                        let tip = gs.chain.light_state_clone();
+                        Ok((
+                            Self::create_change_output(
+                                &gs.wallet_state,
+                                tip.header().height,
+                                change_amount,
+                                *key,
+                                medium,
+                            )?,
+                            tip,
+                        ))
+                    };
 
-                ChangePolicy::Burn => TxOutput::no_notification(
-                    Utxo::new_native_currency(LockScript::burn(), change_amount),
-                    Digest::default(),
-                    Digest::default(),
-                    false,
+                    match state_lock {
+                        StateLock::Lock(mut global_state_lock) => {
+                            create_change(&*global_state_lock.lock_guard_mut().await)?
+                        }
+                        StateLock::WriteGuard(gsm) => create_change(&*gsm)?,
+                        StateLock::ReadGuard(gs) => create_change(&*gs)?,
+                    }
+                }
+
+                ChangePolicy::Burn => (
+                    TxOutput::no_notification(
+                        Utxo::new_native_currency(LockScript::burn(), change_amount),
+                        Digest::default(),
+                        Digest::default(),
+                        false,
+                    ),
+                    state_lock.tip().await,
                 ),
             };
             tx_outputs.push(change_output);
-        }
+            tip
+        } else {
+            state_lock.tip().await
+        };
 
         Ok(TransactionDetails::new(
             tx_inputs.into(),
@@ -145,7 +212,7 @@ impl TransactionDetailsBuilder {
             fee,
             coinbase,
             timestamp,
-            mutator_set_accumulator,
+            tip_block.mutator_set_accumulator_after(),
         )?)
     }
 
@@ -192,3 +259,18 @@ impl TransactionDetailsBuilder {
         Ok(change_output)
     }
 }
+
+// enum WalletStateRef<'a> {
+//     Mutable(&'a mut WalletState),
+//     Immutable(&'a WalletState),
+//     Lock(GlobalStateLock),
+// }
+
+// impl<'a> WalletStateRef<'a> {
+//     fn immutable(&'a self) -> &'a WalletState {
+//         match self {
+//             Self::Mutable(ws) => ws,
+//             Self::Immutable(ws) => ws,
+//         }
+//     }
+// }

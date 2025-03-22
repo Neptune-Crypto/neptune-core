@@ -1472,7 +1472,12 @@ mod archival_state_tests {
         let empty_tx = alice
             .lock_guard()
             .await
-            .create_transaction(vec![].into(), fee, in_seven_months, config_1b)
+            .create_transaction(
+                Vec::<TxOutput>::new().into(),
+                fee,
+                in_seven_months,
+                config_1b,
+            )
             .await
             .unwrap()
             .transaction;

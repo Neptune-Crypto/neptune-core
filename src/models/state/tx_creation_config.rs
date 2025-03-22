@@ -98,14 +98,15 @@ impl TxCreationConfig {
         self
     }
 
-    // pub fn recover_to_provided_key(
-    //     mut self,
-    //     change_key: Arc<SpendingKey>,
-    //     notification_medium: UtxoNotificationMedium,
-    // ) -> Self {
-    //     self.change_policy = ChangePolicy::recover_to_provided_key(change_key, notification_medium);
-    //     self
-    // }
+    #[cfg(test)]
+    pub fn recover_to_provided_key(
+        mut self,
+        change_key: Arc<SpendingKey>,
+        notification_medium: UtxoNotificationMedium,
+    ) -> Self {
+        self.change_policy = ChangePolicy::recover_to_provided_key(change_key, notification_medium);
+        self
+    }
 
     // pub fn recover_to_next_unused_key(
     //     mut self,
