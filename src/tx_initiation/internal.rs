@@ -60,15 +60,15 @@ impl TransactionInitiatorInternal {
             .build();
 
         // generate tx details
-        let state_lock = StateLock::WriteGuard(gsm);
+        let mut state_lock = StateLock::WriteGuard(gsm);
         let tx_details = TransactionDetailsBuilder::new()
             .inputs(tx_inputs.into_iter().into())
             .outputs(tx_outputs)
             .fee(fee)
             .change_policy(tx_creation_config.change_policy())
-            .build(state_lock)
+            .build(&mut state_lock)
             .await?;
-        // drop(state_lock);
+        drop(state_lock);
 
         let tx_details_rc = Arc::new(tx_details);
 

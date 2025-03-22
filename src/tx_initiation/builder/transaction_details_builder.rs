@@ -81,15 +81,20 @@ impl TransactionDetailsBuilder {
     /// necessary. This occurs if change_policy is
     /// ChangePolicy::RecoverToNextUnusedKey and change is needed.
     ///
-    /// note: this method accepts a StateLock.
-    /// A write-lock will be acquired only if it is necesary to generate a
-    /// new change key.  Otherwise a read-lock will be acquired.
+    /// important: this method accepts a StateLock mutable reference.
     ///
-    /// If caller already holds a write lock or read lock for other purposes
-    /// then build_immutable() or build_mutable() should be used.
+    /// If a new change key must be generated then:
+    ///   StateLock::Lock       --> a write-lock will be acquired (once).
+    ///   StateLock::WriteGuard --> existing write-lock will be used.
+    ///   StateLock::ReadGuard  --> return error CreateTxError::CantGenChangeKeyForImmutableWallet
+    ///
+    /// else:
+    ///   StateLock::Lock       --> a read-lock will be acquired (once).
+    ///   StateLock::WriteGuard --> existing write-lock will be used.
+    ///   StateLock::ReadGuard  --> existing read-lock will be used.
     pub async fn build(
         self,
-        state_lock: StateLock<'_>,
+        state_lock: &mut StateLock<'_>,
     ) -> Result<TransactionDetails, CreateTxError> {
         let TransactionDetailsBuilder {
             tx_inputs,
@@ -148,7 +153,7 @@ impl TransactionDetailsBuilder {
                     }
 
                     match state_lock {
-                        StateLock::Lock(mut global_state_lock) => {
+                        StateLock::Lock(ref mut global_state_lock) => {
                             create_change(
                                 &mut *global_state_lock.lock_guard_mut().await,
                                 key_type,
@@ -157,7 +162,7 @@ impl TransactionDetailsBuilder {
                             )
                             .await?
                         }
-                        StateLock::WriteGuard(mut gsm) => {
+                        StateLock::WriteGuard(ref mut gsm) => {
                             create_change(&mut *gsm, key_type, change_amount, medium).await?
                         }
                         StateLock::ReadGuard(_) => {
@@ -182,8 +187,8 @@ impl TransactionDetailsBuilder {
                     };
 
                     match state_lock {
-                        StateLock::Lock(mut global_state_lock) => {
-                            create_change(&*global_state_lock.lock_guard_mut().await)?
+                        StateLock::Lock(global_state_lock) => {
+                            create_change(&*global_state_lock.lock_guard().await)?
                         }
                         StateLock::WriteGuard(gsm) => create_change(&*gsm)?,
                         StateLock::ReadGuard(gs) => create_change(&*gs)?,

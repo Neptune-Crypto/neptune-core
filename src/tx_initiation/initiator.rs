@@ -27,6 +27,7 @@ use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::tx_initiation::export::Timestamp;
 use crate::GlobalStateLock;
+use crate::models::state::StateLock;
 
 #[derive(Debug)]
 pub struct TransactionInitiator {
@@ -104,7 +105,7 @@ impl TransactionInitiator {
             .outputs(outputs)
             .fee(fee)
             .change_policy(change_policy)
-            .build(self.global_state_lock.clone().into())
+            .build(&mut StateLock::from(self.global_state_lock.clone()))
             .await
     }
 
