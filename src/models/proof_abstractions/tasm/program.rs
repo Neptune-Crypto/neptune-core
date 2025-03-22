@@ -10,7 +10,7 @@ use super::prover_job::ProverJob;
 use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
-use crate::job_queue::triton_vm::global_triton_vm_job_queue;
+use crate::job_queue::triton_vm::triton_vm_job_queue::TritonVmJobQueue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 
 #[derive(Debug, Clone)]
@@ -97,7 +97,7 @@ pub(crate) async fn prove_consensus_program(
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
-    let job_queue = global_triton_vm_job_queue();
+    let job_queue = TritonVmJobQueue::instance();
     let job_handle = job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
 
     // satisfy borrow checker.
