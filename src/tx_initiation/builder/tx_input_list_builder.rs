@@ -1,3 +1,10 @@
+//! provides a builder and related types for selecting which inputs to
+//! use in a transaction in order to cover the target spend amount.
+//!
+//! all spendable inputs may be obtained via `spendable_inputs()`.
+//!
+//! The `InputSelectionPolicy` enum provides a set of policies for selecting
+//! inputs.
 use get_size2::GetSize;
 use itertools::Itertools;
 use rand::rng;
@@ -8,57 +15,73 @@ use serde::Serialize;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::state::wallet::transaction_input::TxInput;
 
+/// defines sort ordering: ascending or descending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SortOrder {
+    /// ascending order
     Ascending,
+    /// descending order
     Descending,
 }
 
+/// defines a policy for selecting from available transaction inputs in order
+/// to cover the target spend amount.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum InputSelectionPolicy {
+    /// choose inputs at random
     #[default]
     Random,
 
+    /// choose inputs by native currency amount in specified sort order.
     ByNativeCoinAmount(SortOrder),
 
+    /// choose inputs by utxo size in specified sort order
     // is this useful?
     ByUtxoSize(SortOrder),
     // is something like this possible?
     // eg, so we can order by a particular token amount, like USDT.
     // ByCoinAmount(Coin, SortOrder)
 
-    // I'm unsure how/if this is possible.
+    // I'm unsure how/if this is possible (to lookup block-height of input confirmation)
     // ByBlockHeight(SortOrder)
 }
 
-// note: all fields intentionally private
+/// a builder to select transaction inputs from all available inputs based on an
+/// [InputSelectionPolicy].
 #[derive(Debug, Default)]
 pub struct TxInputListBuilder {
+    // note: all fields intentionally private
     spendable_inputs: Vec<TxInput>,
     policy: InputSelectionPolicy,
     spend_amount: NativeCurrencyAmount,
 }
 
 impl TxInputListBuilder {
+    /// instantiate
     pub fn new() -> Self {
         Default::default()
     }
 
+    /// set available spendable inputs.  These may be obtained via
+    /// [spendable_inputs()](super::super::TransactionInitiator::spendable_inputs())
     pub fn spendable_inputs(mut self, inputs: Vec<TxInput>) -> Self {
         self.spendable_inputs = inputs;
         self
     }
 
+    /// set an input selection policy
     pub fn policy(mut self, policy: InputSelectionPolicy) -> Self {
         self.policy = policy;
         self
     }
 
+    /// set the target spend amount
     pub fn spend_amount(mut self, spend_amount: NativeCurrencyAmount) -> Self {
         self.spend_amount = spend_amount;
         self
     }
 
+    /// build the list of transaction inputs
     pub fn build(self) -> impl IntoIterator<Item = TxInput> {
         let Self {
             mut spendable_inputs,
