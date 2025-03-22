@@ -1,23 +1,30 @@
+use std::sync::Arc;
+
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::transaction_output::TxOutput;
+use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 
 /// Objects created by `create_transaction`.
-///
-/// Most of the time we are only interested in the transaction. The change
-/// output is only set if there is a change (which is not always the case).
-/// The details is set when the [`TxCreationConfig`](super::TxCreationConfig)
-/// is configured to set it. In the common case it is not set, saving time,
-/// state, and hassle.
-#[derive(Debug, Clone)]
-pub(crate) struct TxCreationArtifacts {
-    pub(crate) transaction: Transaction,
-    pub(crate) details: Option<TransactionDetails>,
-    pub(crate) change_output: Option<TxOutput>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxCreationArtifacts {
+    pub(crate) transaction: Arc<Transaction>,
+    pub(crate) details: Arc<TransactionDetails>,
 }
 
-impl From<TxCreationArtifacts> for Transaction {
-    fn from(value: TxCreationArtifacts) -> Self {
-        value.transaction
+impl TxCreationArtifacts {
+    pub fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    pub fn details(&self) -> &TransactionDetails {
+        &self.details
+    }
+
+    pub fn offchain_notifications(&self, network: Network) -> Vec<PrivateNotificationData> {
+        self.details.tx_outputs.offchain_notifications(network)
     }
 }

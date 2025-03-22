@@ -60,7 +60,6 @@ where
     // the public API. The suppressed lints below are not nice, but I don't know
     // how else to make it work.
     #[expect(async_fn_in_trait)]
-    #[expect(private_interfaces)]
     async fn prove(
         &self,
         claim: Claim,
@@ -146,7 +145,7 @@ pub(crate) async fn prove_consensus_program(
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct TritonVmProofJobOptions {
+pub struct TritonVmProofJobOptions {
     pub job_priority: TritonVmJobPriority,
     pub job_settings: ProverJobSettings,
     pub cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,

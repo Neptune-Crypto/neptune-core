@@ -3,7 +3,6 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -72,7 +71,24 @@ impl TxOutput {
         unowned_utxo_notify_medium: UtxoNotificationMedium,
     ) -> Self {
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
+        Self::auto_utxo(
+            wallet_state,
+            utxo,
+            address,
+            sender_randomness,
+            owned_utxo_notify_medium,
+            unowned_utxo_notify_medium,
+        )
+    }
 
+    pub fn auto_utxo(
+        wallet_state: &WalletState,
+        utxo: Utxo,
+        address: ReceivingAddress,
+        sender_randomness: Digest,
+        owned_utxo_notify_medium: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
+    ) -> Self {
         let has_matching_spending_key = wallet_state.can_unlock(&utxo);
 
         let receiver_digest = address.privacy_digest();
@@ -101,7 +117,6 @@ impl TxOutput {
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.
-    #[cfg(test)]
     pub(crate) fn no_notification(
         utxo: Utxo,
         sender_randomness: Digest,
@@ -113,6 +128,40 @@ impl TxOutput {
             sender_randomness,
             receiver_digest: privacy_digest,
             notification_method: UtxoNotifyMethod::None,
+            owned,
+        }
+    }
+
+    /// Instantiate a [TxOutput] for any utxo intended for on-chain UTXO
+    /// notification.
+    pub(crate) fn onchain_utxo(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        owned: bool,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            owned,
+        }
+    }
+
+    /// Instantiate a [TxOutput] for any utxo intended for off-chain UTXO
+    /// notification.
+    pub(crate) fn offchain_utxo(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        owned: bool,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
             owned,
         }
     }
@@ -180,7 +229,7 @@ impl TxOutput {
         }
     }
 
-    pub(crate) fn private_notification(
+    pub(crate) fn offchain_notification(
         &self,
         network: Network,
     ) -> Option<(String, ReceivingAddress)> {
@@ -225,25 +274,9 @@ impl Deref for TxOutputList {
     }
 }
 
-impl IntoIterator for TxOutputList {
-    type Item = TxOutput;
-
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
 impl DerefMut for TxOutputList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-impl From<Vec<TxOutput>> for TxOutputList {
-    fn from(v: Vec<TxOutput>) -> Self {
-        Self(v)
     }
 }
 
@@ -259,9 +292,9 @@ impl From<&TxOutputList> for Vec<Utxo> {
     }
 }
 
-impl From<Option<TxOutput>> for TxOutputList {
-    fn from(value: Option<TxOutput>) -> Self {
-        value.into_iter().collect_vec().into()
+impl<I: Into<TxOutput>, T: IntoIterator<Item = I>> From<T> for TxOutputList {
+    fn from(v: T) -> Self {
+        Self(v.into_iter().map(|i| i.into()).collect())
     }
 }
 
@@ -328,21 +361,24 @@ impl TxOutputList {
         public_announcements
     }
 
-    pub(crate) fn private_notifications(&self, network: Network) -> Vec<PrivateNotificationData> {
-        let mut private_utxo_notifications = vec![];
-        for tx_output in &self.0 {
-            if let Some((ciphertext, receiver_address)) = tx_output.private_notification(network) {
-                let notification_data = PrivateNotificationData {
-                    cleartext: tx_output.notification_payload(),
-                    ciphertext,
-                    recipient_address: receiver_address,
-                    owned: tx_output.owned,
-                };
-                private_utxo_notifications.push(notification_data)
-            }
-        }
-
-        private_utxo_notifications
+    pub(crate) fn offchain_notifications(&self, network: Network) -> Vec<PrivateNotificationData> {
+        self.0
+            .iter()
+            .filter_map(move |tx_output| {
+                if let Some((ciphertext, receiver_address)) =
+                    tx_output.offchain_notification(network)
+                {
+                    Some(PrivateNotificationData {
+                        cleartext: tx_output.notification_payload(),
+                        ciphertext,
+                        recipient_address: receiver_address,
+                        owned: tx_output.owned,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// indicates if any offchain notifications exist
@@ -354,13 +390,13 @@ impl TxOutputList {
         self.0.push(tx_output);
     }
 
-    pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
-    where
-        T: IntoIterator<Item = TxOutput>,
-    {
-        self.0.extend(maybe_tx_output);
-        self
-    }
+    // pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
+    // where
+    //     T: IntoIterator<Item = TxOutput>,
+    // {
+    //     self.0.extend(maybe_tx_output);
+    //     self
+    // }
 }
 
 #[cfg(test)]

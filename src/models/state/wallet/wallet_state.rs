@@ -59,6 +59,7 @@ use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -396,7 +397,7 @@ impl WalletState {
     /// notifications and that are destined for this wallet.
     pub(crate) fn extract_expected_utxos(
         &self,
-        tx_outputs: TxOutputList,
+        tx_outputs: &TxOutputList,
         notifier: UtxoNotifier,
     ) -> Vec<ExpectedUtxo> {
         tx_outputs
@@ -1648,14 +1649,70 @@ impl WalletState {
         }
     }
 
+    /// Returns all spendable inputs.
+    ///
+    /// wallet_status must be current as of present tip.
+    ///
+    ///   excludes utxos:
+    ///     + that are timelocked in the future
+    ///     + that are unspendable (no spending key)
+    ///     + that are already spent in the mempool
+    pub(crate) fn spendable_inputs(
+        &self,
+        wallet_status: WalletStatus,
+        timestamp: Timestamp,
+    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+        // Build a hashset of all tx inputs presently in the mempool.
+        let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
+            .mempool_spent_utxos
+            .iter()
+            .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
+            .map(|(_, absi, _)| *absi)
+            .collect();
+
+        // filter spendable inputs.
+        wallet_status.synced_unspent.into_iter().filter_map(
+            move |(wallet_status_element, membership_proof)| {
+                // filter out UTXOs that are still timelocked.
+                if !wallet_status_element.utxo.can_spend_at(timestamp) {
+                    return None;
+                }
+
+                // filter out inputs that are already spent by txs in mempool.
+                let absolute_index_set =
+                    membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
+                if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
+                    return None;
+                }
+
+                // filter out inputs that we can't spend
+                let Some(spending_key) =
+                    self.find_spending_key_for_utxo(&wallet_status_element.utxo)
+                else {
+                    warn!(
+                        "spending key not found for utxo: {:?}",
+                        wallet_status_element.utxo
+                    );
+                    return None;
+                };
+
+                // Create the transaction input object
+                Some(
+                    UnlockedUtxo::unlock(
+                        wallet_status_element.utxo.clone(),
+                        spending_key,
+                        membership_proof.clone(),
+                    )
+                    .into(),
+                )
+            },
+        )
+    }
+
     /// Allocate sufficient UTXOs to generate a transaction.
     ///
     /// Requested amount `total_spend` must include fees that are paid in the
     /// transaction.
-    ///
-    /// The argument `utxo_filter` is an optional predicate which, if set,
-    /// filters for UTXOs where the predicate evaluates to true. If not set,
-    /// all UTXOs are allowed.
     pub(crate) async fn allocate_sufficient_input_funds(
         &self,
         total_spend: NativeCurrencyAmount,
@@ -1663,66 +1720,22 @@ impl WalletState {
         mutator_set_accumulator: &MutatorSetAccumulator,
         timestamp: Timestamp,
     ) -> Result<Vec<UnlockedUtxo>> {
-        // We only attempt to generate a transaction using those UTXOs that have up-to-date
-        // membership proofs.
         let wallet_status = self
             .get_wallet_status(tip_digest, mutator_set_accumulator)
             .await;
 
-        // Start selecting inputs.
-        // If there aren't enough inputs, we will discover after the next loop,
-        // and handle the corresponding error gracefully where we catch it.
-        let mut input_funds = vec![];
-        let mut total_available_amount_ignoring_mempool = NativeCurrencyAmount::zero();
+        let mut input_funds = Vec::with_capacity(wallet_status.synced_unspent.len());
         let mut allocated_amount = NativeCurrencyAmount::zero();
-        let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
-            .mempool_spent_utxos
-            .iter()
-            .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
-            .map(|(_, absi, _)| *absi)
-            .collect();
-        for (wallet_status_element, membership_proof) in &wallet_status.synced_unspent {
-            let utxo_amount = wallet_status_element.utxo.get_native_currency_amount();
 
+        for input in self.spendable_inputs(wallet_status, timestamp) {
             // Don't allocate more than needed
             if allocated_amount >= total_spend {
                 break;
             }
 
-            // Don't attempt to use UTXOs that are still timelocked.
-            if !wallet_status_element.utxo.can_spend_at(timestamp) {
-                continue;
-            }
-
-            // Don't use inputs that we can't spend
-            let Some(spending_key) = self.find_spending_key_for_utxo(&wallet_status_element.utxo)
-            else {
-                warn!(
-                    "spending key not found for utxo: {:?}",
-                    wallet_status_element.utxo
-                );
-                continue;
-            };
-
-            // Create the transaction input object
-            let unlocked_utxo = UnlockedUtxo::unlock(
-                wallet_status_element.utxo.clone(),
-                spending_key,
-                membership_proof.clone(),
-            );
-
-            // Don't use inputs that are already spent by txs in mempool.
-            total_available_amount_ignoring_mempool =
-                total_available_amount_ignoring_mempool + utxo_amount;
-            let absolute_index_set =
-                membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
-            if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
-                continue;
-            }
-
             // Select the input
-            input_funds.push(unlocked_utxo);
-            allocated_amount = allocated_amount + utxo_amount;
+            allocated_amount = allocated_amount + input.utxo.get_native_currency_amount();
+            input_funds.push(input.into());
         }
 
         // If there aren't enough funds, catch and report error gracefully
@@ -1730,7 +1743,6 @@ impl WalletState {
             bail!(
                 "UTXO allocation failed.\n\
                 Requested: {total_spend}\n\
-                Available, ignoring mempool: {total_available_amount_ignoring_mempool}\n\
                 Allocated: {allocated_amount}"
             )
         }

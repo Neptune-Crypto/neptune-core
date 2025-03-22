@@ -46,6 +46,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -74,6 +75,7 @@ use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -87,8 +89,10 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::models::state::mining_status::MiningStatus;
+use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::tx_creation_config::TxCreationConfig;
+use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
+use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
@@ -98,14 +102,17 @@ use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleT
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::models::state::wallet::transaction_input::TxInputList;
+use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::tx_initiation;
+use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -143,13 +150,6 @@ pub struct DashBoardOverviewDataFromClient {
 
     /// CPU temperature in degrees Celsius
     pub cpu_temp: Option<f32>,
-}
-
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, strum::Display)]
-pub enum TransactionProofType {
-    SingleProof,
-    ProofCollection,
-    PrimitiveWitness,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
@@ -1510,67 +1510,58 @@ pub trait RPC {
     /// ```
     async fn clear_standing_by_ip(token: rpc_auth::Token, ip: IpAddr) -> RpcResult<()>;
 
-    /// Send coins to a single recipient.
-    ///
-    /// See docs for [send_to_many()](Self::send_to_many())
-    ///
-    /// ```no_run
-    /// # use anyhow::Result;
-    /// # use neptune_cash::config_models::network::Network;
-    /// # use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    /// # use neptune_cash::models::state::wallet::address::ReceivingAddress;
-    /// # use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
-    /// # use tarpc::tokio_serde::formats::Json;
-    /// # use tarpc::serde_transport::tcp;
-    /// # use tarpc::client;
-    /// # use tarpc::context;
-    /// # use std::net::IpAddr;
-    /// #
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<()>{
-    /// #
-    /// # // create a serde/json transport over tcp.
-    /// # let transport = tcp::connect("127.0.0.1:9799", Json::default).await?;
-    /// #
-    /// # // create an rpc client using the transport.
-    /// # let client = RPCClient::new(client::Config::default(), transport).spawn();
-    /// #
-    /// # // Defines cookie hint
-    /// # let cookie_hint = client.cookie_hint(context::current()).await??;
-    /// #
-    /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
-    /// #
-    /// // Send amount set to 20 coins
-    /// let amount : NativeCurrencyAmount = NativeCurrencyAmount::coins(20);
-    /// // The coins receiving address
-    /// let address = ReceivingAddress::from_bech32m("nolgam1lf8vc5xpa4jf9vjakts632fct5q80d4m6tax39nrl8c55dta2h7n7lnkh9pmwckl0ndwc7897xwfgx5vv02xdt3099z62222wazz7tjl6umzewla9xzxyqefh2w47v4eh0xzvfsxjk6kq5u84rwwlflq7cs726ljttl6ls860te04cwpy5kk8n40qqjnps0gdp46namhsa3cqt0uc0s5e34h6s5rw2kl77uvvs4rlnn5t8wtuefsduuccwsxmk27r8d48g49swgafhj6wmvu5cx3lweqhnxgdgm7mmdq7ck6wkurw2jzl64k9u34kzgu9stgd47ljzte0hz0n2lcng83vtpf0u9f4hggw4llqsz2fqpe4096d9v5fzg7xvxg6zvr7gksq4yqgn8shepg5xsczmzz256m9c6r8zqdkzy4tk9he59ndtdkrrr8u5v6ztnvkvmy4sed7p7plm2y09sgksw6zcjayls4wl9fnqu97kyx9cdknksar7h8jetygur979rt5arcwmvp2dy3ynt6arna2yjpevt9209v9g2p5cvp6gjp9850w3w6afeg8yuhp6u447hrudcssyjauqa2p7jk4tz37wg70yrdhsgn35sc0hdkclvpapu75dgtmswk0vtgadx44mqdps6ry6005xqups9dpc93u66qj9j7lfaqgdqrrfg9pkxhjl99ge387rh257x2phfvjvc8y66p22wax8myyhm7mgmlxu9gug0km3lmn4lzcyj32mduy6msy4kfn5z2tr67zfxadnj6wc0av27mk0j90pf67uzp9ps8aekr24kpv5n3qeczfznen9vj67ft95s93t26l8uh87qr6kp8lsyuzm4h36de830h6rr3lhg5ac995nrsu6h0p56t5tnglvx0s02mr0ts95fgcevveky5kkw6zgj6jd5m3n5ljhw862km8sedr30xvg8t9vh409ufuxdnfuypvqdq49z6mp46p936pjzwwqjda6yy5wuxx9lffrxwcmfqzch6nz2l4mwd2vlsdr58vhygppy6nm6tduyemw4clwj9uac4v990xt6jt7e2al7m6sjlq4qgxfjf4ytx8f5j460vvr7yac9hsvlsat2vh5gl55mt4wr7v5p3m6k5ya5442xdarastxlmpf2vqz5lusp8tlglxkj0jksgwqgtj6j0kxwmw40egpzs5rr996xpv8wwqyja4tmw599n9fh77f5ruxk69vtpwl9z5ezmdn92cpyyhwff59ypp0z5rv98vdvm67umqzt0ljjan30u3a8nga35fdy450ht9gef24mveucxqwv5aflge5r3amxsvd7l30j9kcqm7alq0ks2wqpde7pdct2gmvafxvjg3ad0a3h58assjaszvmykl3k5tn238gstm2shlvad4a53mm5ztvp5q2zt4pdzj0ssevlkumwhc0g5cxnxc9u7rh9gffkq7h9ufcxkgtghe32sv3vwzkessr52mcmajt83lvz45wqru9hht8cytfedtjlv7z7en6pp0guja85ft3rv6hzf2e02e7wfu38s0nyfzkc2qy2k298qtmxgrpduntejtvenr80csnckajnhu44399tkm0a7wdldalf678n9prd54twwlw24xhppxqlquatfztllkeejlkfxuayddwagh6uzx040tqlcs7hcflnu0ywynmz0chz48qcx7dsc4gpseu0dqvmmezpuv0tawm78nleju2vp4lkehua56hrnuj2wuc5lqvxlnskvp53vu7e2399pgp7xcwe3ww23qcd9pywladq34nk6cwcvtj3vdfgwf6r7s6vq46y2x05e043nj6tu8am2und8z3ftf3he5ccjxamtnmxfd79m04ph36kzx6e789dhqrwmwcfrn9ulsedeplk3dvrmad6f20y9qfl6n6kzaxkmmmaq4d6s5rl4kmhc7fcdkrkandw2jxdjckuscu56syly8rtjatj4j2ug23cwvep3dgcdvmtr32296nf9vdl3rcu0r7hge23ydt83k5nhtnexuqrnamveacz6c43eay9nz4pjjwjatkgp80lg9tnf5kdr2eel8s2fk6v338x4hu00htemm5pq6qlucqqq5tchhtekjzdu50erqd2fkdu9th3wl0mqxz5u7wnpgwgpammv2yqpa5znljegyhke0dz9vg27uh5t5x6qdgf7vu54lqssejekwzfxchjyq2s8frm9fmt688w76aug56v6n3w5xdre78xplfsdw3e4j6dc5w7tf83r25re0duq6h8z54wnkqr9yh2k0skjqea4elgcr4aw7hks9m8w3tx8w9xlxpqqll2zeql55ew7e90dyuynkqxfuqzv45t22ljamdll3udvqrllprdltthzm866jdaxkkrnryj4cmc2m7sk99clgql3ynrhe9kynqn4mh3tepk8dtq7cndtc2hma29s4cuylsvg04s70uyr53w5656su5rjem5egss08zrfaef0mww6t8pr26uph2n8a2cs55ydx4xhasjqk7xs0akh6f26j2ec4d8pd0kdf4jya6p9jl48wmy5autdpw2q8mehrq6kypt573genj66l5zkq6xvrdqugmfczxa2gj9ylx3pgpjqnhuem9udfkj9qr2y8lh728sr7uaedu5wwmfa72ykh395jqh7f7f9p2gskn6u7k844kpnwe3eqv84pl53r6x9af88a8ey7298njdg03h8mxqz2x6z8ys3qpuxq768tjq0zhrnjgns8d78euzwsvx6vn4f9tftrp68zcch3h75mc9drpt7tpvnyyqfjuqclxhdwhdwtsakecv04p9r3jx90htql9a3ht5mxrj4ercv4cd52wk4qhu7dn4tqe7yclqx2l36gcsrzmdlv440qls7qjpq6k95mst485vpennnur8h62a7d7syvyer89qtyfzlfhz8a5a0x5tuwhc9mah0e944xzhsc6uvpv8vat44w7r3xyw8q85y77jux8zhndrhdn36swryffqmpkxgcw4g29q40sul4fl5vrfru08a5j3rd3jl8799srpf2xqpxq38wwvhr4mxqf5wwdqfqq7harshggvufzlgn0l9fq0j76dyuge75jmzy8celvw6wesfs82n4jw2k8jnus2zds5a67my339uuzka4w72tau6j7wyu0lla0mcjpaflphsuy7f2phev6tr8vc9nj2mczkeg4vy3n5jkgecwgrvwu3vw9x5knpkxzv8kw3dpzzxy3rvrs56vxw8ugmyz2vdj6dakjyq3feym4290l7hgdt0ac5u49sekezzf0ghwmlek4h75fkzpvuly9zupw32dd3l9my282nekgk78fe6ayjyhczetxf8r82yd2askl52kmupr9xaxw0jd08dsd3523ea6ge48384rlmt4mu4w4x0q9s", Network::Main)?;
-    /// // owned utxo notify method
-    /// let notify_self : UtxoNotificationMedium = UtxoNotificationMedium::OnChain;
-    /// #
-    /// // unwowned utxo notify method
-    /// let notify_other : UtxoNotificationMedium = UtxoNotificationMedium::OnChain;
-    /// #
-    /// // Max fee
-    /// let fee : NativeCurrencyAmount = NativeCurrencyAmount::coins(10);
-    /// #
-    /// // neptune-core server sends token to a single recipient
-    /// let send_result = client.send(context::current(), token, amount, address, notify_self, notify_other, fee).await??;
-    /// # Ok(())
-    /// # }
-    /// ```
-    async fn send(
-        token: rpc_auth::Token,
-        amount: NativeCurrencyAmount,
-        address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
+    async fn spendable_inputs(token: rpc_auth::Token) -> RpcResult<TxInputList>;
 
-    /// Send coins to multiple recipients
+    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
+    ///
+    /// see [InputSelectionPolicy]
+    ///
+    /// pub enum InputSelectionPolicy {
+    ///     Random,
+    ///     ByNativeCoinAmount(SortOrder),
+    ///     ByUtxoSize(SortOrder),
+    /// }
+    async fn select_spendable_inputs(
+        token: rpc_auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList>;
+
+    /// generate tx outputs from list of OutputFormat, which can be
+    /// address:amount, address:amount:medium, address:utxo,
+    /// address:utxo:medium, tx_output
+    async fn generate_tx_outputs(
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+    ) -> RpcResult<TxOutputList>;
+
+    async fn generate_tx_details(
+        token: rpc_auth::Token,
+        tx_inputs: TxInputList,
+        tx_outputs: TxOutputList,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TransactionDetails>;
+
+    async fn generate_witness_proof(
+        token: rpc_auth::Token,
+        tx_details: TransactionDetails,
+    ) -> RpcResult<TransactionProof>;
+
+    /// assemble a transaction from TransactionDetails and a TransactionProof.
+    async fn assemble_transaction(
+        token: rpc_auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction>;
+
+    /// record transaction and initiate broadcast to peers
+    async fn record_and_broadcast_transaction(
+        token: rpc_auth::Token,
+        tx_artifacts: TxCreationArtifacts,
+    ) -> RpcResult<()>;
+
+    /// Send coins to one or more recipients
     ///
     /// note: sending is rate-limited to 2 sends per block until block
     /// 25000 is reached.
@@ -1653,13 +1644,27 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn send_to_many(
+    async fn send(
         token: rpc_auth::Token,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notify_medium: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
+    ) -> RpcResult<TxCreationArtifacts>;
+
+    // upgrades a transaction's proof.
+    //
+    // ignored if the transaction is already upgraded to level of supplied
+    // proof (or higher)
+    async fn upgrade_tx_proof(
+        token: rpc_auth::Token,
+        transaction_id: TransactionKernelId,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<()>;
+
+    async fn proof_type(
+        token: rpc_auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TransactionProofType>;
 
     /// claim a utxo
     ///
@@ -1914,246 +1919,6 @@ impl NeptuneRPCServer {
     fn cpu_temp_inner() -> Option<f32> {
         let current_system = System::new();
         current_system.cpu_temp().ok()
-    }
-
-    async fn send_to_many_inner_with_mock_proof_option(
-        mut self,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
-        fee: NativeCurrencyAmount,
-        now: Timestamp,
-        tx_proving_capability: TxProvingCapability,
-        mocked_invalid_proof: Option<TransactionProof>,
-    ) -> Result<(Transaction, Vec<PrivateNotificationData>), error::SendError> {
-        let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
-            utxo_notification_media;
-
-        // check if this send would exceed the send rate-limit (per block)
-        {
-            // send rate limiting only applies below height 25000
-            // which is approx 5.6 months after launch.
-            // after that, the training wheel come off.
-            const RATE_LIMIT_UNTIL_HEIGHT: u64 = 25000;
-            let state = self.state.lock_guard().await;
-
-            if state.chain.light_state().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {
-                const RATE_LIMIT: usize = 2;
-                let tip_digest = state.chain.light_state().hash();
-                let send_count_at_tip = state
-                    .wallet_state
-                    .count_sent_transactions_at_block(tip_digest)
-                    .await;
-                tracing::debug!(
-                    "send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}",
-                    send_count_at_tip,
-                    RATE_LIMIT
-                );
-                if send_count_at_tip >= RATE_LIMIT {
-                    let height = state.chain.light_state().header().height;
-                    let e = error::SendError::RateLimit {
-                        height,
-                        tip_digest,
-                        max: RATE_LIMIT,
-                    };
-                    tracing::warn!("{}", e.to_string());
-                    return Err(e);
-                }
-            }
-        }
-
-        tracing::debug!("stmi: step 1. get change key. need write-lock");
-
-        // obtain next unused symmetric key for change utxo
-        let change_key = {
-            let mut s = self.state.lock_guard_mut().await;
-            let key = s
-                .wallet_state
-                .next_unused_spending_key(KeyType::Symmetric)
-                .await
-                .expect("wallet should be capable of generating symmetric spending keys");
-
-            // write state to disk. create_transaction() may be slow.
-            s.persist_wallet().await.expect("flushed");
-            key
-        };
-
-        tracing::debug!("stmi: step 2. generate outputs. need read-lock");
-
-        let state = self.state.lock_guard().await;
-        let tx_outputs = state.generate_tx_outputs(
-            outputs,
-            owned_utxo_notification_medium,
-            unowned_utxo_notification_medium,
-        );
-
-        tracing::debug!("stmi: step 3. create tx. have read-lock");
-
-        // Create the transaction
-        //
-        // Note that create_transaction() does not modify any state and only
-        // requires acquiring a read-lock which does not block other tasks.
-        // This is important because internally it calls prove() which is a very
-        // lengthy operation.
-        //
-        // note: A change output will be added to tx_outputs if needed.
-        let config = TxCreationConfig::default()
-            .recover_change(change_key, owned_utxo_notification_medium)
-            .with_prover_capability(tx_proving_capability)
-            .record_details()
-            .use_job_queue(self.state.vm_job_queue());
-        let transaction_creation_artifacts = match state
-            .create_transaction(tx_outputs.clone(), fee, now, config)
-            .await
-        {
-            Ok(tx) => tx,
-            Err(e) => {
-                tracing::error!("Could not create transaction: {}", e);
-                return Err(e.into());
-            }
-        };
-        drop(state);
-        let mut transaction = transaction_creation_artifacts.transaction;
-        let transaction_details = transaction_creation_artifacts
-            .details
-            .expect("details should be some when configured to track details");
-        let maybe_change_output = transaction_creation_artifacts.change_output;
-
-        if let Some(invalid_proof) = mocked_invalid_proof {
-            transaction.proof = invalid_proof;
-        }
-
-        tracing::debug!("stmi: step 4. extract expected utxo. need read-lock");
-
-        let offchain_notifications = tx_outputs.private_notifications(self.state.cli().network);
-        tracing::debug!(
-            "Generated {} offchain notifications",
-            offchain_notifications.len()
-        );
-
-        let utxos_sent_to_self = self
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .extract_expected_utxos(
-                tx_outputs.clone().concat_with(maybe_change_output),
-                UtxoNotifier::Myself,
-            );
-
-        // if the tx created offchain expected_utxos we must inform wallet.
-        if !utxos_sent_to_self.is_empty() {
-            tracing::debug!("stmi: step 5. add expected utxos. need write-lock");
-
-            // acquire write-lock
-            let mut gsm = self.state.lock_guard_mut().await;
-
-            // Inform wallet of any expected incoming utxos.
-            // note that this (briefly) mutates self.
-            gsm.wallet_state
-                .add_expected_utxos(utxos_sent_to_self)
-                .await;
-
-            // ensure we write new wallet state out to disk.
-            gsm.persist_wallet().await.expect("flushed wallet");
-        }
-
-        // write-lock block.
-        {
-            tracing::debug!("stmi: step 6. add sent-transaction to wallet. with write-lock");
-
-            let mut gsm = self.state.lock_guard_mut().await;
-            // inform wallet about the details of this sent transaction, so it can
-            // group inputs and outputs together, eg for history purposes.
-            let tip_digest = gsm.chain.light_state().hash();
-            gsm.wallet_state
-                .add_sent_transaction((transaction_details, tip_digest).into())
-                .await;
-
-            tracing::debug!("stmi: step 7. flush dbs.  with write-lock");
-            gsm.flush_databases().await.expect("flushed DBs");
-        }
-
-        tracing::debug!("stmi: step 8. send messages. no lock needed");
-
-        // Send transaction message to main
-        let response = self
-            .rpc_server_to_main_tx
-            .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
-            .await;
-
-        if let Err(e) = response {
-            tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
-            return Err(error::SendError::NotBroadcast);
-        };
-
-        tracing::debug!("stmi: step 8. all done with send_to_many_inner().");
-
-        Ok((transaction, offchain_notifications))
-    }
-
-    /// Method to create a transaction with a given timestamp and prover
-    /// capability.
-    ///
-    /// Factored out from [NeptuneRPCServer::send_to_many] in order to generate
-    /// deterministic transaction kernels where tests can reuse previously
-    /// generated proofs.
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn send_to_many_inner(
-        self,
-        _ctx: context::Context,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
-        fee: NativeCurrencyAmount,
-        now: Timestamp,
-        tx_proving_capability: TxProvingCapability,
-    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), error::SendError> {
-        let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
-            utxo_notification_media;
-        let ret = self
-            .send_to_many_inner_with_mock_proof_option(
-                outputs,
-                (
-                    owned_utxo_notification_medium,
-                    unowned_utxo_notification_medium,
-                ),
-                fee,
-                now,
-                tx_proving_capability,
-                None,
-            )
-            .await;
-
-        ret.map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))
-    }
-
-    /// Like [Self::send_to_many_inner] but without attempting to create a valid
-    /// SingleProof, since this is a time-consuming process.
-    ///
-    /// Also returns the full transaction and not just its kernel ID.
-    #[cfg(test)]
-    async fn send_to_many_inner_invalid_proof(
-        self,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notification_medium: UtxoNotificationMedium,
-        unowned_utxo_notification_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
-        now: Timestamp,
-    ) -> Option<(Transaction, Vec<PrivateNotificationData>)> {
-        self.send_to_many_inner_with_mock_proof_option(
-            outputs,
-            (
-                owned_utxo_notification_medium,
-                unowned_utxo_notification_medium,
-            ),
-            fee,
-            now,
-            TxProvingCapability::PrimitiveWitness,
-            Some(TransactionProof::invalid()),
-        )
-        .await
-        .ok()
     }
 
     /// Assemble a data for the wallet to register the UTXO. Returns `Ok(None)`
@@ -3038,88 +2803,167 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn send(
+    async fn spendable_inputs(
         self,
-        ctx: context::Context,
+        _: context::Context,
         token: rpc_auth::Token,
-        amount: NativeCurrencyAmount,
-        address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
-        log_slow_scope!(fn_name!());
-
-        // note: we do not call token.auth() because send_to_many() does it.
-
-        self.send_to_many(
-            ctx,
-            token,
-            vec![(address, amount)],
-            owned_utxo_notify_method,
-            unowned_utxo_notify_medium,
-            fee,
-        )
-        .await
-    }
-
-    // Locking:
-    //   * acquires `global_state_lock` for write
-    //
-    // TODO: add an endpoint to get recommended fee density.
-    //
-    // documented in trait. do not add doc-comment.
-    async fn send_to_many(
-        self,
-        ctx: context::Context,
-        token: rpc_auth::Token,
-        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notification_medium: UtxoNotificationMedium,
-        unowned_utxo_notification_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
-    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+    ) -> RpcResult<TxInputList> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        tracing::debug!("stm: entered fn");
+        Ok(self.state.tx_initiator().spendable_inputs().await)
+    }
 
-        if self.state.cli().no_transaction_initiation {
-            warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
-            return Err(error::SendError::Unsupported.into());
-        }
+    // documented in trait. do not add doc-comment.
+    async fn select_spendable_inputs(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
 
-        // abort early on negative fee
-        if fee.is_negative() {
-            warn!("Cannot send negative-fee transaction.");
-            return Err(error::SendError::NegativeFee.into());
-        }
-
-        match self.state.cli().proving_capability() {
-            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness => {
-                warn!("Cannot initiate transaction because transaction proving capability is too weak.");
-                return Err(error::SendError::TooWeak.into());
-            }
-            TxProvingCapability::ProofCollection | TxProvingCapability::SingleProof => (),
-        };
-
-        // The proving capability is set to the lowest possible value here,
-        // since we don't want the client (CLI or dashboard) to hang while
-        // producing proofs. Instead, we let (a task started by) main loop
-        // handle the proving.
-        let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
         Ok(self
-            .send_to_many_inner(
-                ctx,
-                outputs,
-                (
-                    owned_utxo_notification_medium,
-                    unowned_utxo_notification_medium,
-                ),
-                fee,
-                Timestamp::now(),
-                tx_proving_capability,
-            )
+            .state
+            .tx_initiator()
+            .select_spendable_inputs(policy, spend_amount)
+            .await
+            .into())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_tx_outputs(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+    ) -> RpcResult<TxOutputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self.state.tx_initiator().generate_tx_outputs(outputs).await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_tx_details(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        tx_inputs: TxInputList,
+        tx_outputs: TxOutputList,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TransactionDetails> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .tx_initiator()
+            .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
             .await?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_witness_proof(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        tx_details: TransactionDetails,
+    ) -> RpcResult<TransactionProof> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .tx_initiator()
+            .generate_witness_proof(Arc::new(tx_details)))
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn assemble_transaction(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .tx_initiator()
+            .assemble_transaction(Arc::new(transaction_details), transaction_proof)?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn record_and_broadcast_transaction(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        tx_artifacts: TxCreationArtifacts,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .tx_initiator()
+            .record_and_broadcast_transaction(&tx_artifacts)
+            .await?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn send(
+        self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TxCreationArtifacts> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .tx_sender()
+            .send(outputs, change_policy, fee, Timestamp::now())
+            .await?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn upgrade_tx_proof(
+        self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        transaction_id: TransactionKernelId,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .tx_initiator()
+            .upgrade_tx_proof(transaction_id, transaction_proof)
+            .await?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn proof_type(
+        self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TransactionProofType> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self.state.tx_initiator().proof_type(txid).await?)
     }
 
     // // documented in trait. do not add doc-comment.
@@ -3578,7 +3422,13 @@ pub mod error {
         ExportedBlockProposalStorageCapacityExceeded,
 
         #[error(transparent)]
-        SendError(#[from] SendError),
+        CreateTxError(#[from] tx_initiation::error::CreateTxError),
+
+        #[error(transparent)]
+        UpgradeProofError(#[from] tx_initiation::error::UpgradeProofError),
+
+        #[error(transparent)]
+        SendError(#[from] tx_initiation::error::SendError),
 
         #[error(transparent)]
         ClaimError(#[from] ClaimError),
@@ -3587,42 +3437,6 @@ pub mod error {
     // convert anyhow::Error to an RpcError::Failed.
     // note that anyhow Error is not serializable.
     impl From<anyhow::Error> for RpcError {
-        fn from(e: anyhow::Error) -> Self {
-            Self::Failed(e.to_string())
-        }
-    }
-
-    /// enumerates possible transaction send errors
-    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
-    #[non_exhaustive]
-    pub enum SendError {
-        #[error("send() is not supported by this node")]
-        Unsupported,
-
-        #[error("transaction could not be broadcast.")]
-        NotBroadcast,
-
-        // catch-all error, eg for anyhow errors
-        #[error("transaction could not be sent.  reason: {0}")]
-        Failed(String),
-
-        #[error("Transaction with negative fees not allowed")]
-        NegativeFee,
-
-        #[error("machine too weak to initiate transactions")]
-        TooWeak,
-
-        #[error("Send rate limit reached for block height {height} ({digest}). A maximum of {max} tx may be sent per block.", digest = tip_digest.to_hex())]
-        RateLimit {
-            height: BlockHeight,
-            tip_digest: Digest,
-            max: usize,
-        },
-    }
-
-    // convert anyhow::Error to a SendError::Failed.
-    // note that anyhow Error is not serializable.
-    impl From<anyhow::Error> for SendError {
         fn from(e: anyhow::Error) -> Self {
             Self::Failed(e.to_string())
         }
