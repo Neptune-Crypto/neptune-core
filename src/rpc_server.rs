@@ -113,7 +113,6 @@ use crate::twenty_first::prelude::Tip5;
 use crate::tx_initiation;
 use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use crate::tx_initiation::send;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -2812,9 +2811,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
-            .spendable_inputs()
-            .await)
+        Ok(self.state.tx_initiator().spendable_inputs().await)
     }
 
     // documented in trait. do not add doc-comment.
@@ -2828,7 +2825,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
+        Ok(self
+            .state
+            .tx_initiator()
             .select_spendable_inputs(policy, spend_amount)
             .await
             .into())
@@ -2844,9 +2843,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
-            .generate_tx_outputs(outputs)
-            .await)
+        Ok(self.state.tx_initiator().generate_tx_outputs(outputs).await)
     }
 
     // documented in trait. do not add doc-comment.
@@ -2862,7 +2859,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
+        Ok(self
+            .state
+            .tx_initiator()
             .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
             .await?)
     }
@@ -2877,7 +2876,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
+        Ok(self
+            .state
+            .tx_initiator()
             .generate_witness_proof(Arc::new(tx_details)))
     }
 
@@ -2892,7 +2893,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
+        Ok(self
+            .state
+            .tx_initiator()
             .assemble_transaction(Arc::new(transaction_details), transaction_proof)?)
     }
 
@@ -2906,7 +2909,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
+        Ok(self
+            .state
+            .tx_initiator()
             .record_and_broadcast_transaction(&tx_artifacts)
             .await?)
     }
@@ -2923,7 +2928,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
+        Ok(self
+            .state
+            .tx_initiator()
             .send(outputs, change_policy, fee, Timestamp::now())
             .await?)
     }
@@ -2939,7 +2946,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
+        Ok(self
+            .state
+            .tx_initiator()
             .upgrade_tx_proof(transaction_id, transaction_proof)
             .await?)
     }
@@ -2954,9 +2963,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(send::TransactionInitiator::new(self.state.clone())
-            .proof_type(txid)
-            .await?)
+        Ok(self.state.tx_initiator().proof_type(txid).await?)
     }
 
     // // documented in trait. do not add doc-comment.

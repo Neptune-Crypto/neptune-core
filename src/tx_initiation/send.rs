@@ -39,7 +39,8 @@ pub struct TransactionInitiator {
 }
 
 impl TransactionInitiator {
-    // goal is for this type to be usable outside this crate
+    // this type should not be instantiated directly, but instead retrieved via
+    // GlobalStateLock::tx_initiator()
     pub(crate) fn new(global_state_lock: GlobalStateLock) -> Self {
         Self { global_state_lock }
     }
