@@ -205,7 +205,6 @@ impl TransactionDetailsBuilder {
                         Utxo::new_native_currency(LockScript::burn(), change_amount),
                         Digest::default(),
                         Digest::default(),
-                        false, // owned
                     ),
                     state_lock.tip().await,
                 ),
@@ -250,19 +249,16 @@ impl TransactionDetailsBuilder {
             .wallet_entropy
             .generate_sender_randomness(tip_height, receiver_digest);
 
-        let owned = true;
         let change_output = match change_utxo_notify_method {
             UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency_as_change(
                 change_amount,
                 change_sender_randomness,
                 own_receiving_address,
-                owned,
             ),
             UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency_as_change(
                 change_amount,
                 change_sender_randomness,
                 own_receiving_address,
-                owned,
             ),
         };
 

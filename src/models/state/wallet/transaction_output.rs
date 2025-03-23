@@ -170,14 +170,13 @@ impl TxOutput {
         utxo: Utxo,
         sender_randomness: Digest,
         privacy_digest: Digest,
-        owned: bool,
     ) -> Self {
         Self {
             utxo,
             sender_randomness,
             receiver_digest: privacy_digest,
             notification_method: UtxoNotifyMethod::None,
-            owned,
+            owned: true,
             is_change: true,
         }
     }
@@ -243,7 +242,6 @@ impl TxOutput {
         amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
-        owned: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
         Self {
@@ -251,7 +249,7 @@ impl TxOutput {
             sender_randomness,
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OnChain(receiving_address),
-            owned,
+            owned: true,
             is_change: true,
         }
     }
@@ -281,7 +279,6 @@ impl TxOutput {
         amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
-        owned: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
         Self {
@@ -289,7 +286,7 @@ impl TxOutput {
             sender_randomness,
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OffChain(receiving_address),
-            owned,
+            owned: true,
             is_change: true,
         }
     }
