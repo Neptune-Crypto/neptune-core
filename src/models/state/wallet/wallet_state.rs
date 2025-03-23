@@ -3108,12 +3108,10 @@ pub(crate) mod tests {
             let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
 
             // mine a block to our wallet.  we should have 100 coins after.
-            let tip_digest = mine_block_to_wallet_invalid_block_proof(
-                &mut global_state_lock,
-                Some(timestamp),
-            )
-            .await?
-            .hash();
+            let tip_digest =
+                mine_block_to_wallet_invalid_block_proof(&mut global_state_lock, Some(timestamp))
+                    .await?
+                    .hash();
 
             let tx = {
                 // verify that confirmed and unconfirmed balances.

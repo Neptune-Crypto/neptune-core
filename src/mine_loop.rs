@@ -28,6 +28,7 @@ use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
+use crate::tx_initiation::export::TxInputList;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -462,7 +463,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
     ]
     .into();
     let transaction_details = TransactionDetails::new_with_coinbase(
-        vec![],
+        TxInputList::empty(),
         composer_outputs.clone(),
         coinbase_amount,
         guesser_fee,

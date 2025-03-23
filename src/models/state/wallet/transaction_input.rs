@@ -104,6 +104,10 @@ impl From<TxInputList> for Vec<UnlockedUtxo> {
 }
 
 impl TxInputList {
+    pub(crate) fn empty() -> Self {
+        Self(vec![])
+    }
+
     pub fn total_native_coins(&self) -> NativeCurrencyAmount {
         self.0
             .iter()

@@ -837,7 +837,6 @@ mod tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::make_mock_block;

@@ -246,8 +246,7 @@ pub(crate) async fn mock_genesis_global_state(
     let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
     // dummy channel
-    let (rpc_to_main_tx, mut rpc_to_main_rx) =
-        tokio::sync::mpsc::channel::<RPCServerToMain>(5);
+    let (rpc_to_main_tx, mut rpc_to_main_rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(5);
     tokio::spawn(async move {
         while let Some(i) = rpc_to_main_rx.recv().await {
             tracing::trace!("mock Main got message = {:?}", i);
@@ -840,7 +839,8 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .light_state()
         .to_owned();
 
-    let timestamp = timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
+    let timestamp =
+        timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
 
     let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
         &tip_block,

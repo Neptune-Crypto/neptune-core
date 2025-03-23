@@ -214,7 +214,7 @@ impl TransactionDetailsBuilder {
         };
 
         Ok(TransactionDetails::new(
-            tx_inputs.into(),
+            tx_inputs,
             tx_outputs,
             fee,
             coinbase,

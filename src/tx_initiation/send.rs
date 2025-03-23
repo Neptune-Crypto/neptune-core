@@ -47,7 +47,7 @@ impl TransactionSender {
         // handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
 
-        tracing::debug!("step 1. generate outputs. need read-lock");
+        tracing::debug!("step 1. generate outputs.");
 
         let tx_outputs = initiator.generate_tx_outputs(outputs).await;
 
@@ -55,12 +55,11 @@ impl TransactionSender {
 
         // Create the transaction
         //
-        // Note that create_transaction() does not modify any state and only
-        // requires acquiring a read-lock which does not block other tasks.
-        // This is important because internally it calls prove() which is a very
-        // lengthy operation.
-        //
         // note: A change output will be added to tx_outputs if needed.
+        //
+        // create_transaction() modifies state only if a new-receiving address
+        // is required for a change output.  It also calls prove() which is a
+        // very lengthy operation.
         let config = TxCreationConfig::default()
             .use_change_policy(change_policy)
             .with_prover_capability(tx_proving_capability)
@@ -76,9 +75,7 @@ impl TransactionSender {
 
         tracing::debug!(
             "Generated {} offchain notifications",
-            tx_artifacts
-                .offchain_notifications()
-                .len()
+            tx_artifacts.offchain_notifications().len()
         );
 
         tracing::debug!("step 3. record and broadcast tx.");

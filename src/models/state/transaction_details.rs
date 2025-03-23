@@ -8,25 +8,54 @@ use tasm_lib::prelude::Digest;
 use tracing::error;
 
 use super::wallet::transaction_output::TxOutput;
-use super::wallet::unlocked_utxo::UnlockedUtxo;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use std::fmt::Display;
 
 /// Information, fetched from the state of the node, required to generate a
 /// transaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionDetails {
-    pub tx_inputs: Vec<UnlockedUtxo>,
+    pub tx_inputs: TxInputList,
     pub tx_outputs: TxOutputList,
     pub fee: NativeCurrencyAmount,
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
     pub mutator_set_accumulator: MutatorSetAccumulator,
     pub has_change_output: bool,
+}
+
+impl Display for TransactionDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"TransactionDetails:
+    inputs: {},
+    outputs: {},
+    inputs_native_currency_amount: {},
+    outputs_native_currency_amount: {},
+    fee: {},
+    coinbase: {},
+    timestamp: {},
+    change_output: {},
+"#,
+            self.tx_inputs.len(),
+            self.tx_outputs.len(),
+            self.tx_inputs.total_native_coins(),
+            self.tx_outputs.total_native_coins(),
+            self.fee,
+            self.coinbase.unwrap_or_else(|| 0.into()),
+            self.timestamp,
+            self.change_output()
+                .map(|o| o.native_currency_amount())
+                .unwrap_or_else(|| 0.into()),
+        )
+    }
 }
 
 impl TransactionDetails {
@@ -104,9 +133,9 @@ impl TransactionDetails {
         let has_change_output = false;
 
         TransactionDetails::new_without_coinbase(
-            vec![],
-            gobbling_utxos.into(),
-            -gobbled_fee,
+            TxInputList::empty(),
+            gobbling_utxos,
+            gobbled_fee,
             now,
             mutator_set_accumulator,
             has_change_output,
@@ -123,8 +152,8 @@ impl TransactionDetails {
     ///
     /// See also: [Self::new_without_coinbase].
     pub(crate) fn new_with_coinbase(
-        tx_inputs: Vec<UnlockedUtxo>,
-        tx_outputs: TxOutputList,
+        tx_inputs: impl Into<TxInputList>,
+        tx_outputs: impl Into<TxOutputList>,
         coinbase: NativeCurrencyAmount,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
@@ -151,8 +180,8 @@ impl TransactionDetails {
     ///
     /// See also: [Self::new_with_coinbase].
     pub(crate) fn new_without_coinbase(
-        tx_inputs: Vec<UnlockedUtxo>,
-        tx_outputs: TxOutputList,
+        tx_inputs: impl Into<TxInputList>,
+        tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
@@ -177,14 +206,17 @@ impl TransactionDetails {
     ///  - the transaction is not balanced
     ///  - some mutator set membership proof is invalid.
     pub(crate) fn new(
-        tx_inputs: Vec<UnlockedUtxo>,
-        tx_outputs: TxOutputList,
+        tx_inputs: impl Into<TxInputList>,
+        tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,
         coinbase: Option<NativeCurrencyAmount>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         has_change_output: bool,
     ) -> Result<TransactionDetails> {
+        let tx_inputs: TxInputList = tx_inputs.into();
+        let tx_outputs: TxOutputList = tx_outputs.into();
+
         // total amount to be spent -- determines how many and which UTXOs to use
         let total_spend = tx_outputs.total_native_coins() + fee;
         let total_input: NativeCurrencyAmount = tx_inputs

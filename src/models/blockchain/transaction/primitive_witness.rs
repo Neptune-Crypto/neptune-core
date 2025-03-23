@@ -26,11 +26,11 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::tx_initiation::export::TxInputList;
 use crate::Hash;
 
 /// A list of UTXOs with an associated salt.
@@ -157,7 +157,7 @@ impl PrimitiveWitness {
     /// # Panics
     /// Panics if transaction validity cannot be satisfied.
     fn generate_primitive_witness(
-        unlocked_utxos: &[UnlockedUtxo],
+        unlocked_utxos: &TxInputList,
         output_utxos: Vec<Utxo>,
         sender_randomnesses: Vec<Digest>,
         receiver_digests: Vec<Digest>,
@@ -265,11 +265,10 @@ impl PrimitiveWitness {
 
         // populate witness
         let output_utxos = tx_outputs.utxos();
-        let unlocked_utxos = tx_inputs;
         let sender_randomnesses = tx_outputs.sender_randomnesses();
         let receiver_digests = tx_outputs.receiver_digests();
         Self::generate_primitive_witness(
-            unlocked_utxos,
+            tx_inputs,
             output_utxos,
             sender_randomnesses,
             receiver_digests,

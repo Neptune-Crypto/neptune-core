@@ -6,8 +6,8 @@ use serde::Serialize;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::transaction_output::TxOutput;
+use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 
 /// Objects created by `create_transaction`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
