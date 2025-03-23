@@ -84,7 +84,9 @@ impl TxCreationConfig {
     pub fn new() -> Self {
         Self {
             triton_vm_job_queue: vm_job_queue(),
-            ..Default::default() // Default for the rest
+            prover_capability: Default::default(),
+            proof_job_options: Default::default(),
+            change_policy: Default::default(),
         }
     }
 
