@@ -3493,7 +3493,6 @@ mod rpc_server_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::unit_test_data_directory;
     use crate::Block;
-    use crate::RPC_CHANNEL_CAPACITY;
 
     async fn test_rpc_server(
         network: Network,
@@ -3658,7 +3657,7 @@ mod rpc_server_tests {
             )
             .await;
 
-        let transaction_timestamp = network.launch_date();
+        // let transaction_timestamp = network.launch_date();
         // let proving_capability = rpc_server.state.cli().proving_capability();
         let my_output: OutputFormat = (own_receiving_address, NativeCurrencyAmount::one()).into();
         let _ = rpc_server
@@ -4696,7 +4695,6 @@ mod rpc_server_tests {
 
                     let genesis_block = Block::genesis(network);
                     let mut blocks = vec![];
-                    // let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
 
                     let fee = NativeCurrencyAmount::zero();
                     let bob_amount: NativeCurrencyAmount = pay_to_bob_outputs
@@ -4744,7 +4742,7 @@ mod rpc_server_tests {
 
                     (
                         blocks,
-                        tx_artifacts.offchain_notifications(network),
+                        tx_artifacts.offchain_notifications(),
                         bob_amount,
                     )
                 };
@@ -4842,10 +4840,6 @@ mod rpc_server_tests {
                     test_rpc_server(network, bob_wallet.clone(), 2, Args::default()).await;
                 let bob_token = cookie_token(&bob).await;
 
-                let in_seven_months =
-                    Block::genesis(network).header().timestamp + Timestamp::months(7);
-                let in_eight_months = in_seven_months + Timestamp::months(1);
-
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
                 let genesis_block = Block::genesis(network);
                 let (block1, composer_expected_utxos) =
@@ -4941,7 +4935,7 @@ mod rpc_server_tests {
                     }
                 }
 
-                for offchain_notification in tx_artifacts.offchain_notifications(network) {
+                for offchain_notification in tx_artifacts.offchain_notifications() {
                     bob.clone()
                         .claim_utxo(
                             context::current(),
@@ -5031,7 +5025,7 @@ mod rpc_server_tests {
             let token = cookie_token(&rpc_server).await;
 
             let ctx = context::current();
-            let timestamp = network.launch_date() + Timestamp::days(1);
+            // let timestamp = network.launch_date() + Timestamp::days(1);
             let own_address = rpc_server
                 .clone()
                 .next_receiving_address(ctx, token, KeyType::Generation)
@@ -5098,7 +5092,7 @@ mod rpc_server_tests {
 
             let ctx = context::current();
             let token = cookie_token(&rpc_server).await;
-            let timestamp = network.launch_date() + Timestamp::months(7);
+            // let timestamp = network.launch_date() + Timestamp::months(7);
 
             // obtain some funds.
             mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, None).await?;

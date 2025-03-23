@@ -1116,7 +1116,7 @@ async fn main() -> Result<()> {
             process_utxo_notifications(
                 &data_directory,
                 network,
-                tx_artifacts.offchain_notifications(network),
+                tx_artifacts.offchain_notifications(),
                 Some(receiver_tag),
             )?
         }
@@ -1148,7 +1148,7 @@ async fn main() -> Result<()> {
                     process_utxo_notifications(
                         &data_directory,
                         network,
-                        tx_artifacts.offchain_notifications(network),
+                        tx_artifacts.offchain_notifications(),
                         None, // todo:  parse receiver tags from cmd-line.
                     )?
                 }

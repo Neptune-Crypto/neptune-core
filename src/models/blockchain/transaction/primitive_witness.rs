@@ -243,6 +243,7 @@ impl PrimitiveWitness {
             coinbase,
             timestamp,
             mutator_set_accumulator,
+            ..
         } = transaction_details;
 
         // complete transaction kernel

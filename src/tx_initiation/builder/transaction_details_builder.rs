@@ -116,8 +116,10 @@ impl TransactionDetailsBuilder {
             .checked_sub(&total_outbound_amount)
             .ok_or(CreateTxError::InsufficientFunds)?;
 
+        let has_change_output = change_amount > 0.into();
+
         // Add change output, if required to balance transaction
-        let tip_block = if change_amount > 0.into() {
+        let tip_block = if has_change_output {
             let (change_output, tip) = match change_policy {
                 ChangePolicy::ExactChange => {
                     return Err(CreateTxError::NotExactChange);
@@ -218,6 +220,7 @@ impl TransactionDetailsBuilder {
             coinbase,
             timestamp,
             tip_block.mutator_set_accumulator_after(),
+            has_change_output,
         )?)
     }
 

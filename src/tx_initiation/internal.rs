@@ -96,6 +96,7 @@ impl TransactionInitiatorInternal {
 
         // package tx with details
         let transaction_creation_artifacts = TxCreationArtifacts {
+            network: self.global_state_lock.cli().network,
             transaction: Arc::new(transaction),
             details: tx_details_rc,
         };

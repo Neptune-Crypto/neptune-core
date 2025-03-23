@@ -26,6 +26,7 @@ pub struct TransactionDetails {
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
     pub mutator_set_accumulator: MutatorSetAccumulator,
+    pub has_change_output: bool,
 }
 
 impl TransactionDetails {
@@ -100,12 +101,15 @@ impl TransactionDetails {
             }
         };
 
+        let has_change_output = false;
+
         TransactionDetails::new_without_coinbase(
             vec![],
             gobbling_utxos.into(),
             -gobbled_fee,
             now,
             mutator_set_accumulator,
+            has_change_output,
         )
         .expect("new_without_coinbase should succeed when total output amount is zero and no inputs are provided")
     }
@@ -126,6 +130,7 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
+        let has_change_output = false;
         Self::new(
             tx_inputs,
             tx_outputs,
@@ -133,6 +138,7 @@ impl TransactionDetails {
             Some(coinbase),
             timestamp,
             mutator_set_accumulator,
+            has_change_output,
         )
     }
 
@@ -150,6 +156,7 @@ impl TransactionDetails {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        has_change_output: bool,
     ) -> Result<TransactionDetails> {
         Self::new(
             tx_inputs,
@@ -158,6 +165,7 @@ impl TransactionDetails {
             None,
             timestamp,
             mutator_set_accumulator,
+            has_change_output,
         )
     }
 
@@ -175,6 +183,7 @@ impl TransactionDetails {
         coinbase: Option<NativeCurrencyAmount>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        has_change_output: bool,
     ) -> Result<TransactionDetails> {
         // total amount to be spent -- determines how many and which UTXOs to use
         let total_spend = tx_outputs.total_native_coins() + fee;
@@ -209,7 +218,16 @@ impl TransactionDetails {
             coinbase,
             timestamp,
             mutator_set_accumulator,
+            has_change_output,
         })
+    }
+
+    pub fn change_output(&self) -> Option<&TxOutput> {
+        if self.has_change_output {
+            self.tx_outputs.iter().last()
+        } else {
+            None
+        }
     }
 }
 

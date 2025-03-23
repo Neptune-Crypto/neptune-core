@@ -77,7 +77,7 @@ impl TransactionSender {
         tracing::debug!(
             "Generated {} offchain notifications",
             tx_artifacts
-                .offchain_notifications(self.global_state_lock.cli().network)
+                .offchain_notifications()
                 .len()
         );
 
