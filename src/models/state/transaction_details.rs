@@ -47,7 +47,7 @@ impl Display for TransactionDetails {
     change_outputs: {},
     owned_outputs: {},
 "#,
-            self.timestamp,
+            self.timestamp.standard_format(),
             self.spend_amount(),
             self.tx_inputs.total_native_coins(),
             self.tx_outputs.total_native_coins(),

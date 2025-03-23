@@ -69,6 +69,7 @@ impl TransactionInitiatorInternal {
 
         // generate tx details
         let tx_details = TransactionDetailsBuilder::new()
+            .timestamp(timestamp)
             .inputs(tx_inputs.into_iter().into())
             .outputs(tx_outputs)
             .fee(fee)

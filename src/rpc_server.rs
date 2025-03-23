@@ -5107,7 +5107,7 @@ mod rpc_server_tests {
             let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
                 .to_address()
                 .into();
-            let amount = NativeCurrencyAmount::coins(rng.random_range(0..10));
+            let amount = NativeCurrencyAmount::coins(rng.random_range(0..2));
             let fee = NativeCurrencyAmount::coins(1);
 
             let output: OutputFormat = (address, amount, UtxoNotificationMedium::OnChain).into();

@@ -32,12 +32,17 @@ pub struct TransactionDetailsBuilder {
     fee: NativeCurrencyAmount,
     coinbase: Option<NativeCurrencyAmount>,
     change_policy: ChangePolicy,
-    timestamp: Timestamp,
+    timestamp: Option<Timestamp>,
 }
 
 impl TransactionDetailsBuilder {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn timestamp(mut self, timestamp: Timestamp) -> Self {
+        self.timestamp = Some(timestamp);
+        self
     }
 
     pub fn input(mut self, tx_input: TxInput) -> Self {
@@ -105,6 +110,9 @@ impl TransactionDetailsBuilder {
             change_policy,
             ..
         } = self;
+
+        // default to present time if unspecified
+        let timestamp = timestamp.unwrap_or_else(|| Timestamp::now());
 
         let total_outbound_amount = tx_outputs
             .total_native_coins()

@@ -101,6 +101,7 @@ impl TransactionInitiator {
         fee: NativeCurrencyAmount,
     ) -> Result<TransactionDetails, error::CreateTxError> {
         TransactionDetailsBuilder::new()
+            .timestamp(Timestamp::now())
             .inputs(inputs)
             .outputs(outputs)
             .fee(fee)
