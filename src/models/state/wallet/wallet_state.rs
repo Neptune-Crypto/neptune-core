@@ -3110,8 +3110,7 @@ pub(crate) mod tests {
             // mine a block to our wallet.  we should have 100 coins after.
             let tip_digest = mine_block_to_wallet_invalid_block_proof(
                 &mut global_state_lock,
-                genesis_block.hash(),
-                timestamp,
+                Some(timestamp),
             )
             .await?
             .hash();

@@ -5014,6 +5014,7 @@ mod rpc_server_tests {
     mod send_tests {
         use super::*;
         use crate::rpc_server::error::RpcError;
+        use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
 
         #[traced_test]
         #[tokio::test]
@@ -5087,7 +5088,7 @@ mod rpc_server_tests {
         async fn send_rate_limit() -> Result<()> {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;
-            let rpc_server = test_rpc_server(
+            let mut rpc_server = test_rpc_server(
                 network,
                 WalletEntropy::devnet_wallet(),
                 2,
@@ -5098,6 +5099,9 @@ mod rpc_server_tests {
             let ctx = context::current();
             let token = cookie_token(&rpc_server).await;
             let timestamp = network.launch_date() + Timestamp::months(7);
+
+            // obtain some funds.
+            mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, None).await?;
 
             let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
                 .to_address()
