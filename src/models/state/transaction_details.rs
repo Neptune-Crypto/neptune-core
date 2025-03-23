@@ -36,12 +36,12 @@ impl Display for TransactionDetails {
         write!(
             f,
             r#"TransactionDetails:
+    timestamp: {},
     spend_amount: {},
     inputs_amount: {},
     outputs_amount: {},
     fee: {},
     coinbase: {},
-    timestamp: {},
     inputs: {},
     outputs: {},
     change_outputs: {},
