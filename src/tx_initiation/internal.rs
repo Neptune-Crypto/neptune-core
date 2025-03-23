@@ -11,12 +11,12 @@ use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBu
 use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::tx_initiation::builder::tx_input_list_builder::SortOrder;
 use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+use crate::tx_initiation::export::ChangePolicy;
 use crate::tx_initiation::export::NativeCurrencyAmount;
 use crate::tx_initiation::export::Timestamp;
 use crate::tx_initiation::export::TxCreationArtifacts;
 use crate::tx_initiation::export::TxOutputList;
 use crate::GlobalStateLock;
-use crate::tx_initiation::export::ChangePolicy;
 
 // provides crate-internal API(s)
 pub(crate) struct TransactionInitiatorInternal {
@@ -41,19 +41,22 @@ impl TransactionInitiatorInternal {
         timestamp: Timestamp,
         tx_creation_config: TxCreationConfig,
     ) -> anyhow::Result<TxCreationArtifacts> {
-
         // acquire lock.  write-lock is only needed if we must generate a
         // new change receiving address.  However, that is also the most common
         // scenario.
         let mut state_lock = match tx_creation_config.change_policy() {
-            ChangePolicy::RecoverToNextUnusedKey{..} => StateLock::WriteGuard(self.global_state_lock.lock_guard_mut().await),
+            ChangePolicy::RecoverToNextUnusedKey { .. } => {
+                StateLock::WriteGuard(self.global_state_lock.lock_guard_mut().await)
+            }
             _ => StateLock::ReadGuard(self.global_state_lock.lock_guard().await),
         };
 
         // select inputs
         let tx_inputs = TxInputListBuilder::new()
             .spendable_inputs(
-                state_lock.gs().wallet_spendable_inputs(timestamp)
+                state_lock
+                    .gs()
+                    .wallet_spendable_inputs(timestamp)
                     .await
                     .into_iter()
                     .collect(),

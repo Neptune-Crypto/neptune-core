@@ -2157,7 +2157,7 @@ mod test {
 
             let fee = NativeCurrencyAmount::coins(1);
             let proof_collection_tx = tx_no_outputs(
-                &main_loop_handler.global_state_lock,
+                &mut main_loop_handler.global_state_lock,
                 TxProvingCapability::ProofCollection,
                 fee,
             )
@@ -2167,7 +2167,7 @@ mod test {
                 .global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert(proof_collection_tx.clone(), TransactionOrigin::Foreign)
+                .mempool_insert((*proof_collection_tx).clone(), TransactionOrigin::Foreign)
                 .await;
 
             assert!(

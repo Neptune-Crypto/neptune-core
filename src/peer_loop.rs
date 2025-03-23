@@ -3337,8 +3337,7 @@ mod peer_loop_tests {
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
         let transaction_1 = state_lock
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
@@ -3421,8 +3420,7 @@ mod peer_loop_tests {
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
         let transaction_1 = state_lock
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
@@ -3451,7 +3449,7 @@ mod peer_loop_tests {
         state_lock
             .lock_guard_mut()
             .await
-            .mempool_insert(transaction_1.clone(), TransactionOrigin::Foreign)
+            .mempool_insert((*transaction_1).clone(), TransactionOrigin::Foreign)
             .await;
         assert!(
             !state_lock.lock_guard().await.mempool.is_empty(),
@@ -3608,6 +3606,7 @@ mod peer_loop_tests {
         use crate::config_models::cli_args;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
+        use crate::models::state::wallet::transaction_output::TxOutput;
         use crate::tests::shared::mock_genesis_global_state;
 
         async fn tx_of_proof_quality(
@@ -3639,7 +3638,8 @@ mod peer_loop_tests {
                 )
                 .await
                 .unwrap()
-                .transaction
+                .transaction()
+                .clone()
         }
 
         #[traced_test]
@@ -3683,7 +3683,7 @@ mod peer_loop_tests {
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(own_tx.to_owned(), TransactionOrigin::Foreign)
+                    .mempool_insert((*own_tx).to_owned(), TransactionOrigin::Foreign)
                     .await;
 
                 let tx_notification: TransactionNotification = new_tx.try_into().unwrap();

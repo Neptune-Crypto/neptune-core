@@ -1348,8 +1348,7 @@ pub(crate) mod block_tests {
                     .recover_change_on_chain(alice_key)
                     .with_prover_capability(TxProvingCapability::SingleProof);
                 let tx2 = alice
-                    .lock_guard_mut()
-                    .await
+                    .tx_initiator_internal()
                     .create_transaction(outputs.into(), fee, plus_eight_months, config2)
                     .await
                     .unwrap()
@@ -1357,7 +1356,7 @@ pub(crate) mod block_tests {
                 let block2_tx = coinbase_for_block2
                     .clone()
                     .merge_with(
-                        tx2,
+                        (*tx2).clone(),
                         rng.random(),
                         TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
@@ -1400,8 +1399,7 @@ pub(crate) mod block_tests {
                     .recover_change_on_chain(alice_key)
                     .with_prover_capability(TxProvingCapability::SingleProof);
                 let tx3 = alice
-                    .lock_guard_mut()
-                    .await
+                    .tx_initiator_internal()
                     .create_transaction(
                         vec![output_to_self.clone()].into(),
                         fee,
@@ -1414,7 +1412,7 @@ pub(crate) mod block_tests {
                 let block3_tx = coinbase_for_block3
                     .clone()
                     .merge_with(
-                        tx3,
+                        (*tx3).clone(),
                         rng.random(),
                         TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
@@ -1683,29 +1681,27 @@ pub(crate) mod block_tests {
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let tx1 = alice
-                .lock_guard()
-                .await
+                .tx_initiator_internal()
                 .create_transaction(vec![output.clone()].into(), fee, in_seven_months, config1)
                 .await
                 .unwrap()
                 .transaction;
 
             let block1 =
-                Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
+                Block::block_template_invalid_proof(&genesis_block, (*tx1).clone(), in_seven_months, None);
             alice.set_new_tip(block1.clone()).await.unwrap();
 
             let config2 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let tx2 = alice
-                .lock_guard()
-                .await
+                .tx_initiator_internal()
                 .create_transaction(vec![output].into(), fee, in_eight_months, config2)
                 .await
                 .unwrap()
                 .transaction;
 
-            let block2 = Block::block_template_invalid_proof(&block1, tx2, in_eight_months, None);
+            let block2 = Block::block_template_invalid_proof(&block1, (*tx2).clone(), in_eight_months, None);
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
@@ -1810,8 +1806,7 @@ pub(crate) mod block_tests {
                     .with_prover_capability(TxProvingCapability::SingleProof)
                     .use_job_queue(job_queue.clone());
                 let transaction_creation_artifacts = alice
-                    .lock_guard_mut()
-                    .await
+                    .tx_initiator_internal()
                     .create_transaction(tx_outputs, NativeCurrencyAmount::coins(0), now, config)
                     .await
                     .unwrap();
@@ -1820,7 +1815,7 @@ pub(crate) mod block_tests {
                 // merge that transaction in
                 transaction = transaction
                     .merge_with(
-                        self_spending_transaction,
+                        (*self_spending_transaction).clone(),
                         rng.random(),
                         job_queue.clone(),
                         TritonVmProofJobOptions::default(),

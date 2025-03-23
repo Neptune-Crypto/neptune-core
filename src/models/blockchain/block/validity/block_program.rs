@@ -513,13 +513,12 @@ pub(crate) mod test {
             .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx = alice
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(vec![tx_output].into(), fee, now, config)
             .await
             .unwrap()
             .transaction;
-        let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
+        let block1 = mine_tx(&alice, (*tx).clone(), &genesis_block, now).await;
 
         // Update transaction, stick it into block 2, and verify that block 2
         // is invalid.

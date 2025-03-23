@@ -393,11 +393,9 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .with_proof_job_options(job_options)
         .with_prover_capability(proving_power);
 
-    let transaction = tx_initiation::internal::create_raw_transaction(
-        Arc::new(transaction_details),
-        config,
-    )
-    .await?;
+    let transaction =
+        tx_initiation::internal::create_raw_transaction(Arc::new(transaction_details), config)
+            .await?;
 
     info!("Done: generating single proof for coinbase transaction");
 
@@ -1211,7 +1209,7 @@ pub(crate) mod mine_loop_tests {
             .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_from_alice = alice
-            .tx_sender()
+            .tx_initiator_internal()
             .create_transaction(
                 vec![output_to_alice].into(),
                 NativeCurrencyAmount::coins(1),
@@ -1285,7 +1283,7 @@ pub(crate) mod mine_loop_tests {
             {
                 let mut alice_gsm = alice.lock_guard_mut().await;
                 alice_gsm
-                    .mempool_insert(tx_from_alice.clone(), TransactionOrigin::Own)
+                    .mempool_insert((*tx_from_alice).clone(), TransactionOrigin::Own)
                     .await;
                 assert_eq!(1, alice_gsm.mempool.len());
             }

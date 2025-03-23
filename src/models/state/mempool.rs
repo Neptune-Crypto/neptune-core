@@ -987,8 +987,7 @@ mod tests {
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
             .with_prover_capability(TxProvingCapability::ProofCollection);
         let tx_by_bob = bob
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 Vec::<TxOutput>::new().into(),
                 high_fee,
@@ -1142,8 +1141,7 @@ mod tests {
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_bob = bob
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 utxos_from_bob.clone(),
                 NativeCurrencyAmount::coins(1),
@@ -1184,8 +1182,7 @@ mod tests {
             .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_from_alice_original = alice
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 utxos_from_alice.into(),
                 NativeCurrencyAmount::coins(1),
@@ -1478,8 +1475,7 @@ mod tests {
             .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(proving_capability);
         let unmined_tx = alice
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 vec![tx_receiver_data].into(),
                 NativeCurrencyAmount::coins(1),
@@ -1607,9 +1603,7 @@ mod tests {
                     .recover_change_on_chain(premine_spending_key.into())
                     .with_prover_capability(TxProvingCapability::ProofCollection);
                 preminer_clone
-                    .clone()
-                    .lock_guard()
-                    .await
+                    .tx_initiator_internal()
                     .create_transaction(tx_outputs.clone(), fee, in_seven_months, config)
                     .await
                     .expect("producing proof collection should succeed")
@@ -1809,7 +1803,7 @@ mod tests {
             // Clippy is wrong here. You can *not* eliminate the binding.
             #[allow(clippy::let_and_return)]
             let transaction = bob
-                .tx_initiator_internal_mut()
+                .tx_initiator_internal()
                 .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
                 .await
                 .unwrap()

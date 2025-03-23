@@ -74,6 +74,14 @@ pub struct Transaction {
     pub proof: TransactionProof,
 }
 
+// for simpler Arc compatibility with existing tests.
+#[cfg(test)]
+impl From<Arc<Transaction>> for Transaction {
+    fn from(t: Arc<Transaction>) -> Self {
+        (*t).clone()
+    }
+}
+
 impl Transaction {
     pub fn txid(&self) -> TransactionKernelId {
         self.kernel.txid()

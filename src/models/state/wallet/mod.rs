@@ -552,7 +552,8 @@ mod wallet_tests {
         let config_1 = TxCreationConfig::default()
             .recover_change_on_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx_1 = bob
+        let tx_1 = bob_global_lock
+            .tx_initiator_internal()
             .create_transaction(
                 receiver_data_to_alice.clone(),
                 NativeCurrencyAmount::coins(2),
@@ -789,7 +790,8 @@ mod wallet_tests {
         let config_2b = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx_from_bob = bob
+        let tx_from_bob = bob_global_lock
+            .tx_initiator_internal()
             .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 NativeCurrencyAmount::coins(4),
@@ -1002,8 +1004,7 @@ mod wallet_tests {
             .recover_change_off_chain(change_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let sender_tx = bob
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(vec![tx_output].into(), one_money, in_seven_months, config)
             .await
             .unwrap()

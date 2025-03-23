@@ -299,7 +299,7 @@ impl GlobalStateLock {
 
         let utxos_sent_to_self = gsm
             .wallet_state
-            .extract_expected_utxos(&transaction_details.tx_outputs, UtxoNotifier::Myself);
+            .extract_expected_utxos(transaction_details.tx_outputs.iter(), UtxoNotifier::Myself);
 
         // if the tx created offchain expected_utxos we must inform wallet.
         if !utxos_sent_to_self.is_empty() {
@@ -379,7 +379,6 @@ impl<'a> From<AtomicRwWriteGuard<'a, GlobalState>> for StateLock<'a> {
 }
 
 impl<'a> StateLock<'a> {
-
     pub fn gs(&self) -> &GlobalState {
         match self {
             Self::ReadGuard(g) => &*g,
@@ -1726,8 +1725,7 @@ mod global_state_tests {
             .recover_change_off_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
         assert!(bob
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs.clone(),
                 NativeCurrencyAmount::coins(1),
@@ -1739,8 +1737,7 @@ mod global_state_tests {
 
         // one month after though, we should be
         let tx = bob
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs,
                 NativeCurrencyAmount::coins(1),
@@ -1777,8 +1774,7 @@ mod global_state_tests {
         }
 
         let new_tx = bob
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 output_utxos.into(),
                 NativeCurrencyAmount::coins(1),
@@ -2422,8 +2418,7 @@ mod global_state_tests {
             .recover_change(genesis_key, UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_alice_and_bob = premine_receiver
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()]
                     .concat()
@@ -2603,8 +2598,7 @@ mod global_state_tests {
             .recover_change(alice_spending_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_alice = alice
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs_from_alice.clone().into(),
                 NativeCurrencyAmount::coins(1),
@@ -2647,8 +2641,7 @@ mod global_state_tests {
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_bob = bob
-            .lock_guard()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs_from_bob.clone().into(),
                 NativeCurrencyAmount::coins(1),
@@ -3398,10 +3391,10 @@ mod global_state_tests {
         async fn have_to_specify_change_policy() {
             let network = Network::Main;
             let wallet_entropy = WalletEntropy::devnet_wallet();
-            let alice =
+            let alice_gsl =
                 mock_genesis_global_state(network, 2, wallet_entropy, cli_args::Args::default())
                     .await;
-            let alice = alice.global_state_lock.lock_guard().await;
+            let alice = alice_gsl.global_state_lock.lock_guard().await;
             let now = network.launch_date() + Timestamp::years(2);
             assert!(alice
                 .get_wallet_status_for_tip()
@@ -3420,7 +3413,8 @@ mod global_state_tests {
 
             let bad_tx_config = TxCreationConfig::default()
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-            let tx_result = alice
+            let tx_result = alice_gsl
+                .tx_initiator_internal()
                 .create_transaction(
                     vec![tx_output.clone()].into(),
                     NativeCurrencyAmount::zero(),
@@ -3433,7 +3427,8 @@ mod global_state_tests {
             // Specify change policy and verify that transaction can be
             // constructed.
             let good_tx_config = bad_tx_config.burn_change();
-            assert!(alice
+            assert!(alice_gsl
+                .tx_initiator_internal()
                 .create_transaction(
                     vec![tx_output].into(),
                     NativeCurrencyAmount::zero(),
@@ -3448,10 +3443,11 @@ mod global_state_tests {
     /// tests that pertain to restoring a wallet from seed-phrase
     /// and comparing onchain vs offchain notification methods.
     mod restore_wallet {
+        use num_traits::CheckedSub;
+
         use super::*;
         use crate::mine_loop::create_block_transaction_from;
         use crate::mine_loop::TxMergeOrigin;
-        use num_traits::CheckedSub;
 
         /// test scenario: onchain/symmetric.
         /// pass outcome: no funds loss
@@ -3610,7 +3606,10 @@ mod global_state_tests {
                     alice_to_bob_amount,
                     UtxoNotificationMedium::OnChain,
                 )];
-                let tx_outputs = alice_state_lock.tx_initiator().generate_tx_outputs(outputs).await;
+                let tx_outputs = alice_state_lock
+                    .tx_initiator()
+                    .generate_tx_outputs(outputs)
+                    .await;
                 let outputs_len = tx_outputs.len();
 
                 // create tx.  utxo_notify_method is a test param.
@@ -3618,7 +3617,7 @@ mod global_state_tests {
                     .recover_to_provided_key(Arc::new(alice_change_key), change_notification_medium)
                     .with_prover_capability(TxProvingCapability::SingleProof);
                 let artifacts = alice_state_lock
-                    .tx_initiator_internal_mut()
+                    .tx_initiator_internal()
                     .create_transaction(
                         tx_outputs.clone(),
                         alice_to_bob_fee,
@@ -3628,7 +3627,11 @@ mod global_state_tests {
                     .await
                     .unwrap();
                 let alice_to_bob_tx = artifacts.transaction;
-                assert_eq!(artifacts.details.tx_outputs.len(), outputs_len+1, "A change Tx-output was expected");
+                assert_eq!(
+                    artifacts.details.tx_outputs.len(),
+                    outputs_len + 1,
+                    "A change Tx-output was expected"
+                );
 
                 // Inform alice wallet of any expected incoming utxos.
                 // note: no-op when all utxo notifications are sent on-chain.
@@ -3636,10 +3639,7 @@ mod global_state_tests {
                     .lock_guard()
                     .await
                     .wallet_state
-                    .extract_expected_utxos(
-                        &artifacts.details.tx_outputs,
-                        UtxoNotifier::Myself,
-                    );
+                    .extract_expected_utxos(&artifacts.details.tx_outputs, UtxoNotifier::Myself);
                 alice_state_lock
                     .lock_guard_mut()
                     .await

@@ -773,7 +773,7 @@ mod test {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
+                .mempool_insert((*pwtx).clone(), TransactionOrigin::Own)
                 .await;
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
@@ -845,7 +845,7 @@ mod test {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(pwtx.clone(), TransactionOrigin::Own)
+                .mempool_insert((*pwtx).clone(), TransactionOrigin::Own)
                 .await;
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");

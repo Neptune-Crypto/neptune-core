@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 
+use crate::models::state::wallet::transaction_output::TxOutput;
 use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
@@ -60,7 +61,6 @@ use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
-use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
@@ -395,13 +395,12 @@ impl WalletState {
 
     /// Extract `ExpectedUtxo`s from the `TxOutputList` that require off-chain
     /// notifications and that are destined for this wallet.
-    pub(crate) fn extract_expected_utxos(
+    pub(crate) fn extract_expected_utxos<'a>(
         &self,
-        tx_outputs: &TxOutputList,
+        tx_outputs: impl Iterator<Item=&'a TxOutput>,
         notifier: UtxoNotifier,
     ) -> Vec<ExpectedUtxo> {
         tx_outputs
-            .iter()
             .filter(|txo| txo.is_offchain())
             .filter_map(|txo| {
                 self.find_spending_key_for_utxo(&txo.utxo())
@@ -2053,8 +2052,7 @@ pub(crate) mod tests {
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let tx_block2 = bob
-            .lock_guard_mut()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs.clone().into(),
                 fee,
@@ -2098,8 +2096,7 @@ pub(crate) mod tests {
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let tx_block3 = bob
-            .lock_guard_mut()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs.into(),
                 fee,
@@ -2159,8 +2156,7 @@ pub(crate) mod tests {
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let mut tx_block2 = bob
-            .lock_guard_mut()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 vec![txo.clone()].into(),
                 fee,
@@ -2260,8 +2256,7 @@ pub(crate) mod tests {
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let mut tx_block2 = bob
-            .lock_guard_mut()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 vec![txo.clone()].into(),
                 fee,
@@ -2975,7 +2970,7 @@ pub(crate) mod tests {
                 .recover_change_on_chain(a_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let mut tx_spending_guesser_fee = bob
-                .tx_initiator_internal_mut()
+                .tx_initiator_internal()
                 .create_transaction(Vec::<TxOutput>::new().into(), fee, block2_timestamp, config)
                 .await
                 .unwrap()
@@ -3158,7 +3153,7 @@ pub(crate) mod tests {
             global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert(tx, TransactionOrigin::Own)
+                .mempool_insert((*tx).clone(), TransactionOrigin::Own)
                 .await;
 
             {
@@ -3228,7 +3223,7 @@ pub(crate) mod tests {
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
-                    .tx_initiator_internal_mut()
+                    .tx_initiator_internal()
                     .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
                     .map(|tx| tx.transaction)
@@ -3305,7 +3300,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(tx1, TransactionOrigin::Own)
+                .mempool_insert((*tx1).clone(), TransactionOrigin::Own)
                 .await;
 
             // generate a second transaction
@@ -3323,7 +3318,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(tx2, TransactionOrigin::Own)
+                .mempool_insert((*tx2).clone(), TransactionOrigin::Own)
                 .await;
 
             // verify that the mempool contains two transactions
@@ -3723,7 +3718,7 @@ pub(crate) mod tests {
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
-                    .tx_initiator_internal_mut()
+                    .tx_initiator_internal()
                     .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
                     .unwrap()
@@ -3979,8 +3974,7 @@ pub(crate) mod tests {
                 .recover_change_off_chain(premine_change_key)
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let transaction = premine_receiver
-                .lock_guard()
-                .await
+                .tx_initiator_internal()
                 .create_transaction(
                     vec![tx_output].into(),
                     NativeCurrencyAmount::coins(0),

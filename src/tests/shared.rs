@@ -113,6 +113,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::HandshakeData;
+use crate::RPCServerToMain;
 use crate::PEER_CHANNEL_CAPACITY;
 use crate::VERSION;
 
@@ -244,12 +245,16 @@ pub(crate) async fn mock_genesis_global_state(
 
     let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
+    // dummy channel
+    let (to_main_tx, _) = mpsc::channel::<RPCServerToMain>(1);
+
     GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
         cli.clone(),
         mempool,
+        to_main_tx,
     )
 }
 
