@@ -461,24 +461,36 @@ impl TxOutputList {
         public_announcements
     }
 
-    pub(crate) fn offchain_notifications(&self, network: Network) -> Vec<PrivateNotificationData> {
-        self.0
-            .iter()
-            .filter_map(move |tx_output| {
-                if let Some((ciphertext, receiver_address)) =
-                    tx_output.offchain_notification(network)
-                {
-                    Some(PrivateNotificationData {
-                        cleartext: tx_output.notification_payload(),
-                        ciphertext,
-                        recipient_address: receiver_address,
-                        owned: tx_output.owned,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
+    pub(crate) fn offchain_notifications(
+        &self,
+        network: Network,
+    ) -> impl Iterator<Item = PrivateNotificationData> + use<'_> {
+        self.0.iter().filter_map(move |tx_output| {
+            if let Some((ciphertext, receiver_address)) = tx_output.offchain_notification(network) {
+                Some(PrivateNotificationData {
+                    cleartext: tx_output.notification_payload(),
+                    ciphertext,
+                    recipient_address: receiver_address,
+                    owned: tx_output.owned,
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    pub(crate) fn owned_offchain_notifications(
+        &self,
+        network: Network,
+    ) -> impl Iterator<Item = PrivateNotificationData> + use<'_> {
+        self.offchain_notifications(network).filter(|n| n.owned)
+    }
+
+    pub(crate) fn unowned_offchain_notifications(
+        &self,
+        network: Network,
+    ) -> impl Iterator<Item = PrivateNotificationData> + use<'_> {
+        self.offchain_notifications(network).filter(|n| !n.owned)
     }
 
     /// indicates if any offchain notifications exist

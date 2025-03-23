@@ -18,7 +18,11 @@ pub enum CreateTxError {
     #[error("total spend amount is too large")]
     TotalSpendTooLarge,
 
-    #[error("insufficient funds. requested: {}, available: {}", requested, available)]
+    #[error(
+        "insufficient funds. requested: {}, available: {}",
+        requested,
+        available
+    )]
     InsufficientFunds {
         requested: NativeCurrencyAmount,
         available: NativeCurrencyAmount,

@@ -4745,7 +4745,16 @@ mod rpc_server_tests {
                     blocks.push(block2);
                     blocks.push(block3);
 
-                    (blocks, tx_artifacts.offchain_notifications(), bob_amount)
+                    // note: change-policy uses off-chain, so alice will have an
+                    // off-chain notificatin also.  So it is important to use
+                    // unowned_offchain_notifications() when retrieving those
+                    // intended for bob.
+
+                    (
+                        blocks,
+                        tx_artifacts.unowned_offchain_notifications(),
+                        bob_amount,
+                    )
                 };
 
                 // bob's node claims each utxo
@@ -4936,7 +4945,7 @@ mod rpc_server_tests {
                     }
                 }
 
-                for offchain_notification in tx_artifacts.offchain_notifications() {
+                for offchain_notification in tx_artifacts.owned_offchain_notifications() {
                     bob.clone()
                         .claim_utxo(
                             context::current(),
@@ -5104,7 +5113,6 @@ mod rpc_server_tests {
             mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, Some(timestamp))
                 .await?;
             mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, None).await?;
-
 
             let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
                 .to_address()

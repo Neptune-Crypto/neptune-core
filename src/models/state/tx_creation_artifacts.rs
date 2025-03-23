@@ -25,7 +25,24 @@ impl TxCreationArtifacts {
         &self.details
     }
 
-    pub fn offchain_notifications(&self) -> Vec<PrivateNotificationData> {
-        self.details.tx_outputs.offchain_notifications(self.network)
+    pub fn all_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
+        self.details
+            .tx_outputs
+            .offchain_notifications(self.network)
+            .collect()
+    }
+
+    pub fn owned_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
+        self.details
+            .tx_outputs
+            .owned_offchain_notifications(self.network)
+            .collect()
+    }
+
+    pub fn unowned_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
+        self.details
+            .tx_outputs
+            .unowned_offchain_notifications(self.network)
+            .collect()
     }
 }
