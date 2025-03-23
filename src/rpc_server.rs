@@ -5092,10 +5092,10 @@ mod rpc_server_tests {
 
             let ctx = context::current();
             let token = cookie_token(&rpc_server).await;
-            // let timestamp = network.launch_date() + Timestamp::months(7);
+            let timestamp = network.launch_date() + Timestamp::months(7);
 
             // obtain some funds.
-            mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, None).await?;
+            mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, Some(timestamp)).await?;
 
             let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
                 .to_address()
