@@ -246,7 +246,13 @@ pub(crate) async fn mock_genesis_global_state(
     let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
     // dummy channel
-    let (to_main_tx, _) = mpsc::channel::<RPCServerToMain>(1);
+    let (rpc_to_main_tx, mut rpc_to_main_rx) =
+        tokio::sync::mpsc::channel::<RPCServerToMain>(5);
+    tokio::spawn(async move {
+        while let Some(i) = rpc_to_main_rx.recv().await {
+            tracing::trace!("mock Main got message = {:?}", i);
+        }
+    });
 
     GlobalStateLock::new(
         wallet_state,
@@ -254,7 +260,7 @@ pub(crate) async fn mock_genesis_global_state(
         networking_state,
         cli.clone(),
         mempool,
-        to_main_tx,
+        rpc_to_main_tx,
     )
 }
 

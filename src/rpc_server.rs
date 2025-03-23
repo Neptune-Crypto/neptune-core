@@ -3503,14 +3503,6 @@ mod rpc_server_tests {
     ) -> NeptuneRPCServer {
         let global_state_lock =
             mock_genesis_global_state(network, peer_count, wallet_entropy, cli).await;
-        let (dummy_tx, mut dummy_rx) =
-            tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-
-        tokio::spawn(async move {
-            while let Some(i) = dummy_rx.recv().await {
-                tracing::trace!("mock Main got message = {:?}", i);
-            }
-        });
 
         let data_directory = unit_test_data_directory(network).unwrap();
 
@@ -3519,7 +3511,9 @@ mod rpc_server_tests {
             .unwrap()
             .into()];
 
-        NeptuneRPCServer::new(global_state_lock, dummy_tx, data_directory, valid_tokens)
+        let rpc_to_main_tx = global_state_lock.rpc_server_to_main_tx();
+
+        NeptuneRPCServer::new(global_state_lock, rpc_to_main_tx, data_directory, valid_tokens)
     }
 
     async fn cookie_token(server: &NeptuneRPCServer) -> rpc_auth::Token {
