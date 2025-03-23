@@ -502,6 +502,18 @@ impl TxOutputList {
         self
     }
 
+    pub fn owned_iter(&self) -> impl Iterator<Item = &TxOutput> + '_ {
+        self.0.iter().filter(|o| o.owned)
+    }
+
+    pub fn owned_amount(&self) -> NativeCurrencyAmount {
+        self.owned_iter().map(|o| o.native_currency_amount()).sum()
+    }
+
+    pub fn has_owned_output(&self) -> bool {
+        self.0.iter().any(|o| o.owned)
+    }
+
     pub fn change_iter(&self) -> impl Iterator<Item = &TxOutput> + '_ {
         self.0.iter().filter(|o| o.is_change)
     }

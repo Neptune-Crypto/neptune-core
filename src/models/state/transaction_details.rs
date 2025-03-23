@@ -36,26 +36,37 @@ impl Display for TransactionDetails {
         write!(
             f,
             r#"TransactionDetails:
-    inputs: {},
-    outputs: {},
+    spend_amount: {},
     inputs_amount: {},
     outputs_amount: {},
-    spend_amount: {},
     fee: {},
     coinbase: {},
     timestamp: {},
+    inputs: {},
+    outputs: {},
     change_outputs: {},
+    owned_outputs: {},
 "#,
-            self.tx_inputs.len(),
-            self.tx_outputs.len(),
+            self.timestamp,
+            self.spend_amount(),
             self.tx_inputs.total_native_coins(),
             self.tx_outputs.total_native_coins(),
-            self.spend_amount(),
             self.fee,
             self.coinbase.unwrap_or_else(|| 0.into()),
-            self.timestamp,
+            self.tx_inputs
+                .iter()
+                .map(|o| o.native_currency_amount())
+                .join(", "),
+            self.tx_outputs
+                .iter()
+                .map(|o| o.native_currency_amount())
+                .join(", "),
             self.tx_outputs
                 .change_iter()
+                .map(|o| o.native_currency_amount())
+                .join(", "),
+            self.tx_outputs
+                .owned_iter()
                 .map(|o| o.native_currency_amount())
                 .join(", ")
         )
@@ -103,13 +114,13 @@ impl TransactionDetails {
                         amount_timelocked,
                         sender_randomness,
                         receiving_address.clone(),
-                        true,  // owned
+                        true, // owned
                     ),
                     TxOutput::onchain_native_currency(
                         amount_liquid,
                         sender_randomness,
                         receiving_address,
-                        true,  // owned
+                        true, // owned
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],
@@ -118,13 +129,13 @@ impl TransactionDetails {
                         amount_timelocked,
                         sender_randomness,
                         receiving_address.clone(),
-                        true,  // owned
+                        true, // owned
                     ),
                     TxOutput::offchain_native_currency(
                         amount_liquid,
                         sender_randomness,
                         receiving_address,
-                        true,  // owned
+                        true, // owned
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],

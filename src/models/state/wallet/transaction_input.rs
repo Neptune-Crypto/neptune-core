@@ -39,8 +39,12 @@ impl Deref for TxInput {
     }
 }
 
-#[cfg(test)]
 impl TxInput {
+    pub fn native_currency_amount(&self) -> NativeCurrencyAmount {
+        self.utxo.get_native_currency_amount()
+    }
+
+    #[cfg(test)]
     pub fn new_random(amount: NativeCurrencyAmount) -> Self {
         use crate::models::blockchain::transaction::lock_script::LockScript;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
