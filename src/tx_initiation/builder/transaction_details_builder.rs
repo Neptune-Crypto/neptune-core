@@ -202,7 +202,8 @@ impl TransactionDetailsBuilder {
                         Utxo::new_native_currency(LockScript::burn(), change_amount),
                         Digest::default(),
                         Digest::default(),
-                        false,
+                        false, // owned
+                        true,  // is_change
                     ),
                     state_lock.tip().await,
                 ),
@@ -220,7 +221,6 @@ impl TransactionDetailsBuilder {
             coinbase,
             timestamp,
             tip_block.mutator_set_accumulator_after(),
-            has_change_output,
         )?)
     }
 
@@ -255,12 +255,14 @@ impl TransactionDetailsBuilder {
                 change_sender_randomness,
                 own_receiving_address,
                 owned,
+                true, // is_change
             ),
             UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
                 change_amount,
                 change_sender_randomness,
                 own_receiving_address,
                 owned,
+                true, // is_change
             ),
         };
 

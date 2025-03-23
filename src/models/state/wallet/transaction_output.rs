@@ -36,6 +36,7 @@ pub struct TxOutput {
 
     /// Indicates if this client can unlock the UTXO
     owned: bool,
+    is_change: bool,
 }
 
 impl From<&TxOutput> for AdditionRecord {
@@ -62,13 +63,14 @@ impl TxOutput {
     /// If the [Utxo] cannot be claimed by our wallet then the specified
     /// notification for owned UTXOs is used, otherwise the specified
     /// notification medium for unowned UTXOs is used.
-    pub fn auto(
+    pub(crate) fn auto(
         wallet_state: &WalletState,
         address: ReceivingAddress,
         amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
+        is_change: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
         Self::auto_utxo(
@@ -78,16 +80,18 @@ impl TxOutput {
             sender_randomness,
             owned_utxo_notify_medium,
             unowned_utxo_notify_medium,
+            is_change,
         )
     }
 
-    pub fn auto_utxo(
+    pub(crate) fn auto_utxo(
         wallet_state: &WalletState,
         utxo: Utxo,
         address: ReceivingAddress,
         sender_randomness: Digest,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
+        is_change: bool,
     ) -> Self {
         let has_matching_spending_key = wallet_state.can_unlock(&utxo);
 
@@ -110,6 +114,7 @@ impl TxOutput {
             receiver_digest,
             notification_method,
             owned: has_matching_spending_key,
+            is_change,
         }
     }
 
@@ -126,6 +131,7 @@ impl TxOutput {
         sender_randomness: Digest,
         privacy_digest: Digest,
         owned: bool,
+        is_change: bool,
     ) -> Self {
         Self {
             utxo,
@@ -133,6 +139,7 @@ impl TxOutput {
             receiver_digest: privacy_digest,
             notification_method: UtxoNotifyMethod::None,
             owned,
+            is_change,
         }
     }
 
@@ -143,6 +150,7 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
+        is_change: bool,
     ) -> Self {
         Self {
             utxo,
@@ -150,6 +158,7 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OnChain(receiving_address),
             owned,
+            is_change,
         }
     }
 
@@ -160,6 +169,7 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
+        is_change: bool,
     ) -> Self {
         Self {
             utxo,
@@ -167,6 +177,7 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OffChain(receiving_address),
             owned,
+            is_change,
         }
     }
 
@@ -177,6 +188,7 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
+        is_change: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
         Self {
@@ -185,6 +197,7 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OnChain(receiving_address),
             owned,
+            is_change,
         }
     }
 
@@ -195,6 +208,7 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
+        is_change: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
         Self {
@@ -203,10 +217,15 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OffChain(receiving_address),
             owned,
+            is_change,
         }
     }
 
-    pub(crate) fn is_offchain(&self) -> bool {
+    pub fn is_change(&self) -> bool {
+        self.is_change
+    }
+
+    pub fn is_offchain(&self) -> bool {
         matches!(self.notification_method, UtxoNotifyMethod::OffChain(_))
     }
 
@@ -222,7 +241,7 @@ impl TxOutput {
         self.receiver_digest
     }
 
-    pub(crate) fn public_announcement(&self) -> Option<PublicAnnouncement> {
+    pub fn public_announcement(&self) -> Option<PublicAnnouncement> {
         match &self.notification_method {
             UtxoNotifyMethod::None => None,
             UtxoNotifyMethod::OffChain(_) => None,
@@ -262,6 +281,7 @@ impl TxOutput {
             receiver_digest: self.receiver_digest,
             notification_method: self.notification_method,
             owned: self.owned,
+            is_change: self.is_change,
         }
     }
 }
@@ -407,6 +427,18 @@ impl TxOutputList {
     {
         self.0.extend(maybe_tx_output);
         self
+    }
+
+    pub fn change_iter(&self) -> impl Iterator<Item = &TxOutput> + '_ {
+        self.0.iter().filter(|o| o.is_change)
+    }
+
+    pub fn change_amount(&self) -> NativeCurrencyAmount {
+        self.change_iter().map(|o| o.native_currency_amount()).sum()
+    }
+
+    pub fn has_change_output(&self) -> bool {
+        self.0.iter().any(|o| o.is_change)
     }
 }
 

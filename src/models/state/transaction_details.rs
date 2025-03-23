@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use anyhow::bail;
 use anyhow::Result;
+use itertools::Itertools;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -28,7 +29,6 @@ pub struct TransactionDetails {
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
     pub mutator_set_accumulator: MutatorSetAccumulator,
-    pub has_change_output: bool,
 }
 
 impl Display for TransactionDetails {
@@ -44,7 +44,7 @@ impl Display for TransactionDetails {
     fee: {},
     coinbase: {},
     timestamp: {},
-    change_output: {},
+    change_outputs: {},
 "#,
             self.tx_inputs.len(),
             self.tx_outputs.len(),
@@ -54,9 +54,10 @@ impl Display for TransactionDetails {
             self.fee,
             self.coinbase.unwrap_or_else(|| 0.into()),
             self.timestamp,
-            self.change_output()
+            self.tx_outputs
+                .change_iter()
                 .map(|o| o.native_currency_amount())
-                .unwrap_or_else(|| 0.into()),
+                .join(", ")
         )
     }
 }
@@ -102,13 +103,15 @@ impl TransactionDetails {
                         amount_timelocked,
                         sender_randomness,
                         receiving_address.clone(),
-                        true,
+                        true,  // owned
+                        false, // is_change
                     ),
                     TxOutput::onchain_native_currency(
                         amount_liquid,
                         sender_randomness,
                         receiving_address,
-                        true,
+                        true,  // owned
+                        false, // is_change
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],
@@ -117,13 +120,15 @@ impl TransactionDetails {
                         amount_timelocked,
                         sender_randomness,
                         receiving_address.clone(),
-                        true,
+                        true,  // owned
+                        false, // is_change
                     ),
                     TxOutput::offchain_native_currency(
                         amount_liquid,
                         sender_randomness,
                         receiving_address,
-                        true,
+                        true,  // owned
+                        false, // is_change
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],
@@ -133,15 +138,12 @@ impl TransactionDetails {
             }
         };
 
-        let has_change_output = false;
-
         TransactionDetails::new_without_coinbase(
             TxInputList::empty(),
             gobbling_utxos,
             gobbled_fee,
             now,
             mutator_set_accumulator,
-            has_change_output,
         )
         .expect("new_without_coinbase should succeed when total output amount is zero and no inputs are provided")
     }
@@ -162,7 +164,6 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
-        let has_change_output = false;
         Self::new(
             tx_inputs,
             tx_outputs,
@@ -170,7 +171,6 @@ impl TransactionDetails {
             Some(coinbase),
             timestamp,
             mutator_set_accumulator,
-            has_change_output,
         )
     }
 
@@ -188,7 +188,6 @@ impl TransactionDetails {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
-        has_change_output: bool,
     ) -> Result<TransactionDetails> {
         Self::new(
             tx_inputs,
@@ -197,7 +196,6 @@ impl TransactionDetails {
             None,
             timestamp,
             mutator_set_accumulator,
-            has_change_output,
         )
     }
 
@@ -215,7 +213,6 @@ impl TransactionDetails {
         coinbase: Option<NativeCurrencyAmount>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
-        has_change_output: bool,
     ) -> Result<TransactionDetails> {
         let tx_inputs: TxInputList = tx_inputs.into();
         let tx_outputs: TxOutputList = tx_outputs.into();
@@ -253,29 +250,14 @@ impl TransactionDetails {
             coinbase,
             timestamp,
             mutator_set_accumulator,
-            has_change_output,
         })
-    }
-
-    pub fn change_output(&self) -> Option<&TxOutput> {
-        if self.has_change_output {
-            self.tx_outputs.iter().last()
-        } else {
-            None
-        }
     }
 
     /// amount spent (excludes change and fee)
     ///
     /// ie: sum(inputs) - (change + fee)
     pub fn spend_amount(&self) -> NativeCurrencyAmount {
-        let change_amt: NativeCurrencyAmount = self
-            .change_output()
-            .iter()
-            .map(|o| o.native_currency_amount())
-            .sum();
-
-        let not_spend = change_amt + self.fee;
+        let not_spend = self.tx_outputs.change_amount() + self.fee;
 
         // sum(inputs) - (change + fee)
         self.tx_inputs
