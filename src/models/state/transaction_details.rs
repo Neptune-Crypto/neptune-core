@@ -38,8 +38,9 @@ impl Display for TransactionDetails {
             r#"TransactionDetails:
     inputs: {},
     outputs: {},
-    inputs_native_currency_amount: {},
-    outputs_native_currency_amount: {},
+    inputs_amount: {},
+    outputs_amount: {},
+    spend_amount: {},
     fee: {},
     coinbase: {},
     timestamp: {},
@@ -49,6 +50,7 @@ impl Display for TransactionDetails {
             self.tx_outputs.len(),
             self.tx_inputs.total_native_coins(),
             self.tx_outputs.total_native_coins(),
+            self.spend_amount(),
             self.fee,
             self.coinbase.unwrap_or_else(|| 0.into()),
             self.timestamp,
@@ -261,6 +263,25 @@ impl TransactionDetails {
         } else {
             None
         }
+    }
+
+    /// amount spent (excludes change and fee)
+    ///
+    /// ie: sum(inputs) - (change + fee)
+    pub fn spend_amount(&self) -> NativeCurrencyAmount {
+        let change_amt: NativeCurrencyAmount = self
+            .change_output()
+            .iter()
+            .map(|o| o.native_currency_amount())
+            .sum();
+
+        let not_spend = change_amt + self.fee;
+
+        // sum(inputs) - (change + fee)
+        self.tx_inputs
+            .total_native_coins()
+            .checked_sub(&not_spend)
+            .unwrap_or_else(|| 0.into())
     }
 }
 
