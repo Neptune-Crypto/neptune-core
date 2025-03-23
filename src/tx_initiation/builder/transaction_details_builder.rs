@@ -114,7 +114,10 @@ impl TransactionDetailsBuilder {
 
         let change_amount = total_unlocked_amount
             .checked_sub(&total_outbound_amount)
-            .ok_or(CreateTxError::InsufficientFunds)?;
+            .ok_or(CreateTxError::InsufficientFunds {
+                requested: total_outbound_amount,
+                available: total_unlocked_amount,
+            })?;
 
         let has_change_output = change_amount > 0.into();
 

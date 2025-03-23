@@ -2,7 +2,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::tx_initiation::export::BlockHeight;
+use crate::tx_initiation::export::NativeCurrencyAmount;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
@@ -18,7 +19,10 @@ pub enum CreateTxError {
     TotalSpendTooLarge,
 
     #[error("insufficient funds")]
-    InsufficientFunds,
+    InsufficientFunds {
+        requested: NativeCurrencyAmount,
+        available: NativeCurrencyAmount,
+    },
 
     #[error("ChangePolicy = ExactChange, but input amount exceeds output amount")]
     NotExactChange,
