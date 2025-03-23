@@ -5100,9 +5100,11 @@ mod rpc_server_tests {
             let token = cookie_token(&rpc_server).await;
             let timestamp = network.launch_date() + Timestamp::months(7);
 
-            // obtain some funds.
+            // obtain some funds, so we have two inputs available.
             mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, Some(timestamp))
                 .await?;
+            mine_block_to_wallet_invalid_block_proof(&mut rpc_server.state, None).await?;
+
 
             let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
                 .to_address()
