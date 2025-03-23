@@ -3652,35 +3652,44 @@ mod rpc_server_tests {
             .clone()
             .clear_standing_by_ip(ctx, token, "127.0.0.1".parse().unwrap())
             .await;
+        let output: OutputFormat = (own_receiving_address.clone(), NativeCurrencyAmount::one()).into();
         let _ = rpc_server
             .clone()
             .send(
                 ctx,
                 token,
-                NativeCurrencyAmount::one(),
-                own_receiving_address.clone(),
-                UtxoNotificationMedium::OffChain,
-                UtxoNotificationMedium::OffChain,
+                vec![output],
+                ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one(),
             )
             .await;
 
         let transaction_timestamp = network.launch_date();
-        let proving_capability = rpc_server.state.cli().proving_capability();
+        // let proving_capability = rpc_server.state.cli().proving_capability();
+        let my_output: OutputFormat = (own_receiving_address, NativeCurrencyAmount::one()).into();
         let _ = rpc_server
             .clone()
-            .send_to_many_inner(
+            .send(
                 ctx,
-                vec![(own_receiving_address, NativeCurrencyAmount::one())],
-                (
-                    UtxoNotificationMedium::OffChain,
-                    UtxoNotificationMedium::OffChain,
-                ),
-                NativeCurrencyAmount::one(),
-                transaction_timestamp,
-                proving_capability,
+                token,
+                vec![my_output],
+                ChangePolicy::ExactChange,
+                NativeCurrencyAmount::one()
             )
             .await;
+
+            // .send_to_many_inner(
+            //     ctx,
+            //     vec![],
+            //     (
+            //         UtxoNotificationMedium::OffChain,
+            //         UtxoNotificationMedium::OffChain,
+            //     ),
+            //     NativeCurrencyAmount::one(),
+            //     transaction_timestamp,
+            //     proving_capability,
+            // )
+            // .await;
         let _ = rpc_server.clone().pause_miner(ctx, token).await;
         let _ = rpc_server.clone().restart_miner(ctx, token).await;
         let _ = rpc_server
@@ -4340,27 +4349,14 @@ mod rpc_server_tests {
         let rpc_server = test_rpc_server(network, WalletEntropy::new_random(), 2, cli_on).await;
         let token = cookie_token(&rpc_server).await;
 
+        let output: OutputFormat = (address.into(), amount).into();
         assert!(rpc_server
             .clone()
             .send(
                 ctx,
                 token,
-                amount,
-                address.into(),
-                UtxoNotificationMedium::OffChain,
-                UtxoNotificationMedium::OffChain,
-                NativeCurrencyAmount::zero()
-            )
-            .await
-            .is_err());
-        assert!(rpc_server
-            .clone()
-            .send_to_many(
-                ctx,
-                token,
-                vec![(address.into(), amount)],
-                UtxoNotificationMedium::OffChain,
-                UtxoNotificationMedium::OffChain,
+                vec![output],
+                ChangePolicy::ExactChange,
                 NativeCurrencyAmount::zero()
             )
             .await
@@ -4653,6 +4649,7 @@ mod rpc_server_tests {
             use cli_args::Args;
 
             use super::*;
+
             use crate::tests::shared::invalid_block_with_transaction;
             use crate::tests::shared::invalid_empty_block;
 
@@ -4677,10 +4674,21 @@ mod rpc_server_tests {
                         .await?
                         .unwrap();
 
-                    let pay_to_bob_outputs = vec![
-                        (receiving_address_generation, NativeCurrencyAmount::coins(1)),
-                        (receiving_address_symmetric, NativeCurrencyAmount::coins(2)),
-                    ];
+                    let pay_to_bob_outputs: Vec<OutputFormat> = [
+                        (
+                            receiving_address_generation,
+                            NativeCurrencyAmount::coins(1),
+                            UtxoNotificationMedium::OffChain,
+                        ),
+                        (
+                            receiving_address_symmetric,
+                            NativeCurrencyAmount::coins(2),
+                            UtxoNotificationMedium::OffChain,
+                        ),
+                    ]
+                    .into_iter()
+                    .map(|o| o.into())
+                    .collect();
 
                     (pay_to_bob_outputs, rpc_server, token)
                 };
@@ -4690,14 +4698,17 @@ mod rpc_server_tests {
                     let wallet_entropy = WalletEntropy::new_random();
                     let mut rpc_server =
                         test_rpc_server(network, wallet_entropy.clone(), 2, Args::default()).await;
+                    let token = cookie_token(&rpc_server).await;
 
                     let genesis_block = Block::genesis(network);
                     let mut blocks = vec![];
-                    let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
+                    // let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
 
                     let fee = NativeCurrencyAmount::zero();
-                    let bob_amount: NativeCurrencyAmount =
-                        pay_to_bob_outputs.iter().map(|(_, amt)| *amt).sum();
+                    let bob_amount: NativeCurrencyAmount = pay_to_bob_outputs
+                        .iter()
+                        .map(|o| o.native_currency_amount())
+                        .sum();
 
                     // Mine block 1 to get some coins
 
@@ -4712,26 +4723,36 @@ mod rpc_server_tests {
                         .await
                         .unwrap();
 
-                    let (tx, offchain_notifications) = rpc_server
+                    let tx_artifacts = rpc_server
                         .clone()
-                        .send_to_many_inner_invalid_proof(
+                        .send(
+                            context::current(),
+                            token,
                             pay_to_bob_outputs,
-                            UtxoNotificationMedium::OffChain,
-                            UtxoNotificationMedium::OffChain,
+                            ChangePolicy::recover_to_next_unused_key(
+                                KeyType::Symmetric,
+                                UtxoNotificationMedium::OffChain,
+                            ),
                             fee,
-                            in_seven_months,
                         )
                         .await
                         .unwrap();
 
-                    let block2 = invalid_block_with_transaction(&block1, tx);
+                    let block2 = invalid_block_with_transaction(
+                        &block1,
+                        tx_artifacts.transaction.clone().into(),
+                    );
                     let block3 = invalid_empty_block(&block2);
 
                     // mine two blocks, the first will include the transaction
                     blocks.push(block2);
                     blocks.push(block3);
 
-                    (blocks, offchain_notifications, bob_amount)
+                    (
+                        blocks,
+                        tx_artifacts.offchain_notifications(network),
+                        bob_amount,
+                    )
                 };
 
                 // bob's node claims each utxo
@@ -4852,26 +4873,43 @@ mod rpc_server_tests {
                     .await?
                     .unwrap();
 
-                let pay_to_self_outputs = vec![
-                    (bob_gen_addr, NativeCurrencyAmount::coins(5)),
-                    (bob_sym_addr, NativeCurrencyAmount::coins(6)),
-                ];
+                let pay_to_self_outputs: Vec<OutputFormat> = [
+                    (
+                        bob_gen_addr,
+                        NativeCurrencyAmount::coins(5),
+                        UtxoNotificationMedium::OffChain,
+                    ),
+                    (
+                        bob_sym_addr,
+                        NativeCurrencyAmount::coins(6),
+                        UtxoNotificationMedium::OffChain,
+                    ),
+                ]
+                .into_iter()
+                .map(|o| o.into())
+                .collect();
 
                 let fee = NativeCurrencyAmount::coins(2);
-                let (tx, offchain_notifications) = bob
+                let tx_artifacts = bob
                     .clone()
-                    .send_to_many_inner_invalid_proof(
+                    .send(
+                        context::current(),
+                        bob_token,
                         pay_to_self_outputs.clone(),
-                        UtxoNotificationMedium::OffChain,
-                        UtxoNotificationMedium::OffChain,
+                        ChangePolicy::recover_to_next_unused_key(
+                            KeyType::Symmetric,
+                            UtxoNotificationMedium::OffChain,
+                        ),
                         fee,
-                        in_eight_months,
                     )
                     .await
                     .unwrap();
 
                 // alice mines 2 more blocks.  block2 confirms the sent tx.
-                let block2 = invalid_block_with_transaction(&block1, tx);
+                let block2 = invalid_block_with_transaction(
+                    &block1,
+                    tx_artifacts.transaction.clone().into(),
+                );
                 let block3 = invalid_empty_block(&block2);
 
                 if claim_after_mined {
@@ -4884,23 +4922,32 @@ mod rpc_server_tests {
                         let another_address = WalletEntropy::new_random()
                             .nth_generation_spending_key(0)
                             .to_address();
-                        let (spending_tx, _) = bob
+                        let output: OutputFormat = (
+                            another_address.into(),
+                            NativeCurrencyAmount::coins(62),
+                            UtxoNotificationMedium::OffChain,
+                        )
+                            .into();
+                        let spending_tx_artifacts = bob
                             .clone()
-                            .send_to_many_inner_invalid_proof(
-                                vec![(another_address.into(), NativeCurrencyAmount::coins(62))],
-                                UtxoNotificationMedium::OffChain,
-                                UtxoNotificationMedium::OffChain,
+                            .send(
+                                context::current(),
+                                bob_token,
+                                vec![output],
+                                ChangePolicy::exact_change(),
                                 NativeCurrencyAmount::zero(),
-                                in_eight_months,
                             )
                             .await
                             .unwrap();
-                        let block4 = invalid_block_with_transaction(&block3, spending_tx);
+                        let block4 = invalid_block_with_transaction(
+                            &block3,
+                            spending_tx_artifacts.transaction.clone().into(),
+                        );
                         bob.state.set_new_tip(block4.clone()).await?;
                     }
                 }
 
-                for offchain_notification in offchain_notifications {
+                for offchain_notification in tx_artifacts.offchain_notifications(network) {
                     bob.clone()
                         .claim_utxo(
                             context::current(),
@@ -4972,6 +5019,7 @@ mod rpc_server_tests {
 
     mod send_tests {
         use super::*;
+        use crate::rpc_server::error::RpcError;
 
         #[traced_test]
         #[tokio::test]
@@ -4995,7 +5043,7 @@ mod rpc_server_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            let elem = (own_address.clone(), NativeCurrencyAmount::zero());
+            let elem: OutputFormat = (own_address.clone(), NativeCurrencyAmount::zero(), UtxoNotificationMedium::OffChain).into();
             let outputs = std::iter::repeat(elem);
             let fee = NativeCurrencyAmount::zero();
 
@@ -5003,18 +5051,26 @@ mod rpc_server_tests {
             for i in 5..7 {
                 let result = rpc_server
                     .clone()
-                    .send_to_many_inner(
+                    .send(
                         ctx,
+                        token,
                         outputs.clone().take(i).collect(),
-                        (
-                            UtxoNotificationMedium::OffChain,
-                            UtxoNotificationMedium::OffChain,
-                        ),
+                        ChangePolicy::ExactChange,
                         fee,
-                        timestamp,
-                        TxProvingCapability::PrimitiveWitness,
                     )
                     .await;
+                    // .send_to_many_inner(
+                    //     ctx,
+                    //     outputs.clone().take(i).collect(),
+                    //     (
+                    //         UtxoNotificationMedium::OffChain,
+                    //         UtxoNotificationMedium::OffChain,
+                    //     ),
+                    //     fee,
+                    //     timestamp,
+                    //     TxProvingCapability::PrimitiveWitness,
+                    // )
+                    // .await;
                 assert!(result.is_ok());
             }
         }
@@ -5046,6 +5102,7 @@ mod rpc_server_tests {
             .await;
 
             let ctx = context::current();
+            let token = cookie_token(&rpc_server).await;
             let timestamp = network.launch_date() + Timestamp::months(7);
 
             let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.random())
@@ -5054,30 +5111,40 @@ mod rpc_server_tests {
             let amount = NativeCurrencyAmount::coins(rng.random_range(0..10));
             let fee = NativeCurrencyAmount::coins(1);
 
-            let outputs = vec![(address, amount)];
+            let output: OutputFormat = (address, amount, UtxoNotificationMedium::OnChain).into();
+            let outputs = vec![output];
 
             for i in 0..10 {
                 let result = rpc_server
                     .clone()
-                    .send_to_many_inner(
+                    .send(
                         ctx,
+                        token,
                         outputs.clone(),
-                        (
-                            UtxoNotificationMedium::OnChain,
-                            UtxoNotificationMedium::OnChain,
-                        ),
+                        ChangePolicy::Burn,
                         fee,
-                        timestamp,
-                        TxProvingCapability::PrimitiveWitness,
                     )
                     .await;
+
+                    // .send_to_many_inner(
+                    //     ctx,
+                    //     outputs.clone(),
+                    //     (
+                    //         UtxoNotificationMedium::OnChain,
+                    //         UtxoNotificationMedium::OnChain,
+                    //     ),
+                    //     fee,
+                    //     timestamp,
+                    //     TxProvingCapability::PrimitiveWitness,
+                    // )
+                    // .await;
 
                 // any attempts after the 2nd send should result in RateLimit error.
                 match i {
                     0..2 => assert!(result.is_ok()),
                     _ => assert!(matches!(
                         result,
-                        Err(tx_initiation::error::SendError::RateLimit { .. })
+                        Err(RpcError::SendError(tx_initiation::error::SendError::RateLimit { .. }))
                     )),
                 }
             }
@@ -5120,7 +5187,7 @@ mod rpc_server_tests {
                     cli_args::Args::default(),
                 )
                 .await;
-                let ctx = context::current();
+                let token = cookie_token(&rpc_server).await;
 
                 // --- Init.  get wallet spending key ---
                 let genesis_block = Block::genesis(network);
@@ -5184,13 +5251,14 @@ mod rpc_server_tests {
                     KeyType::Symmetric => SymmetricKey::from_seed(rng.random()).into(),
                     KeyType::RawHashLock => panic!("hash lock key not supported"),
                 };
-                let output1 = (
+                let output1: OutputFormat = (
                     external_receiving_address.clone(),
                     NativeCurrencyAmount::coins(5),
-                );
+                    UtxoNotificationMedium::OffChain,
+                ).into();
 
                 // --- Setup. generate an output that our wallet can claim. ---
-                let output2 = {
+                let output2: OutputFormat = {
                     let spending_key = rpc_server
                         .state
                         .lock_guard_mut()
@@ -5202,8 +5270,9 @@ mod rpc_server_tests {
                     (
                         spending_key.to_address().unwrap(),
                         NativeCurrencyAmount::coins(25),
+                        UtxoNotificationMedium::OffChain,
                     )
-                };
+                }.into();
 
                 // --- Setup. assemble outputs and fee ---
                 let outputs = vec![output1, output2];
@@ -5227,18 +5296,32 @@ mod rpc_server_tests {
                 // capability.
                 let result = rpc_server
                     .clone()
-                    .send_to_many_inner(
-                        ctx,
+                    .send(
+                        context::current(),
+                        token,
                         outputs,
-                        (
-                            UtxoNotificationMedium::OffChain,
+                        ChangePolicy::recover_to_next_unused_key(
+                            KeyType::Symmetric,
                             UtxoNotificationMedium::OffChain,
                         ),
                         fee,
-                        timestamp,
-                        TxProvingCapability::ProofCollection,
                     )
                     .await;
+
+                // let result = rpc_server
+                //     .clone()
+                //     .send_to_many_inner(
+                //         ctx,
+                //         outputs,
+                //         (
+                //             UtxoNotificationMedium::OffChain,
+                //             UtxoNotificationMedium::OffChain,
+                //         ),
+                //         fee,
+                //         timestamp,
+                //         TxProvingCapability::ProofCollection,
+                //     )
+                //     .await;
 
                 // --- Test: bech32m serialize/deserialize roundtrip.
                 assert_eq!(

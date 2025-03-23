@@ -48,7 +48,7 @@ impl TxInput {
 
         let lock_script = LockScript::anyone_can_spend();
         Self(UnlockedUtxo::unlock(
-            Utxo::new_native_coin(lock_script.clone(), amount),
+            Utxo::new_native_currency(lock_script.clone(), amount),
             GenerationSpendingKey::derive_from_seed(rand::random()).into(),
             pseudorandom_mutator_set_membership_proof(rand::random()),
         ))

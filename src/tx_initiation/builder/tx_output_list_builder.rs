@@ -16,7 +16,7 @@ use crate::models::state::StateLock;
 use crate::WalletState;
 
 /// enumerates various ways to specify a transaction output.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OutputFormat {
     /// specify receiving address and amount
     AddressAndAmount(ReceivingAddress, NativeCurrencyAmount),
@@ -36,6 +36,18 @@ pub enum OutputFormat {
 
     /// specify a [TxOutput]
     TxOutput(TxOutput),
+}
+
+impl OutputFormat {
+    pub fn native_currency_amount(&self) -> NativeCurrencyAmount {
+        match self {
+            Self::AddressAndAmount(_, amt) => *amt,
+            Self::AddressAndAmountAndMedium(_, amt, _) => *amt,
+            Self::AddressAndUtxo(_, u) => u.get_native_currency_amount(),
+            Self::AddressAndUtxoAndMedium(_, u, _) => u.get_native_currency_amount(),
+            Self::TxOutput(to) => to.native_currency_amount(),
+        }
+    }
 }
 
 impl From<(ReceivingAddress, NativeCurrencyAmount)> for OutputFormat {

@@ -176,14 +176,14 @@ pub(crate) mod text {
         /// `OnChain`.
         #[cfg(test)]
         pub(crate) fn recover_change_on_chain(self, change_key: SpendingKey) -> Self {
-            self.recover_change(change_key, UtxoNotificationMedium::OnChain)
+            self.recover_to_provided_key(Arc::new(change_key), UtxoNotificationMedium::OnChain)
         }
 
         /// Enable change-recovery with the given key, and set the medium to
         /// `OffChain`.
         #[cfg(test)]
         pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
-            self.recover_change(change_key, UtxoNotificationMedium::OffChain)
+            self.recover_to_provided_key(Arc::new(change_key), UtxoNotificationMedium::OffChain)
         }
 
         /// Burn the change.

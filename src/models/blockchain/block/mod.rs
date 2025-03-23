@@ -1687,8 +1687,12 @@ pub(crate) mod block_tests {
                 .unwrap()
                 .transaction;
 
-            let block1 =
-                Block::block_template_invalid_proof(&genesis_block, (*tx1).clone(), in_seven_months, None);
+            let block1 = Block::block_template_invalid_proof(
+                &genesis_block,
+                (*tx1).clone(),
+                in_seven_months,
+                None,
+            );
             alice.set_new_tip(block1.clone()).await.unwrap();
 
             let config2 = TxCreationConfig::default()
@@ -1701,7 +1705,8 @@ pub(crate) mod block_tests {
                 .unwrap()
                 .transaction;
 
-            let block2 = Block::block_template_invalid_proof(&block1, (*tx2).clone(), in_eight_months, None);
+            let block2 =
+                Block::block_template_invalid_proof(&block1, (*tx2).clone(), in_eight_months, None);
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
 

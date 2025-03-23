@@ -65,6 +65,7 @@ mod wallet_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
+    use crate::tx_initiation::export::Transaction;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...
@@ -517,6 +518,7 @@ mod wallet_tests {
         let mut bob_global_lock =
             mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args::Args::default())
                 .await;
+        let mut tx_initiator_internal = bob_global_lock.tx_initiator_internal();
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
@@ -552,8 +554,7 @@ mod wallet_tests {
         let config_1 = TxCreationConfig::default()
             .recover_change_on_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx_1 = bob_global_lock
-            .tx_initiator_internal()
+        let tx_1 = tx_initiator_internal
             .create_transaction(
                 receiver_data_to_alice.clone(),
                 NativeCurrencyAmount::coins(2),
@@ -561,7 +562,8 @@ mod wallet_tests {
                 config_1,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         let block_1 = invalid_block_with_transaction(&genesis_block, tx_1.into());
 
@@ -591,7 +593,7 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(receiver_data_to_alice, UtxoNotifier::Cli);
+            .extract_expected_utxos(receiver_data_to_alice.iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await
@@ -710,6 +712,7 @@ mod wallet_tests {
         let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
         bob.set_new_tip(block_2_b.clone()).await.unwrap();
+        drop(bob);
         let alice_monitored_utxos_at_2b: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
@@ -790,8 +793,8 @@ mod wallet_tests {
         let config_2b = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx_from_bob = bob_global_lock
-            .tx_initiator_internal()
+
+        let tx_from_bob: Transaction = tx_initiator_internal
             .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 NativeCurrencyAmount::coins(4),
@@ -799,7 +802,9 @@ mod wallet_tests {
                 config_2b,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction
+            .into();
 
         let guesser_fraction = 0f64;
         let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction_from_state(
@@ -820,7 +825,7 @@ mod wallet_tests {
         .unwrap();
         let merged_tx = coinbase_tx
             .merge_with(
-                tx_from_bob.into(),
+                tx_from_bob,
                 Default::default(),
                 TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -1003,12 +1008,13 @@ mod wallet_tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
-        let sender_tx = bob
+        let sender_tx: Transaction = bob
             .tx_initiator_internal()
             .create_transaction(vec![tx_output].into(), one_money, in_seven_months, config)
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
         let tx_for_block = sender_tx
             .merge_with(
                 cbtx,

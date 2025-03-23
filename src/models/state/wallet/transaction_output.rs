@@ -113,6 +113,10 @@ impl TxOutput {
         }
     }
 
+    pub fn native_currency_amount(&self) -> NativeCurrencyAmount {
+        self.utxo.get_native_currency_amount()
+    }
+
     /// Instantiates [TxOutput] without any associated notification-info.
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
@@ -292,6 +296,12 @@ impl From<&TxOutputList> for Vec<Utxo> {
     }
 }
 
+impl From<TxOutputList> for Vec<TxOutput> {
+    fn from(list: TxOutputList) -> Self {
+        list.0
+    }
+}
+
 impl<I: Into<TxOutput>, T: IntoIterator<Item = I>> From<T> for TxOutputList {
     fn from(v: T) -> Self {
         Self(v.into_iter().map(|i| i.into()).collect())
@@ -390,13 +400,14 @@ impl TxOutputList {
         self.0.push(tx_output);
     }
 
-    // pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
-    // where
-    //     T: IntoIterator<Item = TxOutput>,
-    // {
-    //     self.0.extend(maybe_tx_output);
-    //     self
-    // }
+    #[cfg(test)]
+    pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
+    where
+        T: IntoIterator<Item = TxOutput>,
+    {
+        self.0.extend(maybe_tx_output);
+        self
+    }
 }
 
 #[cfg(test)]

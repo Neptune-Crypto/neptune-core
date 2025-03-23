@@ -3336,7 +3336,7 @@ mod peer_loop_tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
-        let transaction_1 = state_lock
+        let transaction_1: Transaction = state_lock
             .tx_initiator_internal()
             .create_transaction(
                 Default::default(),
@@ -3346,7 +3346,8 @@ mod peer_loop_tests {
             )
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
 
         // Build the resulting transaction notification
         let tx_notification: TransactionNotification = (&transaction_1).try_into().unwrap();
@@ -3419,7 +3420,7 @@ mod peer_loop_tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
-        let transaction_1 = state_lock
+        let transaction_1: Transaction = state_lock
             .tx_initiator_internal()
             .create_transaction(
                 Default::default(),
@@ -3429,7 +3430,8 @@ mod peer_loop_tests {
             )
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let mut peer_loop_handler = PeerLoopHandler::new(
@@ -3449,7 +3451,7 @@ mod peer_loop_tests {
         state_lock
             .lock_guard_mut()
             .await
-            .mempool_insert((*transaction_1).clone(), TransactionOrigin::Foreign)
+            .mempool_insert(transaction_1.clone(), TransactionOrigin::Foreign)
             .await;
         assert!(
             !state_lock.lock_guard().await.mempool.is_empty(),

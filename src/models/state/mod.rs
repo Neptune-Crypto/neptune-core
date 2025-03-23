@@ -354,13 +354,13 @@ pub enum StateLock<'a> {
     WriteGuard(AtomicRwWriteGuard<'a, GlobalState>),
 }
 
-impl<'a> From<GlobalStateLock> for StateLock<'a> {
+impl From<GlobalStateLock> for StateLock<'_> {
     fn from(g: GlobalStateLock) -> Self {
         Self::Lock(g)
     }
 }
 
-impl<'a> From<&GlobalStateLock> for StateLock<'a> {
+impl From<&GlobalStateLock> for StateLock<'_> {
     fn from(g: &GlobalStateLock) -> Self {
         Self::Lock(g.clone()) // cheap Arc clone.
     }
@@ -381,9 +381,9 @@ impl<'a> From<AtomicRwWriteGuard<'a, GlobalState>> for StateLock<'a> {
 impl<'a> StateLock<'a> {
     pub fn gs(&self) -> &GlobalState {
         match self {
-            Self::ReadGuard(g) => &*g,
-            Self::WriteGuard(g) => &*g,
-            _ => panic!("wrong usage: not a guard"),
+            Self::ReadGuard(g) => g,
+            Self::WriteGuard(g) => g,
+            Self::Lock(_) => panic!("wrong usage: not a guard"),
         }
     }
 
@@ -2415,24 +2415,30 @@ mod global_state_tests {
             .await
             .unwrap();
         let config_alice_and_bob = TxCreationConfig::default()
-            .recover_change(genesis_key, UtxoNotificationMedium::OffChain)
+            .recover_change_off_chain(genesis_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
+        let tx_outputs_for_alice_and_bob =
+            [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()].concat();
         let artifacts_alice_and_bob = premine_receiver
             .tx_initiator_internal()
             .create_transaction(
-                [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()]
-                    .concat()
-                    .into(),
+                tx_outputs_for_alice_and_bob.clone().into(),
                 fee,
                 in_seven_months,
                 config_alice_and_bob,
             )
             .await
             .unwrap();
-        let tx_to_alice_and_bob = artifacts_alice_and_bob.transaction;
-        let Some(change_output) = artifacts_alice_and_bob.change_output else {
-            panic!("Expected change output to genesis receiver");
-        };
+        let tx_to_alice_and_bob: Transaction = artifacts_alice_and_bob.transaction.into();
+        assert_eq!(
+            tx_outputs_for_alice_and_bob.len() + 1,
+            artifacts_alice_and_bob.details.tx_outputs.len(),
+            "Expected change output to genesis receiver"
+        );
+        let change_output = (*artifacts_alice_and_bob.details.tx_outputs)
+            .clone()
+            .pop()
+            .unwrap();
 
         assert!(tx_to_alice_and_bob.is_valid().await);
         assert!(tx_to_alice_and_bob
@@ -2490,7 +2496,7 @@ mod global_state_tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(tx_outputs_for_alice.into(), UtxoNotifier::Cli);
+            .extract_expected_utxos(tx_outputs_for_alice.iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await
@@ -2502,7 +2508,7 @@ mod global_state_tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(tx_outputs_for_bob.into(), UtxoNotifier::Cli);
+            .extract_expected_utxos(tx_outputs_for_bob.iter(), UtxoNotifier::Cli);
         bob.lock_guard_mut()
             .await
             .wallet_state
@@ -2595,7 +2601,7 @@ mod global_state_tests {
         // use-`ProofCollection`-instead-of-`SingleProof` functionality.
         // Weaker machines need to use the proof server.
         let config_alice = TxCreationConfig::default()
-            .recover_change(alice_spending_key.into(), UtxoNotificationMedium::OffChain)
+            .recover_change_off_chain(alice_spending_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_alice = alice
             .tx_initiator_internal()
@@ -2608,8 +2614,9 @@ mod global_state_tests {
             .await
             .unwrap();
         let tx_from_alice = artifacts_from_alice.transaction;
-        assert!(
-            artifacts_from_alice.change_output.is_none(),
+        assert_eq!(
+            tx_outputs_from_alice.len(),
+            artifacts_from_alice.details.tx_outputs.len(),
             "No change for Alice as she spent it all"
         );
 
@@ -2638,7 +2645,7 @@ mod global_state_tests {
             ),
         ];
         let config_bob = TxCreationConfig::default()
-            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
+            .recover_change_off_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
         let artifacts_from_bob = bob
             .tx_initiator_internal()
@@ -2652,8 +2659,9 @@ mod global_state_tests {
             .unwrap();
         let tx_from_bob = artifacts_from_bob.transaction;
 
-        assert!(
-            artifacts_from_bob.change_output.is_none(),
+        assert_eq!(
+            tx_outputs_from_bob.len(),
+            artifacts_from_bob.details.tx_outputs.len(),
             "No change for Bob as he spent it all"
         );
 
@@ -2685,7 +2693,7 @@ mod global_state_tests {
 
         let block_transaction2 = coinbase_transaction2
             .merge_with(
-                tx_from_alice,
+                tx_from_alice.into(),
                 Default::default(),
                 TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -2693,7 +2701,7 @@ mod global_state_tests {
             .await
             .unwrap()
             .merge_with(
-                tx_from_bob,
+                tx_from_bob.into(),
                 Default::default(),
                 TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -3639,7 +3647,10 @@ mod global_state_tests {
                     .lock_guard()
                     .await
                     .wallet_state
-                    .extract_expected_utxos(&artifacts.details.tx_outputs, UtxoNotifier::Myself);
+                    .extract_expected_utxos(
+                        artifacts.details.tx_outputs.iter(),
+                        UtxoNotifier::Myself,
+                    );
                 alice_state_lock
                     .lock_guard_mut()
                     .await
