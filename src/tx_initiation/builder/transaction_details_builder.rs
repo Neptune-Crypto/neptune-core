@@ -198,12 +198,11 @@ impl TransactionDetailsBuilder {
                 }
 
                 ChangePolicy::Burn => (
-                    TxOutput::no_notification(
+                    TxOutput::no_notification_as_change(
                         Utxo::new_native_currency(LockScript::burn(), change_amount),
                         Digest::default(),
                         Digest::default(),
                         false, // owned
-                        true,  // is_change
                     ),
                     state_lock.tip().await,
                 ),
@@ -250,19 +249,17 @@ impl TransactionDetailsBuilder {
 
         let owned = true;
         let change_output = match change_utxo_notify_method {
-            UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency(
+            UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency_as_change(
                 change_amount,
                 change_sender_randomness,
                 own_receiving_address,
                 owned,
-                true, // is_change
             ),
-            UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
+            UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency_as_change(
                 change_amount,
                 change_sender_randomness,
                 own_receiving_address,
                 owned,
-                true, // is_change
             ),
         };
 

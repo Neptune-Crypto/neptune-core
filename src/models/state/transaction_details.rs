@@ -104,14 +104,12 @@ impl TransactionDetails {
                         sender_randomness,
                         receiving_address.clone(),
                         true,  // owned
-                        false, // is_change
                     ),
                     TxOutput::onchain_native_currency(
                         amount_liquid,
                         sender_randomness,
                         receiving_address,
                         true,  // owned
-                        false, // is_change
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],
@@ -121,14 +119,12 @@ impl TransactionDetails {
                         sender_randomness,
                         receiving_address.clone(),
                         true,  // owned
-                        false, // is_change
                     ),
                     TxOutput::offchain_native_currency(
                         amount_liquid,
                         sender_randomness,
                         receiving_address,
                         true,  // owned
-                        false, // is_change
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],

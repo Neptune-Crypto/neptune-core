@@ -70,21 +70,40 @@ impl TxOutput {
         sender_randomness: Digest,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
-        is_change: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
-        Self::auto_utxo(
+        Self::auto_utxo_maybe_change(
             wallet_state,
             utxo,
             address,
             sender_randomness,
             owned_utxo_notify_medium,
             unowned_utxo_notify_medium,
-            is_change,
+            false, // is_change
         )
     }
 
     pub(crate) fn auto_utxo(
+        wallet_state: &WalletState,
+        utxo: Utxo,
+        address: ReceivingAddress,
+        sender_randomness: Digest,
+        owned_utxo_notify_medium: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
+    ) -> Self {
+        Self::auto_utxo_maybe_change(
+            wallet_state,
+            utxo,
+            address,
+            sender_randomness,
+            owned_utxo_notify_medium,
+            unowned_utxo_notify_medium,
+            false, // is_change
+        )
+    }
+
+    // private!
+    fn auto_utxo_maybe_change(
         wallet_state: &WalletState,
         utxo: Utxo,
         address: ReceivingAddress,
@@ -126,12 +145,12 @@ impl TxOutput {
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.
+    #[cfg(test)]
     pub(crate) fn no_notification(
         utxo: Utxo,
         sender_randomness: Digest,
         privacy_digest: Digest,
         owned: bool,
-        is_change: bool,
     ) -> Self {
         Self {
             utxo,
@@ -139,7 +158,27 @@ impl TxOutput {
             receiver_digest: privacy_digest,
             notification_method: UtxoNotifyMethod::None,
             owned,
-            is_change,
+            is_change: false,
+        }
+    }
+
+    /// Instantiates [TxOutput] without any associated notification-info.
+    ///
+    /// Warning: If care is not taken, this is an easy way to lose funds.
+    /// Don't use this constructor unless you have a good reason to.
+    pub(crate) fn no_notification_as_change(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        privacy_digest: Digest,
+        owned: bool,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: privacy_digest,
+            notification_method: UtxoNotifyMethod::None,
+            owned,
+            is_change: true,
         }
     }
 
@@ -150,7 +189,6 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
-        is_change: bool,
     ) -> Self {
         Self {
             utxo,
@@ -158,7 +196,7 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OnChain(receiving_address),
             owned,
-            is_change,
+            is_change: false,
         }
     }
 
@@ -169,7 +207,6 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
-        is_change: bool,
     ) -> Self {
         Self {
             utxo,
@@ -177,7 +214,7 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OffChain(receiving_address),
             owned,
-            is_change,
+            is_change: false,
         }
     }
 
@@ -188,7 +225,6 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
-        is_change: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
         Self {
@@ -197,7 +233,26 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OnChain(receiving_address),
             owned,
-            is_change,
+            is_change: false,
+        }
+    }
+
+    /// Instantiate a [TxOutput] for native currency intended fro on-chain UTXO
+    /// notification.
+    pub(crate) fn onchain_native_currency_as_change(
+        amount: NativeCurrencyAmount,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        owned: bool,
+    ) -> Self {
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            owned,
+            is_change: true,
         }
     }
 
@@ -208,7 +263,6 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
-        is_change: bool,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
         Self {
@@ -217,7 +271,26 @@ impl TxOutput {
             receiver_digest: receiving_address.privacy_digest(),
             notification_method: UtxoNotifyMethod::OffChain(receiving_address),
             owned,
-            is_change,
+            is_change: false,
+        }
+    }
+
+    /// Instantiate a [TxOutput] for native currency intended for off-chain UTXO
+    /// notification.
+    pub(crate) fn offchain_native_currency_as_change(
+        amount: NativeCurrencyAmount,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        owned: bool,
+    ) -> Self {
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
+            owned,
+            is_change: true,
         }
     }
 
@@ -464,6 +537,7 @@ mod tests {
                 receiver_digest: self.receiver_digest,
                 notification_method: self.notification_method,
                 owned: self.owned,
+                is_change: false,
             }
         }
 
@@ -474,6 +548,7 @@ mod tests {
                 receiver_digest: self.receiver_digest,
                 notification_method: self.notification_method,
                 owned: self.owned,
+                is_change: self.is_change,
             }
         }
     }

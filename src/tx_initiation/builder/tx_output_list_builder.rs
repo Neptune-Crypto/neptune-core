@@ -214,8 +214,6 @@ impl TxOutputListBuilder {
 
         // Convert outputs.  [address:amount] --> TxOutputList
         let outputs = self.outputs.into_iter().map(|output_type| {
-            let is_change = false;
-
             match output_type {
                 OutputFormat::TxOutput(o) => o,
 
@@ -232,7 +230,6 @@ impl TxOutputListBuilder {
                         sender_randomness,
                         self.owned_utxo_notification_medium,
                         self.unowned_utxo_notification_medium,
-                        is_change,
                     )
                 }
 
@@ -248,14 +245,12 @@ impl TxOutputListBuilder {
                             sender_randomness,
                             address,
                             owned,
-                            is_change,
                         ),
                         UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
                             amt,
                             sender_randomness,
                             address,
                             owned,
-                            is_change,
                         ),
                     }
                 }
@@ -273,7 +268,6 @@ impl TxOutputListBuilder {
                         sender_randomness,
                         self.owned_utxo_notification_medium,
                         self.unowned_utxo_notification_medium,
-                        is_change,
                     )
                 }
 
@@ -283,20 +277,12 @@ impl TxOutputListBuilder {
                     let owned = wallet_state.can_unlock(&utxo);
 
                     match medium {
-                        UtxoNotificationMedium::OnChain => TxOutput::onchain_utxo(
-                            utxo,
-                            sender_randomness,
-                            address,
-                            owned,
-                            is_change,
-                        ),
-                        UtxoNotificationMedium::OffChain => TxOutput::offchain_utxo(
-                            utxo,
-                            sender_randomness,
-                            address,
-                            owned,
-                            is_change,
-                        ),
+                        UtxoNotificationMedium::OnChain => {
+                            TxOutput::onchain_utxo(utxo, sender_randomness, address, owned)
+                        }
+                        UtxoNotificationMedium::OffChain => {
+                            TxOutput::offchain_utxo(utxo, sender_randomness, address, owned)
+                        }
                     }
                 }
             }
