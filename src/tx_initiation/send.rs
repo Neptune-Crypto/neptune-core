@@ -41,17 +41,20 @@ impl TransactionSender {
 
         initiator_private.check_proceed_with_send(fee).await?;
 
+        tracing::debug!("tx send initiated.");
+
         // The proving capability is set to the lowest possible value here,
         // since we don't want the client (CLI or dashboard) to hang while
         // producing proofs. Instead, we let (a task started by) main loop
         // handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
 
-        tracing::debug!("step 1. generate outputs.");
-
         let tx_outputs = initiator.generate_tx_outputs(outputs).await;
 
-        tracing::debug!("step 2. create tx.");
+        tracing::debug!(
+            "send: generated outputs.  spend amount = {}",
+            tx_outputs.total_native_coins()
+        );
 
         // Create the transaction
         //
@@ -73,12 +76,7 @@ impl TransactionSender {
                 e
             })?;
 
-        tracing::debug!(
-            "Generated {} offchain notifications",
-            tx_artifacts.offchain_notifications().len()
-        );
-
-        tracing::debug!("step 3. record and broadcast tx.");
+        tracing::info!("send: record and broadcast tx:\n{}", tx_artifacts.details);
 
         initiator
             .record_and_broadcast_transaction(&tx_artifacts)

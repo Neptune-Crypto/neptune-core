@@ -28,7 +28,6 @@ use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
-use crate::tx_initiation::export::TxInputList;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -58,6 +57,7 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::tx_initiation;
+use crate::tx_initiation::export::TxInputList;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 /// Information related to the resources to be used for guessing.

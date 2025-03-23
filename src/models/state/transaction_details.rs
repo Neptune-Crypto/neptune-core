@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use anyhow::bail;
 use anyhow::Result;
 use num_traits::CheckedSub;
@@ -15,7 +17,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use std::fmt::Display;
 
 /// Information, fetched from the state of the node, required to generate a
 /// transaction.
