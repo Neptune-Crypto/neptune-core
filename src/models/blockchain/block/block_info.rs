@@ -18,6 +18,9 @@ use crate::prelude::twenty_first;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockInfo {
     pub height: BlockHeight,
+
+    /// Block size in number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s
+    pub size: usize,
     pub digest: Digest,
     pub prev_block_digest: Digest,
     pub timestamp: Timestamp,
@@ -40,6 +43,7 @@ impl std::fmt::Display for BlockInfo {
         let buf = String::new()
             + &format!("height: {}\n", self.height)
             + &format!("digest: {}\n", self.digest.to_hex())
+            + &format!("size: {}\n", self.size)
             + &format!("prev_block_digest: {}\n", self.prev_block_digest.to_hex())
             + &format!("timestamp: {}\n", self.timestamp.standard_format())
             + &format!(
@@ -82,6 +86,7 @@ impl BlockInfo {
             digest,
             prev_block_digest: header.prev_block_digest,
             height: header.height,
+            size: block.size(),
             timestamp: header.timestamp,
             difficulty: header.difficulty,
             cumulative_proof_of_work: header.cumulative_proof_of_work,
