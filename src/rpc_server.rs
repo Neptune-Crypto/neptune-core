@@ -1722,6 +1722,9 @@ pub trait RPC {
         max_search_depth: Option<u64>,
     ) -> RpcResult<bool>;
 
+    /// Delete all transactions from the mempool.
+    async fn clear_mempool(token: rpc_auth::Token) -> RpcResult<()>;
+
     /// Stop miner if running
     ///
     /// ```no_run
@@ -3176,6 +3179,22 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn clear_mempool(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::ClearMempool)
+            .await;
+
+        Ok(())
+    }
+
     async fn pause_miner(
         self,
         _context: tarpc::context::Context,
