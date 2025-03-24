@@ -106,13 +106,14 @@ impl<P> Drop for JobQueue<P> {
 
         // we can't use tracker.wait().await in drop.
         // so we poll for up to 1 second.
-
+/*
         for _ in 0..100 {
             if self.tracker.is_empty() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+*/
     }
 }
 

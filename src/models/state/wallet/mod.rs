@@ -519,10 +519,11 @@ mod wallet_tests {
             mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args::Args::default())
                 .await;
         let mut tx_initiator_internal = bob_global_lock.tx_initiator_internal();
-        let mut bob = bob_global_lock.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
-        let bobs_original_balance = bob
+        let bobs_original_balance = bob_global_lock
+            .lock_guard()
+            .await
             .get_wallet_status_for_tip()
             .await
             .synced_unspent_available_amount(in_seven_months);
@@ -531,10 +532,16 @@ mod wallet_tests {
             "Premine must have non-zero synced balance"
         );
 
-        let bob_sender_randomness = bob.wallet_state.wallet_entropy.generate_sender_randomness(
-            genesis_block.kernel.header.height,
-            alice_address.privacy_digest(),
-        );
+        let bob_sender_randomness = bob_global_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_entropy
+            .generate_sender_randomness(
+                genesis_block.kernel.header.height,
+                alice_address.privacy_digest(),
+            );
+
         let receiver_data_12_to_alice = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(12),
             bob_sender_randomness,
@@ -577,13 +584,16 @@ mod wallet_tests {
 
         // Notification for Bob's change happens on-chain. No need to ask
         // wallet to expect change UTXO.
-        bob.set_new_tip(block_1.clone()).await.unwrap();
+        bob_global_lock.set_new_tip(block_1.clone()).await.unwrap();
 
         assert_eq!(
             bobs_original_balance
                 .checked_sub(&NativeCurrencyAmount::coins(15))
                 .unwrap(),
-            bob.get_wallet_status_for_tip()
+            bob_global_lock
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
                 .await
                 .synced_unspent_available_amount(in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
@@ -646,7 +656,10 @@ mod wallet_tests {
                 .add_expected_utxos(expected)
                 .await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
-            bob.set_new_tip(next_block.clone()).await.unwrap();
+            bob_global_lock
+                .set_new_tip(next_block.clone())
+                .await
+                .unwrap();
         }
 
         let first_block_after_spree = next_block;
@@ -705,14 +718,18 @@ mod wallet_tests {
         );
 
         // Bob mines a block, ignoring Alice's spree and forking instead
-        let bob_key = bob
+        let bob_key = bob_global_lock
+            .lock_guard()
+            .await
             .wallet_state
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
-        bob.set_new_tip(block_2_b.clone()).await.unwrap();
-        drop(bob);
+        bob_global_lock
+            .set_new_tip(block_2_b.clone())
+            .await
+            .unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await

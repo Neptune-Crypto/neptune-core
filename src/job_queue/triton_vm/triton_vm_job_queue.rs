@@ -1,7 +1,6 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use super::super::JobQueue;
 
@@ -42,6 +41,7 @@ impl TritonVmJobQueue {
     /// capabilities.
     #[cfg(not(test))]
     pub fn get_instance() -> Arc<Self> {
+        use std::sync::OnceLock;
         static INSTANCE: OnceLock<Arc<TritonVmJobQueue>> = OnceLock::new();
         INSTANCE
             .get_or_init(|| Arc::new(Self(JobQueue::<TritonVmJobPriority>::start())))

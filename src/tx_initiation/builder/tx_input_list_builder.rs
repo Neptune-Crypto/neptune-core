@@ -32,6 +32,9 @@ pub enum InputSelectionPolicy {
     #[default]
     Random,
 
+    /// use the natural order of the provided inputs.
+    ByProvidedOrder,
+
     /// choose inputs by native currency amount in specified sort order.
     ByNativeCoinAmount(SortOrder),
 
@@ -95,6 +98,11 @@ impl TxInputListBuilder {
         let ordered_iter = match policy {
             InputSelectionPolicy::Random => {
                 spendable_inputs.shuffle(&mut rng());
+                spendable_inputs.into_iter()
+            }
+
+            InputSelectionPolicy::ByProvidedOrder => {
+                // leave input order unchanged.
                 spendable_inputs.into_iter()
             }
 

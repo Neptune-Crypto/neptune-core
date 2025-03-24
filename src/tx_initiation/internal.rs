@@ -9,7 +9,6 @@ use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-use crate::tx_initiation::builder::tx_input_list_builder::SortOrder;
 use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::tx_initiation::export::ChangePolicy;
 use crate::tx_initiation::export::NativeCurrencyAmount;
@@ -61,9 +60,7 @@ impl TransactionInitiatorInternal {
                     .into_iter()
                     .collect(),
             )
-            .policy(InputSelectionPolicy::ByNativeCoinAmount(
-                SortOrder::Descending,
-            ))
+            .policy(InputSelectionPolicy::ByProvidedOrder)
             .spend_amount(tx_outputs.total_native_coins() + fee)
             .build();
 

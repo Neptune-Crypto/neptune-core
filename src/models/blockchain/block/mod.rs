@@ -1095,6 +1095,7 @@ pub(crate) mod block_tests {
         Block::block_subsidy(random_height.into());
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn test_difficulty_control_matches() {
         let network = Network::Main;
