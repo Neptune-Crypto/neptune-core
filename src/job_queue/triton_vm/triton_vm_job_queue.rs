@@ -39,7 +39,6 @@ impl TritonVmJobQueue {
     /// callers should execute resource intensive triton-vm tasks in this
     /// queue to avoid running simultaneous tasks that could exceed hardware
     /// capabilities.
-    #[cfg(not(test))]
     pub fn get_instance() -> Arc<Self> {
         use std::sync::OnceLock;
         static INSTANCE: OnceLock<Arc<TritonVmJobQueue>> = OnceLock::new();
@@ -48,10 +47,10 @@ impl TritonVmJobQueue {
             .clone()
     }
 
-    #[cfg(test)]
-    pub fn get_instance() -> Arc<Self> {
-        Arc::new(Self(JobQueue::<TritonVmJobPriority>::start()))
-    }
+    //#[cfg(test)]
+    //pub fn get_instance() -> Arc<Self> {
+    //    Arc::new(Self(JobQueue::<TritonVmJobPriority>::start()))
+    //}
 
     /// Wrapper for Self::get_instance()
     /// here for two reasons:
