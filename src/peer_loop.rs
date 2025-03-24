@@ -1459,10 +1459,14 @@ impl PeerLoopHandler {
                         ))
                         .await?
                     }
-                    Err(reject_reason) => info!(
-                        "Got unfavorable block proposal notification from {} peer; rejecting. Reason:\n{reject_reason}",
+                    Err(reject_reason) => {
+                        info!(
+                        "Rejecting notification of block proposal with guesser fee {} from peer \
+                        {}. Reason:\n{reject_reason}",
+                        block_proposal_notification.guesser_fee.display_n_decimals(5),
                         self.peer_address
-                    ),
+                    )
+                    }
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
