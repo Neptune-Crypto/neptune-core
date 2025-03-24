@@ -74,12 +74,6 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
-    /// A proof that will always be invalid
-    #[cfg(test)]
-    pub(crate) fn invalid() -> Self {
-        Self::SingleProof(Proof(vec![]))
-    }
-
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
@@ -336,7 +330,7 @@ impl Transaction {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use tasm_lib::prelude::Digest;
     use tests::primitive_witness::SaltedUtxos;
 
@@ -344,6 +338,23 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+    impl TransactionProof {
+        /// A proof that will always be invalid
+        #[cfg(test)]
+        pub(crate) fn invalid() -> Self {
+            Self::SingleProof(Proof(vec![]))
+        }
+
+        /// A proof that will always be invalid, with a specified size measured in
+        /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
+        #[cfg(test)]
+        pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {
+            use tasm_lib::twenty_first::bfe;
+
+            Self::SingleProof(Proof(vec![bfe!(0); size]))
+        }
+    }
 
     impl Transaction {
         /// Create a new transaction with primitive witness for a new mutator set.
