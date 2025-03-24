@@ -75,14 +75,27 @@ struct AddJobMsg<P> {
     cancel_rx: JobCancelReceiver,
     priority: P,
 }
-
+use tokio::task::JoinHandle;
 /// implements a job queue that sends result of each job to a listener.
 pub struct JobQueue<P> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
 
+    job_handle: JoinHandle<()>, // Store the job processing task handle
+    job_addition_handle: JoinHandle<()>, // store the job addition task handle.
+
     // this is here so the tracker won't be dropped until JobQueue is.
-    #[allow(dead_code)]
-    tracker: TaskTracker,
+//    #[allow(dead_code)]
+//    tracker: TaskTracker,
+}
+
+use tokio::sync::mpsc::UnboundedReceiver;
+
+struct LoggedReceiver<T>(UnboundedReceiver<T>);
+
+impl<T> Drop for LoggedReceiver<T> {
+    fn drop(&mut self) {
+        tracing::debug!("LoggedReceiver dropped!");
+    }
 }
 
 impl<P> std::fmt::Debug for JobQueue<P> {
@@ -103,6 +116,8 @@ impl<P> Drop for JobQueue<P> {
     // it is working.
     fn drop(&mut self) {
         let _ = self.tx.send(JobQueueMsg::Stop);
+
+        tracing::debug!("in JobQueue::drop()");
 
         // we can't use tracker.wait().await in drop.
         // so we poll for up to 1 second.
@@ -129,7 +144,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             current_job: Option<CurrentJob>,
         }
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<JobQueueMsg<P>>();
+        let (tx, rx) = mpsc::unbounded_channel::<JobQueueMsg<P>>();
+        let mut rx = LoggedReceiver(rx);
 
         let shared = Shared {
             jobs: VecDeque::new(),
@@ -139,12 +155,13 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         let (tx_deque, mut rx_deque) = tokio::sync::mpsc::unbounded_channel();
 
-        let tracker = TaskTracker::new();
+//        let tracker = TaskTracker::new();
 
         // spawns background task that adds incoming jobs to job-queue
         let jobs_rc1 = jobs.clone();
-        tracker.spawn(async move {
-            while let Some(msg) = rx.recv().await {
+        let job_addition_handle = tokio::spawn(async move {
+//        tracker.spawn(async move {
+            while let Some(msg) = rx.0.recv().await {
                 match msg {
                     JobQueueMsg::AddJob(m) => {
                         let (num_jobs, job_running) = {
@@ -179,11 +196,13 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                     }
                 }
             }
+            tracing::debug!("task add/stop exiting");
         });
 
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = jobs.clone();
-        tracker.spawn(async move {
+        let job_handle = tokio::spawn(async move {        
+//        tracker.spawn(async move {
             let mut job_num: usize = 1;
 
             while rx_deque.recv().await.is_some() {
@@ -225,12 +244,18 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
                 let _ = msg.result_tx.send(job_completion);
             }
+            tracing::debug!("task process_jobs exiting");
         });
-        tracker.close();
+  //      tracker.close();
 
         tracing::info!("JobQueue: started new queue.");
 
-        Self { tx, tracker }
+//        Self { tx, tracker }
+        Self {
+            tx,
+            job_handle,
+            job_addition_handle,
+        }        
     }
 
     /// adds job to job-queue and returns immediately.
@@ -248,6 +273,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             cancel_rx: cancel_rx.clone(),
             priority,
         });
+        if self.tx.is_closed() {
+            tracing::error!("JobQueue::add_job() -- add-job channel is unexpectedly closed!!!");
+        }
         self.tx
             .send(msg)
             .map_err(|e| JobQueueError::AddJobError(e.to_string()))?;
@@ -331,6 +359,12 @@ mod tests {
     #[traced_test]
     fn spawned_tasks_live_as_long_as_jobqueue() -> anyhow::Result<()> {
         workers::spawned_tasks_live_as_long_as_jobqueue(true)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn panic_in_job_does_not_stop_job_queue() -> anyhow::Result<()> {
+        workers::panic_in_job_does_not_stop_job_queue().await
     }
 
     mod workers {
@@ -544,6 +578,43 @@ mod tests {
 
             Ok(())
         }
+
+        pub(super) async fn panic_in_job_does_not_stop_job_queue() -> anyhow::Result<()> {
+            // create a job queue
+            let job_queue = JobQueue::start();
+
+               struct PanicJob;
+    
+            #[async_trait::async_trait]
+            impl Job for PanicJob {
+                fn is_async(&self) -> bool {
+                    false
+                }
+
+                fn run(&self, _cancel_rx: JobCancelReceiver) -> JobCompletion {
+                    panic!("job panics for unknown reason");
+                }
+            }
+
+            let job_handle = job_queue.add_job(Box::new(PanicJob), DoubleJobPriority::Low)?;
+                
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            let _completion = job_handle.complete().await;
+
+            assert!(!job_queue.tx.is_closed());
+
+            // ensure we can still run another job afterwards.
+            let job = Box::new(DoubleJob {
+                data: 10,
+                duration: std::time::Duration::from_millis(50),
+                is_async: false,
+            });
+            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
+            assert!(job_handle.result().await.is_ok());
+
+            Ok(())
+        }        
 
         // note: creates own tokio runtime.  caller must not use [tokio::test]
         //
