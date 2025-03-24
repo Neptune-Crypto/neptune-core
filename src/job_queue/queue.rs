@@ -238,16 +238,6 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         }
     }
 
-    /// Wrapper for Self::start(), wrapping the produced value into an `Arc`.
-    /// here for two reasons:
-    ///  1. backwards compat with existing tests
-    ///  2. if tests call dummy() instead of start(), then it is easier
-    ///     to find where start() is called for real.
-    #[cfg(test)]
-    pub fn dummy() -> Arc<Self> {
-        Arc::new(Self::start())
-    }
-
     /// adds job to job-queue and returns immediately.
     ///
     /// job-results can be obtained by via JobHandle::results().await

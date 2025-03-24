@@ -51,7 +51,7 @@ use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::JobQueue;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
@@ -729,7 +729,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         composer_parameters,
         block_timestamp,
         TxProvingCapability::PrimitiveWitness,
-        JobQueue::dummy(),
+        TritonVmJobQueue::dummy(),
         (TritonVmJobPriority::Normal, None).into(),
     )
     .await

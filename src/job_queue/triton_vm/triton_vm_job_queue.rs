@@ -42,7 +42,19 @@ impl TritonVmJobQueue {
     /// capabilities.
     pub fn get_instance() -> Arc<Self> {
         static INSTANCE: OnceLock<Arc<TritonVmJobQueue>> = OnceLock::new();
-        INSTANCE.get_or_init(|| Arc::new(Self(JobQueue::<TritonVmJobPriority>::start()))).clone()
+        INSTANCE
+            .get_or_init(|| Arc::new(Self(JobQueue::<TritonVmJobPriority>::start())))
+            .clone()
+    }
+
+    /// Wrapper for Self::get_instance()
+    /// here for two reasons:
+    ///  1. backwards compat with existing tests
+    ///  2. if tests call dummy() instead of start(), then it is easier
+    ///     to find where start() is called for real.
+    #[cfg(test)]
+    pub fn dummy() -> Arc<Self> {
+        Self::get_instance()
     }
 }
 
