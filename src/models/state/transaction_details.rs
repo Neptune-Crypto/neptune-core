@@ -148,7 +148,7 @@ impl TransactionDetails {
         TransactionDetails::new_without_coinbase(
             TxInputList::empty(),
             gobbling_utxos,
-            gobbled_fee,
+            -gobbled_fee,
             now,
             mutator_set_accumulator,
         )
