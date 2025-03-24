@@ -340,9 +340,19 @@ impl Mempool {
                 TransactionProof::ProofCollection(_) => conflicts
                     .iter()
                     .any(|x| matches!(&x.1.proof, TransactionProof::Witness(_))),
-                TransactionProof::SingleProof(_) => conflicts
-                    .iter()
-                    .any(|x| !matches!(&x.1.proof, TransactionProof::SingleProof(_))),
+                TransactionProof::SingleProof(_) => {
+                    // A SingleProof-backed transaction kicks out conflicts if
+                    // a) any conflicts are not SingleProof, or
+                    // b) the conflict (as there can be only one) has the same
+                    //    txk-id, which indicates mutator set update. In this
+                    //    case, we just assume that the new transaction has a
+                    //    newer mutator set, because you cannot update back in
+                    //    time.
+                    conflicts.iter().any(|(conflicting_txkid, conflicting_tx)| {
+                        !matches!(&conflicting_tx.proof, TransactionProof::SingleProof(_))
+                            || *conflicting_txkid == new_tx.kernel.txid()
+                    })
+                }
             }
         }
 
@@ -356,38 +366,26 @@ impl Mempool {
 
         // If transaction to be inserted conflicts with transactions already in
         // the mempool, we replace them -- but only if the new transaction has a
-        // higher fee-density than the ones already in mempool. For this check
-        // we disqualify existing transactions that are identical except for the
-        // mutator set hash, because this difference indicates it was updated.
-        // This policy should have
-        // the effect that merged transactions always replace those transactions
+        // higher fee-density than the ones already in mempool, or if it has
+        // a higher proof-quality, meaning that it's in a state more likely to
+        // be picked up by a composer.
+        // Consequently, merged transactions always replace those transactions
         // that were merged since the merged transaction is *very* likely to
         // have a higher fee density that the lowest one of the ones that were
-        // merged. If the new transaction has a higher proof quality than the
-        // conflict, we also replace the old transactions.
+        // merged.
         let conflicts = self.transaction_conflicts_with(&new_tx);
-        let is_likely_mutator_set_update = conflicts.iter().all(|(_txkid, old_tx)| {
-            old_tx
-                .kernel
-                .inputs
-                .iter()
-                .map(|rr| rr.absolute_indices)
-                .collect_vec()
-                == new_tx
-                    .kernel
-                    .inputs
-                    .iter()
-                    .map(|rr| rr.absolute_indices)
-                    .collect_vec()
-                && old_tx.kernel.outputs == new_tx.kernel.outputs
-        });
+
+        // do not insert an existing transaction again
+        if conflicts.contains(&(new_tx.kernel.txid(), &new_tx)) {
+            return vec![];
+        }
+
         let new_tx_has_higher_proof_quality = new_tx_has_higher_proof_quality(&new_tx, &conflicts);
         let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
             let better_fee_density = min_fee_of_conflicting_tx < new_tx.fee_density();
-            if new_tx_has_higher_proof_quality || better_fee_density || is_likely_mutator_set_update
-            {
+            if new_tx_has_higher_proof_quality || better_fee_density {
                 for conflicting_txid in conflicts {
                     if let Some(e) = self.remove(conflicting_txid) {
                         events.push(e);
