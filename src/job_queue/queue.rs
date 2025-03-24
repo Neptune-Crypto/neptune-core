@@ -5,7 +5,6 @@ use std::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio_util::task::TaskTracker;
 
 use super::errors::JobHandleError;
 use super::errors::JobQueueError;
@@ -80,12 +79,12 @@ use tokio::task::JoinHandle;
 pub struct JobQueue<P> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
 
-    job_handle: JoinHandle<()>, // Store the job processing task handle
-    job_addition_handle: JoinHandle<()>, // store the job addition task handle.
+    process_jobs_task_handle: JoinHandle<()>, // Store the job processing task handle
+    add_job_task_handle: JoinHandle<()>,      // store the job addition task handle.
 
-    // this is here so the tracker won't be dropped until JobQueue is.
-//    #[allow(dead_code)]
-//    tracker: TaskTracker,
+                                              // this is here so the tracker won't be dropped until JobQueue is.
+                                              //    #[allow(dead_code)]
+                                              //    tracker: TaskTracker,
 }
 
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -119,16 +118,18 @@ impl<P> Drop for JobQueue<P> {
 
         tracing::debug!("in JobQueue::drop()");
 
-        // we can't use tracker.wait().await in drop.
-        // so we poll for up to 1 second.
-/*
-        for _ in 0..100 {
-            if self.tracker.is_empty() {
+        // we can't use JoinHandle.await in drop.
+        // so we poll for up to 1/10 second.
+        for _ in 0..10 {
+            if self.add_job_task_handle.is_finished()
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-*/
+
+        // not really necessary, but it avoids a dead-code warning.
+        self.process_jobs_task_handle.abort();
     }
 }
 
@@ -155,12 +156,12 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         let (tx_deque, mut rx_deque) = tokio::sync::mpsc::unbounded_channel();
 
-//        let tracker = TaskTracker::new();
+        //        let tracker = TaskTracker::new();
 
         // spawns background task that adds incoming jobs to job-queue
         let jobs_rc1 = jobs.clone();
-        let job_addition_handle = tokio::spawn(async move {
-//        tracker.spawn(async move {
+        let add_job_task_handle = tokio::spawn(async move {
+            //        tracker.spawn(async move {
             while let Some(msg) = rx.0.recv().await {
                 match msg {
                     JobQueueMsg::AddJob(m) => {
@@ -201,8 +202,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = jobs.clone();
-        let job_handle = tokio::spawn(async move {        
-//        tracker.spawn(async move {
+        let process_jobs_task_handle = tokio::spawn(async move {
+            //        tracker.spawn(async move {
             let mut job_num: usize = 1;
 
             while rx_deque.recv().await.is_some() {
@@ -246,16 +247,16 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             }
             tracing::debug!("task process_jobs exiting");
         });
-  //      tracker.close();
+        //      tracker.close();
 
         tracing::info!("JobQueue: started new queue.");
 
-//        Self { tx, tracker }
+        //        Self { tx, tracker }
         Self {
             tx,
-            job_handle,
-            job_addition_handle,
-        }        
+            process_jobs_task_handle,
+            add_job_task_handle,
+        }
     }
 
     /// adds job to job-queue and returns immediately.
@@ -583,8 +584,8 @@ mod tests {
             // create a job queue
             let job_queue = JobQueue::start();
 
-               struct PanicJob;
-    
+            struct PanicJob;
+
             #[async_trait::async_trait]
             impl Job for PanicJob {
                 fn is_async(&self) -> bool {
@@ -597,7 +598,7 @@ mod tests {
             }
 
             let job_handle = job_queue.add_job(Box::new(PanicJob), DoubleJobPriority::Low)?;
-                
+
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
             let _completion = job_handle.complete().await;
@@ -614,7 +615,7 @@ mod tests {
             assert!(job_handle.result().await.is_ok());
 
             Ok(())
-        }        
+        }
 
         // note: creates own tokio runtime.  caller must not use [tokio::test]
         //
