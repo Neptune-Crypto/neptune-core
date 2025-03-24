@@ -27,7 +27,6 @@ use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
-use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::JobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -50,7 +49,6 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalState;
@@ -621,23 +619,7 @@ pub(crate) async fn create_block_transaction_from(
         .expect("Must be able to merge transactions in mining context");
     }
 
-    // If composer UTXO notifications are sent onchain, the wallet does not need
-    // to expect them. If they are handled offchain, the wallet must be
-    // notified, but only if the receiver preimage is known (otherwise which
-    // wallet to notify?).
-    let mut own_expected_utxos = vec![];
-    if composer_parameters.notification_policy() == FeeNotificationPolicy::OffChain {
-        if let Some(receiver_preimage) = composer_parameters.maybe_receiver_preimage() {
-            own_expected_utxos.extend(composer_txos.into_iter().map(|txo| {
-                ExpectedUtxo::new(
-                    txo.utxo(),
-                    txo.sender_randomness(),
-                    receiver_preimage,
-                    UtxoNotifier::OwnMinerComposeBlock,
-                )
-            }));
-        }
-    }
+    let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
 
     Ok((block_transaction, own_expected_utxos))
 }
@@ -988,6 +970,7 @@ pub(crate) mod mine_loop_tests {
 
     use super::*;
     use crate::config_models::cli_args;
+    use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
@@ -1039,22 +1022,7 @@ pub(crate) mod mine_loop_tests {
         )
         .await?;
 
-        let own_expected_utxos =
-            composer_parameters
-                .maybe_receiver_preimage()
-                .map_or(vec![], |receiver_preimage| {
-                    composer_outputs
-                        .iter()
-                        .map(|txo| {
-                            ExpectedUtxo::new(
-                                txo.utxo(),
-                                txo.sender_randomness(),
-                                receiver_preimage,
-                                UtxoNotifier::OwnMinerComposeBlock,
-                            )
-                        })
-                        .collect()
-                });
+        let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_outputs);
 
         Ok((transaction, own_expected_utxos))
     }
@@ -1787,53 +1755,91 @@ pub(crate) mod mine_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn coinbase_has_expected_timelocked_outputs() {
-        let network = Network::Main;
-        let cli_args = cli_args::Args {
-            guesser_fraction: 0.0,
-            ..Default::default()
-        };
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
-        let genesis_block = Block::genesis(network);
-        let launch_date = genesis_block.header().timestamp;
+    async fn coinbase_transaction_has_one_timelocked_and_one_liquid_output() {
+        for notification_policy in [
+            FeeNotificationPolicy::OffChain,
+            FeeNotificationPolicy::OnChainGeneration,
+            FeeNotificationPolicy::OnChainSymmetric,
+        ] {
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                guesser_fraction: 0.0,
+                fee_notification: notification_policy,
+                ..Default::default()
+            };
+            let global_state_lock =
+                mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args)
+                    .await;
+            let genesis_block = Block::genesis(network);
+            let launch_date = genesis_block.header().timestamp;
 
-        let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
-            &genesis_block,
-            &global_state_lock,
-            launch_date,
-            TxProvingCapability::PrimitiveWitness,
-            (TritonVmJobPriority::Normal, None).into(),
-        )
-        .await
-        .unwrap();
+            let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
+                &genesis_block,
+                &global_state_lock,
+                launch_date,
+                TxProvingCapability::PrimitiveWitness,
+                (TritonVmJobPriority::Normal, None).into(),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(
-            2,
-            coinbase_utxo_info.len(),
-            "Expected two expected UTXOs for composer."
-        );
-        assert!(
-            coinbase_utxo_info
-                .iter()
-                .filter(|x| x.utxo.release_date().is_some())
-                .count()
-                .is_one(),
-            "Expected one timelocked coinbase UTXO"
-        );
-        assert!(
-            coinbase_utxo_info
-                .iter()
-                .filter(|x| x.utxo.release_date().is_none())
-                .count()
-                .is_one(),
-            "Expected one liquid coinbase UTXO"
-        );
-        assert_eq!(
-            2,
-            transaction.kernel.outputs.len(),
-            "Expected two outputs in coinbase tx"
-        );
+            let expected_number_of_expected_utxos = match notification_policy {
+                FeeNotificationPolicy::OffChain => 2,
+                FeeNotificationPolicy::OnChainSymmetric
+                | FeeNotificationPolicy::OnChainGeneration => 0,
+            };
+            assert_eq!(
+                2,
+                transaction.kernel.outputs.len(),
+                "Expected two outputs in coinbase tx"
+            );
+            assert_eq!(
+                expected_number_of_expected_utxos,
+                coinbase_utxo_info.len(),
+                "Expected {expected_number_of_expected_utxos} expected UTXOs for composer."
+            );
+
+            if notification_policy == FeeNotificationPolicy::OffChain {
+                assert!(
+                    coinbase_utxo_info
+                        .iter()
+                        .filter(|x| x.utxo.release_date().is_some())
+                        .count()
+                        .is_one(),
+                    "Expected one timelocked coinbase UTXO"
+                );
+                assert!(
+                    coinbase_utxo_info
+                        .iter()
+                        .filter(|x| x.utxo.release_date().is_none())
+                        .count()
+                        .is_one(),
+                    "Expected one liquid coinbase UTXO"
+                );
+            } else {
+                let announced_outputs = global_state_lock
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .scan_for_utxos_announced_to_known_keys(&transaction.kernel)
+                    .collect_vec();
+                assert_eq!(2, announced_outputs.len());
+                assert_eq!(
+                    1,
+                    announced_outputs
+                        .iter()
+                        .filter(|x| x.utxo.release_date().is_some())
+                        .count()
+                );
+                assert_eq!(
+                    1,
+                    announced_outputs
+                        .iter()
+                        .filter(|x| x.utxo.release_date().is_none())
+                        .count()
+                );
+            }
+        }
     }
 
     #[test]
