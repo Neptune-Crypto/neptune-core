@@ -1722,6 +1722,9 @@ pub trait RPC {
         max_search_depth: Option<u64>,
     ) -> RpcResult<bool>;
 
+    /// Delete all transactions from the mempool.
+    async fn clear_mempool(token: rpc_auth::Token) -> RpcResult<()>;
+
     /// Pause receiving of blocks, block proposals, and transactions. If
     /// activated, no new blocks will be received. Transactions, blocks, and
     /// block proposals originating locally will not be shared with peers.
@@ -3189,6 +3192,23 @@ impl RPC for NeptuneRPCServer {
 
         // 2. Send acknowledgement to client.
         Ok(response.is_ok())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn clear_mempool(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::ClearMempool)
+            .await;
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.

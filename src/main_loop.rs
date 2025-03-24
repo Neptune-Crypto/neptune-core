@@ -1727,6 +1727,16 @@ impl MainLoopHandler {
                 }
                 Ok(false)
             }
+            RPCServerToMain::ClearMempool => {
+                info!("Clearing mempool");
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .mempool_clear()
+                    .await;
+
+                Ok(false)
+            }
             RPCServerToMain::ProofOfWorkSolution(new_block) => {
                 info!("Handling PoW solution from RPC call");
 
