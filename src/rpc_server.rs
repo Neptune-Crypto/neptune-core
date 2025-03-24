@@ -1722,6 +1722,22 @@ pub trait RPC {
         max_search_depth: Option<u64>,
     ) -> RpcResult<bool>;
 
+    /// Pause receiving of blocks, block proposals, and transactions. If
+    /// activated, no new blocks will be received. Transactions, blocks, and
+    /// block proposals originating locally will not be shared with peers.
+    /// Mining should be paused when this is activated. Cannot be called if the
+    /// client is currently syncing.
+    ///
+    /// Can be used to build a big transaction through the merge of multiple
+    /// smaller transactions without risking that the smaller, unmerged
+    /// transactions are mined.
+    async fn pause_state_updates(token: rpc_auth::Token) -> RpcResult<()>;
+
+    /// Resume state updates. If state updates were paused, start receiving and
+    /// transmitting blocks, block proposals, and transactions again. Otherwise,
+    /// does nothing.
+    async fn resume_state_updates(token: rpc_auth::Token) -> RpcResult<()>;
+
     /// Stop miner if running
     ///
     /// ```no_run
@@ -3176,6 +3192,43 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn pause_state_updates(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let mut state = self.state.lock_guard_mut().await;
+
+        if state.net.sync_anchor.is_some() {
+            error!("Cannot pause state updates when syncing.");
+            return Err(error::RpcError::CannotPauseWhileSyncing);
+        }
+
+        state.net.pause_state_updates = true;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn resume_state_updates(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.state
+            .lock_mut(|state| state.net.pause_state_updates = false)
+            .await;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn pause_miner(
         self,
         _context: tarpc::context::Context,
@@ -3587,6 +3640,9 @@ pub mod error {
 
         #[error(transparent)]
         ClaimError(#[from] ClaimError),
+
+        #[error("Cannot pause state updates while client is syncing")]
+        CannotPauseWhileSyncing,
     }
 
     // convert anyhow::Error to an RpcError::Failed.

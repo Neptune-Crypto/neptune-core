@@ -323,6 +323,13 @@ enum Command {
         fee: NativeCurrencyAmount,
     },
 
+    /// pause processing of new transaction data. Prevents new blocks, new
+    /// block proposals, and new transactions from being received.
+    PauseStateUpdates,
+
+    /// If state updates have been paused, resumes them. Otherwise does nothing.
+    ResumeStateUpdates,
+
     /// pause mining
     PauseMiner,
 
@@ -1135,6 +1142,14 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => eprintln!("{}", e),
             }
+        }
+        Command::PauseStateUpdates => {
+            println!("Sending command to pause state updates.");
+            client.pause_state_updates(ctx, token).await??;
+        }
+        Command::ResumeStateUpdates => {
+            println!("Sending command to resume state updates.");
+            client.resume_state_updates(ctx, token).await??;
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");

@@ -1544,7 +1544,6 @@ impl MainLoopHandler {
                     if let Some(exit_code) = exit_code {
                         break exit_code;
                     }
-
                 }
 
                 // Handle the completion of mempool tx-update jobs after new block.

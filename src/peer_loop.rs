@@ -1705,8 +1705,8 @@ impl PeerLoopHandler {
                         break;
                     };
 
-                    let syncing =
-                        self.global_state_lock.lock(|s| s.net.sync_anchor.is_some()).await;
+                    let (syncing, state_updates_paused) =
+                        self.global_state_lock.lock(|s| (s.net.sync_anchor.is_some(), s.net.pause_state_updates)).await;
                     let message_type = peer_message.get_type();
                     if peer_message.ignore_during_sync() && syncing {
                         debug!(
@@ -1718,6 +1718,10 @@ impl PeerLoopHandler {
                         debug!(
                             "Ignoring {message_type} message when not syncing, from {peer_address}",
                         );
+                        continue;
+                    }
+                    if peer_message.ignore_on_paused_state_updates() && state_updates_paused {
+                        debug!("Ignoring message because state updates have been paused.");
                         continue;
                     }
 
@@ -1741,6 +1745,11 @@ impl PeerLoopHandler {
                 main_msg_res = from_main_rx.recv() => {
                     let main_msg = main_msg_res
                         .unwrap_or_else(|e| panic!("Failed to read from main loop: {e}"));
+                    let state_updates_paused = self.global_state_lock.lock_guard().await.net.pause_state_updates;
+                    if main_msg.ignore_on_paused_state_updates() && state_updates_paused {
+                        warn!("Peer loop ignores message from main loop because state updates have been paused");
+                        continue;
+                    }
                     let close_connection = self
                         .handle_main_task_message(main_msg, &mut peer, peer_state_info)
                         .await
