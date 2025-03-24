@@ -855,7 +855,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .await
         .wallet_state
         .wallet_entropy
-        .guesser_preimage(tip_block.header().prev_block_digest);
+        .guesser_preimage(tip_block.hash());
     let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
     block.set_header_guesser_digest(guesser_preimage.hash());
 
