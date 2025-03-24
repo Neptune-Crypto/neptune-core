@@ -2,6 +2,9 @@ use tasm_lib::prelude::Digest;
 
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::wallet::transaction_output::TxOutputList;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ComposerParameters {
@@ -59,5 +62,28 @@ impl ComposerParameters {
 
     pub(crate) fn notification_policy(&self) -> FeeNotificationPolicy {
         self.notification_policy
+    }
+
+    /// Convert the [`TxOutputList`] to a list of [`ExpectedUtxo`]s consistent
+    /// with the composer parameters.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the composer parameter's receiver preimage is set to something
+    /// that does not match with some output's receiver digest.
+    pub(crate) fn extract_expected_utxos(&self, composer_txos: TxOutputList) -> Vec<ExpectedUtxo> {
+        // If composer UTXO notifications are sent onchain, the wallet does not need
+        // to expect them. If they are handled offchain, the wallet must be
+        // notified, but only if the receiver preimage is known (otherwise you
+        // cannot expect them, as you can't generate the addition record).
+        if self.notification_policy() != FeeNotificationPolicy::OffChain {
+            return vec![];
+        }
+
+        let Some(receiver_preimage) = self.maybe_receiver_preimage() else {
+            return vec![];
+        };
+
+        composer_txos.expected_utxos(UtxoNotifier::OwnMinerComposeBlock, receiver_preimage)
     }
 }

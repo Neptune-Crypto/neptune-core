@@ -7,6 +7,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::expected_utxo::UtxoNotifier;
 use super::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
@@ -15,6 +16,7 @@ use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
@@ -378,6 +380,38 @@ impl TxOutputList {
     {
         self.0.extend(maybe_tx_output);
         self
+    }
+
+    /// Convert the [`TxOutputList`] to a list of [`ExpectedUtxo`]s.
+    ///
+    /// Useful in the context where all outputs in the [`TxOutputList`] are
+    /// owned by the client's wallet.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the receiver preimage does not match the receiver digest from
+    /// any transaction output.
+    pub(crate) fn expected_utxos(
+        self,
+        utxo_notifier: UtxoNotifier,
+        receiver_preimage: Digest,
+    ) -> Vec<ExpectedUtxo> {
+        let expected_receiver_digest = receiver_preimage.hash();
+        assert!(
+            self.iter()
+                .all(|x| x.receiver_digest == expected_receiver_digest),
+            "Claimed receiver preimage must match transaction outputs"
+        );
+        self.into_iter()
+            .map(|txo| {
+                ExpectedUtxo::new(
+                    txo.utxo(),
+                    txo.sender_randomness(),
+                    receiver_preimage,
+                    utxo_notifier,
+                )
+            })
+            .collect()
     }
 }
 

@@ -738,7 +738,7 @@ impl WalletState {
     /// Scan the given transaction for announced UTXOs as recognized by owned
     /// `SpendingKey`s, and then verify those announced UTXOs are actually
     /// present.
-    fn scan_for_utxos_announced_to_known_keys<'a>(
+    pub(crate) fn scan_for_utxos_announced_to_known_keys<'a>(
         &'a self,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
