@@ -1,0 +1,29 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+name: Build without Cargo.lock
+
+jobs:
+  runner-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Remove Cargo.lock
+        run: rm Cargo.lock
+
+      - name: Build
+        run: cargo build --all --release
