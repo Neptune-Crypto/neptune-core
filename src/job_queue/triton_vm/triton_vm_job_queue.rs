@@ -1,3 +1,5 @@
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -15,18 +17,35 @@ pub enum TritonVmJobPriority {
     Highest = 5,
 }
 
-/// provides type safety and clarity in case we implement multiple job queues.
-pub type TritonVmJobQueue = JobQueue<TritonVmJobPriority>;
+#[derive(Debug)]
+pub struct TritonVmJobQueue(JobQueue<TritonVmJobPriority>);
 
-/// returns reference-counted clone of the triton vm job queue.
-///
-/// callers should execute resource intensive triton-vm tasks in this
-/// queue to avoid running simultaneous tasks that could exceed hardware
-/// capabilities.
+impl Deref for TritonVmJobQueue {
+    type Target = JobQueue<TritonVmJobPriority>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for TritonVmJobQueue {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl TritonVmJobQueue {
+    /// returns the triton vm job queue (singleton).
+    ///
+    /// callers should execute resource intensive triton-vm tasks in this
+    /// queue to avoid running simultaneous tasks that could exceed hardware
+    /// capabilities.
+    pub fn get_instance() -> Arc<Self> {
+        static INSTANCE: OnceLock<Arc<TritonVmJobQueue>> = OnceLock::new();
+        INSTANCE.get_or_init(|| Arc::new(Self(JobQueue::<TritonVmJobPriority>::start()))).clone()
+    }
+}
+
 pub fn vm_job_queue() -> Arc<TritonVmJobQueue> {
-    static JOB_QUEUE_LOCK: OnceLock<Arc<TritonVmJobQueue>> = OnceLock::new();
-
-    JOB_QUEUE_LOCK
-        .get_or_init(|| Arc::new(TritonVmJobQueue::start()))
-        .clone()
+    TritonVmJobQueue::get_instance()
 }
