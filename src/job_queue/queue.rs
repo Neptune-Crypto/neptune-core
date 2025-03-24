@@ -103,6 +103,16 @@ impl<P> Drop for JobQueue<P> {
     // it is working.
     fn drop(&mut self) {
         let _ = self.tx.send(JobQueueMsg::Stop);
+
+        // we can't use tracker.wait().await in drop.
+        // so we poll for up to 1 second.
+
+        for _ in 0..100 {
+            if self.tracker.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
 
@@ -216,6 +226,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             }
         });
         tracker.close();
+
+        tracing::info!("JobQueue: started new queue.");
 
         Self { tx, tracker }
     }
