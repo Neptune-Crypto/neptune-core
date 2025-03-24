@@ -1375,10 +1375,13 @@ impl WalletState {
                 let is_guesser_fee = incoming_utxo.is_guesser_fee();
                 info!(
                     "Received UTXO in block {}, height {}\nvalue = {}\n\
-                    is guesser fee: {is_guesser_fee}\n\n",
+                    is guesser fee: {is_guesser_fee}\ntime-lock: {}\n\n",
                     new_block.hash(),
                     new_block.kernel.header.height,
                     utxo.get_native_currency_amount(),
+                    utxo.release_date()
+                        .map(|t| t.standard_format())
+                        .unwrap_or_else(|| "none".into()),
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =

@@ -217,10 +217,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         });
         tracker.close();
 
-        Self {
-            tx,
-            tracker,
-        }
+        Self { tx, tracker }
     }
 
     /// adds job to job-queue and returns immediately.
