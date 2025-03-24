@@ -77,6 +77,10 @@ struct AddJobMsg<P> {
 }
 
 /// implements a job queue that sends result of each job to a listener.
+///
+/// The generic argument provides type safety and clarity in case we implement
+/// job queues for other job types. For each job type, there should only ever be
+/// one instance.
 pub struct JobQueue<P> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
     tracker: TaskTracker,

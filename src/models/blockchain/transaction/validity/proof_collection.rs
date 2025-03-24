@@ -13,7 +13,6 @@ use tracing::trace;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
@@ -82,7 +81,6 @@ impl ProofCollection {
 
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
-        triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Self> {
         let (
@@ -106,7 +104,6 @@ impl ProofCollection {
             .prove(
                 removal_records_integrity_witness.claim(),
                 removal_records_integrity_witness.nondeterminism(),
-                triton_vm_job_queue,
                 proof_job_options.clone(),
             )
             .await?;
@@ -116,7 +113,6 @@ impl ProofCollection {
             .prove(
                 collect_lock_scripts_witness.claim(),
                 collect_lock_scripts_witness.nondeterminism(),
-                triton_vm_job_queue,
                 proof_job_options.clone(),
             )
             .await?;
@@ -126,7 +122,6 @@ impl ProofCollection {
             .prove(
                 kernel_to_outputs_witness.claim(),
                 kernel_to_outputs_witness.nondeterminism(),
-                triton_vm_job_queue,
                 proof_job_options.clone(),
             )
             .await?;
@@ -136,7 +131,6 @@ impl ProofCollection {
             .prove(
                 collect_type_scripts_witness.claim(),
                 collect_type_scripts_witness.nondeterminism(),
-                triton_vm_job_queue,
                 proof_job_options.clone(),
             )
             .await?;
@@ -146,11 +140,7 @@ impl ProofCollection {
         for lock_script_and_witness in &primitive_witness.lock_scripts_and_witnesses {
             lock_scripts_halt.push(
                 lock_script_and_witness
-                    .prove(
-                        txk_mast_hash_as_input.clone(),
-                        triton_vm_job_queue,
-                        proof_job_options.clone(),
-                    )
+                    .prove(txk_mast_hash_as_input.clone(), proof_job_options.clone())
                     .await?,
             );
         }
@@ -168,7 +158,6 @@ impl ProofCollection {
                     txk_mast_hash,
                     salted_inputs_hash,
                     salted_outputs_hash,
-                    triton_vm_job_queue,
                     proof_job_options.clone(),
                 )
                 .await?,

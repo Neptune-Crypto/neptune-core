@@ -28,6 +28,7 @@
 
 pub mod errors;
 mod queue;
+pub mod singleton;
 pub mod traits;
 pub mod triton_vm;
 

@@ -1,4 +1,5 @@
-use super::super::JobQueue;
+use crate::job_queue::JobQueue;
+use crate::singleton_job_queue;
 
 // todo: maybe we want to have more levels or just make it an integer eg u8.
 // or maybe name the levels by type/usage of job/proof.
@@ -12,5 +13,7 @@ pub enum TritonVmJobPriority {
     Highest = 5,
 }
 
-/// provides type safety and clarity in case we implement multiple job queues.
-pub type TritonVmJobQueue = JobQueue<TritonVmJobPriority>;
+singleton_job_queue! {
+    #[doc = "A singleton job queue for Triton VM jobs."]
+    TritonVmJobQueue = JobQueue<TritonVmJobPriority>
+}
