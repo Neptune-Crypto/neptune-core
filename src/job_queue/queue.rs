@@ -79,8 +79,10 @@ struct AddJobMsg<P> {
 /// implements a job queue that sends result of each job to a listener.
 pub struct JobQueue<P> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
+
+    // this is here so the tracker won't be dropped until JobQueue is.
+    #[allow(dead_code)]
     tracker: TaskTracker,
-    refs: Arc<()>,
 }
 
 impl<P> std::fmt::Debug for JobQueue<P> {
@@ -88,16 +90,6 @@ impl<P> std::fmt::Debug for JobQueue<P> {
         f.debug_struct("JobQueue")
             .field("tx", &"mpsc::Sender")
             .finish()
-    }
-}
-
-impl<P> Clone for JobQueue<P> {
-    fn clone(&self) -> Self {
-        Self {
-            tx: self.tx.clone(),
-            tracker: self.tracker.clone(),
-            refs: self.refs.clone(),
-        }
     }
 }
 
@@ -110,13 +102,7 @@ impl<P> Drop for JobQueue<P> {
     // test stop_only_called_once_when_cloned exists to check
     // it is working.
     fn drop(&mut self) {
-        let refs_weak = Arc::downgrade(&self.refs);
-        self.refs = Arc::new(());
-
-        // if upgrade fails, then this is the last reference.
-        if refs_weak.upgrade().is_none() {
-            let _ = self.tx.send(JobQueueMsg::Stop);
-        }
+        let _ = self.tx.send(JobQueueMsg::Stop);
     }
 }
 
@@ -234,7 +220,6 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         Self {
             tx,
             tracker,
-            refs: Arc::new(()),
         }
     }
 
@@ -336,12 +321,6 @@ mod tests {
     #[traced_test]
     fn spawned_tasks_live_as_long_as_jobqueue() -> anyhow::Result<()> {
         workers::spawned_tasks_live_as_long_as_jobqueue(true)
-    }
-
-    #[tokio::test]
-    #[traced_test]
-    async fn stop_only_called_once_when_cloned() -> anyhow::Result<()> {
-        workers::stop_only_called_once_when_cloned().await
     }
 
     mod workers {
@@ -687,7 +666,7 @@ mod tests {
             let result_ok_clone = result_ok.clone();
             rt.block_on(async {
                 // create a job queue
-                let job_queue = JobQueue::start();
+                let job_queue = Arc::new(JobQueue::start());
 
                 // spawns background task that adds job
                 let job_queue_cloned = job_queue.clone();
@@ -726,44 +705,6 @@ mod tests {
             drop(rt);
 
             assert!(*result_ok.lock().unwrap());
-
-            Ok(())
-        }
-
-        /// this test verifies that the queue is not stopped until the last
-        /// JobQueue reference is dropped.
-        pub(super) async fn stop_only_called_once_when_cloned() -> anyhow::Result<()> {
-            let jq1 = JobQueue::start();
-            let jq2 = jq1.clone();
-            let jq3 = jq1.clone();
-
-            let duration = std::time::Duration::from_secs(3600); // 1 hour job
-
-            let job = Box::new(DoubleJob {
-                data: 10,
-                duration,
-                is_async: true,
-            });
-
-            let rx_handle = jq1.add_job(job, DoubleJobPriority::Low)?;
-
-            assert!(!jq1.tx.is_closed());
-
-            drop(jq2);
-            assert!(!jq1.tx.is_closed());
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            assert!(!rx_handle.cancel_tx.is_closed());
-
-            drop(jq3);
-            assert!(!jq1.tx.is_closed());
-
-            drop(jq1);
-
-            // rx_handle.cancel().unwrap();
-
-            let completion = rx_handle.complete().await?;
-            assert!(matches!(completion, JobCompletion::Cancelled));
 
             Ok(())
         }
