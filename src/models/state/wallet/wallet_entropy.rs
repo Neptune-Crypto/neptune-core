@@ -72,7 +72,7 @@ impl WalletEntropy {
     /// Returns the receiving address for prover rewards, *i.e.*, composer fee
     /// or proof-upgrader (gobbling) fee.
     pub(crate) fn prover_fee_address(&self) -> ReceivingAddress {
-        self.nth_generation_spending_key(0).to_address().into()
+        self.prover_fee_key().to_address().into()
     }
 
     /// derives a generation spending key at `index`

@@ -18,6 +18,9 @@ pub(crate) struct ComposerParameters {
 impl Eq for ComposerParameters {}
 
 impl ComposerParameters {
+    /// # Panics
+    ///
+    ///  - If `guesser_fee_fraction` is not a fraction contained in [0;1].
     pub(crate) fn new(
         reward_address: ReceivingAddress,
         sender_randomness: Digest,

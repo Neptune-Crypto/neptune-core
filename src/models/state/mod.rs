@@ -343,6 +343,8 @@ impl GlobalState {
             .await
     }
 
+    /// Return the block height in which the latest UTXO was either spent or
+    /// received. `None` if this wallet never received a UTXO.
     pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
         let (height, time_secs) =
             time_fn_call_async(self.get_latest_balance_height_internal()).await;
@@ -402,7 +404,12 @@ impl GlobalState {
     /// The relevant CLI parameters are read from the CLI arguments living on
     /// [`GlobalState`]. The next block height is passed as an argument since
     /// the callers need to declare this, to resolve race conditions.
+    ///
+    /// # Panics
+    ///
+    ///  - If `next_block_height` is genesis.
     pub(crate) fn composer_parameters(&self, next_block_height: BlockHeight) -> ComposerParameters {
+        assert!(!next_block_height.is_genesis());
         self.wallet_state.composer_parameters(
             next_block_height,
             self.cli.guesser_fraction,

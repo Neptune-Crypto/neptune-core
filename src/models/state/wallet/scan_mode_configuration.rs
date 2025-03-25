@@ -18,6 +18,16 @@ pub(crate) struct ScanModeConfiguration {
     num_future_keys: usize,
     first_block_height: BlockHeight,
     last_block_height: Option<BlockHeight>,
+
+    /// Relates to the attempted recovery of composer rewards, assuming the user
+    ///  - remembers what they set the guesser fraction to, and
+    ///  - lost incoming_randomness.dat, and
+    ///  - migrated the wallet (or corrupted the wallet database), and
+    ///  - did not use on-chain notifications for the composer (or used the
+    ///    default settings before on-chain notifications were set as default).
+    ///
+    /// Under those conditions, this field will identify composer UTXOs that are
+    /// lost otherwise.
     maybe_guesser_fraction: Option<f64>,
 }
 
