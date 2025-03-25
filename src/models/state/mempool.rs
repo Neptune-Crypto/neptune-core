@@ -90,6 +90,7 @@ pub enum MempoolEvent {
 /// Used to mark origin of transaction. To determine if transaction was
 /// initiated locally or not.
 #[derive(Debug, GetSize, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub(crate) enum TransactionOrigin {
     Foreign,
     Own,
@@ -1979,9 +1980,14 @@ mod tests {
     }
 
     mod proof_quality_tests {
-        use super::*;
+        use proptest::prop_assert_eq;
+        use proptest::prop_assert_ne;
+        use test_strategy::proptest;
 
-        /// Return a valid transaction with a specified proof type.
+        use super::*;
+        use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+
+        /// Return a valid, deterministic transaction with a specified proof type.
         async fn tx_with_proof_type(
             proof_type: TxProvingCapability,
             network: Network,
@@ -2107,6 +2113,63 @@ mod tests {
                 tx_in_mempool.proof,
                 TransactionProof::ProofCollection(_)
             ));
+        }
+
+        #[proptest(cases = 15, async = "tokio")]
+        async fn ms_updated_transaction_always_replaces_progenitor(
+            #[strategy(0usize..20)] _num_inputs_own: usize,
+            #[strategy(0usize..20)] _num_outputs_own: usize,
+            #[strategy(0usize..20)] _num_public_announcements_own: usize,
+            #[strategy(0usize..20)] _num_inputs_mined: usize,
+            #[strategy(0usize..20)] _num_outputs_mined: usize,
+            #[strategy(0usize..20)] _num_public_announcements_mined: usize,
+            #[strategy(0usize..200_000)] size_old_proof: usize,
+            #[strategy(0usize..200_000)] size_new_proof: usize,
+            #[strategy(arb())] tx_origin: TransactionOrigin,
+            #[strategy(PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets(
+            [(#_num_inputs_own, #_num_outputs_own, #_num_public_announcements_own),
+            (#_num_inputs_mined, #_num_outputs_mined, #_num_public_announcements_mined),],
+    ))]
+            pws: [PrimitiveWitness; 2],
+        ) {
+            // Transactions in the mempool do not need to be valid, so we just
+            // pretend that the primitive-witness backed transactions have a
+            // SingleProof.
+            let into_single_proof_transaction = |pw: PrimitiveWitness, size_of_proof: usize| {
+                let mock_proof = TransactionProof::invalid_single_proof_of_size(size_of_proof);
+                Transaction {
+                    kernel: pw.kernel,
+                    proof: mock_proof,
+                }
+            };
+            let [mempool_tx, mined_tx] = pws;
+
+            let ms_update = MutatorSetUpdate::new(
+                mined_tx.kernel.inputs.clone(),
+                mined_tx.kernel.outputs.clone(),
+            );
+            let updated_tx =
+                PrimitiveWitness::update_with_new_ms_data(mempool_tx.clone(), ms_update);
+
+            let original_tx = into_single_proof_transaction(mempool_tx, size_old_proof);
+            let updated_tx = into_single_proof_transaction(updated_tx, size_new_proof);
+
+            assert_eq!(original_tx.kernel.txid(), updated_tx.kernel.txid());
+            let txid = original_tx.kernel.txid();
+
+            let mut mempool = setup_mock_mempool(0, Network::Main, tx_origin);
+
+            // First insert original transaction, then updated which should
+            // always replace the original transaction, regardless of its size.
+            mempool.insert(original_tx.clone(), tx_origin);
+            let in_mempool_start = mempool.get(txid).map(|tx| tx.to_owned()).unwrap();
+            prop_assert_eq!(&original_tx, &in_mempool_start);
+            prop_assert_ne!(&updated_tx, &in_mempool_start);
+
+            mempool.insert(updated_tx.clone(), tx_origin);
+            let in_mempool_end = mempool.get(txid).map(|tx| tx.to_owned()).unwrap();
+            prop_assert_eq!(&updated_tx, &in_mempool_end);
+            prop_assert_ne!(&original_tx, &in_mempool_end);
         }
     }
 }
