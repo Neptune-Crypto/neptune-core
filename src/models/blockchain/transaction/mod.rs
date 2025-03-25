@@ -341,7 +341,6 @@ pub(crate) mod tests {
 
     impl TransactionProof {
         /// A proof that will always be invalid
-        #[cfg(test)]
         pub(crate) fn invalid() -> Self {
             Self::SingleProof(Proof(vec![]))
         }
