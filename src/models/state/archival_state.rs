@@ -1825,7 +1825,7 @@ mod archival_state_tests {
             .unwrap();
         println!("Generated transaction for Alice and Bob.");
 
-        let (cbtx, composer_expected_utxos) = make_coinbase_transaction_from_state(
+        let (cbtx, _composer_expected_utxos) = make_coinbase_transaction_from_state(
             &premine_rec
                 .global_state_lock
                 .lock_guard()
@@ -1874,7 +1874,7 @@ mod archival_state_tests {
             block_1.kernel.body.transaction_kernel.outputs.len()
         );
 
-        // Expect coinbase and change UTXO
+        // Expect change UTXO, as it uses offchain notifications.
         {
             let mut premine_rec = premine_rec.lock_guard_mut().await;
             let expected_utxos = premine_rec
@@ -1884,12 +1884,6 @@ mod archival_state_tests {
             premine_rec
                 .wallet_state
                 .add_expected_utxos(expected_utxos)
-                .await;
-
-            assert_eq!(2, composer_expected_utxos.len());
-            premine_rec
-                .wallet_state
-                .add_expected_utxos(composer_expected_utxos)
                 .await;
         }
 
