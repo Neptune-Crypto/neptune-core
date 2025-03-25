@@ -140,7 +140,11 @@ impl proptest_state_machine::StateMachineTest for TheSut {
         let g_cloned = g.clone();
 
         rt.block_on(async {
-            dbg!(&transition);
+            dbg!(format!("{:?}", transition.0)
+                .lines()
+                .next()
+                .unwrap_or_default());
+            dbg!(&transition.1.is_some());
             match transition {
                 Transition(_, Some(AssosiatedData::MakeNewBlocks(..))) => {
                     // blocks_stuff(ref_state.blocks[ref_state.blocks.len()-1 - BLOCKS_NEW_LEN..].into()).await;
