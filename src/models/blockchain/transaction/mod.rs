@@ -347,7 +347,6 @@ pub(crate) mod tests {
 
         /// A proof that will always be invalid, with a specified size measured in
         /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
-        #[cfg(test)]
         pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {
             use tasm_lib::twenty_first::bfe;
 
