@@ -512,10 +512,8 @@ pub(crate) async fn create_block_transaction_from(
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
-    debug!(
-        "Creating block transaction with mutator set hash: {}",
-        predecessor_block_ms.hash()
-    );
+    let mutator_set_hash = predecessor_block_ms.hash();
+    debug!("Creating block transaction with mutator set hash: {mutator_set_hash}",);
 
     let mut rng: StdRng =
         SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
@@ -557,6 +555,7 @@ pub(crate) async fn create_block_transaction_from(
                 block_capacity_for_transactions,
                 Some(MAX_NUM_TXS_TO_MERGE),
                 only_merge_single_proofs,
+                mutator_set_hash,
             ),
     };
 
