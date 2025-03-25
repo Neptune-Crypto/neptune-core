@@ -635,6 +635,7 @@ pub(super) fn get_upgrade_task_from_mempool(
             } else {
                 NativeCurrencyAmount::zero()
             };
+
         let upgrade_decision = UpgradeJob::ProofCollectionToSingleProof {
             kernel: kernel.to_owned(),
             proof: proof.to_owned(),
@@ -647,7 +648,13 @@ pub(super) fn get_upgrade_task_from_mempool(
             return None;
         }
 
-        Some((upgrade_decision, tx_origin))
+        let upgrade_is_worth_is =
+            gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
+        if upgrade_is_worth_is {
+            Some((upgrade_decision, tx_origin))
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -669,6 +676,7 @@ pub(super) fn get_upgrade_task_from_mempool(
         } else {
             NativeCurrencyAmount::zero()
         };
+
         let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
         let upgrade_decision = UpgradeJob::Merge {
             left_kernel: left_kernel.to_owned(),
@@ -687,7 +695,13 @@ pub(super) fn get_upgrade_task_from_mempool(
             return None;
         }
 
-        Some((upgrade_decision, tx_origin))
+        let upgrade_is_worth_is =
+            gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
+        if upgrade_is_worth_is {
+            Some((upgrade_decision, tx_origin))
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -715,11 +729,17 @@ mod test {
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::invalid_empty_block_with_timestamp;
+    use crate::tests::shared::mock_genesis_global_state;
 
     /// Returns a PrimitiveWitness-backed transaction initiated by the global
     /// state provided as argument. Assumes balance is sufficient to make this
     /// transaction.
-    async fn primitive_witness_backed_tx(mut state: GlobalStateLock, seed: u64) -> Transaction {
+    async fn transaction_from_state(
+        mut state: GlobalStateLock,
+        seed: u64,
+        proof_quality: TxProvingCapability,
+        fee: NativeCurrencyAmount,
+    ) -> Transaction {
         let mut rng: StdRng = SeedableRng::seed_from_u64(seed);
         let receiving_address = GenerationReceivingAddress::derive_from_seed(rng.random());
         let tx_outputs = vec![TxOutput::onchain_native_currency(
@@ -731,7 +751,6 @@ mod test {
         .into();
         let mut state = state.lock_guard_mut().await;
         let change_key = state.wallet_state.next_unused_symmetric_key().await;
-        let fee = NativeCurrencyAmount::from_nau(100);
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
         let (tx, _, _) = state
             .create_transaction_with_prover_capability(
@@ -740,13 +759,66 @@ mod test {
                 UtxoNotificationMedium::OffChain,
                 fee,
                 timestamp,
-                TxProvingCapability::PrimitiveWitness,
+                proof_quality,
                 &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
 
         tx
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn dont_upgrade_foreign_proof_collection_if_fee_too_low() {
+        let network = Network::Main;
+
+        // Alice is premine recipient, so she can make a transaction (after
+        // expiry of timelock). Rando is not premine recipient.
+        let cli_args = cli_args::Args {
+            min_gobbling_fee: NativeCurrencyAmount::from_nau(5),
+            network: Network::Main,
+            ..Default::default()
+        };
+        let alice =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone())
+                .await;
+        let pc_tx_low_fee = transaction_from_state(
+            alice.clone(),
+            512777439428,
+            TxProvingCapability::ProofCollection,
+            NativeCurrencyAmount::from_nau(2),
+        )
+        .await;
+        let mut rando =
+            mock_genesis_global_state(network, 2, WalletEntropy::new_random(), cli_args).await;
+        let mut rando = rando.lock_guard_mut().await;
+
+        rando
+            .mempool_insert(pc_tx_low_fee, TransactionOrigin::Foreign)
+            .await;
+        assert!(get_upgrade_task_from_mempool(&rando).is_none());
+
+        let pc_tx_high_fee = transaction_from_state(
+            alice.clone(),
+            512777439428,
+            TxProvingCapability::ProofCollection,
+            NativeCurrencyAmount::from_nau(1_000_000_000),
+        )
+        .await;
+        rando
+            .mempool_insert(pc_tx_high_fee.clone(), TransactionOrigin::Foreign)
+            .await;
+        let job = get_upgrade_task_from_mempool(&rando).unwrap().0;
+        let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
+            panic!("Expected proof-collection to single-proof job");
+        };
+
+        assert_eq!(
+            pc_tx_high_fee.kernel.txid(),
+            kernel.txid(),
+            "Returned job must be the one with a high fee"
+        );
     }
 
     #[traced_test]
@@ -764,7 +836,13 @@ mod test {
                 get_test_genesis_setup(network, 2, cli_args::Args::default_with_network(network))
                     .await
                     .unwrap();
-            let pwtx = primitive_witness_backed_tx(alice.clone(), 512777439428).await;
+            let pwtx = transaction_from_state(
+                alice.clone(),
+                512777439428,
+                TxProvingCapability::PrimitiveWitness,
+                NativeCurrencyAmount::from_nau(100),
+            )
+            .await;
             alice
                 .lock_guard_mut()
                 .await
@@ -836,7 +914,13 @@ mod test {
                 get_test_genesis_setup(network, 2, cli_args::Args::default_with_network(network))
                     .await
                     .unwrap();
-            let pwtx = primitive_witness_backed_tx(alice.clone(), 512777439429).await;
+            let pwtx = transaction_from_state(
+                alice.clone(),
+                512777439429,
+                TxProvingCapability::PrimitiveWitness,
+                NativeCurrencyAmount::from_nau(100),
+            )
+            .await;
             alice
                 .lock_guard_mut()
                 .await
