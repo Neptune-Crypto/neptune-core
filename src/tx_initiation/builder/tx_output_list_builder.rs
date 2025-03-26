@@ -59,7 +59,6 @@ impl OutputFormat {
 
     // ##multicoin## : maybe something like
     // pub fn amount(&self, coint: Coin) -> CoinAmount;
-
 }
 
 impl From<(ReceivingAddress, NativeCurrencyAmount)> for OutputFormat {

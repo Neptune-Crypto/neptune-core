@@ -360,6 +360,10 @@ impl DerefMut for GlobalStateLock {
 /// Example usage:
 ///
 /// ```rust
+/// use neptune_cash::models::state::GlobalState;
+/// use neptune_cash::models::state::GlobalStateLock;
+/// use neptune_cash::tx_initiation::export::StateLock;
+///
 /// fn worker(gs: &GlobalState, truth: bool) {
 ///    // do something with gs and truth.
 /// }
