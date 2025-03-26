@@ -37,6 +37,9 @@ pub enum CreateTxError {
     #[error("cannot generate change key for immutable wallet.")]
     CantGenChangeKeyForImmutableWallet,
 
+    #[error("witness validation failed")]
+    WitnessValidationFailed,
+
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]
     Failed(String),

@@ -15,7 +15,7 @@ use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::StateLock;
 use crate::WalletState;
 
-/// enumerates various ways to specify a transaction output.
+/// enumerates various ways to specify a transaction output as a simple tuple.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OutputFormat {
     /// specify receiving address and amount
@@ -193,23 +193,28 @@ impl TxOutputListBuilder {
     }
 
     /// build the list of [TxOutput], with [StateLock]
-    pub async fn build_with_state(self, state_lock: &mut StateLock<'_>) -> TxOutputList {
+    ///
+    /// note: a caller that already holds a read-lock or write-lock over
+    /// [GlobalState] should provide a ReadGuard or WriteGuard.  The builder
+    /// will use the already-acquired lock, which can still be used in other
+    /// calls by the caller.
+    pub async fn build(self, state_lock: &StateLock<'_>) -> TxOutputList {
         match state_lock {
             StateLock::Lock(gsl) => {
                 let gs = gsl.lock_guard().await;
-                self.build(&gs.wallet_state, gs.chain.light_state().header().height)
+                self.build_worker(&gs.wallet_state, gs.chain.light_state().header().height)
             }
             StateLock::ReadGuard(gs) => {
-                self.build(&gs.wallet_state, gs.chain.light_state().header().height)
+                self.build_worker(&gs.wallet_state, gs.chain.light_state().header().height)
             }
             StateLock::WriteGuard(gs) => {
-                self.build(&gs.wallet_state, gs.chain.light_state().header().height)
+                self.build_worker(&gs.wallet_state, gs.chain.light_state().header().height)
             }
         }
     }
 
     /// build the list of [TxOutput]
-    pub fn build(self, wallet_state: &WalletState, block_height: BlockHeight) -> TxOutputList {
+    fn build_worker(self, wallet_state: &WalletState, block_height: BlockHeight) -> TxOutputList {
         let wallet_entropy = &wallet_state.wallet_entropy;
 
         // Convert outputs.  [address:amount] --> TxOutputList

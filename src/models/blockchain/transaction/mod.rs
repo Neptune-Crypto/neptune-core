@@ -267,6 +267,14 @@ impl Transaction {
             .is_confirmable_relative_to(mutator_set_accumulator)
             .is_ok()
     }
+
+    /// verifies the transaction proof is valid
+    ///
+    /// ... which also means the transaction is valid.
+    // maybe this should just be called verify()  or validate()?
+    pub async fn verify_proof(&self) -> bool {
+        self.proof.verify(self.kernel.mast_hash()).await
+    }
 }
 
 #[cfg(test)]

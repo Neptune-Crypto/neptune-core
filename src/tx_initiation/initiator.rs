@@ -19,7 +19,6 @@ use crate::models::state::tx_creation_config::ChangePolicy;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::StateLock;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
@@ -89,8 +88,8 @@ impl TransactionInitiator {
             builder = builder.output_format(output_format);
         }
 
-        let gs = self.global_state_lock.lock_guard().await;
-        builder.build(&gs.wallet_state, gs.chain.light_state().header().height)
+        // note: cheap arc clone.
+        builder.build(&self.global_state_lock.clone().into()).await
     }
 
     pub async fn generate_tx_details(
@@ -106,7 +105,7 @@ impl TransactionInitiator {
             .outputs(outputs)
             .fee(fee)
             .change_policy(change_policy)
-            .build(&mut StateLock::from(self.global_state_lock.clone()))
+            .build(&mut self.global_state_lock.clone().into())
             .await
     }
 
@@ -134,6 +133,7 @@ impl TransactionInitiator {
         self.worker().check_rate_limit().await?;
 
         // note: acquires write-lock.
+        // note: this should validate tx, but presently does not.
         self.global_state_lock.record_transaction(tx).await?;
 
         // note: cheap arc clone of tx.

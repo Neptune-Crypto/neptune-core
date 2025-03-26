@@ -1,3 +1,11 @@
+//! This module provides a builder for generating [TransactionDetails].
+//!
+//! The builder will modify state only if one ore more new keys must be added to
+//! the wallet for change output(s).  see [TransactionDetailsBuilder::build()]
+//! for details.
+//!
+//! The resulting `TransactionDetails` contains all data needed for a [Transaction]
+//! except for a [TransactionProof].
 use std::sync::Arc;
 
 use num_traits::CheckedAdd;
@@ -24,6 +32,7 @@ use crate::tx_initiation::error::CreateTxError;
 use crate::Block;
 use crate::WalletState;
 
+/// a builder to generate [TransactionDetails].
 // note: all fields intentionally private
 #[derive(Debug, Default)]
 pub struct TransactionDetailsBuilder {
@@ -36,10 +45,12 @@ pub struct TransactionDetailsBuilder {
 }
 
 impl TransactionDetailsBuilder {
+    /// instantiate builder
     pub fn new() -> Self {
         Default::default()
     }
 
+    /// add a timestamp.  defaults to Timestamp::now()
     pub fn timestamp(mut self, timestamp: Timestamp) -> Self {
         self.timestamp = Some(timestamp);
         self
@@ -273,18 +284,3 @@ impl TransactionDetailsBuilder {
         Ok(change_output)
     }
 }
-
-// enum WalletStateRef<'a> {
-//     Mutable(&'a mut WalletState),
-//     Immutable(&'a WalletState),
-//     Lock(GlobalStateLock),
-// }
-
-// impl<'a> WalletStateRef<'a> {
-//     fn immutable(&'a self) -> &'a WalletState {
-//         match self {
-//             Self::Mutable(ws) => ws,
-//             Self::Immutable(ws) => ws,
-//         }
-//     }
-// }

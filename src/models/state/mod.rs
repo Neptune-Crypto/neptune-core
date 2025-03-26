@@ -288,18 +288,22 @@ impl GlobalStateLock {
 
     /// stores/records a transaction into local state (mempool and wallet)
     pub async fn record_transaction(&mut self, tx_artifacts: &TxCreationArtifacts) -> Result<()> {
-        // todo: verify that transaction and transaction_details match.
+        // verifies that:
+        //  1. Self::network matches provided Network.
+        //  2. Transaction and TransactionDetails match.
+        //  3. Transaction proof is valid, and thus the Tx itself is valid.
+        tx_artifacts.verify(self.cli().network).await?;
 
-        // these are both Arc, so clone is fast.
+        // clone is cheap as fields are Arc<T>
         let transaction = tx_artifacts.transaction.clone();
-        let transaction_details = tx_artifacts.details.clone();
+        let details = tx_artifacts.details.clone();
 
         // acquire write-lock
         let mut gsm = self.lock_guard_mut().await;
 
         let utxos_sent_to_self = gsm
             .wallet_state
-            .extract_expected_utxos(transaction_details.tx_outputs.iter(), UtxoNotifier::Myself);
+            .extract_expected_utxos(details.tx_outputs.iter(), UtxoNotifier::Myself);
 
         // if the tx created offchain expected_utxos we must inform wallet.
         if !utxos_sent_to_self.is_empty() {
@@ -318,11 +322,11 @@ impl GlobalStateLock {
         // can group inputs and outputs together, eg for history purposes.
         let tip_digest = gsm.chain.light_state().hash();
         gsm.wallet_state
-            .add_sent_transaction((transaction_details.as_ref(), tip_digest).into())
+            .add_sent_transaction((details.as_ref(), tip_digest).into())
             .await;
 
         // insert transaction into mempool
-        // todo: use Arc or Rc to avoid clone.
+        // todo: we should use Arc<Tx> in mempool to avoid cloning large Tx.
         gsm.mempool_insert((*transaction).clone(), TransactionOrigin::Own)
             .await;
 

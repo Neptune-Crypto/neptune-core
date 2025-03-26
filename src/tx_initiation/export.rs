@@ -3,6 +3,7 @@
 //!
 //! They are exported here in one location for caller convenience.
 
+pub use crate::config_models::network::Network;
 pub use crate::models::blockchain::block::block_height::BlockHeight;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProof;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
