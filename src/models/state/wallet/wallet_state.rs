@@ -173,7 +173,7 @@ impl WalletState {
     ///
     ///  # Panics
     ///
-    ///  - If the `guesser_fraction` is not a fraction contained in [0;1].
+    ///  - If the `guesser_fraction` is not a fraction contained in \[0;1\].
     pub(crate) fn composer_parameters(
         &self,
         next_block_height: BlockHeight,
