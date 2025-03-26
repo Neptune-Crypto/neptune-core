@@ -203,7 +203,7 @@ pub struct Args {
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
-    pub(crate) network: Network,
+    pub network: Network,
 
     /// Max number of membership proofs stored per owned UTXO
     #[structopt(long, default_value = "3")]
@@ -498,7 +498,7 @@ impl Args {
 
     /// Get the proving capability CLI argument or estimate it if it is not set.
     /// Cache the result so we don't estimate more than once.
-    pub(crate) fn proving_capability(&self) -> TxProvingCapability {
+    pub fn proving_capability(&self) -> TxProvingCapability {
         *self.tx_proving_capability_cache.get_or_init(|| {
             if let Some(proving_capability) = self.tx_proving_capability {
                 proving_capability

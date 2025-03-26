@@ -363,15 +363,14 @@ impl DerefMut for GlobalStateLock {
 /// use neptune_cash::models::state::GlobalState;
 /// use neptune_cash::models::state::GlobalStateLock;
 /// use neptune_cash::tx_initiation::export::StateLock;
-///
 /// fn worker(gs: &GlobalState, truth: bool) {
 ///    // do something with gs and truth.
 /// }
 ///
 /// // a callee that accepts &StateLock
-/// async fn callee(state_lock: &StateLock, truth: bool) {
+/// async fn callee(state_lock: &StateLock<'_>, truth: bool) {
 ///     match state_lock {
-///        StateLock::Lock(gsl) => worker(&gsl.lock_guard().await, truth),
+///        StateLock::Lock(gsl) => worker(&*gsl.lock_guard().await, truth),
 ///        StateLock::ReadGuard(gs) => worker(&gs, truth),
 ///        StateLock::WriteGuard(gs) => worker(&gs, truth),
 ///    }
@@ -380,9 +379,8 @@ impl DerefMut for GlobalStateLock {
 /// // a caller that uses `Lock` variant
 /// async fn caller_1(gsl: GlobalStateLock) {
 ///     // read-lock will be acquired each call.
-///     // note: cheap arc clone.
-///     callee(gsl.clone().into(), true).await;
-///     callee(gsl.clone().into(), false).await;
+///     callee(&gsl.clone().into(), true).await;
+///     callee(&gsl.clone().into(), false).await;
 /// }
 ///
 /// // a caller that uses `ReadLock` variant
@@ -394,7 +392,7 @@ impl DerefMut for GlobalStateLock {
 /// }
 ///
 /// // a caller that uses `WriteLock` variant
-/// async fn caller_3(gsl: GlobalStateLock) {
+/// async fn caller_3(mut gsl: GlobalStateLock) {
 ///     // write-lock is acquired only once.
 ///     let sl = StateLock::from(gsl.lock_guard_mut().await);
 ///     callee(&sl, true).await;
