@@ -1,3 +1,67 @@
+
+## [0.2.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.0..v0.2.1) - 2025-03-26
+
+### ✨ Features
+
+- Expand `BlockInfo` with `size` ([f67ac005](https://github.com/Neptune-Crypto/neptune-core/commit/f67ac005) / [9d490102](https://github.com/Neptune-Crypto/neptune-core/commit/9d490102))
+- *(mempool)* Filter transactions for mutator set match ([8a3b7313](https://github.com/Neptune-Crypto/neptune-core/commit/8a3b7313))
+- *(rpc_server)* Add command to clear mempool ([8cc1264e](https://github.com/Neptune-Crypto/neptune-core/commit/8cc1264e))
+- *(`cli_args`)* `offchain_fee_notifications` ([bc2f73d1](https://github.com/Neptune-Crypto/neptune-core/commit/bc2f73d1))
+- Scan blocks for lost composer UTXOs ([e322aa5a](https://github.com/Neptune-Crypto/neptune-core/commit/e322aa5a))
+
+### 🐛 Bug Fixes
+
+- Fix script for backing up randomness ([11e0616a](https://github.com/Neptune-Crypto/neptune-core/commit/11e0616a))
+- *(proof_upgrader)* Don't upgrade for less than min gobbling fee ([94a84ca6](https://github.com/Neptune-Crypto/neptune-core/commit/94a84ca6))
+- *(mempool)* Ignore conflictors with deprecated mutator sets ([e8fc2430](https://github.com/Neptune-Crypto/neptune-core/commit/e8fc2430))
+- Don't return expected UTXOs for composition when policy is onchain ([e78d971d](https://github.com/Neptune-Crypto/neptune-core/commit/e78d971d))
+- *(peer_loop)* Fix race condition on new connection ([2aca28b1](https://github.com/Neptune-Crypto/neptune-core/commit/2aca28b1))
+
+### 📚 Documentation
+
+- *(mempool)* Add docstring ([6dbe4ed3](https://github.com/Neptune-Crypto/neptune-core/commit/6dbe4ed3))
+- *(peer_loop)* Justify holding write lock on new connection ([8f96f38e](https://github.com/Neptune-Crypto/neptune-core/commit/8f96f38e))
+
+### ♻️  Refactor
+
+- Make TransactionKernelId public ([266ba7d2](https://github.com/Neptune-Crypto/neptune-core/commit/266ba7d2))
+- Make upgrader fee notifications conform to CLI policy ([d336bea2](https://github.com/Neptune-Crypto/neptune-core/commit/d336bea2))
+- Default to on-chain composer fee notifications ([a8d635e1](https://github.com/Neptune-Crypto/neptune-core/commit/a8d635e1))
+- Simplify interface wrt. guesser fee fraction ([c22f1dcd](https://github.com/Neptune-Crypto/neptune-core/commit/c22f1dcd))
+- *(`cli_args`)* Generalize fee notification policy ([f5e61d28](https://github.com/Neptune-Crypto/neptune-core/commit/f5e61d28))
+- *(`WalletState`)* Auto-generate symmetric key with index 0 ([e2522731](https://github.com/Neptune-Crypto/neptune-core/commit/e2522731))
+- Factor out production of coinbase outputs ([68d587a7](https://github.com/Neptune-Crypto/neptune-core/commit/68d587a7))
+- *(`mine_loop`)* Factor out extractor for `ExpectedUtxo`s ([c27e06a7](https://github.com/Neptune-Crypto/neptune-core/commit/c27e06a7))
+- *(`mempool`)* Catch self-conflicts smarter ([6c1081c8](https://github.com/Neptune-Crypto/neptune-core/commit/6c1081c8))
+
+### ✅ Testing
+
+- *(mempool)* MS-filtering also works for SingleProof-backed txs ([16193bb1](https://github.com/Neptune-Crypto/neptune-core/commit/16193bb1))
+- Wallet recovers unexpected composer UTXO ([908976a1](https://github.com/Neptune-Crypto/neptune-core/commit/908976a1))
+- Expand composer and upgrader fee recovery tests ([be9ef7b3](https://github.com/Neptune-Crypto/neptune-core/commit/be9ef7b3))
+- Recovery of unexpected off-chain composer UTXOs ([3a1e0367](https://github.com/Neptune-Crypto/neptune-core/commit/3a1e0367))
+- Force `SingleProof` capability for block transactions ([395d0e36](https://github.com/Neptune-Crypto/neptune-core/commit/395d0e36))
+- Explicitly bind and drop channel to nowhere ([b17a299e](https://github.com/Neptune-Crypto/neptune-core/commit/b17a299e))
+- *(`FeeNotificationPolicy`)* Test parsing empty string ([6d99c118](https://github.com/Neptune-Crypto/neptune-core/commit/6d99c118))
+- *(mempool)* Ensure MS-updated transaction always replaces progenitor ([#528](https://github.com/Neptune-Crypto/neptune-core/issues/528)) ([f8a4785e](https://github.com/Neptune-Crypto/neptune-core/commit/f8a4785e))
+
+### 🎨 Styling
+
+- Report guesser fee of rejected blocks ([cdc6e87b](https://github.com/Neptune-Crypto/neptune-core/commit/cdc6e87b) / [09b6ed8c](https://github.com/Neptune-Crypto/neptune-core/commit/09b6ed8c))
+- Rename variable for better readability ([59cef21d](https://github.com/Neptune-Crypto/neptune-core/commit/59cef21d))
+- Use `expect` to communicate assumptions ([225ee2fa](https://github.com/Neptune-Crypto/neptune-core/commit/225ee2fa))
+
+### ⚙️  Miscellaneous
+
+- Try to build when `Cargo.lock` is absent ([c6583346](https://github.com/Neptune-Crypto/neptune-core/commit/c6583346))
+- Work around semver-breaking dependency ([187d28fd](https://github.com/Neptune-Crypto/neptune-core/commit/187d28fd))
+- Synchronize pre-commit hook with CI ([3fe9300a](https://github.com/Neptune-Crypto/neptune-core/commit/3fe9300a))
+
+### Devx
+
+- Add script for tracking average RPC response time ([b23c3eaf](https://github.com/Neptune-Crypto/neptune-core/commit/b23c3eaf) / [13c163cc](https://github.com/Neptune-Crypto/neptune-core/commit/13c163cc))
+
+
 ## [0.2.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.1.3..v0.2.0) - 2025-03-20
 
 ### 🔱 Fork
