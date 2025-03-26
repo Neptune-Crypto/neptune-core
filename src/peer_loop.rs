@@ -1827,13 +1827,13 @@ impl PeerLoopHandler {
                 own_datetime_utc.format("%Y-%m-%d %H:%M:%S"));
         }
 
-        // There is potential for a race-condition in the peer_map here, as
-        // we've previously counted the number of entries and checked if
-        // instance ID was already connected. But other tasks could have made
-        // connections to a new node after the completion of that check, so we
-        // need to make the check while holding a lock to ensure that this
-        // check still holds. Since we're modifyin peer_map if this check is
-        // successful, we have to acquire a read-lock.
+        // Multiple tasks might attempt to set up a connection concurrently. So
+        // even though we've checked that this connection is allowed, this check
+        // could have been invalidated by another task, for one accepting an
+        // incoming connection from a peer we're currently connecting to. So we
+        // need to make the a check again while holding a write-lock, since
+        // we're modifying `peer_map` here. Holding a read-lock doesn't work
+        // since it would have to be dropped before acquiring the write-lock.
         {
             let mut global_state = self.global_state_lock.lock_guard_mut().await;
             let peer_map = &mut global_state.net.peer_map;
