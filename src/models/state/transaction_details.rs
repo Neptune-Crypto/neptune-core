@@ -64,13 +64,13 @@ impl TransactionDetails {
             match notification_method {
                 UtxoNotifyMethod::OnChain(receiving_address) => vec![
                     TxOutput::onchain_native_currency(
-                        amount_timelocked,
+                        amount_liquid,
                         sender_randomness,
                         receiving_address.clone(),
                         true,
                     ),
                     TxOutput::onchain_native_currency(
-                        amount_liquid,
+                        amount_timelocked,
                         sender_randomness,
                         receiving_address,
                         true,
@@ -79,13 +79,13 @@ impl TransactionDetails {
                 ],
                 UtxoNotifyMethod::OffChain(receiving_address) => vec![
                     TxOutput::offchain_native_currency(
-                        amount_timelocked,
+                        amount_liquid,
                         sender_randomness,
                         receiving_address.clone(),
                         true,
                     ),
                     TxOutput::offchain_native_currency(
-                        amount_liquid,
+                        amount_timelocked,
                         sender_randomness,
                         receiving_address,
                         true,
