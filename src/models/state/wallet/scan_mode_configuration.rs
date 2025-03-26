@@ -13,7 +13,7 @@ use crate::models::blockchain::block::Block;
 /// wallet secret seed but with future derivation indices. If an incoming
 /// message is observed, the derivation index counter is updated accordingly.
 /// The number of future indices to scan for is a tunable parameter.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ScanModeConfiguration {
     num_future_keys: usize,
     first_block_height: BlockHeight,
@@ -30,8 +30,6 @@ pub(crate) struct ScanModeConfiguration {
     /// lost otherwise.
     maybe_guesser_fraction: Option<f64>,
 }
-
-impl Eq for ScanModeConfiguration {}
 
 impl Default for ScanModeConfiguration {
     fn default() -> Self {
@@ -75,7 +73,7 @@ impl ScanModeConfiguration {
         self
     }
 
-    /// Setter for the guesser fraction
+    /// Set the guesser fraction to `Some` value.
     pub(crate) fn set_guesser_fraction(&mut self, fraction: f64) {
         self.maybe_guesser_fraction = Some(fraction);
     }

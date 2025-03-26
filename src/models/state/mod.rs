@@ -343,8 +343,8 @@ impl GlobalState {
             .await
     }
 
-    /// Return the block height in which the latest UTXO was either spent or
-    /// received. `None` if this wallet never received a UTXO.
+    /// The block height in which the latest UTXO was either spent or received.
+    /// `None` if this wallet never received a UTXO.
     pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
         let (height, time_secs) =
             time_fn_call_async(self.get_latest_balance_height_internal()).await;
@@ -401,9 +401,9 @@ impl GlobalState {
     /// Automatically assemble the composer parameters for composing the next
     /// block from the state.
     ///
-    /// The relevant CLI parameters are read from the CLI arguments living on
-    /// [`GlobalState`]. The next block height is passed as an argument since
-    /// the callers need to declare this, to resolve race conditions.
+    /// The next block height is passed as an argument as opposed to being read
+    /// from state since the caller needs to declare it to resolve race
+    /// conditions.
     ///
     /// # Panics
     ///

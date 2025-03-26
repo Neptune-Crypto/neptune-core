@@ -30,7 +30,7 @@ impl FeeNotificationPolicy {
         } else if on_chain_generation.is_match(unparsed_policy) {
             Ok(Self::OnChainGeneration)
         } else {
-            bail!("failed to parse fee notification policy with regex")
+            bail!("failed to parse fee notification policy")
         }
     }
 }
@@ -104,6 +104,8 @@ mod test {
             "invalid",
             "error",
             "",
+            " on-chain-symmetric",
+            "off-chain ",
         ];
         for argument in vectors_fail {
             assert!(FeeNotificationPolicy::parse(argument).is_err());

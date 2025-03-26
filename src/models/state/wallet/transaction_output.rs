@@ -231,6 +231,25 @@ impl TxOutput {
             owned: self.owned,
         }
     }
+
+    /// Convert the [`TxOutput`] into an [`ExpectedUtxo`].
+    ///
+    /// Requires cryptographic data from the wallet.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the receiver preimage does not match the receiver digest from
+    /// the transaction output.
+    fn expected_utxo(&self, receiver_preimage: Digest, notifier: UtxoNotifier) -> ExpectedUtxo {
+        assert_eq!(
+            self.receiver_digest,
+            receiver_preimage.hash(),
+            "Claimed receiver preimage must match transaction output"
+        );
+        let utxo = self.utxo();
+        let sender_randomness = self.sender_randomness();
+        ExpectedUtxo::new(utxo, sender_randomness, receiver_preimage, notifier)
+    }
 }
 
 /// Represents a list of [TxOutput]
@@ -392,25 +411,12 @@ impl TxOutputList {
     /// Panics if the receiver preimage does not match the receiver digest from
     /// any transaction output.
     pub(crate) fn expected_utxos(
-        self,
+        &self,
         utxo_notifier: UtxoNotifier,
         receiver_preimage: Digest,
     ) -> Vec<ExpectedUtxo> {
-        let expected_receiver_digest = receiver_preimage.hash();
-        assert!(
-            self.iter()
-                .all(|x| x.receiver_digest == expected_receiver_digest),
-            "Claimed receiver preimage must match transaction outputs"
-        );
-        self.into_iter()
-            .map(|txo| {
-                ExpectedUtxo::new(
-                    txo.utxo(),
-                    txo.sender_randomness(),
-                    receiver_preimage,
-                    utxo_notifier,
-                )
-            })
+        self.iter()
+            .map(|txo| txo.expected_utxo(receiver_preimage, utxo_notifier))
             .collect()
     }
 }

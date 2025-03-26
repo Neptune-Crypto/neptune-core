@@ -15,8 +15,6 @@ pub(crate) struct ComposerParameters {
     notification_policy: FeeNotificationPolicy,
 }
 
-impl Eq for ComposerParameters {}
-
 impl ComposerParameters {
     /// # Panics
     ///
@@ -26,7 +24,7 @@ impl ComposerParameters {
         sender_randomness: Digest,
         maybe_receiver_preimage: Option<Digest>,
         guesser_fee_fraction: f64,
-        notification_medium: FeeNotificationPolicy,
+        notification_policy: FeeNotificationPolicy,
     ) -> Self {
         let is_fraction = (0_f64..=1.0).contains(&guesser_fee_fraction);
         assert!(
@@ -38,7 +36,7 @@ impl ComposerParameters {
             sender_randomness,
             maybe_receiver_preimage,
             guesser_fee_fraction,
-            notification_policy: notification_medium,
+            notification_policy,
         }
     }
 

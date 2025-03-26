@@ -158,7 +158,7 @@ impl UpgradeJob {
     /// The gobbling fee charged for an upgrade job
     ///
     /// Gobbling fees are charged when a transaction is upgraded from
-    /// proof-collectino to single-proof, or when two single proofs are merged.
+    /// proof-collection to single-proof, or when two single proofs are merged.
     /// The other cases are either not worth it, as you need to create a single-
     /// proof to gobble, or the proof upgrade relates to own funds.
     ///
@@ -509,23 +509,13 @@ impl UpgradeJob {
                 utxo_notification_method,
             );
 
-            let expected_utxos =
-                if matches!(fee_notification_policy, FeeNotificationPolicy::OffChain) {
-                    gobbler
-                        .tx_outputs
-                        .iter()
-                        .map(|x| {
-                            ExpectedUtxo::new(
-                                x.utxo(),
-                                x.sender_randomness(),
-                                receiver_preimage,
-                                UtxoNotifier::FeeGobbler,
-                            )
-                        })
-                        .collect_vec()
-                } else {
-                    vec![]
-                };
+            let expected_utxos = if fee_notification_policy == FeeNotificationPolicy::OffChain {
+                gobbler
+                    .tx_outputs
+                    .expected_utxos(UtxoNotifier::FeeGobbler, receiver_preimage)
+            } else {
+                vec![]
+            };
             let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
             let gobbler_proof =
                 SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())

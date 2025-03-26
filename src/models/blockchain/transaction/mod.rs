@@ -16,6 +16,7 @@ pub mod utxo;
 pub mod validity;
 
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -86,19 +87,6 @@ impl TransactionProof {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn into_proof_collection(self) -> ProofCollection {
-        match self {
-            TransactionProof::Witness(_primitive_witness) => {
-                panic!("Expected ProofCollection, got Witness")
-            }
-            TransactionProof::SingleProof(_proof) => {
-                panic!("Expected ProofCollection, got SingleProof")
-            }
-            TransactionProof::ProofCollection(proof_collection) => proof_collection,
-        }
-    }
-
     pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
         match self {
             TransactionProof::Witness(_) => bail!("Primitive witness does not have a proof"),
@@ -159,12 +147,12 @@ impl Transaction {
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
     ) -> anyhow::Result<Transaction> {
-        if old_transaction_kernel.mutator_set_hash != previous_mutator_set_accumulator.hash() {
-            bail!(
-                "Old transaction kernel's mutator set hash does not agree \
+        ensure!(
+            old_transaction_kernel.mutator_set_hash == previous_mutator_set_accumulator.hash(),
+            "Old transaction kernel's mutator set hash does not agree \
                 with supplied mutator set accumulator."
-            )
-        }
+        );
+
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
         let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
@@ -332,6 +320,7 @@ impl Transaction {
 #[cfg(test)]
 pub(crate) mod tests {
     use tasm_lib::prelude::Digest;
+    use tasm_lib::twenty_first::bfe_vec;
     use tests::primitive_witness::SaltedUtxos;
 
     use super::*;
@@ -348,9 +337,19 @@ pub(crate) mod tests {
         /// A proof that will always be invalid, with a specified size measured in
         /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
         pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {
-            use tasm_lib::twenty_first::bfe;
+            Self::SingleProof(Proof(bfe_vec![0; size]))
+        }
 
-            Self::SingleProof(Proof(vec![bfe!(0); size]))
+        pub(crate) fn into_proof_collection(self) -> ProofCollection {
+            match self {
+                TransactionProof::Witness(_primitive_witness) => {
+                    panic!("Expected ProofCollection, got Witness")
+                }
+                TransactionProof::SingleProof(_proof) => {
+                    panic!("Expected ProofCollection, got SingleProof")
+                }
+                TransactionProof::ProofCollection(proof_collection) => proof_collection,
+            }
         }
     }
 

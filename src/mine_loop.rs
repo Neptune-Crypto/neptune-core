@@ -396,13 +396,21 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     Ok((transaction, composer_outputs))
 }
 
-/// Produce two outputs spending a given portion of the coinbase amount which is
-/// usually set to the block subsidy for this block height.
+/// Produce two outputs spending a given portion of the coinbase amount.
 ///
-/// There are two outputs because one is liquid immediately, and the other is
-/// locked for 3 years. The portion of the block subsidy that goes to the
-/// composer is determined by the guesser fee fraction field of the composer
-/// parameters.
+/// The coinbase amount is usually set to the block subsidy for this block
+/// height.
+///
+/// There are two equal-value outputs because one is liquid immediately, and the
+/// other is locked for 3 years. The portion of the entire block subsidy that
+/// goes to the composer is determined by the `guesser_fee_fraction` field of
+/// the composer parameters.
+///
+/// The sum of the value of the outputs is guaranteed to not exceed the
+/// coinbase amount, since the guesser fee fraction is guaranteed to be in the
+/// range \[0;1\].
+///
+/// Returns an array of two TxOutputs: liquid first, timelocked second.
 pub(crate) fn composer_outputs(
     coinbase_amount: NativeCurrencyAmount,
     composer_parameters: ComposerParameters,
@@ -473,7 +481,9 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         + timelocked_coinbase_output
             .utxo()
             .get_native_currency_amount();
-    let guesser_fee = coinbase_amount.checked_sub(&total_composer_fee).unwrap();
+    let guesser_fee = coinbase_amount
+        .checked_sub(&total_composer_fee)
+        .expect("total_composer_fee cannot exceed coinbase_amount");
 
     info!(
         "Coinbase amount is set to {coinbase_amount} and is divided between \

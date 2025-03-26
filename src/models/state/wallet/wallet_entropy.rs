@@ -25,6 +25,7 @@ use crate::prelude::twenty_first;
 /// data. The wrapper supplies arithmetic functions for use in the context of a
 /// wallet for Neptune Cash.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ZeroizeOnDrop)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct WalletEntropy {
     secret_seed: SecretKeyMaterial,
 }
@@ -199,19 +200,21 @@ impl From<WalletEntropy> for SecretKeyMaterial {
 
 #[cfg(test)]
 mod test {
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
     use super::*;
 
     impl WalletEntropy {
         /// Create a new `WalletEntropy` object and populate it with entropy
         /// obtained via `rand::rng()` from the operating system.
-        #[cfg(test)]
         pub(crate) fn new_random() -> Self {
             Self::new_pseudorandom(rand::Rng::random(&mut rand::rng()))
         }
 
         /// Create a new `WalletEntropy` object and populate it by expanding a given
         /// seed.
-        #[cfg(test)]
         pub(crate) fn new_pseudorandom(seed: [u8; 32]) -> Self {
             let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
             Self {
@@ -220,12 +223,13 @@ mod test {
         }
     }
 
-    #[test]
-    fn prover_fee_address_agrees_with_receiver_preimage() {
-        let wallet_entropy = WalletEntropy::new_random();
-        assert_eq!(
+    #[proptest(cases = 10)]
+    fn prover_fee_address_agrees_with_receiver_preimage(
+        #[strategy(arb())] wallet_entropy: WalletEntropy,
+    ) {
+        prop_assert_eq!(
             wallet_entropy.prover_fee_key().privacy_preimage().hash(),
-            wallet_entropy.prover_fee_address().privacy_digest()
+            wallet_entropy.prover_fee_address().privacy_digest(),
         );
     }
 }

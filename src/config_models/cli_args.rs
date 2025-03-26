@@ -161,19 +161,21 @@ pub struct Args {
     /// transactions they work on, by directing it to an output only they can
     /// spend. By default, a public announcement is added to the transaction to
     /// enable the composer or proof-upgrader to recover such UTXOs after
-    /// importing the key onto a new machine. This public announcement is
+    /// restoring the wallet from seed phrase. This public announcement is
     /// encryped by default under a symmetric key.
     ///
     /// Valid options:
-    ///  - `--fee-notification on-chain-symmetric` (default) On-chain backups
-    ///    using symmetric key ciphertexts.
-    ///  - `--fee-notification on-chain-generation` On-chain backups using
-    ///    generation addresses, which means that public key encryption is used
-    ///    instead. Note that public key ciphertexts are significantly larger
-    ///    (and thus take up more blockchain space) than symmetric ciphertexts.
-    ///  - `--fee-notification off-chain` Avoid on-chain backups. Saves
-    ///    blockchain space, but risks loss of funds. Enable only if you know
-    ///    what you are doing.
+    ///
+    ///  - `on-chain-symmetric` (default) On-chain backups using symmetric key
+    ///    ciphertexts.
+    ///
+    ///  - `on-chain-generation` On-chain backups using generation addresses,
+    ///    which means that public key encryption is used instead. Note that
+    ///    public key ciphertexts are significantly larger (and thus take up
+    ///    more blockchain space) than symmetric ciphertexts.
+    ///
+    ///  - `off-chain` Avoid on-chain backups. Saves blockchain space, but risks
+    ///    loss of funds. Enable only if you know what you are doing.
     ///
     /// This flag does not apply to guesser fees because those UTXOs are
     /// generated automatically.
