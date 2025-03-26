@@ -487,7 +487,18 @@ pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
         .collect_vec()
 }
 
-pub(crate) fn make_plenty_mock_transaction_with_primitive_witness(
+pub(crate) fn make_plenty_mock_transaction_supported_by_invalid_single_proofs(
+    count: usize,
+) -> Vec<Transaction> {
+    let mut pw_backeds = make_plenty_mock_transaction_supported_by_primitive_witness(count);
+    for pw_backed in &mut pw_backeds {
+        pw_backed.proof = TransactionProof::invalid();
+    }
+
+    pw_backeds
+}
+
+pub(crate) fn make_plenty_mock_transaction_supported_by_primitive_witness(
     count: usize,
 ) -> Vec<Transaction> {
     let mut test_runner = TestRunner::deterministic();

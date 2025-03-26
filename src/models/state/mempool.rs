@@ -817,7 +817,9 @@ mod tests {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use rand::random;
+    use rand::rng;
     use rand::rngs::StdRng;
+    use rand::seq::SliceRandom;
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
@@ -844,7 +846,8 @@ mod tests {
     use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
-    use crate::tests::shared::make_plenty_mock_transaction_with_primitive_witness;
+    use crate::tests::shared::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
+    use crate::tests::shared::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::mock_genesis_global_state;
 
     #[tokio::test]
@@ -853,7 +856,7 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
 
-        let txs = make_plenty_mock_transaction_with_primitive_witness(2);
+        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(2);
         let transaction_digests = txs.iter().map(|tx| tx.kernel.txid()).collect_vec();
         assert!(!mempool.contains(transaction_digests[0]));
         assert!(!mempool.contains(transaction_digests[1]));
@@ -894,7 +897,7 @@ mod tests {
         sync_block: &Block,
     ) -> Mempool {
         let mut mempool = Mempool::new(ByteSize::gb(1), None, sync_block.hash());
-        let txs = make_plenty_mock_transaction_with_primitive_witness(transactions_count);
+        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(transactions_count);
         let mutator_set_hash = sync_block.mutator_set_accumulator_after().hash();
         for mut tx in txs {
             tx.kernel = TransactionKernelModifier::default()
@@ -1084,6 +1087,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn get_transactions_for_block_filters_out_unsynced_transactions() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network);
+        let mutator_set_hash: Digest = random();
+
+        let num_synced_transactions = 5;
+        let num_unsynced_transactions = 4;
+
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
+        let mut txs = make_plenty_mock_transaction_supported_by_invalid_single_proofs(
+            num_synced_transactions + num_unsynced_transactions,
+        );
+        for tx in txs.iter_mut().take(num_synced_transactions) {
+            tx.kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(mutator_set_hash)
+                .modify(tx.kernel.clone());
+        }
+
+        txs.shuffle(&mut rng());
+
+        for tx in txs {
+            mempool.insert(tx, TransactionOrigin::Foreign);
+        }
+
+        let only_return_single_proofs = true;
+        let max_total_tx_size = 1_000_000_000;
+        let txs_for_block = mempool.get_transactions_for_block(
+            max_total_tx_size,
+            None,
+            only_return_single_proofs,
+            mutator_set_hash,
+        );
+        assert_eq!(num_synced_transactions, txs_for_block.len());
+        assert!(txs_for_block
+            .iter()
+            .all(|tx| tx.kernel.mutator_set_hash == mutator_set_hash));
+        assert_eq!(
+            num_synced_transactions + num_unsynced_transactions,
+            mempool.len()
+        );
+    }
+
     #[traced_test]
     #[test]
     fn only_txs_with_matching_mutator_set_hashes_are_returned_for_block_inclusion() {
@@ -1093,7 +1139,7 @@ mod tests {
 
         for i in 0..5 {
             let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
-            let mut txs = make_plenty_mock_transaction_with_primitive_witness(i);
+            let mut txs = make_plenty_mock_transaction_supported_by_primitive_witness(i);
 
             for tx in txs.clone() {
                 mempool.insert(tx, TransactionOrigin::Foreign);
@@ -1789,7 +1835,7 @@ mod tests {
     async fn max_len_none() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let txs = make_plenty_mock_transaction_with_primitive_witness(11);
+        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(11);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
 
         for tx in txs {
@@ -1808,7 +1854,7 @@ mod tests {
     async fn max_len_is_respected() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let txs = make_plenty_mock_transaction_with_primitive_witness(20);
+        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(20);
 
         let mut expected_txs = txs.clone();
         expected_txs.sort_by_key(|x| x.fee_density());
