@@ -2157,7 +2157,7 @@ mod tests {
             assert_eq!(original_tx.kernel.txid(), updated_tx.kernel.txid());
             let txid = original_tx.kernel.txid();
 
-            let mut mempool = setup_mock_mempool(0, Network::Main, tx_origin);
+            let mut mempool = Mempool::new(ByteSize::gb(1), None, Digest::default());
 
             // First insert original transaction, then updated which should
             // always replace the original transaction, regardless of its size.

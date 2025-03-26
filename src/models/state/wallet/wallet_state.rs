@@ -4780,16 +4780,17 @@ pub(crate) mod tests {
 
             // upgrade transaction again
             // this time mutator set data
+            let genesis_mutator_set = genesis_block.mutator_set_accumulator_after();
             let single_proof_transaction = rando
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(10_000_000, None, true)[0]
+                .get_transactions_for_block(10_000_000, None, true, genesis_mutator_set.hash())[0]
                 .clone();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
-                genesis_block.mutator_set_accumulator_after(),
+                genesis_mutator_set,
                 block_one.mutator_set_update(),
             ));
             let (channel_to_nowhere_two, nowhere_two) =
@@ -4806,11 +4807,12 @@ pub(crate) mod tests {
             drop(nowhere_two); // drop must occur after message is sent
 
             // get upgraded transaction
+            let block_one_mutator_set = block_one.mutator_set_accumulator_after();
             let transactions_for_block = rando
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(10_000_000, None, true);
+                .get_transactions_for_block(10_000_000, None, true, block_one_mutator_set.hash());
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
             let new_num_public_announcements =
