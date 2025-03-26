@@ -1,10 +1,17 @@
-//! provides a builder and related types for selecting which inputs to
-//! use in a transaction in order to cover the target spend amount.
+//! provides a builder and related types for selecting which inputs to use in a
+//! transaction in order to cover the target spend amount.
 //!
-//! all spendable inputs may be obtained via `spendable_inputs()`.
+//! all spendable inputs may be obtained via
+//! [TransactionInitiator::spendable_inputs()](super::super::initiator::TransactionInitiator::spendable_inputs()).
 //!
 //! The `InputSelectionPolicy` enum provides a set of policies for selecting
 //! inputs.
+//!
+//! If the caller wishes to use custom logic for selecting and ordering inputs
+//! that can be done by manipulating the spendable inputs directly, and then
+//! pass `InputSelectionPolicy::ByProvidedOrder` to the builder.
+//!
+//! see [builder](super) for examples of using the builders together.
 use get_size2::GetSize;
 use itertools::Itertools;
 use rand::rng;
@@ -24,6 +31,12 @@ pub enum SortOrder {
     Descending,
 }
 
+// ##multicoin## :
+//  1. how do we select inputs if spending a token?
+//  2. how do we select inputs if input or output utxo represent
+//     a smart contract?
+//  3. what if input or output utxo(s) contain more than one Coin?
+
 /// defines a policy for selecting from available transaction inputs in order
 /// to cover the target spend amount.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -41,7 +54,7 @@ pub enum InputSelectionPolicy {
     /// choose inputs by utxo size in specified sort order
     // is this useful?
     ByUtxoSize(SortOrder),
-    // is something like this possible?
+    // ##multicoin## : is something like this possible?
     // eg, so we can order by a particular token amount, like USDT.
     // ByCoinAmount(Coin, SortOrder)
 
@@ -56,6 +69,8 @@ pub struct TxInputListBuilder {
     // note: all fields intentionally private
     spendable_inputs: Vec<TxInput>,
     policy: InputSelectionPolicy,
+
+    // ##multicoin## : maybe this should be Coin or Vec<Coin> instead of NativeCurrencyAmount?
     spend_amount: NativeCurrencyAmount,
 }
 
@@ -66,7 +81,7 @@ impl TxInputListBuilder {
     }
 
     /// set available spendable inputs.  These may be obtained via
-    /// [spendable_inputs()](super::super::TransactionInitiator::spendable_inputs())
+    /// [spendable_inputs()](super::super::initiator::TransactionInitiator::spendable_inputs())
     pub fn spendable_inputs(mut self, inputs: Vec<TxInput>) -> Self {
         self.spendable_inputs = inputs;
         self
@@ -77,6 +92,8 @@ impl TxInputListBuilder {
         self.policy = policy;
         self
     }
+
+    // ##multicoin## : maybe this should be Coin or Vec<Coin> instead of NativeCurrencyAmount?
 
     /// set the target spend amount
     pub fn spend_amount(mut self, spend_amount: NativeCurrencyAmount) -> Self {

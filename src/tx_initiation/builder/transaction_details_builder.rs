@@ -4,8 +4,10 @@
 //! the wallet for change output(s).  see [TransactionDetailsBuilder::build()]
 //! for details.
 //!
-//! The resulting `TransactionDetails` contains all data needed for a [Transaction]
-//! except for a [TransactionProof].
+//! The resulting `TransactionDetails` contains all data needed for a [Transaction](crate::models::blockchain::transaction::Transaction)
+//! except for a [TransactionProof](crate::models::blockchain::transaction::TransactionProof).
+//!
+//! see [builder](super) for examples of using the builders together.
 use std::sync::Arc;
 
 use num_traits::CheckedAdd;
@@ -62,7 +64,7 @@ impl TransactionDetailsBuilder {
         self
     }
 
-    /// adds a list of inputs.  See [TransactionInputListBuilder]
+    /// adds a list of inputs.  See [TxInputListBuilder](super::tx_input_list_builder::TxInputListBuilder)
     pub fn inputs(mut self, mut tx_input_list: TxInputList) -> Self {
         self.tx_inputs.append(&mut tx_input_list);
         self
@@ -74,7 +76,7 @@ impl TransactionDetailsBuilder {
         self
     }
 
-    /// adds a list of outputs.  See [TransactionOutputListBuilder]
+    /// adds a list of outputs.  See [TxOutputListBuilder](super::tx_output_list_builder::TxOutputListBuilder)
     pub fn outputs(mut self, mut tx_output_list: TxOutputList) -> Self {
         self.tx_outputs.append(&mut tx_output_list);
         self
@@ -97,6 +99,12 @@ impl TransactionDetailsBuilder {
         self.change_policy = change_policy;
         self
     }
+
+    // ##multicoin## : we must consider change for non-native Coin.
+    //   1. how to obtain the coin amount for these? need some kind of CoinAmount type.
+    //   2. if inputs and outputs have more than one Coin type, how do we
+    //      sum(inputs) and sum(outputs) to determine if inputs exceed outputs?
+    //      (perhaps in a loop for each Coin type present?)
 
     /// build [TransactionDetails] and possibly mutate wallet state, acquiring write-lock if necessary.
     ///
@@ -138,12 +146,14 @@ impl TransactionDetailsBuilder {
         // default to present time if unspecified
         let timestamp = timestamp.unwrap_or_else(Timestamp::now);
 
+        // ##multicoin## : do we need a total amount for each Coin?
         let total_outbound_amount = tx_outputs
             .total_native_coins()
             .checked_add(&fee)
             .ok_or(CreateTxError::TotalSpendTooLarge)?;
         let total_unlocked_amount = tx_inputs.total_native_coins();
 
+        // ##multicoin## : do we need a change amount for each Coin?
         let change_amount = total_unlocked_amount
             .checked_sub(&total_outbound_amount)
             .ok_or(CreateTxError::InsufficientFunds {
@@ -151,6 +161,7 @@ impl TransactionDetailsBuilder {
                 available: total_unlocked_amount,
             })?;
 
+        // ##multicoin## : do we need a change output for each Coin?
         let has_change_output = change_amount > 0.into();
 
         // Add change output, if required to balance transaction
@@ -256,6 +267,8 @@ impl TransactionDetailsBuilder {
             tip_block.mutator_set_accumulator_after(),
         )?)
     }
+
+    // ##multicoin## : should probably accept a Coin and CoinAmount arg?
 
     /// Generate a change UTXO to ensure that the difference in input amount
     /// and output amount goes back to us. Return the UTXO in a format compatible

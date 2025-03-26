@@ -400,7 +400,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     let transaction = TransactionBuilder::new()
         .transaction_details(tx_details_arc)
         .transaction_proof(proof)
-        .build()?;
+        .build_transaction()?;
 
     info!("Done: generating single proof for coinbase transaction");
 

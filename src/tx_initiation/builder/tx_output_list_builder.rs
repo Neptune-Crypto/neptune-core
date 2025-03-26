@@ -2,6 +2,8 @@
 //! transaction outputs ([TxOutput]).
 //!
 //! outputs may be specified in several ways via the [OutputFormat] enum.
+//!
+//! see [builder](super) for examples of using the builders together.
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -14,6 +16,11 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::StateLock;
 use crate::WalletState;
+
+// ##multicoin## :
+//  1. The *AndUtxo variants enable basic multi-coin support.
+//  2. maybe there should be some variant like AddressAndCoinAndAmount(ReceivingAddress, Coin, CoinAmount)
+//     but this requires a new amount type.
 
 /// enumerates various ways to specify a transaction output as a simple tuple.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +46,7 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
+    /// returns the native currency amount
     pub fn native_currency_amount(&self) -> NativeCurrencyAmount {
         match self {
             Self::AddressAndAmount(_, amt) => *amt,
@@ -48,6 +56,10 @@ impl OutputFormat {
             Self::TxOutput(to) => to.native_currency_amount(),
         }
     }
+
+    // ##multicoin## : maybe something like
+    // pub fn amount(&self, coint: Coin) -> CoinAmount;
+
 }
 
 impl From<(ReceivingAddress, NativeCurrencyAmount)> for OutputFormat {
@@ -203,7 +215,7 @@ impl TxOutputListBuilder {
     /// build the list of [TxOutput], with [StateLock]
     ///
     /// note: a caller that already holds a read-lock or write-lock over
-    /// [GlobalState] should provide a ReadGuard or WriteGuard.  The builder
+    /// [GlobalState](crate::models::state::GlobalState) should provide a ReadGuard or WriteGuard.  The builder
     /// will use the already-acquired lock, which can still be used in other
     /// calls by the caller.
     pub async fn build(self, state_lock: &StateLock<'_>) -> TxOutputList {

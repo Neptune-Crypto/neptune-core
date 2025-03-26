@@ -1,5 +1,4 @@
-//! These are types used in the tx_initiator public API, including inputs,
-//! outputs, and errors.
+//! provides types used in the tx_initiator public API
 //!
 //! They are exported here in one location for caller convenience.
 
@@ -17,4 +16,5 @@ pub use crate::models::state::wallet::change_policy::ChangePolicy;
 pub use crate::models::state::wallet::transaction_input::TxInput;
 pub use crate::models::state::wallet::transaction_input::TxInputList;
 pub use crate::models::state::wallet::transaction_output::TxOutputList;
+pub use crate::models::state::StateLock;
 pub use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;

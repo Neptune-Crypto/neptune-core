@@ -1,11 +1,9 @@
 //! This module implements a builder for transaction proofs.
 //!
 //! There are different levels of [TransactionProof] that
-//! can be generated.  The desired proof can be specified with [ProofType].
+//! can be generated.  The desired proof can be specified with [TransactionProofType].
 //!
-//! Proof are generated in the Triton VM.
-//!
-//! Proof generation is a very CPU and RAM intensive process.  Each type
+//! With exception of `TransactionProofType::PrimitiveWitness`, proof generation is a very CPU and RAM intensive process.  Each type
 //! of proof has different hardware requirements.  Also the complexity is
 //! affected by the type and size of transaction.
 //!
@@ -15,43 +13,16 @@
 //! Before a transaction can be confirmed in a block it must have a SingleProof
 //! which is the hardest proof to generate.
 //!
-//! When initiating a transaction, the typical sequence is:
-//!  1. create tx inputs and outputs.
-//!  2. create tx details.
-//!  3. generate a primitive witness proof for tx details.
-//!  4. assemble the transaction.
-//!  5. record and broadcast the transaction.
+//! see [Transaction Initiation Sequence](super::super#transaction-initiation-sequence)
 //!
-//!  (caller is done)
-//!
-//!  6. neptune-core upgrades the proof to ProofCollection.
-//!  7. neptune-core broadcasts the transaction to other nodes.
-//!  8. a powerful node upgrades the proof to SingleProof.
-//!  9. a composer adds the proof to a block-template
-//! 10. a prover (miner) mines the Tx into a block.
-//!
-//! However if the caller has a powerful enough machine, they can generate
+//! If the caller has a powerful enough machine, they can generate
 //! a ProofCollection or SingleProof themself before passing the transaction
-//! to neptune-core.  This takes load off the entire network.
+//! to neptune-core.  This takes load off the entire network and may
+//! lower the caller's fee.
 //!
-//! Note that the caller could generate the Proof on a separate device from
-//! that running neptune-core.
+//! see [Caller Provides Proof Initiation Sequence](super::super#caller-provides-proof-initiation-sequence)
 //!
-//! In this case, the sequence can look like:
-//!  1. create tx inputs and outputs.
-//!  2. create tx details.
-//!  3. generate a SingleProof for tx details.
-//!  4. assemble the transaction.
-//!  5. record and broadcast the transaction.
-//!
-//!  (caller is done)
-//!
-//!  6. neptune-core broadcasts the transaction to other nodes.
-//!  7. a composer adds the proof to a block-template
-//!  8. a prover (miner) mines the Tx into a block.
-//!
-//! (The sequence for ProofCollection is like the original sequence
-//! but with step 6 being performed by the caller in step 3.)
+//! see [builder](super) for examples of using the builders together.
 
 use std::sync::Arc;
 
@@ -68,7 +39,7 @@ use crate::tx_initiation::error::CreateProofError;
 
 /// a builder for [TransactionProof]
 ///
-/// see module docs for details.
+/// see [module docs](self) for details.
 #[derive(Debug, Default)]
 pub struct TransactionProofBuilder {
     transaction_details: Option<Arc<TransactionDetails>>,
@@ -122,7 +93,7 @@ impl TransactionProofBuilder {
     ///
     /// if the target proof-type is Witness, this will return immediately.
     ///
-    /// otherwise it will initiate an async job that could many minutes.
+    /// otherwise it will initiate an async job that could take many minutes.
     ///
     /// note that these jobs occur in a global (per process) job queue that only
     /// permits one VM job to process at a time.  This prevents parallel jobs
@@ -134,6 +105,16 @@ impl TransactionProofBuilder {
     ///
     /// The caller can query the job_queue to determine how many jobs are in the
     /// queue.
+    ///
+    /// External Process:
+    ///
+    /// Proofs are generated in the Triton VM. The proof generation occurs in a
+    /// separate executable, `triton-vm-prover`, which is spawned by the
+    /// job-queue for each proving job.  Only one `triton-vm-prover` process
+    /// should be executing at a time for a given neptune-core instance.
+    ///
+    /// If the external process is killed for any reason, the proof-generation job will fail
+    /// and this method will return an error.
     ///
     /// Cancellation:
     ///

@@ -1,7 +1,10 @@
-//! This is the start of an API layer for creating and sending transactions.  It
-//! is callable by rust users of this crate as well as the RPC server.
+//! provides an easy-to-use `TransactionSender` with single send() method.
 //!
-//! The intent is to present the same API for both rust callers and RPC callers.
+//! This is highest-level and easiest to use API for sending a transaction.
+//! callers should prefer it to lower-level APIs unless there is a need for
+//! greater flexibility than this provides.
+//!
+//! see [tx_initiation](super) for other available API.
 
 use std::sync::Arc;
 
@@ -110,7 +113,7 @@ impl TransactionSender {
         let tx_creation_artifacts = TransactionBuilder::new()
             .transaction_details(tx_details_rc.clone())
             .transaction_proof(proof)
-            .build_tx_artifacts(gsl.cli().network)?;
+            .build(gsl.cli().network)?;
 
         tracing::info!("send: record and broadcast tx:\n{}", tx_details_rc);
 

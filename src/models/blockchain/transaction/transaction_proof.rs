@@ -12,11 +12,17 @@ use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::verifier::verify;
 
+/// represents available types of transaction proofs
+///
+/// the types are ordered (asc) by proof-generation complexity.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, strum::Display)]
 #[repr(u8)]
 pub enum TransactionProofType {
+    /// a primitive-witness.  exposes secrets (keys).  this proof must not be shared.
     PrimitiveWitness = 1,
+    /// a weak proof that does not expose secrets. can be shared with peers, but cannot be confirmed into a block.
     ProofCollection = 2,
+    /// a strong proof.  required for confirming a transaction into a block.
     SingleProof = 3,
 }
 
@@ -30,10 +36,14 @@ impl From<&TransactionProof> for TransactionProofType {
     }
 }
 
+/// represents a transaction proof, which can be of different types.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum TransactionProof {
+    /// a primitive-witness.  exposes secrets (keys).  this proof must not be shared.
     Witness(PrimitiveWitness),
+    /// a strong proof.  required for confirming a transaction into a block.
     SingleProof(Proof),
+    /// a weak proof that does not expose secrets. can be shared with peers, but cannot be confirmed into a block.
     ProofCollection(ProofCollection),
 }
 

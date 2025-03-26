@@ -1579,8 +1579,9 @@ pub trait RPC {
     ///
     /// `owned_utxo_notify_method` specifies how our wallet will be notified of
     /// any outputs destined for it. This includes the change output if one is
-    /// necessary. [UtxoNotificationMedium] defines `OnChain` and `OffChain` delivery
-    /// of notifications.
+    /// necessary.
+    /// [UtxoNotificationMedium](crate::models::state::wallet::utxo_notification::UtxoNotificationMedium)
+    /// defines `OnChain` and `OffChain` delivery of notifications.
     ///
     /// `OffChain` delivery requires less blockchain space and may result in a
     /// lower fee than `OnChain` delivery however there is more potential of

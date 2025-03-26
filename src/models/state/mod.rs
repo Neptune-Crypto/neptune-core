@@ -348,8 +348,77 @@ impl DerefMut for GlobalStateLock {
     }
 }
 
+/// abstracts over lock acquisition types for [GlobalStateLock]
+///
+/// this enables methods to be written that can accept whatever
+/// the caller has.
+///
+/// such generic methods can be called in series to share an already
+/// acquired lock-guard, or to each acquire its own lock-guard
+/// in the case of `Lock` variant.
+///
+/// Example usage:
+///
+/// ```rust
+/// fn worker(gs: &GlobalState, truth: bool) {
+///    // do something with gs and truth.
+/// }
+///
+/// // a callee that accepts &StateLock
+/// async fn callee(state_lock: &StateLock, truth: bool) {
+///     match state_lock {
+///        StateLock::Lock(gsl) => worker(&gsl.lock_guard().await, truth),
+///        StateLock::ReadGuard(gs) => worker(&gs, truth),
+///        StateLock::WriteGuard(gs) => worker(&gs, truth),
+///    }
+/// }
+///
+/// // a caller that uses `Lock` variant
+/// async fn caller_1(gsl: GlobalStateLock) {
+///     // read-lock will be acquired each call.
+///     // note: cheap arc clone.
+///     callee(gsl.clone().into(), true).await;
+///     callee(gsl.clone().into(), false).await;
+/// }
+///
+/// // a caller that uses `ReadLock` variant
+/// async fn caller_2(gsl: GlobalStateLock) {
+///     // read-lock is acquired only once.
+///     let sl = StateLock::from(gsl.lock_guard().await);
+///     callee(&sl, true).await;
+///     callee(&sl, false).await;
+/// }
+///
+/// // a caller that uses `WriteLock` variant
+/// async fn caller_3(gsl: GlobalStateLock) {
+///     // write-lock is acquired only once.
+///     let sl = StateLock::from(gsl.lock_guard_mut().await);
+///     callee(&sl, true).await;
+///     callee(&sl, false).await;
+/// }
+///
+/// // a caller that uses `ReadLock` variant and calls fn that accept `&GlobalState`
+/// async fn caller_4(gsl: GlobalStateLock) {
+///     // read-lock is acquired only once.
+///     let sl = StateLock::from(gsl.lock_guard().await);
+///     callee(&sl, true).await;
+///     callee(&sl, false).await;
+///
+///     // we can pass &GlobalState directly.
+///     worker(sl.gs(), true);
+///
+///     // convert back into a read-guard
+///     let gs = sl.into_read_guard();
+///     worker(&gs, false);
+/// }
+/// ```
+///
+/// example usage as callee: see source of [TxOutputListBuilder::build()](crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder::build())
+///
+/// advanced usage as caller: see source of [TransactionSender::send()](TransactionSender::send())
 #[derive(Debug)]
 pub enum StateLock<'a> {
+    /// holds an instance GlobalStateLock. can be used to
     Lock(GlobalStateLock),
     ReadGuard(AtomicRwReadGuard<'a, GlobalState>),
     WriteGuard(AtomicRwWriteGuard<'a, GlobalState>),
@@ -380,14 +449,20 @@ impl<'a> From<AtomicRwWriteGuard<'a, GlobalState>> for StateLock<'a> {
 }
 
 impl<'a> StateLock<'a> {
+    /// instantiates a `StateLock::ReadGuard`
     pub async fn read_guard(gsl: &'a GlobalStateLock) -> Self {
         Self::ReadGuard(gsl.lock_guard().await)
     }
 
+    /// instantiates a `StateLock::WriteGuard`
     pub async fn write_guard(gsl: &'a mut GlobalStateLock) -> Self {
         Self::WriteGuard(gsl.lock_guard_mut().await)
     }
 
+    /// returns a `GlobalState` reference.
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// `Lock` variant, and a panic will occur if this happens.
     pub fn gs(&self) -> &GlobalState {
         match self {
             Self::ReadGuard(g) => g,
@@ -396,6 +471,10 @@ impl<'a> StateLock<'a> {
         }
     }
 
+    /// converts back into `GlobalStateLock`
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// variant other than `Lock`. A panic will occur if this happens.
     pub fn into_lock(self) -> GlobalStateLock {
         match self {
             Self::Lock(g) => g,
@@ -403,6 +482,10 @@ impl<'a> StateLock<'a> {
         }
     }
 
+    /// converts back into `AtomicRwReadGuard`
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// variant other than `ReadGuard`. A panic will occur if this happens.
     pub fn into_read_guard(self) -> AtomicRwReadGuard<'a, GlobalState> {
         match self {
             Self::ReadGuard(g) => g,
@@ -410,6 +493,10 @@ impl<'a> StateLock<'a> {
         }
     }
 
+    /// converts back into `AtomicRwWriteGuard`
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// variant other than `WriteGuard`. A panic will occur if this happens.
     pub fn into_write_guard(self) -> AtomicRwWriteGuard<'a, GlobalState> {
         match self {
             Self::WriteGuard(g) => g,
@@ -417,6 +504,7 @@ impl<'a> StateLock<'a> {
         }
     }
 
+    /// returns present blockchain tip block.
     pub async fn tip(&self) -> Arc<Block> {
         match self {
             Self::Lock(gsl) => gsl.lock_guard().await.chain.light_state_clone(),

@@ -1,3 +1,5 @@
+//! provides error types related to initiating transactions.
+
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
