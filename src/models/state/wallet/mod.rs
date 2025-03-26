@@ -77,8 +77,9 @@ mod wallet_tests {
 
         let mut rng = rand::rng();
         for network in Network::iter() {
+            let cli_args = cli_args::Args::default_with_network(network);
             let mut alice =
-                mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network).await;
+                mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
             let alice_wallet = get_monitored_utxos(&alice).await;
             assert_eq!(
                 1,
@@ -93,7 +94,7 @@ mod wallet_tests {
             );
 
             let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
-            let bob_wallet = mock_genesis_wallet_state(bob_wallet, network).await;
+            let bob_wallet = mock_genesis_wallet_state(bob_wallet, network, &cli_args).await;
             let bob_mutxos = get_monitored_utxos(&bob_wallet).await;
             assert!(
                 bob_mutxos.is_empty(),
@@ -143,8 +144,10 @@ mod wallet_tests {
     async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
         let mut rng = rand::rng();
         let network = Network::RegTest;
+        let cli_args = cli_args::Args::default();
         let alice_wallet = WalletEntropy::new_random();
-        let mut alice_wallet = mock_genesis_wallet_state(alice_wallet.clone(), network).await;
+        let mut alice_wallet =
+            mock_genesis_wallet_state(alice_wallet.clone(), network, &cli_args).await;
         let bob_wallet = WalletEntropy::new_random();
         let bob_key = bob_wallet.nth_generation_spending_key_for_tests(0);
 
@@ -492,16 +495,22 @@ mod wallet_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn wallet_state_maintenence_multiple_inputs_outputs_test() {
+    async fn wallet_state_maintenence_multiple_inputs_outputs_enough_mps_test() {
         // Bob is premine receiver, Alice is not. They send coins back and forth
-        // and the blockchain forks.
+        // and the blockchain forks. The fork is shallower than the number of
+        // membership proofs per MUTXO, so the fork can be tolerated without any
+        // issues.
 
         let network = Network::Main;
+        let cli_args = cli_args::Args {
+            guesser_fraction: 0.0,
+            number_of_mps_per_utxo: 20,
+            ..Default::default()
+        };
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
         let alice_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
         let mut alice =
-            mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args::Args::default())
-                .await;
+            mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args.clone()).await;
         let alice_key = alice
             .lock_guard()
             .await
@@ -510,12 +519,12 @@ mod wallet_tests {
             .nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let genesis_block = Block::genesis(network);
-        let bob_wallet = mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network)
-            .await
-            .wallet_entropy;
+        let bob_wallet =
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args)
+                .await
+                .wallet_entropy;
         let mut bob_global_lock =
-            mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args::Args::default())
-                .await;
+            mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args.clone()).await;
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
@@ -772,7 +781,7 @@ mod wallet_tests {
                             .unwrap()
                     ),
                 "All membership proofs must be valid after first block  of continued"
-            )
+            );
         }
 
         // Fork back to the B-chain with `block_3b` which contains three outputs
@@ -797,7 +806,6 @@ mod wallet_tests {
             .await
             .unwrap();
 
-        let guesser_fraction = 0f64;
         let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction_from_state(
             &alice
                 .global_state_lock
@@ -807,7 +815,6 @@ mod wallet_tests {
                 .light_state()
                 .clone(),
             &alice,
-            guesser_fraction,
             block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
@@ -968,13 +975,15 @@ mod wallet_tests {
             network,
             42,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args {
+                guesser_fraction: 0.0,
+                ..Default::default()
+            },
         )
         .await;
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
-        let guesser_fraction = 0f64;
         let (cbtx, _cb_expected) = make_coinbase_transaction_from_state(
             &bob.global_state_lock
                 .lock_guard()
@@ -983,7 +992,6 @@ mod wallet_tests {
                 .light_state()
                 .clone(),
             &bob,
-            guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),

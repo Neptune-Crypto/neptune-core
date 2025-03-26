@@ -17,6 +17,7 @@ use zeroize::Zeroize;
 
 /// Holds the secret seed of a wallet.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct SecretKeyMaterial(pub(crate) XFieldElement);
 
 impl Zeroize for SecretKeyMaterial {

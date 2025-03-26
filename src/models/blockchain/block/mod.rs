@@ -1069,6 +1069,7 @@ pub(crate) mod block_tests {
     use super::super::transaction::transaction_kernel::TransactionKernelModifier;
     use super::*;
     use crate::config_models::cli_args;
+    use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
@@ -1161,8 +1162,13 @@ pub(crate) mod block_tests {
         let mut guesser_fraction = 0f64;
         let step = 0.05;
         while guesser_fraction + step <= 1f64 {
-            let composer_parameters =
-                ComposerParameters::new(a_key.to_address().into(), rng.random(), guesser_fraction);
+            let composer_parameters = ComposerParameters::new(
+                a_key.to_address().into(),
+                rng.random(),
+                None,
+                guesser_fraction,
+                FeeNotificationPolicy::OffChain,
+            );
             let (composer_txos, transaction_details) =
                 prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now).unwrap();
             let coinbase_kernel =
@@ -1433,7 +1439,10 @@ pub(crate) mod block_tests {
                 network,
                 3,
                 alice_wallet.clone(),
-                cli_args::Args::default(),
+                cli_args::Args {
+                    guesser_fraction: 0.5,
+                    ..Default::default()
+                },
             )
             .await;
             alice.set_new_tip(block1.clone()).await.unwrap();
@@ -1454,7 +1463,6 @@ pub(crate) mod block_tests {
             let (coinbase_for_block2, _) = make_coinbase_transaction_from_state(
                 &block1,
                 &alice,
-                0.5f64,
                 plus_eight_months,
                 TxProvingCapability::SingleProof,
                 (TritonVmJobPriority::Normal, None).into(),
@@ -1523,7 +1531,6 @@ pub(crate) mod block_tests {
                 let (coinbase_for_block3, _) = make_coinbase_transaction_from_state(
                     &block2_without_valid_pow,
                     &alice,
-                    0.5f64,
                     plus_nine_months,
                     TxProvingCapability::SingleProof,
                     (TritonVmJobPriority::Normal, None).into(),

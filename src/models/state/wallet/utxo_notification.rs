@@ -1,5 +1,3 @@
-#[cfg(test)]
-use arbitrary::Arbitrary;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -21,7 +19,7 @@ pub enum UtxoNotificationMedium {
 /// enumerates how utxos and spending information is communicated, including how
 /// to encrypt this information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub(crate) enum UtxoNotifyMethod {
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain(ReceivingAddress),
@@ -31,6 +29,15 @@ pub(crate) enum UtxoNotifyMethod {
 
     /// No UTXO notification is intended
     None,
+}
+
+impl UtxoNotifyMethod {
+    pub(crate) fn new(medium: UtxoNotificationMedium, address: ReceivingAddress) -> Self {
+        match medium {
+            UtxoNotificationMedium::OnChain => Self::OnChain(address),
+            UtxoNotificationMedium::OffChain => Self::OffChain(address),
+        }
+    }
 }
 
 /// The payload of a UTXO notification, containing all information necessary

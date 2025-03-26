@@ -16,6 +16,7 @@ pub mod utxo;
 pub mod validity;
 
 use anyhow::bail;
+use anyhow::ensure;
 use anyhow::Result;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -74,12 +75,6 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
-    /// A proof that will always be invalid
-    #[cfg(test)]
-    pub(crate) fn invalid() -> Self {
-        Self::SingleProof(Proof(vec![]))
-    }
-
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
@@ -152,6 +147,12 @@ impl Transaction {
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
     ) -> anyhow::Result<Transaction> {
+        ensure!(
+            old_transaction_kernel.mutator_set_hash == previous_mutator_set_accumulator.hash(),
+            "Old transaction kernel's mutator set hash does not agree \
+                with supplied mutator set accumulator."
+        );
+
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
         let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
@@ -317,14 +318,40 @@ impl Transaction {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use tasm_lib::prelude::Digest;
+    use tasm_lib::twenty_first::bfe_vec;
     use tests::primitive_witness::SaltedUtxos;
 
     use super::*;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+    impl TransactionProof {
+        /// A proof that will always be invalid
+        pub(crate) fn invalid() -> Self {
+            Self::SingleProof(Proof(vec![]))
+        }
+
+        /// A proof that will always be invalid, with a specified size measured in
+        /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
+        pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {
+            Self::SingleProof(Proof(bfe_vec![0; size]))
+        }
+
+        pub(crate) fn into_proof_collection(self) -> ProofCollection {
+            match self {
+                TransactionProof::Witness(_primitive_witness) => {
+                    panic!("Expected ProofCollection, got Witness")
+                }
+                TransactionProof::SingleProof(_proof) => {
+                    panic!("Expected ProofCollection, got SingleProof")
+                }
+                TransactionProof::ProofCollection(proof_collection) => proof_collection,
+            }
+        }
+    }
 
     impl Transaction {
         /// Create a new transaction with primitive witness for a new mutator set.

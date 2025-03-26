@@ -7,6 +7,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::expected_utxo::UtxoNotifier;
 use super::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
@@ -15,6 +16,7 @@ use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
@@ -125,14 +127,13 @@ impl TxOutput {
         receiving_address: ReceivingAddress,
         owned: bool,
     ) -> Self {
-        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
-        Self {
-            utxo,
+        Self::native_currency(
+            amount,
             sender_randomness,
-            receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            receiving_address,
+            UtxoNotificationMedium::OnChain,
             owned,
-        }
+        )
     }
 
     /// Instantiate a [TxOutput] for native currency intended for off-chain UTXO
@@ -143,12 +144,31 @@ impl TxOutput {
         receiving_address: ReceivingAddress,
         owned: bool,
     ) -> Self {
+        Self::native_currency(
+            amount,
+            sender_randomness,
+            receiving_address,
+            UtxoNotificationMedium::OffChain,
+            owned,
+        )
+    }
+
+    /// Instantiate a [TxOutput] for native currency.
+    pub(crate) fn native_currency(
+        amount: NativeCurrencyAmount,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+        notification_medium: UtxoNotificationMedium,
+        owned: bool,
+    ) -> Self {
+        let receiver_digest = receiving_address.privacy_digest();
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        let notify_method = UtxoNotifyMethod::new(notification_medium, receiving_address);
         Self {
             utxo,
             sender_randomness,
-            receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
+            receiver_digest,
+            notification_method: notify_method,
             owned,
         }
     }
@@ -210,6 +230,25 @@ impl TxOutput {
             notification_method: self.notification_method,
             owned: self.owned,
         }
+    }
+
+    /// Convert the [`TxOutput`] into an [`ExpectedUtxo`].
+    ///
+    /// Requires cryptographic data from the wallet.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the receiver preimage does not match the receiver digest from
+    /// the transaction output.
+    fn expected_utxo(&self, receiver_preimage: Digest, notifier: UtxoNotifier) -> ExpectedUtxo {
+        assert_eq!(
+            self.receiver_digest,
+            receiver_preimage.hash(),
+            "Claimed receiver preimage must match transaction output"
+        );
+        let utxo = self.utxo();
+        let sender_randomness = self.sender_randomness();
+        ExpectedUtxo::new(utxo, sender_randomness, receiver_preimage, notifier)
     }
 }
 
@@ -360,6 +399,25 @@ impl TxOutputList {
     {
         self.0.extend(maybe_tx_output);
         self
+    }
+
+    /// Convert the [`TxOutputList`] to a list of [`ExpectedUtxo`]s.
+    ///
+    /// Useful in the context where all outputs in the [`TxOutputList`] are
+    /// owned by the client's wallet.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the receiver preimage does not match the receiver digest from
+    /// any transaction output.
+    pub(crate) fn expected_utxos(
+        &self,
+        utxo_notifier: UtxoNotifier,
+        receiver_preimage: Digest,
+    ) -> Vec<ExpectedUtxo> {
+        self.iter()
+            .map(|txo| txo.expected_utxo(receiver_preimage, utxo_notifier))
+            .collect()
     }
 }
 

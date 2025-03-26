@@ -45,10 +45,14 @@ use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::database::NeptuneLevelDb;
+use crate::mine_loop::composer_outputs;
+use crate::mine_loop::composer_parameters::ComposerParameters;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -165,6 +169,32 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
+    /// Generate [`ComposerParameters`] for composing the next block.
+    ///
+    ///  # Panics
+    ///
+    ///  - If the `guesser_fraction` is not a fraction contained in \[0;1\].
+    pub(crate) fn composer_parameters(
+        &self,
+        next_block_height: BlockHeight,
+        guesser_fraction: f64,
+        fee_notification: FeeNotificationPolicy,
+    ) -> ComposerParameters {
+        let reward_address = self.wallet_entropy.prover_fee_address();
+        let receiver_preimage = self.wallet_entropy.prover_fee_key().privacy_preimage();
+        let sender_randomness_for_composer = self
+            .wallet_entropy
+            .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
+
+        ComposerParameters::new(
+            reward_address,
+            sender_randomness_for_composer,
+            Some(receiver_preimage),
+            guesser_fraction,
+            fee_notification,
+        )
+    }
+
     /// Store information needed to recover mutator set membership proof of a
     /// UTXO, in case the wallet database is deleted.
     ///
@@ -243,13 +273,15 @@ impl WalletState {
             .unwrap();
         let mut configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
 
+        let wallet_entropy = wallet_file_context.entropy();
+
         // if wallet was imported, ensure scan mode is enabled
         if !wallet_file_context.wallet_is_new && database_is_new {
             info!("Wallet file present but database absent; wallet may have been imported.");
             configuration.enable_scan_mode();
         }
 
-        Self::new(configuration, wallet_file_context.entropy()).await
+        Self::new(configuration, wallet_entropy).await
     }
 
     /// Construct a `WalletState` object.
@@ -312,19 +344,39 @@ impl WalletState {
             configuration: configuration.clone(),
         };
 
-        // Generation key 0 is reserved for composing and guessing rewards. The
+        // Generation and Symmetric keys with derivation index 0 are reserved
+        // for composing and proof-upgrading rewards. The
         // next lines ensure that the key with derivation-index=0 key is known
         // to the wallet, so that claiming these rewards works.
-        // See comment in [`mine_loop::make_coinbase_transaction()`] for the
-        // rationale why these rewards always go to key 0.
+        //
+        // Motivation:
+        //  1. If the notifications are transmitted off-chain, there is no
+        //     privacy issue because publicly observable data is unlinkable even
+        //     if the lock script is the same. (But conversely: there *is* a
+        //     privacy issue when on-chain notifications are used: fees to the
+        //     same composer can be linked together as such.)
+        //  2. If we were to derive a new address for each proving task (compose
+        //     or upgrade) then we would have large gaps since an address only
+        //     receives funds if that transaction or block actually gets
+        //     confirmed.
+        //  3. Using derivation-index 0 allows us to avoid modifying
+        //     global/wallet state.
+        //  4. The singleton of derivation-indices {0} is easier to scan for
+        //     than a non-trivial set.
         //
         // Wallets start at key derivation index 1 for all UTXOs that are
-        // neither composing rewards, nor guessing rewards, nor premine UTXOs.
+        // neither composing rewards, nor proof upgrading rewards, nor premine
+        // UTXOs.
         //
         // note: this makes test known_keys_are_unique() pass.
         if wallet_state.known_generation_keys.is_empty() {
             let _ = wallet_state
                 .next_unused_spending_key(KeyType::Generation)
+                .await;
+        }
+        if wallet_state.known_symmetric_keys.is_empty() {
+            let _ = wallet_state
+                .next_unused_spending_key(KeyType::Symmetric)
                 .await;
         }
 
@@ -693,7 +745,7 @@ impl WalletState {
     /// Scan the given transaction for announced UTXOs as recognized by owned
     /// `SpendingKey`s, and then verify those announced UTXOs are actually
     /// present.
-    fn scan_for_utxos_announced_to_known_keys<'a>(
+    pub(crate) fn scan_for_utxos_announced_to_known_keys<'a>(
         &'a self,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
@@ -1115,13 +1167,16 @@ impl WalletState {
         Ok(())
     }
 
-    /// Scan the block with keys that will be derived in the future.
+    /// Scan the block for UTXOs owned by us.
+    ///
+    /// Scan with keys that will be derived in the future. Also, try-and-recover
+    /// composer UTXOs assuming the block was composed by us.
     ///
     /// The scan is done only if scan mode is active and the block is in range.
     /// If incoming UTXOs are found, the relevant key derivation counters are
     /// updated.
     async fn recover_by_scanning(&mut self, new_block: &Block) -> Vec<IncomingUtxo> {
-        let Some(scan_mode_configuration) = self.configuration.scan_mode else {
+        let Some(scan_mode_configuration) = &self.configuration.scan_mode else {
             return Vec::new();
         };
         if !scan_mode_configuration.block_is_in_range(new_block) {
@@ -1130,6 +1185,7 @@ impl WalletState {
 
         let mut recovered_outputs = vec![];
 
+        // try to recover UTXOs spent to future keys
         let mut max_counters = HashMap::<KeyType, u64>::new();
         for (key_type, derivation_index, incoming_utxo) in self
             .scan_for_utxos_announced_to_future_keys(
@@ -1146,6 +1202,58 @@ impl WalletState {
                 max_counters.insert(key_type, derivation_index);
             }
             recovered_outputs.push(incoming_utxo);
+        }
+
+        // try to reproduce composer fee UTXOs, assuming it was our block
+        if let Some(guesser_fraction) = scan_mode_configuration.maybe_guesser_fraction() {
+            // derive the composer parameters as the own miner would have
+            let composer_parameters = self.composer_parameters(
+                new_block.header().height,
+                guesser_fraction,
+                FeeNotificationPolicy::OffChain,
+            );
+
+            // if we have the necessary info to claim them
+            if let Some(receiver_preimage) = composer_parameters.maybe_receiver_preimage() {
+                // derive the composer fee UTXOs as the own miner would have
+                let coinbase_amount = Block::block_subsidy(new_block.header().height);
+                let composer_txos = composer_outputs(
+                    coinbase_amount,
+                    composer_parameters.clone(),
+                    new_block.header().timestamp,
+                )
+                .map(|array| array.to_vec())
+                .unwrap_or_default();
+
+                for composer_output in composer_txos {
+                    // compute what the addition record would have been
+                    let incoming_utxo = IncomingUtxo {
+                        utxo: composer_output.utxo(),
+                        sender_randomness: composer_output.sender_randomness(),
+                        receiver_preimage,
+                    };
+                    let addition_record = incoming_utxo.addition_record();
+
+                    // if the addition record is an output in the block,
+                    // it is ours!
+                    if new_block
+                        .body()
+                        .transaction_kernel
+                        .outputs
+                        .contains(&addition_record)
+                    {
+                        info!(
+                            "Found composer fee UTXO worth {}; timelocked? {}",
+                            incoming_utxo
+                                .utxo
+                                .get_native_currency_amount()
+                                .display_n_decimals(8),
+                            incoming_utxo.utxo.release_date().is_some()
+                        );
+                        recovered_outputs.push(incoming_utxo);
+                    }
+                }
+            }
         }
 
         info!(
@@ -1309,8 +1417,9 @@ impl WalletState {
             preprocess_own_mutxos(monitored_utxos, new_block).await;
 
         debug!(
-            "handling {} monitored UTXOs",
-            valid_membership_proofs_and_own_utxo_count.len()
+            "doing maintenance on {}/{} monitored UTXOs",
+            valid_membership_proofs_and_own_utxo_count.len(),
+            all_existing_mutxos.len()
         );
 
         // Loop over all output UTXOs, applying all addition records. In each iteration,
@@ -1766,8 +1875,10 @@ impl WalletState {
 #[cfg(test)]
 pub(crate) mod tests {
     use generation_address::GenerationSpendingKey;
+    use rand::prelude::*;
     use rand::random;
-    use rand::Rng;
+    use rand::rng;
+    use tokio::sync::broadcast;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1810,13 +1921,9 @@ pub(crate) mod tests {
     #[traced_test]
     async fn find_monitored_utxo_test() {
         let network = Network::Testnet;
-        let alice_global_lock = mock_genesis_global_state(
-            network,
-            0,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+        let cli_args = cli_args::Args::default_with_network(network);
+        let alice_global_lock =
+            mock_genesis_global_state(network, 0, WalletEntropy::devnet_wallet(), cli_args).await;
 
         let premine_utxo = {
             let wallet = &alice_global_lock.lock_guard().await.wallet_state;
@@ -2676,7 +2783,8 @@ pub(crate) mod tests {
         let wallet = WalletEntropy::devnet_wallet();
         let genesis_block = Block::genesis(network);
 
-        let wallet_state = mock_genesis_wallet_state(wallet, network).await;
+        let cli_args = cli_args::Args::default_with_network(network);
+        let wallet_state = mock_genesis_wallet_state(wallet, network, &cli_args).await;
 
         // are we synchronized to the genesis block?
         assert_eq!(
@@ -2715,6 +2823,7 @@ pub(crate) mod tests {
         use rand::rng;
 
         use super::*;
+        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::mine_loop::composer_parameters;
         use crate::mine_loop::guess_nonce;
         use crate::mine_loop::GuessingConfiguration;
@@ -2962,8 +3071,13 @@ pub(crate) mod tests {
             // below test function.
             tx_spending_guesser_fee.proof = TransactionProof::invalid();
 
-            let composer_parameters =
-                ComposerParameters::new(a_key.to_address().into(), rng.random(), 0.5f64);
+            let composer_parameters = ComposerParameters::new(
+                a_key.to_address().into(),
+                rng.random(),
+                Some(a_key.privacy_preimage()),
+                0.5f64,
+                FeeNotificationPolicy::OffChain,
+            );
             let (block2_tx, _) = fake_create_block_transaction_for_tests(
                 &block1,
                 composer_parameters,
@@ -2999,8 +3113,9 @@ pub(crate) mod tests {
         async fn guesser_fee_scanner_finds_guesser_fee_iff_present() {
             let network = Network::Main;
             let mut rng = rng();
+            let cli_args = cli_args::Args::default();
             let wallet_state =
-                mock_genesis_wallet_state(WalletEntropy::new_random(), network).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), network, &cli_args).await;
             let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (mut incoming_block, _) =
@@ -3375,8 +3490,13 @@ pub(crate) mod tests {
                 info!("key_type: {}", key_type);
 
                 // 1. Generate a mock WalletState
-                let mut wallet =
-                    mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
+                let cli_args = cli_args::Args::default();
+                let mut wallet = mock_genesis_wallet_state(
+                    WalletEntropy::new_random(),
+                    Network::RegTest,
+                    &cli_args,
+                )
+                .await;
 
                 let num_known_keys = wallet.get_known_spending_keys(key_type).count();
                 let num_to_derive = 20;
@@ -3419,11 +3539,12 @@ pub(crate) mod tests {
                 // 2. record wallet counter and known-keys
                 // 3. persist wallet.
                 // 4. forget wallet (dropped)
+                let cli_args = cli_args::Args::default();
                 let (orig_counter, orig_known_keys) = {
                     let mut wallet = mock_genesis_wallet_state_with_data_dir(
                         wallet_secret.clone(),
-                        Network::RegTest,
                         &data_dir,
+                        &cli_args,
                     )
                     .await;
 
@@ -3440,12 +3561,9 @@ pub(crate) mod tests {
                 };
 
                 // 5. instantiate 2nd wallet instance with same data_dir and secret as the first
-                let wallet = mock_genesis_wallet_state_with_data_dir(
-                    wallet_secret,
-                    Network::RegTest,
-                    &data_dir,
-                )
-                .await;
+                let wallet =
+                    mock_genesis_wallet_state_with_data_dir(wallet_secret, &data_dir, &cli_args)
+                        .await;
 
                 let persisted_counter = wallet.spending_key_counter(key_type);
                 let persisted_known_keys = wallet.get_known_spending_keys(key_type).collect_vec();
@@ -3474,8 +3592,10 @@ pub(crate) mod tests {
         #[traced_test]
         #[tokio::test]
         async fn insert_and_scan() {
+            let cli_args = cli_args::Args::default();
             let mut wallet =
-                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest, &cli_args)
+                    .await;
 
             assert!(wallet.wallet_db.expected_utxos().is_empty().await);
             assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
@@ -3529,8 +3649,10 @@ pub(crate) mod tests {
         #[traced_test]
         #[tokio::test]
         async fn prune_stale() {
+            let cli_args = cli_args::Args::default();
             let mut wallet =
-                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletEntropy::new_random(), Network::RegTest, &cli_args)
+                    .await;
 
             let mock_utxo = Utxo::new_native_currency(
                 LockScript::anyone_can_spend(),
@@ -3628,12 +3750,13 @@ pub(crate) mod tests {
                 let network = Network::RegTest;
                 let wallet_secret = WalletEntropy::new_random();
                 let data_dir = unit_test_data_directory(network).unwrap();
+                let cli_args = cli_args::Args::default();
 
                 // create initial wallet in a new directory
                 let mut wallet = mock_genesis_wallet_state_with_data_dir(
                     wallet_secret.clone(),
-                    network,
                     &data_dir,
+                    &cli_args,
                 )
                 .await;
 
@@ -3667,7 +3790,7 @@ pub(crate) mod tests {
 
                 // re-create wallet state from same seed and same directory
                 let restored_wallet =
-                    mock_genesis_wallet_state_with_data_dir(wallet_secret, network, &data_dir)
+                    mock_genesis_wallet_state_with_data_dir(wallet_secret, &data_dir, &cli_args)
                         .await;
 
                 // if wallet state was persisted to DB then we should have
@@ -3918,12 +4041,13 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
-        use rand::prelude::*;
-        use rand::rng;
-
         use super::*;
+        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::job_queue::JobQueue;
+        use crate::mine_loop::make_coinbase_transaction_stateless;
+        use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+        use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
 
@@ -4259,6 +4383,501 @@ pub(crate) mod tests {
             println!("filtered utxos has {} elements", filtered_utxos.len());
 
             assert_eq!(filtered_utxos, caught_utxos);
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn scan_mode_recovers_unexpected_offchain_composer_utxos() {
+            // Set up Rando with scan mode active
+            let network = Network::Main;
+            let seed: [u8; 32] = random();
+            let cli_args = cli_args::Args {
+                fee_notification: FeeNotificationPolicy::OffChain,
+                scan_blocks: Some(0..=10),
+                compose: true,
+                ..Default::default()
+            };
+            dbg!(seed);
+            let mut rng = StdRng::from_seed(seed);
+            let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let mut rando =
+                mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args).await;
+
+            println!("(ignore all log messages above this line)");
+
+            // Mine block
+            // Send composer UTXO notifications off-chain
+            let genesis_block = Block::genesis(network);
+            let previous_block = genesis_block.clone();
+            let now = network.launch_date() + Timestamp::minutes(10);
+
+            let composer_parameters = rando
+                .lock_guard()
+                .await
+                .composer_parameters(BlockHeight::genesis().next());
+            let (transaction, _composer_txos) = make_coinbase_transaction_stateless(
+                &previous_block,
+                composer_parameters.clone(),
+                now,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            let new_block = invalid_block_with_transaction(&previous_block, transaction);
+            assert!(
+                new_block
+                    .body()
+                    .transaction_kernel
+                    .public_announcements
+                    .is_empty(),
+                "Test assumption: composer reward not announced."
+            );
+            assert!(
+                rando
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .num_expected_utxos()
+                    .await
+                    .is_zero(),
+                "Test assumption: wallet has no expected UTXOs"
+            );
+
+            // Forget about expecting the composer UTXOs
+
+            // Update wallet state with new block (ignoring expected UTXOs)
+            // Be saved by scan mode
+            rando
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &previous_block.mutator_set_accumulator_after(),
+                    &new_block,
+                )
+                .await
+                .unwrap();
+
+            // Lo! composer utxos
+            let wallet_status = rando
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(new_block.hash(), &new_block.mutator_set_accumulator_after())
+                .await;
+            println!(
+                "wallet status -- # synced unspent: {}",
+                wallet_status.synced_unspent.len()
+            );
+            println!(
+                "wallet status -- # synced spent: {}",
+                wallet_status.synced_spent.len()
+            );
+            println!(
+                "wallet status -- # unsynced: {}",
+                wallet_status.unsynced.len()
+            );
+            assert_eq!(2, wallet_status.synced_unspent.len());
+        }
+    }
+
+    pub(crate) mod fee_notifications {
+
+        use super::*;
+        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+        use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+        use crate::main_loop::proof_upgrader::UpgradeJob;
+        use crate::mine_loop::create_block_transaction;
+        use crate::mine_loop::make_coinbase_transaction_stateless;
+        use crate::models::blockchain::block::block_height::BlockHeight;
+        use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use crate::models::state::mempool::TransactionOrigin;
+        use crate::MainToPeerTask;
+        use crate::PEER_CHANNEL_CAPACITY;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn wallet_recovers_unexpected_onchain_symmetric_composer_utxos() {
+            wallet_recovers_composer_utxos(FeeNotificationPolicy::OnChainSymmetric).await
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn wallet_recovers_unexpected_onchain_generation_composer_utxos() {
+            wallet_recovers_composer_utxos(FeeNotificationPolicy::OnChainGeneration).await
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn wallet_recovers_expected_offchain_composer_utxos() {
+            wallet_recovers_composer_utxos(FeeNotificationPolicy::OffChain).await
+        }
+
+        /// Setup:
+        ///  - Rando composes a block, and allocates composer fees to himself
+        ///    per the given policy.
+        ///  - Rando updates wallet state with the new block, and observes
+        ///    composer fee UTXOs.
+        async fn wallet_recovers_composer_utxos(
+            compose_fee_notification_policy: FeeNotificationPolicy,
+        ) {
+            // set up Rando
+            let network = Network::Main;
+            let seed: [u8; 32] = random();
+            let cli_args = cli_args::Args {
+                fee_notification: compose_fee_notification_policy,
+                ..Default::default()
+            };
+            dbg!(seed);
+            let mut rng = StdRng::from_seed(seed);
+            let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let mut global_state_lock =
+                mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args).await;
+
+            println!("(ignore all log messages above this line)");
+
+            // compose block
+            let genesis_block = Block::genesis(network);
+            let now = network.launch_date() + Timestamp::minutes(10);
+
+            let composer_parameters = global_state_lock
+                .lock_guard()
+                .await
+                .composer_parameters(BlockHeight::genesis().next());
+            let (transaction, composer_txos) = make_coinbase_transaction_stateless(
+                &genesis_block,
+                composer_parameters.clone(),
+                now,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            let new_block = invalid_block_with_transaction(&genesis_block, transaction);
+            let expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .add_expected_utxos(expected_utxos.clone())
+                .await;
+
+            let num_expected_pub_announcements = match compose_fee_notification_policy {
+                FeeNotificationPolicy::OffChain => 0,
+                FeeNotificationPolicy::OnChainSymmetric => 2,
+                FeeNotificationPolicy::OnChainGeneration => 2,
+            };
+            assert_eq!(
+                num_expected_pub_announcements,
+                new_block
+                    .body()
+                    .transaction_kernel
+                    .public_announcements
+                    .len()
+            );
+            let num_expected_expected_utxos = 2 - num_expected_pub_announcements;
+            assert_eq!(num_expected_expected_utxos, expected_utxos.len());
+
+            // update wallet state with new block (ignoring expected UTXOs)
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.mutator_set_accumulator_after(),
+                    &new_block,
+                )
+                .await
+                .unwrap();
+
+            // Lo! composer utxos
+            let wallet_status = global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(new_block.hash(), &new_block.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(2, wallet_status.synced_unspent.len());
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn wallet_recovers_expected_offchain_upgrader_fee_utxos() {
+            wallet_recovers_upgrader_fee_utxos_given_notification_policy(
+                FeeNotificationPolicy::OffChain,
+            )
+            .await;
+        }
+        #[traced_test]
+        #[tokio::test]
+        async fn wallet_recovers_unexpected_onchain_symmetric_upgrader_fee_utxos() {
+            wallet_recovers_upgrader_fee_utxos_given_notification_policy(
+                FeeNotificationPolicy::OnChainSymmetric,
+            )
+            .await;
+        }
+        #[traced_test]
+        #[tokio::test]
+        async fn wallet_recovers_unexpected_onchain_generation_upgrader_fee_utxos() {
+            wallet_recovers_upgrader_fee_utxos_given_notification_policy(
+                FeeNotificationPolicy::OnChainGeneration,
+            )
+            .await;
+        }
+
+        /// Setup:
+        ///  - A new transaction is broadcast. It is synced to genesis block.
+        ///  - A new block is mined, ignoring that transaction.
+        ///  - Rando upgrades the transaction, and collects a fee through the
+        ///    given policy.
+        ///  - The upgraded transaction is confirmed in the next block.
+        ///  - After updating state with the new block, Rando observes the
+        ///    upgrader fee UTXOs.
+        ///
+        /// Note that the initial transaction is currently a `ProofCollection`
+        /// transaction, and is being upgraded twice: once from
+        /// `ProofCollection` to `SingleProof`, and once from `SingleProof` to
+        /// `SingleProof` but with a new mutator set. Only the first upgrade
+        /// generates a fee under the current policy. When this policy changes,
+        /// it may suffice to generate a `SingleProof` from the start.
+        async fn wallet_recovers_upgrader_fee_utxos_given_notification_policy(
+            upgrade_fee_notification_policy: FeeNotificationPolicy,
+        ) {
+            // derandomize because we will need proofs
+            let seed = [
+                155, 213, 11, 57, 97, 48, 59, 23, 111, 107, 153, 29, 219, 126, 204, 48, 17, 5, 105,
+                31, 185, 57, 156, 90, 7, 121, 39, 201, 232, 33, 159, 189,
+            ];
+            dbg!(seed);
+            let mut rng = StdRng::from_seed(seed);
+
+            // set up premine recipient
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                ..Default::default()
+            };
+            let wallet_secret = WalletEntropy::devnet_wallet();
+            let mut alice =
+                mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args).await;
+            let genesis_block = Block::genesis(network);
+
+            println!("(ignore all log messages above this line)");
+
+            // create transaction with fee
+            let destination_address =
+                GenerationSpendingKey::derive_from_seed(rng.random()).to_address();
+            let transferred_amount = NativeCurrencyAmount::coins(2);
+            let fee = NativeCurrencyAmount::coins(1);
+            let sender_randomness = rng.random();
+            let own_medium = UtxoNotificationMedium::OnChain;
+            let unowned_medium = UtxoNotificationMedium::OnChain;
+            let tx_outputs = vec![TxOutput::auto(
+                &alice.lock_guard().await.wallet_state,
+                destination_address.into(),
+                transferred_amount,
+                sender_randomness,
+                own_medium,
+                unowned_medium,
+            )];
+            let change_key = alice
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_symmetric_key()
+                .await;
+            let change_medium = UtxoNotificationMedium::OnChain;
+            let now = network.launch_date() + Timestamp::months(7);
+            let dummy_queue = TritonVmJobQueue::dummy();
+            let (proof_collection_transaction, _change_outputs, _) = alice
+                .lock_guard()
+                .await
+                .create_transaction_with_prover_capability(
+                    tx_outputs.into(),
+                    change_key.into(),
+                    change_medium,
+                    fee,
+                    now,
+                    TxProvingCapability::ProofCollection,
+                    &dummy_queue,
+                )
+                .await
+                .unwrap();
+            let old_num_public_announcements = proof_collection_transaction
+                .kernel
+                .public_announcements
+                .len();
+
+            // let Rando upgrade that transaction
+            // from proof collection to single proof
+            let rando_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
+            let rando_cli_args = cli_args::Args {
+                fee_notification: upgrade_fee_notification_policy,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                // necessary to allow proof-collection -> single-proof upgrades for foreign transactions
+                compose: true,
+                ..Default::default()
+            };
+            let mut rando =
+                mock_genesis_global_state(network, 2, rando_wallet_secret.clone(), rando_cli_args)
+                    .await;
+            let upgrade_job_one = UpgradeJob::ProofCollectionToSingleProof {
+                kernel: proof_collection_transaction.kernel,
+                proof: proof_collection_transaction.proof.into_proof_collection(),
+                mutator_set: genesis_block.mutator_set_accumulator_after(),
+                gobbling_fee: fee,
+            };
+            let (channel_to_nowhere_one, nowhere_one) =
+                broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+            upgrade_job_one
+                .handle_upgrade(
+                    &dummy_queue,
+                    TransactionOrigin::Foreign,
+                    true,
+                    rando.clone(),
+                    channel_to_nowhere_one,
+                )
+                .await;
+            drop(nowhere_one); // drop must occur after message is sent
+
+            // create block ignoring that transaction. Rando has upgraded tx
+            // in mempool, alice does not. Alice composes block.
+            let (block_transaction, _composer_utxos) = create_block_transaction(
+                &genesis_block,
+                &alice,
+                now,
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+            let block_one = Block::compose(
+                &genesis_block,
+                block_transaction,
+                now,
+                None,
+                &dummy_queue,
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+            alice
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_one.clone())
+                .await
+                .unwrap();
+            rando
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_one.clone())
+                .await
+                .unwrap();
+
+            // upgrade transaction again
+            // this time mutator set data
+            let genesis_mutator_set = genesis_block.mutator_set_accumulator_after();
+            let single_proof_transaction = rando
+                .lock_guard()
+                .await
+                .mempool
+                .get_transactions_for_block(10_000_000, None, true, genesis_mutator_set.hash())[0]
+                .clone();
+            let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
+                single_proof_transaction.kernel,
+                single_proof_transaction.proof.into_single_proof(),
+                genesis_mutator_set,
+                block_one.mutator_set_update(),
+            ));
+            let (channel_to_nowhere_two, nowhere_two) =
+                broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+            upgrade_job_two
+                .handle_upgrade(
+                    &dummy_queue,
+                    TransactionOrigin::Foreign,
+                    true,
+                    rando.clone(),
+                    channel_to_nowhere_two,
+                )
+                .await;
+            drop(nowhere_two); // drop must occur after message is sent
+
+            // get upgraded transaction
+            let block_one_mutator_set = block_one.mutator_set_accumulator_after();
+            let transactions_for_block = rando
+                .lock_guard()
+                .await
+                .mempool
+                .get_transactions_for_block(10_000_000, None, true, block_one_mutator_set.hash());
+            assert_eq!(1, transactions_for_block.len());
+            let upgraded_transaction = transactions_for_block[0].clone();
+            let new_num_public_announcements =
+                upgraded_transaction.kernel.public_announcements.len();
+            if upgrade_fee_notification_policy == FeeNotificationPolicy::OffChain {
+                assert_eq!(old_num_public_announcements, new_num_public_announcements);
+            } else {
+                assert_ne!(old_num_public_announcements, new_num_public_announcements);
+            }
+
+            // merge with some other transaction to set merge bit, Alice gets
+            // composer rewards.
+            let (some_other_transaction, _) = create_block_transaction(
+                &block_one,
+                &alice,
+                block_one.header().timestamp + Timestamp::minutes(10),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            let block_two_transaction = some_other_transaction
+                .merge_with(
+                    upgraded_transaction,
+                    rng.random(),
+                    &dummy_queue,
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+
+            // create block with that transaction
+            let block_two = Block::compose(
+                &block_one,
+                block_two_transaction,
+                now + Timestamp::minutes(10),
+                None,
+                &dummy_queue,
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            // update wallet state with that block
+            assert!(rando
+                .lock_guard()
+                .await
+                .get_latest_balance_height()
+                .await
+                .is_none());
+            rando
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block_two.clone())
+                .await
+                .unwrap();
+
+            // Lo! upgrader utxos
+            let wallet_status = rando
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_wallet_status(block_two.hash(), &block_two.mutator_set_accumulator_after())
+                .await;
+            assert_eq!(2, wallet_status.synced_unspent.len());
         }
     }
 }

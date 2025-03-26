@@ -13,6 +13,7 @@ use itertools::Itertools;
 use num_traits::Zero;
 use sysinfo::System;
 
+use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -152,6 +153,34 @@ pub struct Args {
     /// threshold cannot be collected by proof upgrading will not be upgraded.
     #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_gobbling_fee: NativeCurrencyAmount,
+
+    /// Whether to keep the UTXO notifications for composer fees and
+    /// proof-upgrader fees off chain.
+    ///
+    /// Composers and proof-upgraders can gobble a portion of the fee of
+    /// transactions they work on, by directing it to an output only they can
+    /// spend. By default, a public announcement is added to the transaction to
+    /// enable the composer or proof-upgrader to recover such UTXOs after
+    /// restoring the wallet from seed phrase. This public announcement is
+    /// encryped by default under a symmetric key.
+    ///
+    /// Valid options:
+    ///
+    ///  - `on-chain-symmetric` (default) On-chain backups using symmetric key
+    ///    ciphertexts.
+    ///
+    ///  - `on-chain-generation` On-chain backups using generation addresses,
+    ///    which means that public key encryption is used instead. Note that
+    ///    public key ciphertexts are significantly larger (and thus take up
+    ///    more blockchain space) than symmetric ciphertexts.
+    ///
+    ///  - `off-chain` Avoid on-chain backups. Saves blockchain space, but risks
+    ///    loss of funds. Enable only if you know what you are doing.
+    ///
+    /// This flag does not apply to guesser fees because those UTXOs are
+    /// generated automatically.
+    #[clap(long, default_value = "on-chain-symmetric", value_parser = FeeNotificationPolicy::parse)]
+    pub(crate) fee_notification: FeeNotificationPolicy,
 
     /// Prune the mempool when it exceeds this size in RAM.
     ///

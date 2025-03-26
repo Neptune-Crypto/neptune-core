@@ -10,6 +10,7 @@ use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
 use zeroize::ZeroizeOnDrop;
 
+use super::address::ReceivingAddress;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::hash_lock_key;
@@ -24,6 +25,7 @@ use crate::prelude::twenty_first;
 /// data. The wrapper supplies arithmetic functions for use in the context of a
 /// wallet for Neptune Cash.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ZeroizeOnDrop)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct WalletEntropy {
     secret_seed: SecretKeyMaterial,
 }
@@ -60,6 +62,18 @@ impl WalletEntropy {
     /// Returns the spending key for guessing on top of the given block.
     pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
         HashLockKey::from_preimage(self.guesser_preimage(prev_block_digest))
+    }
+
+    /// Returns the spending key for prover rewards, *i.e.*, composer fee or
+    /// proof-upgrader (gobbling) fee.
+    pub(crate) fn prover_fee_key(&self) -> generation_address::GenerationSpendingKey {
+        self.nth_generation_spending_key(0u64)
+    }
+
+    /// Returns the receiving address for prover rewards, *i.e.*, composer fee
+    /// or proof-upgrader (gobbling) fee.
+    pub(crate) fn prover_fee_address(&self) -> ReceivingAddress {
+        self.prover_fee_key().to_address().into()
     }
 
     /// derives a generation spending key at `index`
@@ -186,24 +200,36 @@ impl From<WalletEntropy> for SecretKeyMaterial {
 
 #[cfg(test)]
 mod test {
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
     use super::*;
 
     impl WalletEntropy {
         /// Create a new `WalletEntropy` object and populate it with entropy
         /// obtained via `rand::rng()` from the operating system.
-        #[cfg(test)]
         pub(crate) fn new_random() -> Self {
             Self::new_pseudorandom(rand::Rng::random(&mut rand::rng()))
         }
 
         /// Create a new `WalletEntropy` object and populate it by expanding a given
         /// seed.
-        #[cfg(test)]
         pub(crate) fn new_pseudorandom(seed: [u8; 32]) -> Self {
             let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
             Self {
                 secret_seed: SecretKeyMaterial(rand::Rng::random(&mut rng)),
             }
         }
+    }
+
+    #[proptest(cases = 10)]
+    fn prover_fee_address_agrees_with_receiver_preimage(
+        #[strategy(arb())] wallet_entropy: WalletEntropy,
+    ) {
+        prop_assert_eq!(
+            wallet_entropy.prover_fee_key().privacy_preimage().hash(),
+            wallet_entropy.prover_fee_address().privacy_digest(),
+        );
     }
 }

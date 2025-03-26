@@ -47,6 +47,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
@@ -242,7 +243,7 @@ pub(crate) async fn mock_genesis_global_state(
         genesis_block.hash(),
     );
 
-    let wallet_state = mock_genesis_wallet_state(wallet, network).await;
+    let wallet_state = mock_genesis_wallet_state(wallet, network, &cli).await;
 
     GlobalStateLock::new(
         wallet_state,
@@ -722,7 +723,9 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     let composer_parameters = ComposerParameters::new(
         composer_key.to_address().into(),
         coinbase_sender_randomness,
+        Some(composer_key.privacy_preimage()),
         guesser_fraction,
+        FeeNotificationPolicy::OffChain,
     );
 
     let (tx, composer_txos) = make_coinbase_transaction_stateless(
@@ -778,24 +781,20 @@ pub(crate) async fn make_mock_block(
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
 pub async fn mock_genesis_wallet_state(
-    wallet_secret: WalletEntropy,
+    wallet_entropy: WalletEntropy,
     network: Network,
+    cli_args: &cli_args::Args,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(network).unwrap();
-    mock_genesis_wallet_state_with_data_dir(wallet_secret, network, &data_dir).await
+    mock_genesis_wallet_state_with_data_dir(wallet_entropy, &data_dir, cli_args).await
 }
 
 pub async fn mock_genesis_wallet_state_with_data_dir(
     wallet_entropy: WalletEntropy,
-    network: Network,
     data_dir: &DataDirectory,
+    cli_args: &cli_args::Args,
 ) -> WalletState {
-    let cli_args: cli_args::Args = cli_args::Args {
-        number_of_mps_per_utxo: 30,
-        network,
-        ..Default::default()
-    };
-    WalletState::new_from_wallet_entropy(data_dir, wallet_entropy, &cli_args).await
+    WalletState::new_from_wallet_entropy(data_dir, wallet_entropy, cli_args).await
 }
 
 /// Return an archival state populated with the genesis block
@@ -1019,7 +1018,9 @@ async fn fake_block_successor(
     let composer_parameters = ComposerParameters::new(
         GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
         rng.random(),
+        None,
         0.5f64,
+        FeeNotificationPolicy::OffChain,
     );
     let (block_tx, _) = fake_create_block_transaction_for_tests(
         predecessor,
