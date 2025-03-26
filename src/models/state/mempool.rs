@@ -118,6 +118,30 @@ pub(crate) struct MempoolTransaction {
     pub(crate) origin: TransactionOrigin,
 }
 
+/// Unpersisted view of valid transactions that have not been confirmed yet.
+///
+/// Transactions can be inserted into the mempool, and a max size of the
+/// mempool can be declared, either in number of bytes, or in number of
+/// transactions allowed into the mempool.
+///
+/// The mempool uses [`TransactionKernelId`] as its main key, meaning that two
+/// transactions with the same [`TransactionKernelId`] can never be stored in
+/// the mempool. The mempool keeps a sorted view of which transactions are the
+/// most fee-paying as measured by [`FeeDensity`], thus allowing for the least
+/// valuable (from a miner's and proof upgrader's perspective) transactions to
+/// be dropped. However, the mempool always favors transactions of higher
+/// "proof-quality" such that a single-proof backed transaction will always
+/// replace a primitive-witness or proof-collection backed transaction, without
+/// considering fee densities. This is because a) single-proof backed
+/// transactions can always be synced to the latest block (assuming no
+/// reorganization has occurred), and b) because single-proof backed
+/// transactions are more likely to be picked for inclusion in the next block.
+///
+/// The mempool does not attempt to confirm validity or confirmability of its
+/// transactions, that must be handled by the caller. It does, however,
+/// guarantee that no conflicting transactions can be contained in the mempool.
+/// This means that two transactions that spend the same input will never be
+/// allowed into the mempool simultaneously.
 #[derive(Debug, GetSize)]
 pub struct Mempool {
     /// Maximum size this data structure may take up in memory.
