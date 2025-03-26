@@ -56,42 +56,55 @@ impl TransactionDetailsBuilder {
         self
     }
 
+    /// adds an input.
     pub fn input(mut self, tx_input: TxInput) -> Self {
         self.tx_inputs.push(tx_input);
         self
     }
 
+    /// adds a list of inputs.  See [TransactionInputListBuilder]
     pub fn inputs(mut self, mut tx_input_list: TxInputList) -> Self {
         self.tx_inputs.append(&mut tx_input_list);
         self
     }
 
+    /// adds an output
     pub fn output(mut self, tx_output: TxOutput) -> Self {
         self.tx_outputs.push(tx_output);
         self
     }
 
+    /// adds a list of outputs.  See [TransactionOutputListBuilder]
     pub fn outputs(mut self, mut tx_output_list: TxOutputList) -> Self {
         self.tx_outputs.append(&mut tx_output_list);
         self
     }
 
+    /// adds a fee amount
     pub fn fee(mut self, amount: NativeCurrencyAmount) -> Self {
         self.fee = amount;
         self
     }
 
+    /// adds a coinbase amount
     pub fn coinbase(mut self, amount: NativeCurrencyAmount) -> Self {
         self.coinbase = Some(amount);
         self
     }
 
+    /// adds a change policy.   defaults to [ChangePolicy::default()]
     pub fn change_policy(mut self, change_policy: ChangePolicy) -> Self {
         self.change_policy = change_policy;
         self
     }
 
     /// build [TransactionDetails] and possibly mutate wallet state, acquiring write-lock if necessary.
+    ///
+    /// some basic validation of inputs is performed however the result could
+    /// still represent an invalid transaction.  The caller can call
+    /// [TransactionDetails::validate()] on the result.  Otherwise, the
+    /// transaction will be fully validated by the triton VM before it is
+    /// recorded and and broadcast.
     ///
     /// important: this method will generate a new wallet-key for change if
     /// necessary. This occurs if change_policy is
@@ -123,7 +136,7 @@ impl TransactionDetailsBuilder {
         } = self;
 
         // default to present time if unspecified
-        let timestamp = timestamp.unwrap_or_else(|| Timestamp::now());
+        let timestamp = timestamp.unwrap_or_else(Timestamp::now);
 
         let total_outbound_amount = tx_outputs
             .total_native_coins()

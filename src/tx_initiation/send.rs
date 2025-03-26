@@ -3,15 +3,23 @@
 //!
 //! The intent is to present the same API for both rust callers and RPC callers.
 
+use std::sync::Arc;
+
 use super::error;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_creation_config::ChangePolicy;
-use crate::models::state::tx_creation_config::TxCreationConfig;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::StateLock;
+use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
+use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::tx_initiation::export::TransactionProofType;
 use crate::GlobalStateLock;
 
 #[derive(Debug)]
@@ -30,59 +38,88 @@ impl TransactionSender {
     // to retrieve (and store) offchain notifications, if any.
     pub async fn send(
         &mut self,
-        outputs: impl IntoIterator<Item = OutputFormat>,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
-        now: Timestamp,
+        timestamp: Timestamp,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        let mut initiator = self.global_state_lock.tx_initiator();
-        let mut initiator_internal = self.global_state_lock.tx_initiator_internal();
         let initiator_private = self.private();
+        let gsl = &mut self.global_state_lock;
 
         initiator_private.check_proceed_with_send(fee).await?;
 
         tracing::debug!("tx send initiated.");
 
-        // The proving capability is set to the lowest possible value here,
+        // The target proof-type is set to the lowest possible value here,
         // since we don't want the client (CLI or dashboard) to hang while
         // producing proofs. Instead, we let (a task started by) main loop
         // handle the proving.
-        let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
+        let target_proof_type = TransactionProofType::PrimitiveWitness;
 
-        let tx_outputs = initiator.generate_tx_outputs(outputs).await;
+        // acquire lock.  write-lock is only needed if we must generate a
+        // new change receiving address.  However, that is also the most common
+        // scenario.
+        let mut state_lock = match change_policy {
+            ChangePolicy::RecoverToNextUnusedKey { .. } => StateLock::read_guard(gsl).await,
+            _ => StateLock::read_guard(gsl).await,
+        };
 
-        tracing::debug!(
-            "send: generated outputs.  spend amount = {}",
-            tx_outputs.total_native_coins()
-        );
+        // generate outputs
+        let tx_outputs = TxOutputListBuilder::new()
+            .outputs(outputs)
+            .build(&state_lock)
+            .await;
 
-        // Create the transaction
-        //
-        // note: A change output will be added to tx_outputs if needed.
-        //
-        // create_transaction() modifies state only if a new-receiving address
-        // is required for a change output.  It also calls prove() which is a
-        // very lengthy operation.
-        let config = TxCreationConfig::default()
-            .use_change_policy(change_policy)
-            .with_prover_capability(tx_proving_capability)
-            .use_job_queue(vm_job_queue());
+        // select inputs
+        let tx_inputs = TxInputListBuilder::new()
+            .spendable_inputs(
+                state_lock
+                    .gs()
+                    .wallet_spendable_inputs(timestamp)
+                    .await
+                    .into_iter()
+                    .collect(),
+            )
+            .policy(InputSelectionPolicy::Random)
+            .spend_amount(tx_outputs.total_native_coins() + fee)
+            .build();
 
-        let tx_artifacts = initiator_internal
-            .create_transaction(tx_outputs, fee, now, config)
-            .await
-            .map_err(|e| {
-                tracing::error!("Could not create transaction: {}", e);
-                e
-            })?;
+        // generate tx details (may add change output)
+        let tx_details = TransactionDetailsBuilder::new()
+            .inputs(tx_inputs.into_iter().into())
+            .outputs(tx_outputs)
+            .fee(fee)
+            .change_policy(change_policy)
+            .build(&mut state_lock)
+            .await?;
+        drop(state_lock); // release lock asap.
 
-        tracing::info!("send: record and broadcast tx:\n{}", tx_artifacts.details);
+        tracing::info!("send: proving tx:\n{}", tx_details);
 
-        initiator
-            .record_and_broadcast_transaction(&tx_artifacts)
+        let tx_details_rc = Arc::new(tx_details);
+
+        // generate proof
+        let proof = TransactionProofBuilder::new()
+            .transaction_details(tx_details_rc.clone())
+            .job_queue(vm_job_queue())
+            .tx_proving_capability(gsl.cli().proving_capability())
+            .proof_type(target_proof_type)
+            .build()
             .await?;
 
-        Ok(tx_artifacts)
+        // assemble transaction
+        let tx_creation_artifacts = TransactionBuilder::new()
+            .transaction_details(tx_details_rc.clone())
+            .transaction_proof(proof)
+            .build_tx_artifacts(gsl.cli().network)?;
+
+        tracing::info!("send: record and broadcast tx:\n{}", tx_details_rc);
+
+        gsl.tx_initiator()
+            .record_and_broadcast_transaction(&tx_creation_artifacts)
+            .await?;
+
+        Ok(tx_creation_artifacts)
     }
 
     fn private(&self) -> super::private::TransactionInitiatorPrivate {

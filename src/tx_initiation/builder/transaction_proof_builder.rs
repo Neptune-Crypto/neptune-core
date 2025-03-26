@@ -1,3 +1,58 @@
+//! This module implements a builder for transaction proofs.
+//!
+//! There are different levels of [TransactionProof] that
+//! can be generated.  The desired proof can be specified with [ProofType].
+//!
+//! Proof are generated in the Triton VM.
+//!
+//! Proof generation is a very CPU and RAM intensive process.  Each type
+//! of proof has different hardware requirements.  Also the complexity is
+//! affected by the type and size of transaction.
+//!
+//! It is necessary to inform the builder of the device's [TxProvingCapability]
+//! so that weak devices will not attempt to build proofs they are not capable of.
+//!
+//! Before a transaction can be confirmed in a block it must have a SingleProof
+//! which is the hardest proof to generate.
+//!
+//! When initiating a transaction, the typical sequence is:
+//!  1. create tx inputs and outputs.
+//!  2. create tx details.
+//!  3. generate a primitive witness proof for tx details.
+//!  4. assemble the transaction.
+//!  5. record and broadcast the transaction.
+//!
+//!  (caller is done)
+//!
+//!  6. neptune-core upgrades the proof to ProofCollection.
+//!  7. neptune-core broadcasts the transaction to other nodes.
+//!  8. a powerful node upgrades the proof to SingleProof.
+//!  9. a composer adds the proof to a block-template
+//! 10. a prover (miner) mines the Tx into a block.
+//!
+//! However if the caller has a powerful enough machine, they can generate
+//! a ProofCollection or SingleProof themself before passing the transaction
+//! to neptune-core.  This takes load off the entire network.
+//!
+//! Note that the caller could generate the Proof on a separate device from
+//! that running neptune-core.
+//!
+//! In this case, the sequence can look like:
+//!  1. create tx inputs and outputs.
+//!  2. create tx details.
+//!  3. generate a SingleProof for tx details.
+//!  4. assemble the transaction.
+//!  5. record and broadcast the transaction.
+//!
+//!  (caller is done)
+//!
+//!  6. neptune-core broadcasts the transaction to other nodes.
+//!  7. a composer adds the proof to a block-template
+//!  8. a prover (miner) mines the Tx into a block.
+//!
+//! (The sequence for ProofCollection is like the original sequence
+//! but with step 6 being performed by the caller in step 3.)
+
 use std::sync::Arc;
 
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -11,6 +66,9 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::tx_initiation::error::CreateProofError;
 
+/// a builder for [TransactionProof]
+///
+/// see module docs for details.
 #[derive(Debug, Default)]
 pub struct TransactionProofBuilder {
     transaction_details: Option<Arc<TransactionDetails>>,
@@ -21,36 +79,71 @@ pub struct TransactionProofBuilder {
 }
 
 impl TransactionProofBuilder {
+    /// instantiate
     pub fn new() -> Self {
         Default::default()
     }
 
+    /// add transaction details (required)
     pub fn transaction_details(mut self, transaction_details: Arc<TransactionDetails>) -> Self {
         self.transaction_details = Some(transaction_details);
         self
     }
 
+    /// add job queue (required)
     pub fn job_queue(mut self, job_queue: Arc<TritonVmJobQueue>) -> Self {
         self.job_queue = Some(job_queue);
         self
     }
 
+    /// add job options. (optional)
     pub fn proof_job_options(mut self, proof_job_options: TritonVmProofJobOptions) -> Self {
         self.proof_job_options = proof_job_options;
         self
     }
 
+    /// specify the target proof type.  (optional)
+    ///
+    /// if not specified, then builder attempts to generate the
+    /// best proof the device is capable of, as specified by
+    /// tx_proving_capability().
     pub fn proof_type(mut self, proof_type: TransactionProofType) -> Self {
         self.proof_type = Some(proof_type);
         self
     }
 
+    /// specify the device's proving capability.  (optional)
     pub fn tx_proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
         self.tx_proving_capability = tx_proving_capability;
         self
     }
 
-    // fn build(self) -> Result<TransactionProof, TransactionProofBuildError> {
+    /// generate the proof.
+    ///
+    /// if the target proof-type is Witness, this will return immediately.
+    ///
+    /// otherwise it will initiate an async job that could many minutes.
+    ///
+    /// note that these jobs occur in a global (per process) job queue that only
+    /// permits one VM job to process at a time.  This prevents parallel jobs
+    /// from bringing the machine to its knees when each is using all available
+    /// CPU cores and RAM.
+    ///
+    /// Given the serialized nature of the job-queue, it is possible or even likely
+    /// that other jobs may precede this one.
+    ///
+    /// The caller can query the job_queue to determine how many jobs are in the
+    /// queue.
+    ///
+    /// Cancellation:
+    ///
+    /// note that cancelling the future returned by build() will NOT cancel the
+    /// job in the job-queue, as that runs in a separately spawned tokio task
+    /// managed by the job-queue.
+    ///
+    /// Although the job-queue provides a method for cancelling jobs, this builder
+    /// does not presently expose it.  As such, there is no way to cancel a job
+    /// once build() is called.  That funtionality may be exposed later.
     pub async fn build(self) -> Result<TransactionProof, CreateProofError> {
         let (Some(tx_details), Some(job_queue)) = (self.transaction_details, self.job_queue) else {
             return Err(CreateProofError::MissingRequirement);

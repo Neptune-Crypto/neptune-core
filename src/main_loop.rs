@@ -2110,7 +2110,7 @@ mod test {
                 .recover_change_off_chain(change_key.into())
                 .with_prover_capability(tx_proof_type);
             global_state_lock
-                .tx_initiator_internal_mut()
+                .tx_initiator_internal()
                 .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
                 .await
                 .unwrap()

@@ -55,8 +55,14 @@ impl TxCreationArtifacts {
     ///  1. Self::network matches provided Network.
     ///  2. Transaction and TransactionDetails match.
     ///  3. Transaction proof is valid, and thus the Tx itself is valid.
+    ///
+    /// At present we do NOT validate the TransactionDetails themselves
+    /// because if the details match the transaction and the transaction is
+    /// valid, that is sufficient.
     pub async fn verify(&self, network: Network) -> Result<(), TxCreationArtifactsError> {
         // todo: (how) can we also verify that self.network matches the Tx?
+
+        // note: we check the least expensive things first.
 
         // 1. Self::network matches provided Network.
         if network != self.network {
@@ -80,6 +86,8 @@ impl TxCreationArtifacts {
         if !self.transaction.verify_proof().await {
             return Err(TxCreationArtifactsError::InvalidProof);
         }
+
+        // 4. skipped.  validate the transaction details is valid.
 
         Ok(())
     }

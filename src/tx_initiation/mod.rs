@@ -5,8 +5,8 @@ pub mod export;
 pub mod initiator;
 pub mod send;
 
-// for internal crate usage
-pub(crate) mod internal;
+#[cfg(test)]
+pub(crate) mod test_util;
 
 // private worker
 mod private;

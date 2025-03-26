@@ -47,7 +47,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -56,7 +55,8 @@ use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use crate::tx_initiation;
+use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
+use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::tx_initiation::export::TxInputList;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
@@ -387,16 +387,20 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     let (composer_outputs, transaction_details) =
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
 
-    info!("Start: generate single proof for coinbase transaction");
-    let config = TxCreationConfig::default()
-        .exact_change()
-        .use_job_queue(vm_job_queue)
-        .with_proof_job_options(job_options)
-        .with_prover_capability(proving_power);
+    let tx_details_arc = Arc::new(transaction_details);
+    let proof = TransactionProofBuilder::new()
+        .transaction_details(tx_details_arc.clone())
+        .job_queue(vm_job_queue)
+        .proof_job_options(job_options)
+        .tx_proving_capability(proving_power)
+        .build()
+        .await?;
 
-    let transaction =
-        tx_initiation::internal::create_raw_transaction(Arc::new(transaction_details), config)
-            .await?;
+    info!("Start: generate single proof for coinbase transaction");
+    let transaction = TransactionBuilder::new()
+        .transaction_details(tx_details_arc)
+        .transaction_proof(proof)
+        .build()?;
 
     info!("Done: generating single proof for coinbase transaction");
 

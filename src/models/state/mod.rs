@@ -79,8 +79,9 @@ use crate::models::state::wallet::transaction_input::TxInput;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::tx_initiation::initiator::TransactionInitiator;
-use crate::tx_initiation::internal::TransactionInitiatorInternal;
 use crate::tx_initiation::send::TransactionSender;
+#[cfg(test)]
+use crate::tx_initiation::test_util;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
@@ -215,12 +216,8 @@ impl GlobalStateLock {
     }
 
     #[cfg(test)]
-    pub(crate) fn tx_initiator_internal_mut(&mut self) -> TransactionInitiatorInternal {
-        TransactionInitiatorInternal::new(self.clone())
-    }
-
-    pub(crate) fn tx_initiator_internal(&self) -> TransactionInitiatorInternal {
-        TransactionInitiatorInternal::new(self.clone())
+    pub(crate) fn tx_initiator_internal(&self) -> test_util::TransactionInitiatorInternal {
+        test_util::TransactionInitiatorInternal::new(self.clone())
     }
 
     pub fn tx_initiator_mut(&mut self) -> TransactionInitiator {
@@ -383,6 +380,14 @@ impl<'a> From<AtomicRwWriteGuard<'a, GlobalState>> for StateLock<'a> {
 }
 
 impl<'a> StateLock<'a> {
+    pub async fn read_guard(gsl: &'a GlobalStateLock) -> Self {
+        Self::ReadGuard(gsl.lock_guard().await)
+    }
+
+    pub async fn write_guard(gsl: &'a mut GlobalStateLock) -> Self {
+        Self::WriteGuard(gsl.lock_guard_mut().await)
+    }
+
     pub fn gs(&self) -> &GlobalState {
         match self {
             Self::ReadGuard(g) => g,

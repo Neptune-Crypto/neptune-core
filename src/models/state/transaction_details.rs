@@ -13,6 +13,7 @@ use tracing::error;
 use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_input::TxInputList;
@@ -271,6 +272,16 @@ impl TransactionDetails {
             .total_native_coins()
             .checked_sub(&not_spend)
             .unwrap_or_else(|| 0.into())
+    }
+
+    /// verifies the transaction details are valid.
+    ///
+    /// specifically, a [PrimitiveWitness] is built from these
+    /// details and validated in the triton VM.
+    pub async fn validate(&self) -> bool {
+        PrimitiveWitness::from_transaction_details(self)
+            .validate()
+            .await
     }
 }
 

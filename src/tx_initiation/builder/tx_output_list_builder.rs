@@ -138,8 +138,16 @@ impl TxOutputListBuilder {
     }
 
     /// add an output
-    pub fn output_format(mut self, output_format: impl Into<OutputFormat>) -> Self {
-        self.outputs.push(output_format.into());
+    pub fn output(mut self, output: impl Into<OutputFormat>) -> Self {
+        self.outputs.push(output.into());
+        self
+    }
+
+    /// add a list of outputs
+    pub fn outputs(mut self, outputs: impl IntoIterator<Item = impl Into<OutputFormat>>) -> Self {
+        for output in outputs {
+            self.outputs.push(output.into())
+        }
         self
     }
 

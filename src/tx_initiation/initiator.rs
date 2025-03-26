@@ -82,14 +82,10 @@ impl TransactionInitiator {
         &self,
         outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
     ) -> TxOutputList {
-        let mut builder = TxOutputListBuilder::new();
-
-        for output_format in outputs {
-            builder = builder.output_format(output_format);
-        }
-
-        // note: cheap arc clone.
-        builder.build(&self.global_state_lock.clone().into()).await
+        TxOutputListBuilder::new()
+            .outputs(outputs)
+            .build(&self.global_state_lock.clone().into())
+            .await
     }
 
     pub async fn generate_tx_details(

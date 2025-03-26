@@ -1,8 +1,8 @@
-//! this module provides crate-internal tx-initiation APIs.
+//! this is a test-util module that provides the historic create_transaction()
+//! API for usage by tests.
+
 use std::sync::Arc;
 
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::StateLock;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
@@ -87,40 +87,11 @@ impl TransactionInitiatorInternal {
             .await?;
 
         // assemble transaction
-        let transaction = TransactionBuilder::new()
+        let tx_creation_artifacts = TransactionBuilder::new()
             .transaction_details(tx_details_rc.clone())
             .transaction_proof(proof)
-            .build()?;
+            .build_tx_artifacts(self.global_state_lock.cli().network)?;
 
-        // package tx with details
-        let transaction_creation_artifacts = TxCreationArtifacts {
-            network: self.global_state_lock.cli().network,
-            transaction: Arc::new(transaction),
-            details: tx_details_rc,
-        };
-
-        Ok(transaction_creation_artifacts)
+        Ok(tx_creation_artifacts)
     }
-}
-
-/// note: this is a internal internal (crate-private) API.
-///
-/// note: this is now just a wrapper around TransactionProofBuilder and
-/// TransactionBuilder
-pub(crate) async fn create_raw_transaction(
-    tx_details_arc: Arc<TransactionDetails>,
-    config: TxCreationConfig,
-) -> anyhow::Result<Transaction> {
-    let proof = TransactionProofBuilder::new()
-        .transaction_details(tx_details_arc.clone())
-        .job_queue(config.job_queue())
-        .proof_job_options(config.proof_job_options())
-        .tx_proving_capability(config.prover_capability())
-        .build()
-        .await?;
-
-    Ok(TransactionBuilder::new()
-        .transaction_details(tx_details_arc)
-        .transaction_proof(proof)
-        .build()?)
 }

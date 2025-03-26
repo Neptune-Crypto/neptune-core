@@ -4,12 +4,8 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::job_queue::triton_vm::vm_job_queue;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::wallet::address::KeyType;
 
 /// When the selected inputs represent more coins than the outputs (with fee)
@@ -65,7 +61,17 @@ impl ChangePolicy {
     }
 }
 
+#[cfg(test)]
+use super::tx_proving_capability::TxProvingCapability;
+#[cfg(test)]
+use crate::job_queue::triton_vm::vm_job_queue;
+#[cfg(test)]
+use crate::job_queue::triton_vm::TritonVmJobQueue;
+#[cfg(test)]
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+
 /// Options and configuration settings for creating transactions
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct TxCreationConfig {
     prover_capability: TxProvingCapability,
@@ -74,12 +80,14 @@ pub(crate) struct TxCreationConfig {
     change_policy: ChangePolicy,
 }
 
+#[cfg(test)]
 impl Default for TxCreationConfig {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(test)]
 impl TxCreationConfig {
     pub fn new() -> Self {
         Self {
@@ -90,17 +98,6 @@ impl TxCreationConfig {
         }
     }
 
-    pub fn use_change_policy(mut self, change_policy: ChangePolicy) -> Self {
-        self.change_policy = change_policy;
-        self
-    }
-
-    pub fn exact_change(mut self) -> Self {
-        self.change_policy = ChangePolicy::ExactChange;
-        self
-    }
-
-    #[cfg(test)]
     pub fn recover_to_provided_key(
         mut self,
         change_key: Arc<SpendingKey>,
@@ -109,21 +106,6 @@ impl TxCreationConfig {
         self.change_policy = ChangePolicy::recover_to_provided_key(change_key, notification_medium);
         self
     }
-
-    // pub fn recover_to_next_unused_key(
-    //     mut self,
-    //     key_type: KeyType,
-    //     notification_medium: UtxoNotificationMedium,
-    // ) -> Self {
-    //     self.change_policy =
-    //         ChangePolicy::recover_to_next_unused_key(key_type, notification_medium);
-    //     self
-    // }
-
-    // pub fn burn_change(mut self) -> Self {
-    //     self.change_policy = ChangePolicy::Burn;
-    //     self
-    // }
 
     /// Configure the proving capacity.
     pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {
@@ -134,18 +116,6 @@ impl TxCreationConfig {
     /// Configure which job queue to use.
     pub(crate) fn use_job_queue(mut self, job_queue: Arc<TritonVmJobQueue>) -> Self {
         self.triton_vm_job_queue = job_queue;
-        self
-    }
-
-    /// Set the proof job options.
-    ///
-    /// By default, this field assumes the value determined by
-    /// `TritonVmProofJobOptions::default()`.
-    pub(crate) fn with_proof_job_options(
-        mut self,
-        proof_job_options: TritonVmProofJobOptions,
-    ) -> Self {
-        self.proof_job_options = proof_job_options;
         self
     }
 
