@@ -8,20 +8,26 @@
 //! the builder API.
 //!
 //! ```rust
-//! fn send_transaction(gsl: GlobalStateLock, recipient: ReceivingAddress, amount: NativeCurrencyAmount, change_policy: ChangePolicy) -> anyhow::Result<()> {
+//! fn send_transaction(gsl: &mut GlobalStateLock, recipient: ReceivingAddress, amount: NativeCurrencyAmount, change_policy: ChangePolicy) -> anyhow::Result<()> {
 //!
 //!    // acquire lock.  write-lock is only needed if we must generate a
 //!    // new change receiving address.  However, that is also the most common
 //!    // scenario.
 //!    let mut state_lock = match change_policy {
-//!        ChangePolicy::RecoverToNextUnusedKey { .. } => StateLock::read_guard(&gsl).await,
-//!        _ => StateLock::WriteGuard(&mut gsl).await,
+//!        ChangePolicy::RecoverToNextUnusedKey { .. } => StateLock::write_guard(gsl).await,
+//!        _ => StateLock::read_guard(gsl).await,
 //!    };
+//!
+//!    // generate outputs
+//!    let tx_outputs = TxOutputListBuilder::new()
+//!        .outputs(outputs)
+//!        .build(&state_lock)
+//!        .await;
 //!
 //!    // select inputs
 //!    let tx_inputs = TxInputListBuilder::new()
 //!        .spendable_inputs(
-//!                state_lock
+//!            state_lock
 //!                .gs()
 //!                .wallet_spendable_inputs(timestamp)
 //!                .await
@@ -32,12 +38,7 @@
 //!        .spend_amount(tx_outputs.total_native_coins() + fee)
 //!        .build();
 //!
-//!    // generate outputs
-//!    let tx_outputs = TxOutputListBuilder::new()
-//!        .output_format(output_format);
-//!        .build(&state_lock).await
-//!
-//!    // generate tx details
+//!    // generate tx details (may add change output)
 //!    let tx_details = TransactionDetailsBuilder::new()
 //!        .inputs(tx_inputs.into_iter().into())
 //!        .outputs(tx_outputs)
@@ -45,7 +46,7 @@
 //!        .change_policy(change_policy)
 //!        .build(&mut state_lock)
 //!        .await?;
-//!    drop(state_lock);  // release lock asap.
+//!    drop(state_lock); // release lock asap.
 //!
 //!    let tx_details_rc = Arc::new(tx_details);
 //!
@@ -53,7 +54,8 @@
 //!    let proof = TransactionProofBuilder::new()
 //!        .transaction_details(tx_details_rc.clone())
 //!        .job_queue(vm_job_queue())
-//!        .tx_proving_capability(gsl.cli().prover_capability())
+//!        .tx_proving_capability(gsl.cli().proving_capability())
+//!        .proof_type(target_proof_type)
 //!        .build()
 //!        .await?;
 //!
@@ -61,13 +63,18 @@
 //!    let tx_creation_artifacts = TransactionBuilder::new()
 //!        .transaction_details(tx_details_rc.clone())
 //!        .transaction_proof(proof)
-//!        .build_tx_artifacts(state_lock.gs().cli().network)?;
+//!        .build_tx_artifacts(gsl.cli().network)?;
 //!
-//!    gsl.tx_initiator().record_and_broadcast_transaction(&tx_creation_artifacts)?;
+//!    // record and broadcast tx
+//!    gsl.tx_initiator()
+//!        .record_and_broadcast_transaction(&tx_creation_artifacts)
+//!        .await?;
+//!
+//!    Ok(tx_creation_artifacts)
 //! }
 //! ```
 //!
-//! note: the above example fn is very similar to the implementation of [TransactionSender::send()].
+//! note: the above example fn is copied from the implementation of [TransactionSender::send()].
 
 use std::sync::Arc;
 
@@ -79,6 +86,9 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::tx_initiation::error::CreateTxError;
 use crate::tx_initiation::export::TxCreationArtifacts;
 
+/// a builder for [Transaction] and [TxCreationArtifacts]
+///
+/// see module docs for details and example usage.
 #[derive(Debug, Default)]
 pub struct TransactionBuilder {
     transaction_details: Option<Arc<TransactionDetails>>,
@@ -86,20 +96,27 @@ pub struct TransactionBuilder {
 }
 
 impl TransactionBuilder {
+    /// instantiate
     pub fn new() -> Self {
         Default::default()
     }
 
+    /// add transaction details (required)
     pub fn transaction_details(mut self, transaction_details: Arc<TransactionDetails>) -> Self {
         self.transaction_details = Some(transaction_details);
         self
     }
 
+    /// add transaction proof (required)
     pub fn transaction_proof(mut self, transaction_proof: TransactionProof) -> Self {
         self.transaction_proof = Some(transaction_proof);
         self
     }
 
+    /// build a [Transaction]
+    ///
+    /// note: the builder does not validate the resulting transaction.
+    /// caller can do so with [Transaction::verify_proof()]
     pub fn build(self) -> Result<Transaction, CreateTxError> {
         let (Some(tx_details), Some(proof)) = (self.transaction_details, self.transaction_proof)
         else {
@@ -114,8 +131,10 @@ impl TransactionBuilder {
         })
     }
 
+    /// build a [TxCreationArtifacts]
+    ///
     /// note: the builder does not validate the resulting artifacts.
-    /// caller can do so with TxCreationArtifacts::verify()
+    /// caller can do so with [TxCreationArtifacts::verify()]
     pub fn build_tx_artifacts(
         self,
         network: Network,

@@ -1555,6 +1555,13 @@ pub trait RPC {
         transaction_proof: TransactionProof,
     ) -> RpcResult<Transaction>;
 
+    /// assemble transaction artifacts from TransactionDetails and a TransactionProof.
+    async fn assemble_transaction_artifacts(
+        token: rpc_auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<TxCreationArtifacts>;
+
     /// record transaction and initiate broadcast to peers
     async fn record_and_broadcast_transaction(
         token: rpc_auth::Token,
@@ -2897,6 +2904,23 @@ impl RPC for NeptuneRPCServer {
             .state
             .tx_initiator()
             .assemble_transaction(Arc::new(transaction_details), transaction_proof)?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn assemble_transaction_artifacts(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<TxCreationArtifacts> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .tx_initiator()
+            .assemble_transaction_artifacts(Arc::new(transaction_details), transaction_proof)?)
     }
 
     // documented in trait. do not add doc-comment.

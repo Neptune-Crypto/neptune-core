@@ -43,10 +43,9 @@ impl TransactionSender {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
     ) -> Result<TxCreationArtifacts, error::SendError> {
-        let initiator_private = self.private();
-        let gsl = &mut self.global_state_lock;
+        self.private().check_proceed_with_send(fee).await?;
 
-        initiator_private.check_proceed_with_send(fee).await?;
+        let gsl = &mut self.global_state_lock;
 
         tracing::debug!("tx send initiated.");
 
@@ -60,7 +59,7 @@ impl TransactionSender {
         // new change receiving address.  However, that is also the most common
         // scenario.
         let mut state_lock = match change_policy {
-            ChangePolicy::RecoverToNextUnusedKey { .. } => StateLock::read_guard(gsl).await,
+            ChangePolicy::RecoverToNextUnusedKey { .. } => StateLock::write_guard(gsl).await,
             _ => StateLock::read_guard(gsl).await,
         };
 

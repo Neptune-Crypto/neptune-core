@@ -1,7 +1,15 @@
-//! This is the start of an API layer for creating and sending transactions.  It
-//! is callable by rust users of this crate as well as the RPC server.
+//! This is the mid-level neptune-core API layer for creating and sending transactions.
+//! It provides callers with a great deal of flexibility.
+//!
+//! This API wraps the [builder] API, which is a bit more verbose but also easy
+//! to use.
+//!
+//! It is callable by rust users of this crate as well as the RPC server.
 //!
 //! The intent is to present the same API for both rust callers and RPC callers.
+//!
+//! The high-level [send] API is also available, which provides a single
+//! send() method that should suffice for the majority of use cases.
 
 use std::sync::Arc;
 
@@ -28,6 +36,10 @@ use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 use crate::tx_initiation::export::Timestamp;
 use crate::GlobalStateLock;
 
+/// provides an API for building and sending neptune transactions.
+///
+/// This type cannot not be instantiated directly, but is instead
+/// retrieved via [GlobalStateLock::tx_initiator()]
 #[derive(Debug)]
 pub struct TransactionInitiator {
     global_state_lock: GlobalStateLock,
@@ -40,6 +52,9 @@ impl TransactionInitiator {
         Self { global_state_lock }
     }
 
+    /// returns all spendable inputs in the wallet.
+    ///
+    /// the order of inputs is undefined.
     pub async fn spendable_inputs(&self) -> TxInputList {
         // sadly we have to collect here because we can't hold ref after lock guard is dropped.
         self.global_state_lock
@@ -57,6 +72,7 @@ impl TransactionInitiator {
     ///
     /// pub enum InputSelectionPolicy {
     ///     Random,
+    ///     ByProvidedOrder,
     ///     ByNativeCoinAmount(SortOrder),
     ///     ByUtxoSize(SortOrder),
     /// }
@@ -72,10 +88,16 @@ impl TransactionInitiator {
             .build()
     }
 
-    /// generate TxOutputList from a list of [OutputFormat].
+    /// generate a list of outputs from a list of [OutputFormat].
     ///
     /// this is a wrapper around [TxOutputListBuilder], which callers can also
     /// use directly.
+    ///
+    /// note that the outputs can be expressed in tuple format, so long
+    /// as there exists a suitable From adapter on `OutputFormat`.
+    ///
+    /// it is recommended to collect the results into a [TxOutputList]
+    /// which provides additional methods.
     ///
     /// Each output may use either `OnChain` or `OffChain` notifications.
     pub async fn generate_tx_outputs(
@@ -88,6 +110,9 @@ impl TransactionInitiator {
             .await
     }
 
+    /// generates [TransactionDetails] from inputs and outputs
+    ///
+    /// see [TransactionDetailsBuilder].
     pub async fn generate_tx_details(
         &mut self,
         inputs: TxInputList,
@@ -105,11 +130,27 @@ impl TransactionInitiator {
             .await
     }
 
+    /// generates a witness proof from [TransactionDetails]
+    ///
+    /// a witness proof is sufficient for initiating a transaction
+    /// although it will not actually be broadcast to peer until
+    /// neptune-core can upgrade it to a `ProofCollection`.
+    ///
+    /// this function should return immediately.
+    ///
+    /// see [builder::transaction_proof_builder] for details.
     pub fn generate_witness_proof(&self, tx_details: Arc<TransactionDetails>) -> TransactionProof {
         let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);
         TransactionProof::Witness(primitive_witness)
     }
 
+    /// assembles transaction details and a proof into a transaction.
+    ///
+    /// note: normally assemble_transaction_artifacts() should be preferred
+    /// because its output can be directly used as input for
+    /// record_and_broadcast_transaction().
+    ///
+    /// see [TransactionBuilder] for details.
     pub fn assemble_transaction(
         &self,
         transaction_details: Arc<TransactionDetails>,
@@ -121,11 +162,29 @@ impl TransactionInitiator {
             .build()
     }
 
+    /// assembles transaction details and a proof into transaction artifacts.
+    ///
+    /// see [TransactionBuilder] for details.
+    pub fn assemble_transaction_artifacts(
+        &self,
+        transaction_details: Arc<TransactionDetails>,
+        transaction_proof: TransactionProof,
+    ) -> Result<TxCreationArtifacts, error::CreateTxError> {
+        TransactionBuilder::new()
+            .transaction_details(transaction_details)
+            .transaction_proof(transaction_proof)
+            .build_tx_artifacts(self.global_state_lock.cli().network)
+    }
+
+    /// records a transaction into the wallet, mempool, and begins
+    /// preparing to broadcast to peers.
+    ///
+    /// see [transaction_builder] for details.
     pub async fn record_and_broadcast_transaction(
         &mut self,
         tx: &TxCreationArtifacts,
     ) -> Result<(), error::SendError> {
-        // should have been checked before, but just in case.
+        // may have been checked before, but just in case.
         self.worker().check_rate_limit().await?;
 
         // note: acquires write-lock.
@@ -144,6 +203,8 @@ impl TransactionInitiator {
     ///
     /// ignored if the transaction is already upgraded to level of supplied
     /// proof (or higher)
+    ///
+    /// note: experimental and untested!  do not use yet!
     pub async fn upgrade_tx_proof(
         &mut self,
         transaction_id: TransactionKernelId,
@@ -168,6 +229,9 @@ impl TransactionInitiator {
         if !transaction_proof.verify(tx.kernel.mast_hash()).await {
             return Err(error::UpgradeProofError::InvalidProof);
         }
+
+        // tbd: do we need to remove this tx from mempool and re-add
+        // in order to trigger necessary events?
 
         // mutate
         tx.proof = transaction_proof;
