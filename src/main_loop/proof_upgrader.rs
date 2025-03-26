@@ -614,44 +614,44 @@ impl UpgradeJob {
 
 /// Return an [UpgradeJob] that describes work that can be done to upgrade the
 /// proof-quality of a transaction found in mempool. Also indicates whether the
-/// upgrade job affects one of our own transaction, or a foreign transaction.
+/// upgrade job affects one of our own transactions, or a foreign transaction.
 pub(super) fn get_upgrade_task_from_mempool(
     global_state: &GlobalState,
 ) -> Option<(UpgradeJob, TransactionOrigin)> {
-    // Do we have any `ProofCollection`s?
-    let tip = global_state.chain.light_state();
+    let tip_mutator_set = global_state
+        .chain
+        .light_state()
+        .mutator_set_accumulator_after();
     let gobbling_fraction = global_state.gobbling_fraction();
     let min_gobbling_fee = global_state.min_gobbling_fee();
     let num_proofs_threshold = global_state.max_num_proofs();
 
+    // Do we have any `ProofCollection`s?
     let proof_collection_job = if let Some((kernel, proof, tx_origin)) = global_state
         .mempool
         .most_dense_proof_collection(num_proofs_threshold)
     {
-        let gobbling_fee = kernel.fee.lossy_f64_fraction_mul(gobbling_fraction);
-        let gobbling_fee =
-            if gobbling_fee >= min_gobbling_fee && tx_origin == TransactionOrigin::Foreign {
-                gobbling_fee
-            } else {
-                NativeCurrencyAmount::zero()
-            };
-
-        let upgrade_decision = UpgradeJob::ProofCollectionToSingleProof {
-            kernel: kernel.to_owned(),
-            proof: proof.to_owned(),
-            mutator_set: tip.mutator_set_accumulator_after().to_owned(),
-            gobbling_fee,
-        };
-
-        if upgrade_decision.mutator_set().hash() != kernel.mutator_set_hash {
+        if kernel.mutator_set_hash != tip_mutator_set.hash() {
             error!("Deprecated transaction found in mempool. Has ProofCollection in need of updating. Consider clearing mempool.");
             return None;
         }
 
-        let upgrade_is_worth_is =
+        let gobbling_fee = if tx_origin == TransactionOrigin::Own {
+            NativeCurrencyAmount::zero()
+        } else {
+            kernel.fee.lossy_f64_fraction_mul(gobbling_fraction)
+        };
+
+        let upgrade_is_worth_it =
             gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
-        if upgrade_is_worth_is {
-            Some((upgrade_decision, tx_origin))
+        if upgrade_is_worth_it {
+            let upgrade_job = UpgradeJob::ProofCollectionToSingleProof {
+                kernel: kernel.to_owned(),
+                proof: proof.to_owned(),
+                mutator_set: tip_mutator_set.clone(),
+                gobbling_fee,
+            };
+            Some((upgrade_job, tx_origin))
         } else {
             None
         }
@@ -669,35 +669,32 @@ pub(super) fn get_upgrade_task_from_mempool(
         tx_origin,
     )) = global_state.mempool.most_dense_single_proof_pair()
     {
-        let gobbling_fee = left_kernel.fee + right_kernel.fee;
-        let gobbling_fee = gobbling_fee.lossy_f64_fraction_mul(gobbling_fraction);
-        let gobbling_fee = if gobbling_fee >= min_gobbling_fee {
-            gobbling_fee
-        } else {
-            NativeCurrencyAmount::zero()
-        };
-
-        let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
-        let upgrade_decision = UpgradeJob::Merge {
-            left_kernel: left_kernel.to_owned(),
-            single_proof_left: left_single_proof.to_owned(),
-            right_kernel: right_kernel.to_owned(),
-            single_proof_right: right_single_proof.to_owned(),
-            shuffle_seed: rng.random(),
-            mutator_set: tip.mutator_set_accumulator_after().to_owned(),
-            gobbling_fee,
-        };
-
         if left_kernel.mutator_set_hash != right_kernel.mutator_set_hash
-            || right_kernel.mutator_set_hash != upgrade_decision.mutator_set().hash()
+            || right_kernel.mutator_set_hash != tip_mutator_set.hash()
         {
             error!("Deprecated transaction found in mempool. Has SingleProof in need of updating. Consider clearing mempool.");
             return None;
         }
 
+        let gobbling_fee = if tx_origin == TransactionOrigin::Own {
+            NativeCurrencyAmount::zero()
+        } else {
+            (left_kernel.fee + right_kernel.fee).lossy_f64_fraction_mul(gobbling_fraction)
+        };
+
         let upgrade_is_worth_is =
             gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
         if upgrade_is_worth_is {
+            let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
+            let upgrade_decision = UpgradeJob::Merge {
+                left_kernel: left_kernel.to_owned(),
+                single_proof_left: left_single_proof.to_owned(),
+                right_kernel: right_kernel.to_owned(),
+                single_proof_right: right_single_proof.to_owned(),
+                shuffle_seed: rng.random(),
+                mutator_set: tip_mutator_set,
+                gobbling_fee,
+            };
             Some((upgrade_decision, tx_origin))
         } else {
             None
@@ -790,35 +787,46 @@ mod test {
             NativeCurrencyAmount::from_nau(2),
         )
         .await;
-        let mut rando =
-            mock_genesis_global_state(network, 2, WalletEntropy::new_random(), cli_args).await;
-        let mut rando = rando.lock_guard_mut().await;
 
-        rando
-            .mempool_insert(pc_tx_low_fee, TransactionOrigin::Foreign)
+        for tx_origin in [TransactionOrigin::Own, TransactionOrigin::Foreign] {
+            let mut rando = mock_genesis_global_state(
+                network,
+                2,
+                WalletEntropy::new_random(),
+                cli_args.clone(),
+            )
             .await;
-        assert!(get_upgrade_task_from_mempool(&rando).is_none());
+            let mut rando = rando.lock_guard_mut().await;
+            rando.mempool_insert(pc_tx_low_fee.clone(), tx_origin).await;
+            if tx_origin == TransactionOrigin::Own {
+                assert!(get_upgrade_task_from_mempool(&rando).is_some());
+            } else {
+                assert!(get_upgrade_task_from_mempool(&rando).is_none());
+            }
 
-        let pc_tx_high_fee = transaction_from_state(
-            alice.clone(),
-            512777439428,
-            TxProvingCapability::ProofCollection,
-            NativeCurrencyAmount::from_nau(1_000_000_000),
-        )
-        .await;
-        rando
-            .mempool_insert(pc_tx_high_fee.clone(), TransactionOrigin::Foreign)
+            // A high-fee paying transaction must be returned for upgrading
+            // regardless of origin.
+            let pc_tx_high_fee = transaction_from_state(
+                alice.clone(),
+                512777439428,
+                TxProvingCapability::ProofCollection,
+                NativeCurrencyAmount::from_nau(1_000_000_000),
+            )
             .await;
-        let job = get_upgrade_task_from_mempool(&rando).unwrap().0;
-        let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
-            panic!("Expected proof-collection to single-proof job");
-        };
+            rando
+                .mempool_insert(pc_tx_high_fee.clone(), TransactionOrigin::Foreign)
+                .await;
+            let job = get_upgrade_task_from_mempool(&rando).unwrap().0;
+            let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
+                panic!("Expected proof-collection to single-proof job");
+            };
 
-        assert_eq!(
-            pc_tx_high_fee.kernel.txid(),
-            kernel.txid(),
-            "Returned job must be the one with a high fee"
-        );
+            assert_eq!(
+                pc_tx_high_fee.kernel.txid(),
+                kernel.txid(),
+                "Returned job must be the one with a high fee"
+            );
+        }
     }
 
     #[traced_test]
