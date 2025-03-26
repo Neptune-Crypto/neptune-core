@@ -91,6 +91,11 @@ pub struct NetworkingState {
     /// Read-only value set at random during startup
     pub instance_id: u128,
 
+    /// If set to `true`, no blocks, block proposals, or transactions will be
+    /// sent from this client, or accepted from peers.
+    /// Only the RPC server may update this flag.
+    pub pause_state_updates: bool,
+
     /// Timestamp for when the last tx-proof upgrade was attempted. Does not
     /// record latest successful upgrade, merely latest attempt. This is to
     /// prevent excessive runs of the proof-upgrade functionality.
@@ -115,6 +120,7 @@ impl NetworkingState {
             peer_databases,
             sync_anchor: None,
             instance_id: rand::random(),
+            pause_state_updates: false,
 
             // Initialize to now to prevent tx proof upgrade to run immediately
             // after startup of the client.

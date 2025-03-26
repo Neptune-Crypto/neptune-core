@@ -323,6 +323,17 @@ enum Command {
         fee: NativeCurrencyAmount,
     },
 
+    /// pause processing of new transaction data. Prevents new blocks, new
+    /// block proposals, and new transactions from being received.
+    PauseStateUpdates,
+
+    /// If state updates have been paused, resumes them. Otherwise does nothing.
+    ResumeStateUpdates,
+
+    /// Sends a command to the client to delete all transactions from the
+    /// mempool.
+    ClearMempool,
+
     /// pause mining
     PauseMiner,
 
@@ -1135,6 +1146,18 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => eprintln!("{}", e),
             }
+        }
+        Command::PauseStateUpdates => {
+            println!("Sending command to pause state updates.");
+            client.pause_state_updates(ctx, token).await??;
+        }
+        Command::ResumeStateUpdates => {
+            println!("Sending command to resume state updates.");
+            client.resume_state_updates(ctx, token).await??;
+        }
+        Command::ClearMempool => {
+            println!("Sending command to delete all commands from the mempool.");
+            client.clear_mempool(ctx, token).await??;
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");

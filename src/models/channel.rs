@@ -146,6 +146,22 @@ impl MainToPeerTask {
         }
         .to_string()
     }
+
+    /// Function to filter out messages that should be ignored when all state
+    /// updates have been paused.
+    pub(crate) fn ignore_on_paused_state_updates(&self) -> bool {
+        match self {
+            MainToPeerTask::Block(_) => true,
+            MainToPeerTask::BlockProposalNotification(_) => true,
+            MainToPeerTask::RequestBlockBatch(_) => true,
+            MainToPeerTask::PeerSynchronizationTimeout(_) => true,
+            MainToPeerTask::MakePeerDiscoveryRequest => false,
+            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => false,
+            MainToPeerTask::TransactionNotification(_) => true,
+            MainToPeerTask::Disconnect(_) => false,
+            MainToPeerTask::DisconnectAll() => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,6 +222,7 @@ pub(crate) struct ClaimUtxoData {
 pub(crate) enum RPCServerToMain {
     BroadcastTx(Box<Transaction>),
     BroadcastMempoolTransactions,
+    ClearMempool,
     ProofOfWorkSolution(Box<Block>),
     Shutdown,
     PauseMiner,

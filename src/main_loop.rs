@@ -1544,7 +1544,6 @@ impl MainLoopHandler {
                     if let Some(exit_code) = exit_code {
                         break exit_code;
                     }
-
                 }
 
                 // Handle the completion of mempool tx-update jobs after new block.
@@ -1726,6 +1725,16 @@ impl MainLoopHandler {
                         }
                     };
                 }
+                Ok(false)
+            }
+            RPCServerToMain::ClearMempool => {
+                info!("Clearing mempool");
+                self.global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .mempool_clear()
+                    .await;
+
                 Ok(false)
             }
             RPCServerToMain::ProofOfWorkSolution(new_block) => {

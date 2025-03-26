@@ -296,7 +296,8 @@ pub struct GlobalState {
     /// The `BlockchainState` may only be updated by the main task.
     pub chain: BlockchainState,
 
-    /// The `NetworkingState` may be updated by both the main task and peer tasks.
+    /// The `NetworkingState` may be updated by both the main task, peer tasks,
+    /// and RPC server.
     pub net: NetworkingState,
 
     /// The `cli_args::Args` are read-only and accessible by all tasks.
