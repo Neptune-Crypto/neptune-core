@@ -15,7 +15,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
-use crate::models::state::tx_creation_config::ChangePolicy;
+use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;

@@ -10,6 +10,7 @@ pub mod shared;
 pub(crate) mod transaction_details;
 pub(crate) mod transaction_kernel_id;
 pub(crate) mod tx_creation_artifacts;
+#[cfg(test)]
 pub(crate) mod tx_creation_config;
 pub mod tx_proving_capability;
 pub mod wallet;
@@ -41,7 +42,6 @@ use tracing::info;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
-pub use tx_creation_config::ChangePolicy;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::wallet_state::WalletState;

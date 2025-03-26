@@ -1,77 +1,19 @@
+//! note; this module is only used by tests.
+//!
+//! it can be removed once tests are fully updated to
+//! use tx_initiator APIs directly.
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use serde::Deserialize;
-use serde::Serialize;
-
-use super::wallet::address::SpendingKey;
-use super::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::models::state::wallet::address::KeyType;
-
-/// When the selected inputs represent more coins than the outputs (with fee)
-/// where does this change go?
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub enum ChangePolicy {
-    /// Inputs must exactly equal spend amount, or else an error will result.
-    #[default]
-    ExactChange,
-
-    RecoverToNextUnusedKey {
-        key_type: KeyType,
-        medium: UtxoNotificationMedium,
-    },
-
-    RecoverToProvidedKey {
-        key: Arc<SpendingKey>,
-        medium: UtxoNotificationMedium,
-    },
-
-    /// If the change is nonzero, the excess funds will be lost forever.
-    Burn,
-}
-impl ChangePolicy {
-    pub fn exact_change() -> Self {
-        Self::ExactChange
-    }
-
-    /// Enable change-recovery and configure which key and notification medium
-    /// to use for that purpose.
-    pub fn recover_to_provided_key(
-        change_key: Arc<SpendingKey>,
-        notification_medium: UtxoNotificationMedium,
-    ) -> Self {
-        Self::RecoverToProvidedKey {
-            key: change_key,
-            medium: notification_medium,
-        }
-    }
-
-    pub fn recover_to_next_unused_key(
-        key_type: KeyType,
-        notification_medium: UtxoNotificationMedium,
-    ) -> Self {
-        Self::RecoverToNextUnusedKey {
-            key_type,
-            medium: notification_medium,
-        }
-    }
-
-    pub fn burn() -> Self {
-        Self::Burn
-    }
-}
-
-#[cfg(test)]
 use super::tx_proving_capability::TxProvingCapability;
-#[cfg(test)]
+use super::wallet::address::SpendingKey;
+use super::wallet::change_policy::ChangePolicy;
+use super::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::job_queue::triton_vm::vm_job_queue;
-#[cfg(test)]
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-#[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 /// Options and configuration settings for creating transactions
-#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct TxCreationConfig {
     prover_capability: TxProvingCapability,
@@ -80,14 +22,12 @@ pub(crate) struct TxCreationConfig {
     change_policy: ChangePolicy,
 }
 
-#[cfg(test)]
 impl Default for TxCreationConfig {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(test)]
 impl TxCreationConfig {
     pub fn new() -> Self {
         Self {
@@ -137,35 +77,25 @@ impl TxCreationConfig {
     pub(crate) fn proof_job_options(&self) -> TritonVmProofJobOptions {
         self.proof_job_options.clone()
     }
-}
 
-#[cfg(test)]
-pub(crate) mod text {
-    use super::*;
+    /// Enable change-recovery with the given key, and set the medium to
+    /// `OnChain`.
+    pub(crate) fn recover_change_on_chain(self, change_key: SpendingKey) -> Self {
+        self.recover_to_provided_key(Arc::new(change_key), UtxoNotificationMedium::OnChain)
+    }
 
-    impl TxCreationConfig {
-        /// Enable change-recovery with the given key, and set the medium to
-        /// `OnChain`.
-        #[cfg(test)]
-        pub(crate) fn recover_change_on_chain(self, change_key: SpendingKey) -> Self {
-            self.recover_to_provided_key(Arc::new(change_key), UtxoNotificationMedium::OnChain)
-        }
+    /// Enable change-recovery with the given key, and set the medium to
+    /// `OffChain`.
+    pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
+        self.recover_to_provided_key(Arc::new(change_key), UtxoNotificationMedium::OffChain)
+    }
 
-        /// Enable change-recovery with the given key, and set the medium to
-        /// `OffChain`.
-        #[cfg(test)]
-        pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
-            self.recover_to_provided_key(Arc::new(change_key), UtxoNotificationMedium::OffChain)
-        }
-
-        /// Burn the change.
-        ///
-        /// Only use this if you are certain you know what you are doing. Will
-        /// result in loss-of-funds if the transaction is not balanced.
-        #[cfg(test)]
-        pub(crate) fn burn_change(mut self) -> Self {
-            self.change_policy = ChangePolicy::Burn;
-            self
-        }
+    /// Burn the change.
+    ///
+    /// Only use this if you are certain you know what you are doing. Will
+    /// result in loss-of-funds if the transaction is not balanced.
+    pub(crate) fn burn_change(mut self) -> Self {
+        self.change_policy = ChangePolicy::Burn;
+        self
     }
 }

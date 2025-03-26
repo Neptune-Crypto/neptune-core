@@ -10,7 +10,7 @@ use crate::job_queue::triton_vm::vm_job_queue;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
-use crate::models::state::tx_creation_config::ChangePolicy;
+use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::StateLock;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
