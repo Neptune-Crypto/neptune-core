@@ -20,6 +20,7 @@
   - [Installation](./user-guides/installation.md)
   - [Managing Secret Seeds](./user-guides/managing-secret-seeds.md)
   - [Generating Addresses](./user-guides/generating-addresses.md)
+  - [Scan Mode](./user-guides/scan-mode.md)
   - [Shamir Secret Sharing](./user-guides/shamir-secret-sharing.md)
 - [Contributing](./contributing.md)
   - [Git Workflow](./contributing/git-workflow.md)

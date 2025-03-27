@@ -21,18 +21,19 @@ If scan mode is active, `neptune-core` will execute an extra step whenever a new
 
 This extra scan mode step:
  - Reproduces the guesser UTXO as if your node had guessed the block.
- - Reproduces the composer UTXOs as if your node had composed the block. For the guesser fee fraction it takes whatever is set with the command-line argument (and so you had better make sure this command-line argument agrees with the argument you were using when you were composing [^1]).
+ - Reproduces the composer UTXOs as if your node had composed the block. For the guesser fee fraction it takes whatever is set with the command-line argument (and so you had better make sure this command-line argument agrees with the argument you were using when you were composing[^1]).
  - Tries to decrypt the public announcements using keys derived from *future* derivation indices, and bumps the derivation index according to any matches it finds.
 
 Scan mode is not guaranteed to find all lost UTXOs. However, there are tunable parameters with which you can regulate the likelihood of catching lost UTXOs, exchanging speed for success probability.
 
 ## Enabling Scan Mode
 
-There are three ways to enable scan mode [^2]. They can be used in any non-empty combination.
+There are three ways to enable scan mode[^2]. They can be used in any non-empty combination.
 
  1. Import the wallet. If you start `neptune-core` without any supporting state files beyond `wallet.dat` or after using `neptune-cli import-seed-phrase` (which has the same effect), `neptune-core` will infer that the wallet was imported and will automatically enter into scan mode.
  2. Set the command-line argument `--scan-blocks <range>`. The parameter `range` stipulates the range of block heights for which the scanning step will be executed. The default is all block heights. Ranges are valid in either rust or python-index formats.
  3. Set the command-line argument `--scan-keys <n>`. The parameter `n` regulates how many future keys to attempt the trial-decryption with. The default value is 25.
 
-[^1] An [outstanding issue](https://github.com/Neptune-Crypto/neptune-core/issues/535) proposes to infer the guesser fee fraction whenever possible. This improvement would make scanning for composer UTXOs more powerful.
-[^2] Actually, at the time of writing, scan mode is always on due to a [bug](https://github.com/Neptune-Crypto/neptune-core/issues/536). But this will be fixed soon.
+[^1]: An [outstanding issue](https://github.com/Neptune-Crypto/neptune-core/issues/535) proposes to infer the guesser fee fraction whenever possible. This improvement would make scanning for composer UTXOs more powerful.
+
+[^2]: Actually, at the time of writing, scan mode is always on due to a [bug](https://github.com/Neptune-Crypto/neptune-core/issues/536). But this will be fixed soon.
