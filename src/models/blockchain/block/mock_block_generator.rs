@@ -136,7 +136,7 @@ impl MockBlockGenerator {
             composer_parameters,
             timestamp,
             network,
-        )?;
+        );
 
         let coinbase_transaction = Self::mock_transaction_from_details(&transaction_details);
 

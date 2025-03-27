@@ -1082,7 +1082,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         composer_parameters,
         timestamp,
         network,
-    )?;
+    );
 
     let coinbase_transaction =
         fake_create_transaction_from_details_for_tests(transaction_details).await;

@@ -11,6 +11,7 @@ use block_header::MINIMUM_BLOCK_TIME;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
+use num_traits::Zero;
 use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -382,7 +383,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         composer_parameters,
         timestamp,
         job_options.job_settings.network,
-    )?;
+    );
 
     let witness = PrimitiveWitness::from_transaction_details(&transaction_details);
 
@@ -413,7 +414,9 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     Ok((transaction, composer_outputs))
 }
 
-/// Produce two outputs spending a given portion of the coinbase amount.
+/// Produce outputs spending a given portion of the coinbase amount. Returns
+/// two outputs unless this composition awards the entire coinbase amount to
+/// the guesser, in which case zero outputs are returned.
 ///
 /// The coinbase amount is usually set to the block subsidy for this block
 /// height.
@@ -427,23 +430,27 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 /// coinbase amount, since the guesser fee fraction is guaranteed to be in the
 /// range \[0;1\].
 ///
-/// Returns an array of two TxOutputs: liquid first, timelocked second.
+/// Returns: Either the empty list, or two outputs, one immediately liquid, the
+/// other timelocked for three years, as required by the consensus rules.
+///
+/// # Panics
+///
+/// If the provided guesser fee fraction is not between 0 and 1 (inclusive).
 pub(crate) fn composer_outputs(
     coinbase_amount: NativeCurrencyAmount,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
-) -> Result<[TxOutput; 2]> {
+) -> TxOutputList {
     let guesser_fee =
         coinbase_amount.lossy_f64_fraction_mul(composer_parameters.guesser_fee_fraction());
 
-    let Some(amount_to_composer) = coinbase_amount.checked_sub(&guesser_fee) else {
-        bail!(
-            "Guesser fee may not exceed coinbase amount. coinbase_amount: {}; guesser_fee: {}; guesser fee fraction: {}.",
-            coinbase_amount.to_nau(),
-            guesser_fee.to_nau(),
-            composer_parameters.guesser_fee_fraction()
-        );
-    };
+    let amount_to_composer = coinbase_amount
+        .checked_sub(&guesser_fee)
+        .expect("total_composer_fee cannot exceed coinbase_amount");
+
+    if amount_to_composer.is_zero() {
+        return Vec::<TxOutput>::default().into();
+    }
 
     // Note that this calculation guarantees that at least half of the coinbase
     // is timelocked, as a rounding error in the last digit subtracts from the
@@ -478,7 +485,7 @@ pub(crate) fn composer_outputs(
     )
     .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
 
-    Ok([liquid_coinbase_output, timelocked_coinbase_output])
+    vec![liquid_coinbase_output, timelocked_coinbase_output].into()
 }
 
 /// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
@@ -488,18 +495,15 @@ pub(super) fn prepare_coinbase_transaction_stateless(
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     network: Network,
-) -> Result<(TxOutputList, TransactionDetails)> {
+) -> (TxOutputList, TransactionDetails) {
     let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
     info!("Creating coinbase for block of height {next_block_height}.");
 
     let coinbase_amount = Block::block_subsidy(next_block_height);
-    let [liquid_coinbase_output, timelocked_coinbase_output] =
-        composer_outputs(coinbase_amount, composer_parameters, timestamp)?;
-    let total_composer_fee = liquid_coinbase_output.utxo().get_native_currency_amount()
-        + timelocked_coinbase_output
-            .utxo()
-            .get_native_currency_amount();
+    let composer_outputs = composer_outputs(coinbase_amount, composer_parameters, timestamp);
+    let total_composer_fee = composer_outputs.total_native_coins();
+
     let guesser_fee = coinbase_amount
         .checked_sub(&total_composer_fee)
         .expect("total_composer_fee cannot exceed coinbase_amount");
@@ -509,11 +513,6 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         composer fee ({total_composer_fee}) and guesser fee ({guesser_fee})."
     );
 
-    let composer_outputs: TxOutputList = vec![
-        liquid_coinbase_output.clone(),
-        timelocked_coinbase_output.clone(),
-    ]
-    .into();
     let transaction_details = TransactionDetails::new_with_coinbase(
         TxInputList::empty(),
         composer_outputs.clone(),
@@ -524,7 +523,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         network,
     );
 
-    Ok((composer_outputs, transaction_details))
+    (composer_outputs, transaction_details)
 }
 
 /// Enumerates origins of transactions to be merged into a block transaction.
@@ -1050,6 +1049,7 @@ pub(crate) mod tests {
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::dummy_expected_utxo;
@@ -1307,10 +1307,11 @@ pub(crate) mod tests {
                 "Transaction proof for coinbase transaction must be valid."
             );
 
+            let num_coinbase_outputs = if guesser_fee_fraction == 1.0 { 0 } else { 2 };
             assert_eq!(
-                2,
+                num_coinbase_outputs,
                 transaction_empty_mempool.kernel.outputs.len(),
-                "Coinbase transaction with empty mempool must have exactly two outputs"
+                "Coinbase transaction with empty mempool must have exactly {num_coinbase_outputs} outputs"
             );
             assert!(
                 transaction_empty_mempool.kernel.inputs.is_empty(),
@@ -1352,12 +1353,19 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
             };
+
+            let num_outputs_after_merge = num_coinbase_outputs + 2;
             assert_eq!(
-            4,
-            transaction_non_empty_mempool.kernel.outputs.len(),
-            "Transaction for block with non-empty mempool must contain two coinbase outputs, send output, and change output"
-        );
-            assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
+                num_outputs_after_merge,
+                transaction_non_empty_mempool.kernel.outputs.len(),
+                "Transaction for block with non-empty mempool must contain {num_coinbase_outputs} outputs from coinbase, \
+                send output, and change output"
+            );
+            assert_eq!(
+                1,
+                transaction_non_empty_mempool.kernel.inputs.len(),
+                "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent"
+            );
 
             // Build and verify block template
             let block_1_nonempty_mempool = Block::compose(
@@ -1919,6 +1927,96 @@ pub(crate) mod tests {
                         .filter(|x| x.utxo.release_date().is_none())
                         .count()
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn composer_outputs_has_length_zero_if_guesser_fraction_is_1() {
+        let mut rng = rand::rng();
+        let address = SymmetricKey::from_seed(rng.random()).into();
+        let composer_parameters = ComposerParameters::new(
+            address,
+            rng.random(),
+            None,
+            1.0,
+            FeeNotificationPolicy::OffChain,
+        );
+        let composer_outputs = composer_outputs(
+            NativeCurrencyAmount::coins(1),
+            composer_parameters,
+            Timestamp::now(),
+        );
+        assert!(composer_outputs.is_empty());
+    }
+
+    #[test]
+    fn composer_outputs_has_length_two_if_guesser_fraction_is_between_0_and_1() {
+        let mut rng = rand::rng();
+        let address = SymmetricKey::from_seed(rng.random()).into();
+        let guesser_fraction = rng.random_range(0f64..=0.99999f64);
+        let composer_parameters = ComposerParameters::new(
+            address,
+            rng.random(),
+            None,
+            guesser_fraction,
+            FeeNotificationPolicy::OffChain,
+        );
+        let composer_outputs = composer_outputs(
+            NativeCurrencyAmount::coins(1),
+            composer_parameters,
+            Timestamp::now(),
+        );
+        assert_eq!(2, composer_outputs.len());
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn coinbase_tx_has_two_outputs_or_zero_outputs() {
+        for guesser_fraction in [0.6, 1.0] {
+            for notification_policy in [
+                FeeNotificationPolicy::OffChain,
+                FeeNotificationPolicy::OnChainGeneration,
+                FeeNotificationPolicy::OnChainSymmetric,
+            ] {
+                let network = Network::Main;
+                let cli_args = cli_args::Args {
+                    guesser_fraction,
+                    fee_notification: notification_policy,
+                    ..Default::default()
+                };
+                let global_state_lock =
+                    mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args)
+                        .await;
+                let genesis_block = Block::genesis(network);
+                let launch_date = genesis_block.header().timestamp;
+
+                let (transaction, expected_utxos) = make_coinbase_transaction_from_state(
+                    &genesis_block,
+                    &global_state_lock,
+                    launch_date,
+                    global_state_lock
+                        .cli()
+                        .proof_job_options_primitive_witness(),
+                )
+                .await
+                .unwrap();
+
+                // Verify zero outputs if guesser gets it all, otherwise two outputs.
+                let num_expected_outputs = if guesser_fraction == 1.0 { 0 } else { 2 };
+                assert_eq!(num_expected_outputs, transaction.kernel.outputs.len());
+
+                // Verify that the public notifications/expected UTXOs match
+                if notification_policy == FeeNotificationPolicy::OffChain {
+                    assert_eq!(num_expected_outputs, expected_utxos.len());
+                    assert!(transaction.kernel.public_announcements.is_empty());
+                } else {
+                    assert!(expected_utxos.is_empty());
+                    assert_eq!(
+                        num_expected_outputs,
+                        transaction.kernel.public_announcements.len()
+                    );
+                }
             }
         }
     }
