@@ -15,11 +15,11 @@ use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 ///
 /// an instance of this type is necessary to record and broadcast (send) a
 /// transaction with
-/// [record_and_broadcast_transaction()](crate::tx_initiation::initiator::record_and_broadcast_transaction()).
+/// [record_and_broadcast_transaction()](crate::tx_initiation::initiator::TransactionInitiator::record_and_broadcast_transaction()).
 ///
 /// A [Transaction] contains blinded data that can be sent over the network to
 /// other neptune-core nodes.  The [TransactionDetails] contains the unblinded
-/// data that the `Transaction` is generated from, minus the [TransactionProof].
+/// data that the `Transaction` is generated from, minus the [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxCreationArtifacts {
     // tbd: network doesn't necessarily belong here but is necessary

@@ -1512,7 +1512,7 @@ pub trait RPC {
 
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::spendable_inputs()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
     async fn spendable_inputs(token: rpc_auth::Token) -> RpcResult<TxInputList>;
 
     /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
@@ -1527,7 +1527,7 @@ pub trait RPC {
     ///
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::select_spendable_inputs()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
     async fn select_spendable_inputs(
         token: rpc_auth::Token,
         policy: InputSelectionPolicy,
@@ -1541,7 +1541,7 @@ pub trait RPC {
     ///
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::generate_tx_outputs()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_outputs()]
     async fn generate_tx_outputs(
         token: rpc_auth::Token,
         outputs: Vec<OutputFormat>,
@@ -1549,7 +1549,7 @@ pub trait RPC {
 
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::generate_tx_details()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_details()]
     async fn generate_tx_details(
         token: rpc_auth::Token,
         tx_inputs: TxInputList,
@@ -1560,7 +1560,7 @@ pub trait RPC {
 
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::generate_witness_proof()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
     async fn generate_witness_proof(
         token: rpc_auth::Token,
         tx_details: TransactionDetails,
@@ -1570,7 +1570,7 @@ pub trait RPC {
     ///
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::assemble_transaction()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction()]
     async fn assemble_transaction(
         token: rpc_auth::Token,
         transaction_details: TransactionDetails,
@@ -1581,7 +1581,7 @@ pub trait RPC {
     ///
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::assemble_transaction_artifacts()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction_artifacts()]
     async fn assemble_transaction_artifacts(
         token: rpc_auth::Token,
         transaction_details: TransactionDetails,
@@ -1592,7 +1592,7 @@ pub trait RPC {
     ///
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::record_and_broadcast_transaction()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::record_and_broadcast_transaction()]
     async fn record_and_broadcast_transaction(
         token: rpc_auth::Token,
         tx_artifacts: TxCreationArtifacts,
@@ -1682,7 +1682,7 @@ pub trait RPC {
     ///
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::upgrade_tx_proof()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::upgrade_tx_proof()]
     async fn upgrade_tx_proof(
         token: rpc_auth::Token,
         transaction_id: TransactionKernelId,
@@ -1691,7 +1691,7 @@ pub trait RPC {
 
     /// todo: docs.
     ///
-    /// meanwhile see [TransactionInitiator::proof_type()]
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
     async fn proof_type(
         token: rpc_auth::Token,
         txid: TransactionKernelId,

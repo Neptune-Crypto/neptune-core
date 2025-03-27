@@ -13,8 +13,8 @@ use crate::models::blockchain::transaction::transaction_proof::TransactionProofT
 /// represents which type of proof a given device is capable of generating
 ///
 /// see also:
-/// * [TransactionProofType](crate::models::blockchain::transaction::TransactionProofType)
-/// * [TransactionProof](crate::models::blockchain::transaction::TransactionProof)
+/// * [TransactionProofType]
+/// * [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof)
 #[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TxProvingCapability {
     #[default]

@@ -156,7 +156,6 @@ pub struct GlobalStateLock {
 }
 
 impl GlobalStateLock {
-
     /// the key to the watery kingdom.
     pub fn new(
         wallet_state: WalletState,
