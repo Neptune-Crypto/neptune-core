@@ -698,6 +698,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn iter_over_empty_tx_output_list_works() {
+        let tx_output_list: TxOutputList = Vec::<TxOutput>::default().into();
+        let mut as_iter = tx_output_list.iter();
+        assert!(as_iter.next().is_none());
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn test_utxoreceiver_auto_not_owned_output() {
         let global_state_lock = mock_genesis_global_state(
