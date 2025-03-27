@@ -3466,65 +3466,13 @@ mod global_state_tests {
         }
     }
 
-    mod create_transaction {
-        use super::*;
-        use crate::models::blockchain::transaction::lock_script::LockScript;
-        use crate::models::blockchain::transaction::utxo::Utxo;
-
-        #[traced_test]
-        #[tokio::test]
-        async fn have_to_specify_change_policy() {
-            let network = Network::Main;
-            let wallet_entropy = WalletEntropy::devnet_wallet();
-            let alice_gsl =
-                mock_genesis_global_state(network, 2, wallet_entropy, cli_args::Args::default())
-                    .await;
-            let alice = alice_gsl.global_state_lock.lock_guard().await;
-            let now = network.launch_date() + Timestamp::years(2);
-            assert!(alice
-                .get_wallet_status_for_tip()
-                .await
-                .synced_unspent_available_amount(now)
-                .is_positive());
-            drop(alice);
-            let tx_output = TxOutput::no_notification(
-                Utxo::new_native_currency(
-                    LockScript::anyone_can_spend(),
-                    NativeCurrencyAmount::from_nau(1),
-                ),
-                Digest::default(),
-                Digest::default(),
-                false,
-            );
-
-            let bad_tx_config = TxCreationConfig::default()
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-            let tx_result = alice_gsl
-                .tx_initiator_internal()
-                .create_transaction(
-                    vec![tx_output.clone()].into(),
-                    NativeCurrencyAmount::zero(),
-                    now,
-                    bad_tx_config.clone(),
-                )
-                .await;
-            assert!(tx_result.is_err());
-
-            // Specify change policy and verify that transaction can be
-            // constructed.
-            let good_tx_config = bad_tx_config.burn_change();
-            assert!(alice_gsl
-                .tx_initiator_internal()
-                .create_transaction(
-                    vec![tx_output].into(),
-                    NativeCurrencyAmount::zero(),
-                    now,
-                    good_tx_config,
-                )
-                .await
-                .is_ok());
-        }
-    }
+    // note: removed test have_to_specify_change_policy()
+    // because ChangePolicy::default() now exists, specifically
+    // so callers do NOT have to specify change policy unless
+    // they want something different.
+    //
+    // the default is: RecoverToNextUnusedKey
+    //    key-type: symmetric, medium: onchain,
 
     /// tests that pertain to restoring a wallet from seed-phrase
     /// and comparing onchain vs offchain notification methods.
