@@ -14,13 +14,18 @@ There are two broad possibilities:
 
 It is also important to recognize that sometimes the sender and receiver may be the same wallet or two wallets owned by the same person or organization.
 
-## OnChain Utxo transfers
+## On-Chain Utxo Notifications
 
-`OnChain` transfers are performed with the struct `PublicAnnouncement`.  It is an opaque list of fields of type `BFieldElement` that can hold arbitrary data.  A list of `PublicAnnouncement` are attached to each neptune `Transaction` and stored on the blockchain.
+`OnChain` transfers are performed with the struct `PublicAnnouncement`.  It is an opaque list of elements of type `BFieldElement` that can hold arbitrary data.  A list of `PublicAnnouncement` is attached to each Neptune `Transaction` and stored on the blockchain.
 
-The neptune key types leverage `PublicAnnouncement` to store the `key_type` in the first field and a unique `receiver_id` in the second field that is derived from the receiving address.  These fields are plaintext, so anyone can read them.
+The Neptune key types use `PublicAnnouncement`s follows:
+ - elements `0..1`: `key_type` identifies which kind of secret spending key or public receiving address this announcement is for;
+ - elements `1..2`: `receiver_id` identifies the recipient's receiving address
+ - elements `3..`: a ciphertext, decryptable only by the recipient's secret key, that holds `Utxo` and `sender_randomness`, which are necessary pieces of data to claim and spend the UTXO.
 
-The remaining fields (variable length) are filled with encrypted ciphertext that holds `Utxo` and `sender_randomness` which are necessary to claim/spend the `Utxo`.
+The first two elements are plaintext, so anyone can read them.
+
+As of v0.2.1, all payments create on-chain notifications for the recipients by default. In order to avoid producing on-chain notifications, you must manually configure your client. While this default has drawbacks in terms of privacy, it has the benefit that all UTXOs can be recovered with not too much work from the wallet's secret seed.
 
 ### Identifying `Utxo` destined for our wallet
 
@@ -57,10 +62,10 @@ It is important to note that this scheme makes it possible to link together mult
 
 Wallet owners can mitigate this risk somewhat by generating a unique receiving address for each payment and avoid posting it in a public place.  Of course this is not feasible for some use-cases, eg posting an address in a forum for purpose of accepting donations.
 
-It is planned to address this privacy concern but it may not happen until after Neptune mainnet launches.
+Addressing this privacy concern is on the roadmap but not the highest priority.
 
 
-## OffChain Utxo transfers
+## OffChain Utxo Notifications
 
 Many types of OffChain transfers are possible.  examples:
 
@@ -77,7 +82,7 @@ decentralized storage mechanism such as IPFS.  Decentralized storage may provide
 
 It is important to recognize that all `OffChain` methods carry an extra risk of losing funds as compared to `OnChain` notification.  Since the secrets do not exist anywhere on the blockchain they can never be restored by the wallet if lost during or any time after the transfer.
 
-For example Bob performs an OffChain utxo transfer to Sally.  Everything goes fine and Sally receives the notification and her wallet successfully identifies and validates the funds.  Six months later Sally's hard-drive crashes and she doesn't have any backup except for her seed-phrase.  She imports the seed-phrase into a new neptune-core wallet.  The wallet then scans the blockchain for `Utxo` that belong to Sally.   Unfortunately the wallet will not be able to recognize or claim any `Utxo` that she received via `OffChain` notification.
+For example Bob performs an off-chain utxo transfer to Sally.  Everything goes fine and Sally receives the notification and her wallet successfully identifies and validates the funds.  Six months later Sally's hard-drive crashes and she doesn't have any backup except for her seed-phrase.  She imports the seed-phrase into a new neptune-core wallet.  The wallet then scans the blockchain for `Utxo` that belong to Sally.   Unfortunately the wallet might not be able to recognize or claim the `Utxo` that she received via `OffChain` notification.
 
 For this reason, it becomes crucial to maintain ongoing backups/redundancy of wallet data when receiving payments via OffChain notification.  And/or to ensure that the OffChain mechanism can reasonably provide data storage indefinitely into the future.
 
