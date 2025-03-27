@@ -3486,6 +3486,7 @@ mod global_state_tests {
                 .await
                 .synced_unspent_available_amount(now)
                 .is_positive());
+            drop(alice);
             let tx_output = TxOutput::no_notification(
                 Utxo::new_native_currency(
                     LockScript::anyone_can_spend(),
