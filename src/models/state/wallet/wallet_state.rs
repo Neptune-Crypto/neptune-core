@@ -1221,9 +1221,7 @@ impl WalletState {
                     coinbase_amount,
                     composer_parameters.clone(),
                     new_block.header().timestamp,
-                )
-                .map(|array| array.to_vec())
-                .unwrap_or_default();
+                );
 
                 for composer_output in composer_txos {
                     // compute what the addition record would have been
