@@ -1170,7 +1170,7 @@ pub(crate) mod block_tests {
                 FeeNotificationPolicy::OffChain,
             );
             let (composer_txos, transaction_details) =
-                prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now).unwrap();
+                prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now);
             let coinbase_kernel =
                 PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
             let coinbase = Transaction {
