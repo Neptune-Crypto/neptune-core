@@ -20,8 +20,12 @@ use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-/// Information, fetched from the state of the node, required to generate a
-/// transaction.
+/// contains the unblinded data that a [Transaction](crate::models::blockchain::transaction::Transaction) is generated from,
+/// minus the [TransactionProof](crate::models::blockchain::transaction::TransactionProof).
+///
+/// basically, `TransactionDetails` + `TransactionProof` --> `Transaction`.
+///
+/// security: This type contains secrets (keys) and should never be shared.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionDetails {
     pub tx_inputs: TxInputList,
@@ -32,6 +36,7 @@ pub struct TransactionDetails {
     pub mutator_set_accumulator: MutatorSetAccumulator,
 }
 
+// so we can emit a detailed log msg when sending a transaction.
 impl Display for TransactionDetails {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

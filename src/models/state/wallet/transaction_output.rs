@@ -137,6 +137,7 @@ impl TxOutput {
         }
     }
 
+    /// retrieve native currency amount
     pub fn native_currency_amount(&self) -> NativeCurrencyAmount {
         self.utxo.get_native_currency_amount()
     }
@@ -311,6 +312,7 @@ impl TxOutput {
         self.receiver_digest
     }
 
+    /// retrieve public announcement, if any
     pub fn public_announcement(&self) -> Option<PublicAnnouncement> {
         match &self.notification_method {
             UtxoNotifyMethod::None => None,
@@ -398,20 +400,6 @@ impl<I: Into<TxOutput>, T: IntoIterator<Item = I>> From<T> for TxOutputList {
     }
 }
 
-// Killed because: this mapping requires wallet info!
-// impl From<&TxOutputList> for Vec<ExpectedUtxo> {
-//     fn from(list: &TxOutputList) -> Self {
-//         list.expected_utxos_iter().collect()
-//     }
-// }
-
-// Killed because: this mapping requires recipient info!
-// impl From<&TxOutputList> for Vec<PublicAnnouncement> {
-//     fn from(list: &TxOutputList) -> Self {
-//         list.public_announcements_iter().into_iter().collect()
-//     }
-// }
-
 impl TxOutputList {
     /// calculates total amount in native currency
     pub fn total_native_coins(&self) -> NativeCurrencyAmount {
@@ -461,7 +449,7 @@ impl TxOutputList {
         public_announcements
     }
 
-    pub(crate) fn offchain_notifications(
+    pub fn offchain_notifications(
         &self,
         network: Network,
     ) -> impl Iterator<Item = PrivateNotificationData> + use<'_> {
@@ -479,14 +467,14 @@ impl TxOutputList {
         })
     }
 
-    pub(crate) fn owned_offchain_notifications(
+    pub fn owned_offchain_notifications(
         &self,
         network: Network,
     ) -> impl Iterator<Item = PrivateNotificationData> + use<'_> {
         self.offchain_notifications(network).filter(|n| n.owned)
     }
 
-    pub(crate) fn unowned_offchain_notifications(
+    pub fn unowned_offchain_notifications(
         &self,
         network: Network,
     ) -> impl Iterator<Item = PrivateNotificationData> + use<'_> {

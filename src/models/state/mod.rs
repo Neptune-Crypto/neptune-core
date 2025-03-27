@@ -149,11 +149,16 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
+    // holding this sender here enables it be used by the tx_initiator rust API
+    // for broadcasting Tx as well as the RPC API.
+    // (we might consider renaming the channel.)
     rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
 impl GlobalStateLock {
-    pub(crate) fn new(
+
+    /// the key to the watery kingdom.
+    pub fn new(
         wallet_state: WalletState,
         chain: BlockchainState,
         net: NetworkingState,
@@ -220,14 +225,17 @@ impl GlobalStateLock {
         test_util::TransactionInitiatorInternal::new(self.clone())
     }
 
+    /// retrieve a transaction initiator in a mutable context.
     pub fn tx_initiator_mut(&mut self) -> TransactionInitiator {
         TransactionInitiator::new(self.clone())
     }
 
+    /// retrieve a transaction initiator in an immutable context.
     pub fn tx_initiator(&self) -> TransactionInitiator {
         TransactionInitiator::new(self.clone())
     }
 
+    /// retrieve a transaction sender in a mutable context.
     pub fn tx_sender_mut(&mut self) -> TransactionSender {
         TransactionSender::new(self.clone())
     }
@@ -272,6 +280,9 @@ impl GlobalStateLock {
         &self.cli
     }
 
+    /// retrieve sender for channel from RPC to main loop
+    ///
+    /// note that the tx_initiator API now uses this sender also.
     pub fn rpc_server_to_main_tx(&self) -> tokio::sync::mpsc::Sender<RPCServerToMain> {
         self.rpc_server_to_main_tx.clone()
     }
@@ -807,46 +818,14 @@ impl GlobalState {
         history
     }
 
-    // /// Generate a change UTXO to ensure that the difference in input amount
-    // /// and output amount goes back to us. Return the UTXO in a format compatible
-    // /// with claiming it later on.
-    // //
-    // // "Later on" meaning: as an [ExpectedUtxo].
-    // pub fn create_change_output(
-    //     &self,
-    //     change_amount: NativeCurrencyAmount,
-    //     change_key: SpendingKey,
-    //     change_utxo_notify_method: UtxoNotificationMedium,
-    // ) -> Result<TxOutput> {
-    //     let Some(own_receiving_address) = change_key.to_address() else {
-    //         bail!("Cannot create change output when supplied spending key has no corresponding address.");
-    //     };
-
-    //     let receiver_digest = own_receiving_address.privacy_digest();
-    //     let change_sender_randomness = self.wallet_state.wallet_entropy.generate_sender_randomness(
-    //         self.chain.light_state().kernel.header.height,
-    //         receiver_digest,
-    //     );
-
-    //     let owned = true;
-    //     let change_output = match change_utxo_notify_method {
-    //         UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency(
-    //             change_amount,
-    //             change_sender_randomness,
-    //             own_receiving_address,
-    //             owned,
-    //         ),
-    //         UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
-    //             change_amount,
-    //             change_sender_randomness,
-    //             own_receiving_address,
-    //             owned,
-    //         ),
-    //     };
-
-    //     Ok(change_output)
-    // }
-
+    /// retrieves all spendable inputs in the wallet as of the present tip.
+    ///
+    /// excludes utxos:
+    ///   + that are timelocked in the future
+    ///   + that are unspendable (no spending key)
+    ///   + that are already spent in the mempool
+    ///
+    /// note: ordering of the returned `TxInput` is undefined.
     pub async fn wallet_spendable_inputs(
         &self,
         timestamp: Timestamp,

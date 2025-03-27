@@ -76,6 +76,7 @@ impl TransactionProof {
         }
     }
 
+    /// verify this proof is valid for a provided transaction id
     pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
             TransactionProof::Witness(primitive_witness) => {
@@ -94,6 +95,7 @@ impl TransactionProof {
     }
 }
 
+/// error variants associated with a transaction proof
 #[derive(Debug, Copy, Clone)]
 pub enum TransactionProofError {
     CannotUpdateProofVariant,

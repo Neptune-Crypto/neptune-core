@@ -387,6 +387,8 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     let (composer_outputs, transaction_details) =
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
 
+    info!("Start: generate single proof for coinbase transaction");
+
     let tx_details_arc = Arc::new(transaction_details);
     let proof = TransactionProofBuilder::new()
         .transaction_details(tx_details_arc.clone())
@@ -396,13 +398,12 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .build()
         .await?;
 
-    info!("Start: generate single proof for coinbase transaction");
+    info!("Done: generating single proof for coinbase transaction");
+
     let transaction = TransactionBuilder::new()
         .transaction_details(tx_details_arc)
         .transaction_proof(proof)
         .build_transaction()?;
-
-    info!("Done: generating single proof for coinbase transaction");
 
     Ok((transaction, composer_outputs))
 }

@@ -203,6 +203,7 @@ pub(crate) struct ClaimUtxoData {
     pub(crate) expected_utxo: ExpectedUtxo,
 }
 
+/// represents messages that can be sent from RPC server to main loop.
 #[derive(Clone, Debug)]
 pub enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),

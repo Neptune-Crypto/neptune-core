@@ -1,4 +1,4 @@
-//! provides an interface to transaction inputs
+//! provides an interface for working with transaction inputs
 
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -40,6 +40,7 @@ impl Deref for TxInput {
 }
 
 impl TxInput {
+    /// retrieve native currency amount
     pub fn native_currency_amount(&self) -> NativeCurrencyAmount {
         self.utxo.get_native_currency_amount()
     }
@@ -108,10 +109,11 @@ impl From<TxInputList> for Vec<UnlockedUtxo> {
 }
 
 impl TxInputList {
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self(vec![])
     }
 
+    /// retrieves native currency sum(inputs)
     pub fn total_native_coins(&self) -> NativeCurrencyAmount {
         self.0
             .iter()
@@ -119,16 +121,17 @@ impl TxInputList {
             .sum()
     }
 
-    /// retrieves utxos
+    /// provides an iterator over input Utxo
     pub fn utxos_iter(&self) -> impl IntoIterator<Item = Utxo> + '_ {
         self.0.iter().map(|u| &u.utxo).cloned()
     }
 
+    /// retrieves all Utxo
     pub fn utxos(&self) -> Vec<Utxo> {
         self.utxos_iter().into_iter().collect()
     }
 
-    /// retrieves removal records
+    /// provides iterator over removal records
     pub fn removal_records_iter<'a>(
         &'a self,
         msa: &'a MutatorSetAccumulator,
@@ -141,38 +144,12 @@ impl TxInputList {
         self.removal_records_iter(msa).into_iter().collect()
     }
 
-    /*
-        /// retrieves lock scripts
-        pub fn lock_scripts_iter(&self) -> impl IntoIterator<Item = LockScript> + '_ {
-            self.0.iter().map(|u| &u.lock_script).cloned()
-        }
-
-        /// retrieves lock scripts
-        pub fn lock_scripts(&self) -> Vec<LockScript> {
-            self.lock_scripts_iter().into_iter().collect()
-        }
-
-        /// retrieves unlock keys
-        pub fn unlock_keys_iter(&self) -> impl Iterator<Item = Digest> + '_ {
-            self.0.iter().map(|u| u.unlock_key)
-        }
-
-        /// retrieves unlock keys
-        pub fn unlock_keys(&self) -> Vec<Digest> {
-            self.unlock_keys_iter().collect()
-        }
-
-        /// retrieves unlock keys as lock script witnesses
-        pub fn lock_script_witnesses(&self) -> Vec<Vec<BFieldElement>> {
-            self.unlock_keys_iter().map(|uk| uk.encode()).collect()
-        }
-    */
-    /// retrieves membership proofs
+    /// provides mutator-set membership proof iterator
     pub fn ms_membership_proofs_iter(&self) -> impl IntoIterator<Item = MsMembershipProof> + '_ {
         self.0.iter().map(|u| u.mutator_set_mp()).cloned()
     }
 
-    /// retrieves membership proofs
+    /// retrieves mutator-set membership proofs
     pub fn ms_membership_proofs(&self) -> Vec<MsMembershipProof> {
         self.ms_membership_proofs_iter().into_iter().collect()
     }

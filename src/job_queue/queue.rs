@@ -3,8 +3,10 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 use super::errors::JobHandleError;
 use super::errors::JobQueueError;
@@ -74,21 +76,16 @@ struct AddJobMsg<P> {
     cancel_rx: JobCancelReceiver,
     priority: P,
 }
-use tokio::task::JoinHandle;
+
 /// implements a job queue that sends result of each job to a listener.
 pub struct JobQueue<P> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
 
     process_jobs_task_handle: JoinHandle<()>, // Store the job processing task handle
     add_job_task_handle: JoinHandle<()>,      // store the job addition task handle.
-
-                                              // this is here so the tracker won't be dropped until JobQueue is.
-                                              //    #[allow(dead_code)]
-                                              //    tracker: TaskTracker,
 }
 
-use tokio::sync::mpsc::UnboundedReceiver;
-
+// useful for detecting when a receiver gets dropped.
 struct LoggedReceiver<T>(UnboundedReceiver<T>);
 
 impl<T> Drop for LoggedReceiver<T> {
@@ -155,12 +152,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         let (tx_deque, mut rx_deque) = tokio::sync::mpsc::unbounded_channel();
 
-        //        let tracker = TaskTracker::new();
-
         // spawns background task that adds incoming jobs to job-queue
         let jobs_rc1 = jobs.clone();
         let add_job_task_handle = tokio::spawn(async move {
-            //        tracker.spawn(async move {
             while let Some(msg) = rx.0.recv().await {
                 match msg {
                     JobQueueMsg::AddJob(m) => {
@@ -202,7 +196,6 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = jobs.clone();
         let process_jobs_task_handle = tokio::spawn(async move {
-            //        tracker.spawn(async move {
             let mut job_num: usize = 1;
 
             while rx_deque.recv().await.is_some() {
@@ -246,11 +239,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             }
             tracing::debug!("task process_jobs exiting");
         });
-        //      tracker.close();
 
         tracing::info!("JobQueue: started new queue.");
 
-        //        Self { tx, tracker }
         Self {
             tx,
             process_jobs_task_handle,

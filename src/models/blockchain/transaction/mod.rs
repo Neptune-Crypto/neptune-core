@@ -83,6 +83,14 @@ impl From<Arc<Transaction>> for Transaction {
 }
 
 impl Transaction {
+    /// return transaction id.
+    ///
+    /// note that transactions created by users are temporary.  Once confirmed
+    /// into a block they are merged into a single block transaction.  So this
+    /// id will not correspond to anything on the blockchain except for the
+    /// single transaction in each block.
+    ///
+    /// These id are useful for referencing transactions in the mempool however.
     pub fn txid(&self) -> TransactionKernelId {
         self.kernel.txid()
     }

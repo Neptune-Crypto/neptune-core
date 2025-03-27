@@ -1668,7 +1668,7 @@ impl MainLoopHandler {
                 );
 
                 // note: this Tx must already have been added to the mempool by
-                // sender.
+                // sender.  This occurs in GlobalStateLock::record_transaction().
 
                 // Is this a transaction we can share with peers? If so, share
                 // it immediately.

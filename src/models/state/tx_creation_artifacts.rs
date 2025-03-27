@@ -11,23 +11,38 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 
-/// Objects created by `create_transaction`.
+/// represents a [Transaction] and its corresponding [TransactionDetails]
+///
+/// an instance of this type is necessary to record and broadcast (send) a
+/// transaction with
+/// [record_and_broadcast_transaction()](crate::tx_initiation::initiator::record_and_broadcast_transaction()).
+///
+/// A [Transaction] contains blinded data that can be sent over the network to
+/// other neptune-core nodes.  The [TransactionDetails] contains the unblinded
+/// data that the `Transaction` is generated from, minus the [TransactionProof].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxCreationArtifacts {
+    // tbd: network doesn't necessarily belong here but is necessary
+    // for callers to obtain eg offchain_notifications correctly.
+    // perhaps it should be stored in TransactionDetails and/or Transaction,
+    // or maybe there is already some way to deduce it from Transaction?
     pub(crate) network: Network,
     pub(crate) transaction: Arc<Transaction>,
     pub(crate) details: Arc<TransactionDetails>,
 }
 
 impl TxCreationArtifacts {
+    /// get the transaction
     pub fn transaction(&self) -> &Transaction {
         &self.transaction
     }
 
+    /// get the transaction details
     pub fn details(&self) -> &TransactionDetails {
         &self.details
     }
 
+    /// get all offchain notification (owned and unowned)
     pub fn all_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
         self.details
             .tx_outputs
@@ -35,6 +50,7 @@ impl TxCreationArtifacts {
             .collect()
     }
 
+    /// get owned offchain notifications
     pub fn owned_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
         self.details
             .tx_outputs
@@ -42,6 +58,7 @@ impl TxCreationArtifacts {
             .collect()
     }
 
+    /// get unowned offchain notifications
     pub fn unowned_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
         self.details
             .tx_outputs
@@ -60,6 +77,9 @@ impl TxCreationArtifacts {
     /// because if the details match the transaction and the transaction is
     /// valid, that is sufficient.
     pub async fn verify(&self, network: Network) -> Result<(), TxCreationArtifactsError> {
+        // tbd: maybe we should get rid of the network arg.  it's present
+        // out of abundance of caution.
+
         // todo: (how) can we also verify that self.network matches the Tx?
 
         // note: we check the least expensive things first.
@@ -93,7 +113,7 @@ impl TxCreationArtifacts {
     }
 }
 
-/// enumerates possible transaction send errors
+/// enumerates possible transaction artifacts errors
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum TxCreationArtifactsError {

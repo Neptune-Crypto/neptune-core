@@ -8,6 +8,8 @@ use super::address::KeyType;
 use super::address::SpendingKey;
 use super::utxo_notification::UtxoNotificationMedium;
 
+/// specifies how to handle change for a transaction.
+///
 /// When the selected inputs represent more coins than the outputs (with fee)
 /// where does this change go?
 ///

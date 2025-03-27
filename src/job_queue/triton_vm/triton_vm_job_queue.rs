@@ -48,6 +48,17 @@ impl TritonVmJobQueue {
             .clone()
     }
 
+    // note: this cfg(test) is temporary. It is needed because tests each
+    // run in their own tokio runtime, so they cannot share a single job-queue instance
+    // which spawns its own async tasks.  Because when the test runtime shuts down it
+    // kills the job-queue tasks.
+    //
+    // The temporary solution is that each call returns a new JobQueue instance.
+    // That prevents tests from interfering with eachother at the cost that multiple job-queue
+    // exist concurrently.
+    //
+    // The proper solution is for tests to share a single tokio runtime.
+    // This change will be coming in a followup commit/PR.
     #[cfg(test)]
     pub fn get_instance() -> Arc<Self> {
         Arc::new(Self(JobQueue::<TritonVmJobPriority>::start()))
@@ -64,6 +75,7 @@ impl TritonVmJobQueue {
     }
 }
 
+/// returns a clonable reference to the single (per process) VM job queue.
 pub fn vm_job_queue() -> Arc<TritonVmJobQueue> {
     TritonVmJobQueue::get_instance()
 }
