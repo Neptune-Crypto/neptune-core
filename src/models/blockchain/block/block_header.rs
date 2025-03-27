@@ -97,13 +97,17 @@ impl Display for BlockHeader {
             Prev. Digest: {}\n\
             Cumulative Proof-of-Work: {}\n\
             Difficulty: {}\n\
-            Version: {}\n",
+            Version: {}\n
+            Guesser digest: {}\n
+            nonce: {}\n",
             self.height,
             self.timestamp.standard_format(),
             self.prev_block_digest.to_hex(),
             self.cumulative_proof_of_work,
             self.difficulty,
-            self.version
+            self.version,
+            self.guesser_digest,
+            self.nonce
         );
 
         write!(f, "{}", string)
