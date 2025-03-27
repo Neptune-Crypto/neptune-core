@@ -199,7 +199,7 @@ impl WalletState {
     /// UTXO, in case the wallet database is deleted.
     ///
     /// Uses non-blocking I/O via tokio.
-    async fn store_utxo_ms_recovery_data(
+    pub(crate) async fn store_utxo_ms_recovery_data(
         &self,
         utxo_ms_recovery_data: IncomingUtxoRecoveryData,
     ) -> Result<()> {

@@ -994,12 +994,16 @@ impl GlobalState {
 
             for incoming_utxo in incoming_utxos {
                 let new_value = seen_recovery_entries.insert(Tip5::hash(&incoming_utxo));
-                assert!(
-                    new_value,
-                    "Recovery data may not contain duplicated entries. Entry with AOCL index {} \
-                     was duplicated. Try removing the duplicated entry from the file.",
-                    incoming_utxo.aocl_index
-                );
+
+                // Ensure duplicated entries are filtered out.
+                if !new_value {
+                    warn!(
+                        "Recovery data contains duplicated entries. Entry with AOCL index {} \
+                     was duplicated.",
+                        incoming_utxo.aocl_index
+                    );
+                    continue;
+                }
 
                 if mutxos
                     .get(&(incoming_utxo.aocl_index, incoming_utxo.addition_record()))
@@ -1743,8 +1747,8 @@ mod global_state_tests {
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
 
     mod handshake {
@@ -1971,29 +1975,107 @@ mod global_state_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn restore_monitored_utxos_from_recovery_data_duplicated_entries() {
+        // Verify that duplicated entries in `incoming_randomness.dat` are
+        // handled correctly.
+        let network = Network::Main;
+        let mut rng = rand::rng();
+        let mut state = state_with_premine_and_self_mined_blocks(network, &mut rng, 1).await;
+        let mut state = state.lock_guard_mut().await;
+        let orignal_mutxos = state
+            .wallet_state
+            .wallet_db
+            .monitored_utxos()
+            .get_all()
+            .await;
+        assert_eq!(
+            5,
+            orignal_mutxos.len(),
+            "Expected one premine, four mining rewards"
+        );
+
+        // Clear databases, to verify recovery works.
+        state
+            .wallet_state
+            .wallet_db
+            .monitored_utxos_mut()
+            .clear()
+            .await;
+        state.wallet_state.clear_raw_hash_keys().await;
+        state
+            .wallet_state
+            .wallet_db
+            .expected_utxos_mut()
+            .clear()
+            .await;
+
+        let recovery_data = state
+            .wallet_state
+            .read_utxo_ms_recovery_data()
+            .await
+            .unwrap();
+        assert_eq!(
+            5,
+            recovery_data.len(),
+            "Expected five entries in recovery data"
+        );
+
+        // Add duplicated entries to recovery data
+        for recovery_element in recovery_data {
+            state
+                .wallet_state
+                .store_utxo_ms_recovery_data(recovery_element)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            10,
+            state
+                .wallet_state
+                .read_utxo_ms_recovery_data()
+                .await
+                .unwrap()
+                .len(),
+            "Expected ten entries in recovery data"
+        );
+        assert!(
+            state
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .is_empty()
+                .await,
+            "List of monitored UTXOs must be empty before attempting recovery"
+        );
+
+        // Perform this recovery, with duplicated entries. And verify that
+        // the original list of monitored UTXOs is recovered.
+        state
+            .restore_monitored_utxos_from_recovery_data()
+            .await
+            .unwrap();
+        let recovered_mutxos = state
+            .wallet_state
+            .wallet_db
+            .monitored_utxos()
+            .get_all()
+            .await;
+        for (original, recovered) in orignal_mutxos.into_iter().zip_eq(recovered_mutxos) {
+            assert_eq!(original.utxo, recovered.utxo);
+            assert_eq!(
+                original.get_latest_membership_proof_entry().unwrap(),
+                recovered.get_latest_membership_proof_entry().unwrap()
+            );
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Main;
         let mut rng = rand::rng();
-        let wallet = WalletEntropy::devnet_wallet();
-        let own_key = wallet.nth_generation_spending_key_for_tests(0);
         let mut global_state_lock =
-            mock_genesis_global_state(network, 2, wallet.clone(), cli_args::Args::default()).await;
-        let genesis_block = Block::genesis(network);
-        let guesser_preimage = wallet.guesser_preimage(genesis_block.hash());
-        let (block1, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
-            &genesis_block,
-            None,
-            own_key,
-            rng.random(),
-            0.5,
-            guesser_preimage,
-        )
-        .await;
-
-        global_state_lock
-            .set_new_self_composed_tip(block1.clone(), composer_utxos)
-            .await
-            .unwrap();
+            state_with_premine_and_self_mined_blocks(network, &mut rng, 1).await;
 
         // Delete everything from monitored UTXO and from raw-hash keys.
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -2059,6 +2141,12 @@ mod global_state_tests {
 
         // Recover the MUTXO from the recovery data, and verify that MUTXOs are restored
         // Also verify that this operation is idempotent by running it multiple times.
+        let genesis_block = Block::genesis(network);
+        let block1 = global_state.chain.archival_state().get_tip().await;
+        let block1_guesser_preimage = global_state
+            .wallet_state
+            .wallet_entropy
+            .guesser_preimage(genesis_block.hash());
         for _ in 0..3 {
             global_state
                 .restore_monitored_utxos_from_recovery_data()
@@ -2120,7 +2208,7 @@ mod global_state_tests {
                 .collect_vec();
             assert_eq!(
                 vec![SpendingKey::RawHashLock(HashLockKey::from_preimage(
-                    guesser_preimage
+                    block1_guesser_preimage
                 ))],
                 cached_hash_lock_keys,
                 "Cached hash lock keys must match expected value after recovery"
@@ -2132,7 +2220,7 @@ mod global_state_tests {
                 .get_all()
                 .await;
             assert_eq!(
-                vec![guesser_preimage],
+                vec![block1_guesser_preimage],
                 persisted_hash_lock_keys,
                 "Persisted hash lock keys must match expected value after recovery"
             );

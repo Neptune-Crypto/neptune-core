@@ -254,6 +254,43 @@ pub(crate) async fn mock_genesis_global_state(
     )
 }
 
+/// A state with a premine UTXO and self-mined blocks. Both composing and
+/// guessing was done by the returned entity. Tip has height of
+/// `num_blocks_mined`.
+pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
+    network: Network,
+    rng: &mut T,
+    num_blocks_mined: usize,
+) -> GlobalStateLock {
+    let wallet = WalletEntropy::devnet_wallet();
+    let own_key = wallet.nth_generation_spending_key_for_tests(0);
+    let mut global_state_lock =
+        mock_genesis_global_state(network, 2, wallet.clone(), cli_args::Args::default()).await;
+    let mut previous_block = Block::genesis(network);
+
+    for _ in 0..num_blocks_mined {
+        let guesser_preimage = wallet.guesser_preimage(previous_block.hash());
+        let (next_block, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
+            &previous_block,
+            None,
+            own_key,
+            rng.random(),
+            0.5,
+            guesser_preimage,
+        )
+        .await;
+
+        global_state_lock
+            .set_new_self_composed_tip(next_block.clone(), composer_utxos)
+            .await
+            .unwrap();
+
+        previous_block = next_block;
+    }
+
+    global_state_lock
+}
+
 /// Return a setup with empty databases, and with the genesis block set as tip.
 ///
 /// Returns:
