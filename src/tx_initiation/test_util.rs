@@ -1,5 +1,7 @@
 //! this is a test-util module that provides the historic create_transaction()
 //! API for usage by tests.
+//!
+//! Going forward test authors are encouraged to use the public APIs instead.
 
 use std::sync::Arc;
 
@@ -28,7 +30,10 @@ impl TransactionInitiatorInternal {
         Self { global_state_lock }
     }
 
-    /// note: this is an internal (crate-private) API.
+    /// note: this api only exists for legacy unit tests.
+    ///
+    /// new tests should use TransactionSender::send() or
+    /// `TransactionInitiator or a builder.
     ///
     /// it is now just a wrapper around TxInputListBuilder,
     /// TransactionDetailsBuilder, TransactionProofBuilder and
