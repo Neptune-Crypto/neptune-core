@@ -58,6 +58,13 @@
 //!
 //! this sequence requires using the [builder] or [initiator] API.
 
+// note to neptune devs:
+//
+// a lot of design and effort went into re-writing account creation code and
+// organizing it into this module, documenting, etc.  It is quite clean now.
+//
+// Let's keep it that way!   Please no commits in this module without review!!
+
 // these represent the public tx_initiator API
 pub mod builder;
 pub mod error;
