@@ -97,8 +97,8 @@ impl Display for BlockHeader {
             Prev. Digest: {}\n\
             Cumulative Proof-of-Work: {}\n\
             Difficulty: {}\n\
-            Version: {}\n
-            Guesser digest: {}\n
+            Version: {}\n\
+            Guesser digest: {}\n\
             nonce: {}\n",
             self.height,
             self.timestamp.standard_format(),
@@ -106,8 +106,8 @@ impl Display for BlockHeader {
             self.cumulative_proof_of_work,
             self.difficulty,
             self.version,
-            self.guesser_digest,
-            self.nonce
+            self.guesser_digest.to_hex(),
+            self.nonce.to_hex()
         );
 
         write!(f, "{}", string)
@@ -317,5 +317,11 @@ pub(crate) mod block_header_tests {
         let witness: HeaderToBlockHashWitness = (&block).into();
         let calculated = BlockHeaderWithBlockHashWitness::new(*block.header(), witness).hash();
         assert_eq!(expected, calculated);
+    }
+
+    #[test]
+    fn block_header_display_impl() {
+        let block_header = random_block_header();
+        println!("{block_header}");
     }
 }
