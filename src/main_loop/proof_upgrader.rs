@@ -9,6 +9,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::proof::Proof;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use super::TransactionOrigin;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -264,6 +265,29 @@ impl UpgradeJob {
         }
     }
 
+    /// Produce an appropriate log message for the case where the transaction is
+    /// no longer confirmable after a successful proof-upgrade. This could be
+    /// because a faster proof-upgrader upgraded the transaction and it got
+    /// mined in the meantime, or in the case of a merge, one of the inputs to
+    /// the merge upgrade got mined.
+    fn double_spend_warn_msg(&self) -> &str {
+        match self {
+            UpgradeJob::Merge { .. } => "Maybe an input to the merge got mined already?",
+            UpgradeJob::PrimitiveWitnessToProofCollection { .. } => {
+                "Your own transaction already got mined?"
+            }
+            UpgradeJob::PrimitiveWitnessToSingleProof { .. } => {
+                "Your own transaction already got mined?"
+            }
+            UpgradeJob::ProofCollectionToSingleProof { .. } => {
+                "Someone else upgraded the proof-collection and mined it?"
+            }
+            UpgradeJob::UpdateMutatorSetData(_) => {
+                "Transaction got mined while this update job was running?"
+            }
+        }
+    }
+
     /// Upgrade transaction proofs, inserts upgraded tx into the mempool and
     /// informs peers of this new transaction.
     pub(crate) async fn handle_upgrade(
@@ -344,15 +368,22 @@ impl UpgradeJob {
 
             upgrade_job = {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
-                // Did we receive a new block while proving? If so, perform an
-                // update also, if this was requested.
+                let tip_mutator_set = global_state
+                    .chain
+                    .light_state()
+                    .mutator_set_accumulator_after();
 
-                let transaction_is_up_to_date = upgraded.kernel.mutator_set_hash
-                    == global_state
-                        .chain
-                        .light_state()
-                        .mutator_set_accumulator_after()
-                        .hash();
+                // Did the transaction get mined while the proof upgrade job was
+                // running? If so, don't share it or insert it into the mempool.
+                if !upgraded.is_confirmable_relative_to(&tip_mutator_set) {
+                    let verbose_log_msg = upgrade_job.double_spend_warn_msg();
+                    warn!("Upgraded transaction is no longer confirmable. {verbose_log_msg}");
+                    global_state.mempool_remove(upgraded.kernel.txid()).await;
+                    return;
+                }
+
+                let transaction_is_up_to_date =
+                    upgraded.kernel.mutator_set_hash == tip_mutator_set.hash();
 
                 if transaction_is_up_to_date {
                     // Happy path
@@ -760,6 +791,8 @@ pub(super) fn get_upgrade_task_from_mempool(
 
 #[cfg(test)]
 mod test {
+    use tokio::sync::broadcast;
+    use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
 
     use super::*;
@@ -770,12 +803,14 @@ mod test {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::invalid_empty_block_with_timestamp;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::state_with_premine_and_self_mined_blocks;
+    use crate::PEER_CHANNEL_CAPACITY;
 
-    /// Returns a PrimitiveWitness-backed transaction initiated by the global
-    /// state provided as argument. Assumes balance is sufficient to make this
-    /// transaction.
+    /// Returns a transaction initiated by the global state provided as
+    /// argument. Assumes balance is sufficient to make this transaction.
     async fn transaction_from_state(
         mut state: GlobalStateLock,
         seed: u64,
@@ -1043,5 +1078,82 @@ mod test {
                 .mutator_set_accumulator_after();
             assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
         }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn dont_share_partly_mined_merge_upgrade() {
+        let network = Network::Main;
+
+        // Alice is premine recipient and has mined on block, so she can make
+        // (at least) two transaction.
+        let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
+        let mut alice = state_with_premine_and_self_mined_blocks(network, &mut rng, 1).await;
+
+        let mut transactions = vec![];
+        for _ in 0..=1 {
+            let tx_fee = NativeCurrencyAmount::coins(2);
+            let single_proof_tx = transaction_from_state(
+                alice.clone(),
+                rng.random(),
+                TxProvingCapability::SingleProof,
+                tx_fee,
+            )
+            .await;
+            alice
+                .lock_guard_mut()
+                .await
+                .mempool_insert(single_proof_tx.clone(), TransactionOrigin::Own)
+                .await;
+            transactions.push(single_proof_tx);
+        }
+
+        let (merge_upgrade_job, _) = {
+            let alice = alice.lock_guard().await;
+            get_upgrade_task_from_mempool(&alice).unwrap()
+        };
+        assert!(
+            matches!(merge_upgrade_job, UpgradeJob::Merge { .. }),
+            "Return upgrade job must be of type merge."
+        );
+
+        // Now, one of the transactions get mined. Before the upgrade job that
+        // merges the two transactions completes. This means that the merged
+        // transaction will be a double-spending transactions as at least one
+        // of its inputs has already been spent. This transaction must not be
+        // transmitted to peers, as this would cause peers to ban the upgrader
+        // for sharing unconfirmable transactions.
+        let mined_tx = transactions[0].clone();
+        let unmined_tx = transactions[1].clone();
+        let block1 = alice.lock_guard().await.chain.light_state().to_owned();
+        let block2 = invalid_block_with_transaction(&block1, mined_tx);
+        alice.set_new_tip(block2).await.unwrap();
+
+        let (main_to_peer_tx, mut main_to_peer_rx) =
+            broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+        merge_upgrade_job
+            .handle_upgrade(
+                &TritonVmJobQueue::dummy(),
+                TransactionOrigin::Own,
+                true,
+                alice.clone(),
+                main_to_peer_tx.clone(),
+            )
+            .await;
+
+        let peer_msg = main_to_peer_rx.try_recv().unwrap_err();
+        assert_eq!(TryRecvError::Empty, peer_msg);
+
+        drop(main_to_peer_tx);
+
+        // Since one transacion got mined, and the other didn't, we should still
+        // have the unmined transaction in the mempool. Since this transcation
+        // is owned by this client, we want to keep it in the mempool.
+        assert_eq!(1, alice.lock_guard().await.mempool.len());
+        assert!(alice
+            .lock_guard()
+            .await
+            .mempool
+            .contains(unmined_tx.kernel.txid()));
     }
 }
