@@ -1057,6 +1057,16 @@ async fn fake_block_successor(
     seed: [u8; 32],
     with_valid_pow: bool,
 ) -> Block {
+    fake_block_successor_with_merged_tx(predecessor, timestamp, seed, with_valid_pow, vec![]).await
+}
+
+pub async fn fake_block_successor_with_merged_tx(
+    predecessor: &Block,
+    timestamp: Timestamp,
+    seed: [u8; 32],
+    with_valid_pow: bool,
+    txs: Vec<Transaction>,
+) -> Block {
     let mut rng = StdRng::from_seed(seed);
 
     let composer_parameters = ComposerParameters::new(
@@ -1071,7 +1081,7 @@ async fn fake_block_successor(
         composer_parameters,
         timestamp,
         rng.random(),
-        vec![],
+        txs,
     )
     .await
     .unwrap();
