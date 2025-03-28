@@ -6,6 +6,7 @@ use tasm_lib::prelude::Digest;
 
 use crate::tx_initiation::export::BlockHeight;
 use crate::tx_initiation::export::NativeCurrencyAmount;
+use crate::tx_initiation::export::WitnessValidationError;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
@@ -40,7 +41,7 @@ pub enum CreateTxError {
     CantGenChangeKeyForImmutableWallet,
 
     #[error("witness validation failed")]
-    WitnessValidationFailed,
+    WitnessValidationFailed(#[from] WitnessValidationError),
 
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]

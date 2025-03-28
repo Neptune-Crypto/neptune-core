@@ -115,8 +115,6 @@ impl TransactionSender {
             .transaction_proof(proof)
             .build(gsl.cli().network)?;
 
-        tracing::info!("send: record and broadcast tx:\n{}", tx_details_rc);
-
         gsl.tx_initiator()
             .record_and_broadcast_transaction(&tx_creation_artifacts)
             .await?;

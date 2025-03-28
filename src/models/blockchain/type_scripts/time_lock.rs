@@ -1258,7 +1258,7 @@ mod test {
         // must fail to validate.
         prop_assert!(!Runtime::new()
             .unwrap()
-            .block_on(primitive_witness.validate()));
+            .block_on(primitive_witness.validate()).is_ok());
     }
 
     #[proptest(cases = 10)]

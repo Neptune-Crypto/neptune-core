@@ -465,7 +465,7 @@ mod transaction_tests {
             let TransactionProof::Witness(pw) = &transaction.proof else {
                 panic!("Expected primitive witness variant");
             };
-            assert!(pw.validate().await)
+            assert!(pw.validate().await.is_ok())
         }
 
         let mut test_runner = TestRunner::deterministic();
@@ -474,8 +474,8 @@ mod transaction_tests {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-        assert!(to_be_updated.validate().await);
-        assert!(mined.validate().await);
+        assert!(to_be_updated.validate().await.is_ok());
+        assert!(mined.validate().await.is_ok());
 
         let updated_with_block = update_with_block(to_be_updated.clone(), mined.clone());
         assert_valid_as_pw(&updated_with_block).await;

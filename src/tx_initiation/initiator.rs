@@ -198,6 +198,11 @@ impl TransactionInitiator {
             .broadcast_transaction(tx.transaction.clone())
             .await?;
 
+        tracing::info!(
+            "transaction accepted for sending!  recorded tx and initiated broadcast sequence:\n{}",
+            tx.details
+        );
+
         Ok(())
     }
 

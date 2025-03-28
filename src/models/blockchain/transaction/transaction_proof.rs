@@ -81,7 +81,7 @@ impl TransactionProof {
         match self {
             TransactionProof::Witness(primitive_witness) => {
                 !primitive_witness.kernel.merge_bit
-                    && primitive_witness.validate().await
+                    && primitive_witness.validate().await.is_ok()
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
             }
             TransactionProof::SingleProof(single_proof) => {

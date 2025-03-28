@@ -89,13 +89,4 @@ impl TxCreationConfig {
     pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
         self.recover_to_provided_key(Arc::new(change_key), UtxoNotificationMedium::OffChain)
     }
-
-    /// Burn the change.
-    ///
-    /// Only use this if you are certain you know what you are doing. Will
-    /// result in loss-of-funds if the transaction is not balanced.
-    pub(crate) fn burn_change(mut self) -> Self {
-        self.change_policy = ChangePolicy::Burn;
-        self
-    }
 }
