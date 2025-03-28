@@ -9,6 +9,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::proof::Proof;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use super::TransactionOrigin;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -264,6 +265,29 @@ impl UpgradeJob {
         }
     }
 
+    /// Produce an appropriate log message for the case where the transaction is
+    /// no longer confirmable after a successful proof-upgrade. This could be
+    /// because a faster proof-upgrader upgraded the transaction and it got
+    /// mined in the meantime, or in the case of a merge, one of the inputs to
+    /// the merge upgrade got mined.
+    fn double_spend_warn_msg(&self) -> &str {
+        match self {
+            UpgradeJob::Merge { .. } => "Maybe an input to the merge got mined already?",
+            UpgradeJob::PrimitiveWitnessToProofCollection { .. } => {
+                "Your own transaction already got mined?"
+            }
+            UpgradeJob::PrimitiveWitnessToSingleProof { .. } => {
+                "Your own transaction already got mined?"
+            }
+            UpgradeJob::ProofCollectionToSingleProof { .. } => {
+                "Someone else upgraded the proof-collection and mined it?"
+            }
+            UpgradeJob::UpdateMutatorSetData(_) => {
+                "Transaction got mined while this update job was running?"
+            }
+        }
+    }
+
     /// Upgrade transaction proofs, inserts upgraded tx into the mempool and
     /// informs peers of this new transaction.
     pub(crate) async fn handle_upgrade(
@@ -344,19 +368,25 @@ impl UpgradeJob {
 
             upgrade_job = {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
-                // Did we receive a new block while proving? If so, perform an
-                // update also, if this was requested.
+                let tip_mutator_set = global_state
+                    .chain
+                    .light_state()
+                    .mutator_set_accumulator_after();
 
-                let transaction_is_up_to_date = upgraded.kernel.mutator_set_hash
-                    == global_state
-                        .chain
-                        .light_state()
-                        .mutator_set_accumulator_after()
-                        .hash();
+                let transaction_is_up_to_date =
+                    upgraded.kernel.mutator_set_hash == tip_mutator_set.hash();
 
                 if transaction_is_up_to_date {
-                    // Happy path
+                    // Did the transaction get mined while the proof upgrade job was
+                    // running? If so, don't share it or insert it into the mempool.
+                    if !upgraded.is_confirmable_relative_to(&tip_mutator_set) {
+                        let verbose_log_msg = upgrade_job.double_spend_warn_msg();
+                        warn!("Upgraded transaction is no longer confirmable. {verbose_log_msg}");
+                        global_state.mempool_remove(upgraded.kernel.txid()).await;
+                        return;
+                    }
 
+                    // happy path
                     // Insert tx into mempool before notifying peers, so we're
                     // sure to have it when they ask.
                     global_state
