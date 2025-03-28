@@ -285,7 +285,6 @@ impl PrimitiveWitness {
     /// as it is the "final say" with regards to whether most new transactions
     /// gets accepted into the mempool or not.  As such, it returns a detailed
     /// error type for the caller.
-    #[must_use]
     pub async fn validate(&self) -> Result<(), WitnessValidationError> {
         // note: This method used to just return `bool` but callers need more
         // detail than that when initiating a transaction if something goes
