@@ -14,11 +14,11 @@ use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::tx_initiation::error::CreateTxError;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// contains the unblinded data that a [Transaction](crate::models::blockchain::transaction::Transaction) is generated from,
@@ -284,10 +284,13 @@ impl TransactionDetails {
     ///
     /// specifically, a [PrimitiveWitness] is built from these
     /// details and validated in the triton VM.
-    pub async fn validate(&self) -> Result<(), WitnessValidationError> {
-        PrimitiveWitness::from_transaction_details(self)
+    pub async fn validate(&self) -> Result<(), CreateTxError> {
+        // note: we map the WitnessValidationError into CreateTxError as this
+        // method is called during Tx creation, and for consistency in that
+        // process.
+        Ok(PrimitiveWitness::from_transaction_details(self)
             .validate()
-            .await
+            .await?)
     }
 }
 
