@@ -60,6 +60,7 @@ commit_parsers = [
   { message = "^revert",            group = "<!-- 100 --> ⏪️ Revert" },
   { message = "^chore|ci|misc",     group = "<!-- 110 --> ⚙️  Miscellaneous" },
   { message = "^fork",              group = "<!-- 120 --> 🔱 Fork" },
+  { message = "^privacy",           group = "<!-- 130 --> 🕵️ Privacy" },
   { footer = "^changelog: ?ignore", skip = true },
 ]
 
