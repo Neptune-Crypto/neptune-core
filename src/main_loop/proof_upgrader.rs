@@ -790,6 +790,8 @@ pub(super) fn get_upgrade_task_from_mempool(
 
 #[cfg(test)]
 mod test {
+    use tokio::sync::broadcast;
+    use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
 
     use super::*;
@@ -799,13 +801,15 @@ mod test {
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::tests::shared::fake_block_successor_with_merged_tx;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::invalid_empty_block_with_timestamp;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::state_with_premine_and_self_mined_blocks;
+    use crate::PEER_CHANNEL_CAPACITY;
 
-    /// Returns a PrimitiveWitness-backed transaction initiated by the global
-    /// state provided as argument. Assumes balance is sufficient to make this
-    /// transaction.
+    /// Returns a transaction initiated by the global state provided as
+    /// argument. Assumes balance is sufficient to make this transaction.
     async fn transaction_from_state(
         mut state: GlobalStateLock,
         seed: u64,
@@ -1026,7 +1030,7 @@ mod test {
                     TransactionOrigin::Own,
                     true,
                     alice.clone(),
-                    main_to_peer_tx,
+                    main_to_peer_tx.clone(),
                 )
                 .await;
 
@@ -1034,6 +1038,8 @@ mod test {
             let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
                 panic!("Proof upgrader must inform peer tasks about upgraded tx");
             };
+
+            drop(main_to_peer_tx);
 
             assert_eq!(
                 pwtx.kernel.txid(),
@@ -1073,5 +1079,86 @@ mod test {
                 .mutator_set_accumulator_after();
             assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
         }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn dont_share_partly_mined_merge_upgrade() {
+        let network = Network::Main;
+
+        // Alice is premine recipient and has mined on block, so she can make
+        // (at least) two transaction.
+        let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
+        let mut alice = state_with_premine_and_self_mined_blocks(network, &mut rng, 1).await;
+
+        let mut transactions = vec![];
+        for _ in 0..=1 {
+            let tx_fee = NativeCurrencyAmount::coins(2);
+            let single_proof_tx = transaction_from_state(
+                alice.clone(),
+                rng.random(),
+                TxProvingCapability::SingleProof,
+                tx_fee,
+            )
+            .await;
+            alice
+                .lock_guard_mut()
+                .await
+                .mempool_insert(single_proof_tx.clone(), TransactionOrigin::Own)
+                .await;
+            transactions.push(single_proof_tx);
+        }
+
+        let (merge_upgrade_job, _) = {
+            let alice = alice.lock_guard().await;
+            get_upgrade_task_from_mempool(&alice).unwrap()
+        };
+        assert!(
+            matches!(merge_upgrade_job, UpgradeJob::Merge { .. }),
+            "Return upgrade job must be of type merge."
+        );
+
+        // Now, one of the transactions get mined. Before the upgrade job that
+        // merges the two transactions completes. This means that the merged
+        // transaction will be a double-spending transactions as at least one
+        // of its inputs has already been spent. This transaction must not be
+        // transmitted to peers, as this would cause peers to ban the upgrader
+        // for sharing unconfirmable transactions.
+        let mined_tx = transactions[0].clone();
+        let unmined_tx = transactions[1].clone();
+        let block1 = alice.lock_guard().await.chain.light_state().to_owned();
+
+        let now = block1.header().timestamp + Timestamp::hours(1);
+        let block2 =
+            fake_block_successor_with_merged_tx(&block1, now, rng.random(), false, vec![mined_tx])
+                .await;
+        alice.set_new_tip(block2).await.unwrap();
+
+        let (main_to_peer_tx, mut main_to_peer_rx) =
+            broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+        merge_upgrade_job
+            .handle_upgrade(
+                &TritonVmJobQueue::dummy(),
+                TransactionOrigin::Own,
+                true,
+                alice.clone(),
+                main_to_peer_tx.clone(),
+            )
+            .await;
+
+        let peer_msg = main_to_peer_rx.try_recv().unwrap_err();
+        assert_eq!(TryRecvError::Empty, peer_msg);
+
+        drop(main_to_peer_tx);
+
+        // Since one transacion got mined, and the other didn't, we should still
+        // have the unmined transaction in the mempool. Since this transcation
+        // is owned by this client, we want to keep it in the mempool.
+        assert_eq!(1, alice.lock_guard().await.mempool.len());
+        assert!(alice
+            .lock_guard()
+            .await
+            .mempool
+            .contains(unmined_tx.kernel.txid()));
     }
 }
