@@ -39,6 +39,7 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 use transaction_details::TransactionDetails;
+use transaction_kernel_id::TransactionKernelId;
 use twenty_first::math::digest::Digest;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
@@ -1700,6 +1701,12 @@ impl GlobalState {
 
     pub(crate) fn max_num_proofs(&self) -> usize {
         self.cli().max_num_proofs
+    }
+
+    /// Remove one transaction from the mempool and notify wallet of changes.
+    pub(crate) async fn mempool_remove(&mut self, transaction_id: TransactionKernelId) {
+        let events = self.mempool.remove(transaction_id);
+        self.wallet_state.handle_mempool_events(events).await;
     }
 
     /// clears all Tx from mempool and notifies wallet of changes.
