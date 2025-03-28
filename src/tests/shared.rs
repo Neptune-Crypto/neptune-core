@@ -561,6 +561,13 @@ pub(crate) fn make_plenty_mock_transaction_supported_by_primitive_witness(
         .collect_vec()
 }
 
+/// A SingleProof-backed transaction with no inputs or outputs
+pub(crate) fn invalid_empty_single_proof_transaction() -> Transaction {
+    let tx = make_mock_transaction(vec![], vec![]);
+    assert!(matches!(tx.proof, TransactionProof::SingleProof(_)));
+    tx
+}
+
 /// Make a transaction with `Invalid` transaction proof.
 pub fn make_mock_transaction(
     inputs: Vec<RemovalRecord>,

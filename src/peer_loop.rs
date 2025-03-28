@@ -1426,20 +1426,21 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
-                if let Some(transaction) = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .mempool
-                    .get(transaction_identifier)
-                {
-                    if let Ok(transfer_transaction) = transaction.try_into() {
-                        peer.send(PeerMessage::Transaction(Box::new(transfer_transaction)))
-                            .await?;
-                    } else {
-                        warn!("Peer requested transaction that cannot be converted to transfer object");
-                    }
-                }
+                let state = self.global_state_lock.lock_guard().await;
+                let Some(transaction) = state.mempool.get(transaction_identifier) else {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                let Ok(transfer_transaction) = transaction.try_into() else {
+                    warn!("Peer requested transaction that cannot be converted to transfer object");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                // Drop state immediately to prevent holding over a response.
+                drop(state);
+
+                peer.send(PeerMessage::Transaction(Box::new(transfer_transaction)))
+                    .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1938,6 +1939,7 @@ mod peer_loop_tests {
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
     use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::invalid_empty_single_proof_transaction;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
 
@@ -3315,6 +3317,59 @@ mod peer_loop_tests {
         );
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn receive_transaction_request() {
+        let network = Network::Main;
+        let dummy_tx = invalid_empty_single_proof_transaction();
+        let txid = dummy_tx.kernel.txid();
+
+        for transaction_is_known in [false, true] {
+            let (_peer_broadcast_tx, from_main_rx, to_main_tx, _, mut state_lock, _hsd) =
+                get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
+            if transaction_is_known {
+                state_lock
+                    .lock_guard_mut()
+                    .await
+                    .mempool_insert(dummy_tx.clone(), TransactionOrigin::Own)
+                    .await;
+            }
+
+            let mock = if transaction_is_known {
+                Mock::new(vec![
+                    Action::Read(PeerMessage::TransactionRequest(txid)),
+                    Action::Write(PeerMessage::Transaction(Box::new(
+                        (&dummy_tx).try_into().unwrap(),
+                    ))),
+                    Action::Read(PeerMessage::Bye),
+                ])
+            } else {
+                Mock::new(vec![
+                    Action::Read(PeerMessage::TransactionRequest(txid)),
+                    Action::Read(PeerMessage::Bye),
+                ])
+            };
+
+            let hsd = get_dummy_handshake_data_for_genesis(network);
+            let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock,
+                get_dummy_socket_address(0),
+                hsd,
+                true,
+                1,
+            );
+
+            peer_loop_handler
+                .run(mock, from_main_rx, &mut peer_state)
+                .await
+                .unwrap();
+        }
     }
 
     #[traced_test]
