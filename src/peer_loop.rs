@@ -846,15 +846,16 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
-                match self
+                let block = self
                     .global_state_lock
                     .lock_guard()
                     .await
                     .chain
                     .archival_state()
                     .get_block(block_digest)
-                    .await?
-                {
+                    .await?;
+
+                match block {
                     None => {
                         // TODO: Consider punishing here
                         warn!("Peer requested unknown block with hash {}", block_digest);
