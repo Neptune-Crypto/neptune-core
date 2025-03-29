@@ -23,6 +23,7 @@ use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::state::wallet::address::KeyType;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
+use neptune_cash::models::state::wallet::change_policy::ChangePolicy;
 use neptune_cash::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_cash::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use neptune_cash::models::state::wallet::utxo_notification::PrivateNotificationData;
@@ -34,6 +35,7 @@ use neptune_cash::models::state::wallet::wallet_status::WalletStatusExportFormat
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;
@@ -116,11 +118,8 @@ impl FromStr for TransactionOutput {
 }
 
 impl TransactionOutput {
-    pub fn to_receiving_address_amount_tuple(
-        &self,
-        network: Network,
-    ) -> Result<(ReceivingAddress, NativeCurrencyAmount)> {
-        Ok((
+    pub fn to_output_format(&self, network: Network) -> Result<OutputFormat> {
+        Ok(OutputFormat::AddressAndAmount(
             ReceivingAddress::from_bech32m(&self.address, network)?,
             self.amount,
         ))
@@ -1092,14 +1091,16 @@ async fn main() -> Result<()> {
                 .send(
                     ctx,
                     token,
-                    amount,
-                    receiving_address,
-                    notify_self,
-                    notify_other,
+                    vec![OutputFormat::AddressAndAmountAndMedium(
+                        receiving_address,
+                        amount,
+                        notify_other,
+                    )],
+                    ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self),
                     fee,
                 )
                 .await?;
-            let (txid, private_notifications) = match resp {
+            let tx_artifacts = match resp {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("{}", e);
@@ -1107,34 +1108,49 @@ async fn main() -> Result<()> {
                 }
             };
 
-            println!("Successfully created transaction: {txid}");
+            println!(
+                "Successfully created transaction: {}",
+                tx_artifacts.transaction().txid()
+            );
 
             process_utxo_notifications(
                 &data_directory,
                 network,
-                private_notifications,
+                tx_artifacts.all_offchain_notifications(),
                 Some(receiver_tag),
             )?
         }
         Command::SendToMany { outputs, fee } => {
             let parsed_outputs = outputs
                 .into_iter()
-                .map(|o| o.to_receiving_address_amount_tuple(network))
+                .map(|o| o.to_output_format(network))
                 .collect::<Result<Vec<_>>>()?;
 
             let res = client
-                .send_to_many(
+                .send(
                     ctx,
                     token,
                     parsed_outputs,
-                    UtxoNotificationMedium::OnChain,
-                    UtxoNotificationMedium::OnChain,
+                    ChangePolicy::recover_to_next_unused_key(
+                        KeyType::Symmetric,
+                        UtxoNotificationMedium::OnChain,
+                    ),
                     fee,
                 )
                 .await?;
             match res {
-                Ok((txid, _offchain_notifications)) => {
-                    println!("Successfully created transaction: {txid}")
+                Ok(tx_artifacts) => {
+                    println!(
+                        "Successfully created transaction: {}",
+                        tx_artifacts.transaction().txid()
+                    );
+
+                    process_utxo_notifications(
+                        &data_directory,
+                        network,
+                        tx_artifacts.all_offchain_notifications(),
+                        None, // todo:  parse receiver tags from cmd-line.
+                    )?
                 }
                 Err(e) => eprintln!("{}", e),
             }
