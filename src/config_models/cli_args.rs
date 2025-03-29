@@ -35,7 +35,7 @@ pub struct Args {
     ///
     /// macOS:   /Users/Alice/Library/Application Support/neptune/main
     #[clap(long, value_name = "DIR")]
-    pub(crate) data_dir: Option<PathBuf>,
+    pub data_dir: Option<PathBuf>,
 
     /// Ban connections to this node from IP address.
     ///

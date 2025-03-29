@@ -124,6 +124,11 @@ pub struct MainLoopHandler {
     // note: MainToMinerChannel::send() does not block.  might log error.
     main_to_miner_tx: MainToMinerChannel,
 
+    peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+    miner_to_main_rx: mpsc::Receiver<MinerToMain>,
+    rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+    task_handles: Vec<JoinHandle<()>>,
+
     #[cfg(test)]
     mock_now: Option<SystemTime>,
 }
@@ -394,6 +399,11 @@ impl MainLoopHandler {
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         main_to_miner_tx: mpsc::Sender<MainToMiner>,
+
+        peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+        miner_to_main_rx: mpsc::Receiver<MinerToMain>,
+        rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+        task_handles: Vec<JoinHandle<()>>,
     ) -> Self {
         let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {
             Some(main_to_miner_tx)
@@ -406,9 +416,19 @@ impl MainLoopHandler {
             main_to_miner_tx: MainToMinerChannel(maybe_main_to_miner_tx),
             main_to_peer_broadcast_tx,
             peer_task_to_main_tx,
+
+            peer_task_to_main_rx,
+            miner_to_main_rx,
+            rpc_server_to_main_rx,
+            task_handles,
+
             #[cfg(test)]
             mock_now: None,
         }
+    }
+
+    pub fn global_state_lock(&mut self) -> GlobalStateLock {
+        self.global_state_lock.clone()
     }
 
     /// Allows for mocked timestamps such that time dependencies may be tested.
@@ -1203,8 +1223,7 @@ impl MainLoopHandler {
         let candidate_peers = main_loop_state
             .sync_state
             .get_potential_peers_for_sync_request(own_cumulative_pow);
-        let mut rng = rand::rng();
-        let chosen_peer = candidate_peers.choose(&mut rng);
+        let chosen_peer = candidate_peers.choose(&mut rand::rng());
         assert!(
             chosen_peer.is_some(),
             "A synchronization candidate must be available for a request. \
@@ -1387,13 +1406,11 @@ impl MainLoopHandler {
         main_loop_state.update_mempool_receiver = update_receiver;
     }
 
-    pub(crate) async fn run(
-        &mut self,
-        mut peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
-        mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
-        mut rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
-        task_handles: Vec<JoinHandle<()>>,
-    ) -> Result<i32> {
+    pub async fn run(&mut self) -> Result<i32> {
+        info!("Starting main loop");
+
+        let task_handles = std::mem::take(&mut self.task_handles);
+
         // Handle incoming connections, messages from peer tasks, and messages from the mining task
         let mut main_loop_state = MutableMainLoopState::new(task_handles);
 
@@ -1535,7 +1552,7 @@ impl MainLoopHandler {
                 }
 
                 // Handle messages from peer tasks
-                Some(msg) = peer_task_to_main_rx.recv() => {
+                Some(msg) = self.peer_task_to_main_rx.recv() => {
                     debug!("Received message sent to main task.");
                     self.handle_peer_task_message(
                         msg,
@@ -1545,7 +1562,7 @@ impl MainLoopHandler {
                 }
 
                 // Handle messages from miner task
-                Some(main_message) = miner_to_main_rx.recv() => {
+                Some(main_message) = self.miner_to_main_rx.recv() => {
                     let exit_code = self.handle_miner_task_message(main_message, &mut main_loop_state).await?;
 
                     if let Some(exit_code) = exit_code {
@@ -1560,7 +1577,7 @@ impl MainLoopHandler {
                 }
 
                 // Handle messages from rpc server task
-                Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
+                Some(rpc_server_message) = self.rpc_server_to_main_rx.recv() => {
                     let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone(), &mut main_loop_state).await?;
                     if shutdown_after_execution {
                         break SUCCESS_EXIT_CODE
@@ -1811,10 +1828,6 @@ mod test {
     use crate::MINER_CHANNEL_CAPACITY;
 
     struct TestSetup {
-        peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
-        miner_to_main_rx: mpsc::Receiver<MinerToMain>,
-        rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
-        task_join_handles: Vec<JoinHandle<()>>,
         main_loop_handler: MainLoopHandler,
         main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
     }
@@ -1864,21 +1877,20 @@ mod test {
         let (_rpc_server_to_main_tx, rpc_server_to_main_rx) =
             mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
 
+        let task_join_handles = vec![];
+
         let main_loop_handler = MainLoopHandler::new(
             incoming_peer_listener,
             state,
             main_to_peer_tx,
             peer_to_main_tx,
             main_to_miner_tx,
-        );
-
-        let task_join_handles = vec![];
-
-        TestSetup {
-            miner_to_main_rx,
             peer_to_main_rx,
+            miner_to_main_rx,
             rpc_server_to_main_rx,
             task_join_handles,
+        );
+        TestSetup {
             main_loop_handler,
             main_to_peer_rx,
         }
@@ -1887,15 +1899,14 @@ mod test {
     #[tokio::test]
     async fn handle_self_guessed_block_new_tip() {
         // A new tip is registered by main_loop. Verify correct state update.
-        let test_setup = setup(1, 0).await;
         let TestSetup {
-            task_join_handles,
             mut main_loop_handler,
             mut main_to_peer_rx,
             ..
-        } = test_setup;
+        } = setup(1, 0).await;
         let network = main_loop_handler.global_state_lock.cli().network;
-        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+        let mut mutable_main_loop_state =
+            MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
 
         let block1 = invalid_empty_block(&Block::genesis(network));
 
@@ -1984,14 +1995,12 @@ mod test {
         async fn sync_mode_abandoned_on_global_timeout() {
             let num_outgoing_connections = 0;
             let num_incoming_connections = 0;
-            let test_setup = setup(num_outgoing_connections, num_incoming_connections).await;
             let TestSetup {
-                task_join_handles,
                 mut main_loop_handler,
                 ..
-            } = test_setup;
-
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            } = setup(num_outgoing_connections, num_incoming_connections).await;
+            let mut mutable_main_loop_state =
+                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
 
             main_loop_handler
                 .block_sync(&mut mutable_main_loop_state)
@@ -2122,15 +2131,11 @@ mod test {
         async fn upgrade_proof_collection_to_single_proof_foreign_tx() {
             let num_outgoing_connections = 0;
             let num_incoming_connections = 0;
-            let test_setup = setup(num_outgoing_connections, num_incoming_connections).await;
             let TestSetup {
-                peer_to_main_rx,
-                miner_to_main_rx,
-                rpc_server_to_main_rx,
-                task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-            } = test_setup;
+                ..
+            } = setup(num_outgoing_connections, num_incoming_connections).await;
 
             // Force instance to create SingleProofs, otherwise CI and other
             // weak machines fail.
@@ -2145,7 +2150,8 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
             let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let mut mutable_main_loop_state =
+                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
 
             assert!(
                 main_loop_handler
@@ -2252,10 +2258,10 @@ mod test {
 
             // These values are kept alive as the transmission-counterpart will
             // otherwise fail on `send`.
-            drop(peer_to_main_rx);
-            drop(miner_to_main_rx);
-            drop(rpc_server_to_main_rx);
-            drop(main_to_peer_rx);
+            // drop(peer_to_main_rx);
+            // drop(miner_to_main_rx);
+            // drop(rpc_server_to_main_rx);
+            // drop(main_to_peer_rx);
         }
     }
 
@@ -2267,12 +2273,11 @@ mod test {
         async fn prune_peers_too_many_connections() {
             let num_init_peers_outgoing = 10;
             let num_init_peers_incoming = 4;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                mut main_to_peer_rx,
                 mut main_loop_handler,
+                mut main_to_peer_rx,
                 ..
-            } = test_setup;
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: num_init_peers_outgoing as usize,
@@ -2297,12 +2302,11 @@ mod test {
         async fn prune_peers_not_too_many_connections() {
             let num_init_peers_outgoing = 10;
             let num_init_peers_incoming = 1;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                main_to_peer_rx,
                 mut main_loop_handler,
+                main_to_peer_rx,
                 ..
-            } = test_setup;
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: 200,
@@ -2323,12 +2327,10 @@ mod test {
         async fn skip_peer_discovery_if_peer_limit_is_exceeded() {
             let num_init_peers_outgoing = 2;
             let num_init_peers_incoming = 0;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                task_join_handles,
                 mut main_loop_handler,
                 ..
-            } = test_setup;
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: 0,
@@ -2338,8 +2340,10 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
+            let mut mutable_state =
+                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
             main_loop_handler
-                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
+                .discover_peers(&mut mutable_state)
                 .await
                 .unwrap();
 
@@ -2352,10 +2356,8 @@ mod test {
             let num_init_peers_outgoing = 2;
             let num_init_peers_incoming = 0;
             let TestSetup {
-                task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-                peer_to_main_rx: _keep_channel_open,
                 ..
             } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
@@ -2368,8 +2370,10 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
+            let mut mutable_state =
+                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
             main_loop_handler
-                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
+                .discover_peers(&mut mutable_state)
                 .await
                 .unwrap();
 
@@ -2418,15 +2422,11 @@ mod test {
             let network = Network::Main;
             let num_init_peers_outgoing = 5;
             let num_init_peers_incoming = 0;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                mut peer_to_main_rx,
-                miner_to_main_rx: _,
-                rpc_server_to_main_rx: _,
-                task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-            } = test_setup;
+                ..
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: usize::from(num_init_peers_outgoing) + 1,
@@ -2439,7 +2439,8 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
 
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let mut mutable_main_loop_state =
+                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
 
             // check sanity: at startup, we are connected to the initial number of peers
             assert_eq!(
@@ -2545,7 +2546,7 @@ mod test {
 
             // `answer_peer_wrapper` should send a
             // `DisconnectFromLongestLivedPeer` message to main
-            let peer_to_main_message = peer_to_main_rx.recv().await.unwrap();
+            let peer_to_main_message = main_loop_handler.peer_task_to_main_rx.recv().await.unwrap();
             assert!(matches!(
                 peer_to_main_message,
                 PeerTaskToMain::DisconnectFromLongestLivedPeer,

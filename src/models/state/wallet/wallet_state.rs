@@ -1198,6 +1198,7 @@ impl WalletState {
                 StrongUtxoKey,
                 (MsMembershipProof, u64, Digest),
             > = HashMap::default();
+
             let mut all_existing_mutxos: HashMap<StrongUtxoKey, u64> = HashMap::default();
             let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
@@ -1252,7 +1253,6 @@ impl WalletState {
                 all_existing_mutxos,
             )
         }
-
         let tx_kernel = new_block.kernel.body.transaction_kernel.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
@@ -1448,6 +1448,10 @@ impl WalletState {
         // apply all removal records
         debug!("Block has {} removal records", removal_records.len());
 
+        // let mut changed_mutxo = vec![];
+        let all_mutxo = monitored_utxos.get_all().await;
+        let mut update_mutxos: Vec<(Index, MonitoredUtxo)> = vec![];
+
         // reversed twice, so matches order in block.
         let mut removal_record_index: usize = 0;
         while let Some(removal_record) = removal_records.pop() {
@@ -1481,15 +1485,17 @@ impl WalletState {
                         removal_record_index
                     );
 
-                    let mut spent_mutxo = monitored_utxos.get(*mutxo_list_index).await;
+                    let mut spent_mutxo =
+                        all_mutxo.get(*mutxo_list_index as usize).unwrap().clone();
                     spent_mutxo.mark_as_spent(new_block);
-                    monitored_utxos.set(*mutxo_list_index, spent_mutxo).await;
+                    update_mutxos.push((*mutxo_list_index, spent_mutxo));
                 }
             }
 
             msa_state.remove(removal_record);
             removal_record_index += 1;
         }
+        monitored_utxos.set_many(update_mutxos).await;
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(

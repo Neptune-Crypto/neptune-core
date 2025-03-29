@@ -90,7 +90,7 @@ const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
+pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);
     }
@@ -325,22 +325,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("Started RPC server");
 
     // Handle incoming connections, messages from peer tasks, and messages from the mining task
-    info!("Starting main loop");
-    let mut main_loop_handler = MainLoopHandler::new(
+    Ok(MainLoopHandler::new(
         incoming_peer_listener,
         global_state_lock,
         main_to_peer_broadcast_tx,
         peer_task_to_main_tx,
         main_to_miner_tx,
-    );
-    main_loop_handler
-        .run(
-            peer_task_to_main_rx,
-            miner_to_main_rx,
-            rpc_server_to_main_rx,
-            task_join_handles,
-        )
-        .await
+        peer_task_to_main_rx,
+        miner_to_main_rx,
+        rpc_server_to_main_rx,
+        task_join_handles,
+    ))
 }
 
 /// Time a fn call.  Duration is returned as a float in seconds.
