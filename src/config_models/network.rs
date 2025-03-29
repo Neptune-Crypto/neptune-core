@@ -57,6 +57,18 @@ impl Network {
             }
         }
     }
+
+    pub fn is_mainnet(&self) -> bool {
+        matches!(self, Self::Main)
+    }
+
+    pub fn is_testnet(&self) -> bool {
+        matches!(self, Self::Testnet)
+    }
+
+    pub fn is_regtest(&self) -> bool {
+        matches!(self, Self::RegTest)
+    }
 }
 
 impl fmt::Display for Network {

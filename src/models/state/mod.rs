@@ -15,6 +15,7 @@ pub(crate) mod tx_creation_config;
 pub mod tx_proving_capability;
 pub mod wallet;
 
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -342,6 +343,50 @@ impl GlobalStateLock {
 
         Ok(())
     }
+
+    pub async fn mine_regtest_blocks_to_wallet(
+        &mut self,
+        n_blocks: u32,
+    ) -> Result<()> {
+        for _ in 0..n_blocks {
+            self.mine_regtest_block_to_wallet(Timestamp::now()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn mine_regtest_block_to_wallet(
+        &mut self,
+        timestamp: Timestamp,
+    ) -> Result<()> {
+
+        if !self.cli.network.is_regtest() {
+            bail!("wrong network.  network is not regtest");
+        }
+
+        let gs = self.lock_guard().await;
+        let tip_block = gs.chain.light_state_clone();
+        let guesser_preimage = gs.wallet_state.wallet_entropy.guesser_preimage(tip_block.hash());
+        drop(gs);
+
+        // for regtest network (only) the returned tx will have PrimitiveWitness proof.
+        let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
+            &tip_block,
+            self,
+            timestamp,
+            (TritonVmJobPriority::Normal, None).into(),
+        )
+        .await?;
+
+        let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
+        block.set_header_guesser_digest(guesser_preimage.hash());
+
+        self
+            .set_new_self_composed_tip(block, expected_composer_utxos)
+            .await?;
+
+        Ok(())
+    }
+
 }
 
 impl Deref for GlobalStateLock {

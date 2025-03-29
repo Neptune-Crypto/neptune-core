@@ -27,6 +27,8 @@ pub async fn send_alice_to_bob() -> anyhow::Result<()> {
         .to_address()
         .unwrap();  // for now.
 
+    alice_gsl.mine_regtest_blocks_to_wallet(5).await?;
+
     let mut alice_sender = alice_gsl.tx_sender_mut();
 
     let result = alice_sender.send(
@@ -36,7 +38,7 @@ pub async fn send_alice_to_bob() -> anyhow::Result<()> {
         Timestamp::now(),
     ).await;
 
-    assert!(result.is_err());
+    assert!(result.is_ok());
 
     if let Err(e) = result {
         println!("{}", e);

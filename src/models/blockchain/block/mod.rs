@@ -177,7 +177,6 @@ impl Eq for Block {}
 impl Block {
     /// Create a block template with an invalid block proof, from a block
     /// primitive witness.
-    #[cfg(test)]
     pub(crate) fn block_template_invalid_proof_from_witness(
         primitive_witness: BlockPrimitiveWitness,
         block_timestamp: Timestamp,
@@ -193,7 +192,6 @@ impl Block {
     /// Create a block template with an invalid block proof.
     ///
     /// To be used in tests where you don't care about block validity.
-    #[cfg(test)]
     pub(crate) fn block_template_invalid_proof(
         predecessor: &Block,
         transaction: Transaction,

@@ -724,11 +724,14 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         guesser_fraction,
     );
 
+    let proving_capability = TxProvingCapability::PrimitiveWitness;
+
     let (tx, composer_txos) = make_coinbase_transaction_stateless(
         previous_block,
         composer_parameters,
         block_timestamp,
-        TxProvingCapability::PrimitiveWitness,
+        proving_capability,
+        proving_capability.into(),   // target proof-type.
         TritonVmJobQueue::dummy(),
         (TritonVmJobPriority::Normal, None).into(),
     )
