@@ -6,6 +6,7 @@ use std::ops::DerefMut;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use super::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
@@ -14,6 +15,7 @@ use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
@@ -296,6 +298,10 @@ impl TxOutput {
         self.is_change
     }
 
+    pub fn is_owned(&self) -> bool {
+        self.owned
+    }
+
     pub fn is_offchain(&self) -> bool {
         matches!(self.notification_method, UtxoNotifyMethod::OffChain(_))
     }
@@ -355,6 +361,10 @@ impl TxOutput {
             owned: self.owned,
             is_change: self.is_change,
         }
+    }
+
+    pub(crate) fn into_expected_utxo(self, utxo_notifier: UtxoNotifier) -> ExpectedUtxo {
+        ExpectedUtxo::new(self.utxo, self.sender_randomness, self.receiver_digest, utxo_notifier)
     }
 }
 

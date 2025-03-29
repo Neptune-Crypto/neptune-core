@@ -4,7 +4,7 @@ use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
-#[cfg(test)]
+// only used for tests and regtest mode.
 static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::HashSet<Claim>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
@@ -36,7 +36,7 @@ pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
 }
 
 /// Add a claim to the [`CLAIMS_CACHE`].
-#[cfg(test)]
+/// only used for tests and regtest mode.
 pub(crate) async fn cache_true_claim(claim: Claim) {
     CLAIMS_CACHE.lock().await.insert(claim);
 }

@@ -731,7 +731,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         composer_parameters,
         block_timestamp,
         proving_capability,
-        proving_capability.into(),   // target proof-type.
+        proving_capability.into(), // target proof-type.
         TritonVmJobQueue::dummy(),
         (TritonVmJobPriority::Normal, None).into(),
     )

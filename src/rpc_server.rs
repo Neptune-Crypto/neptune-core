@@ -1820,10 +1820,7 @@ pub trait RPC {
     /// mines a block to node's wallet.  (regtest network only)
     ///
     /// todo: docs
-    async fn mine_regtest_blocks_to_wallet(
-        token: rpc_auth::Token,
-        n_blocks: u32,
-    ) -> RpcResult<()>;
+    async fn mine_regtest_blocks_to_wallet(token: rpc_auth::Token, n_blocks: u32) -> RpcResult<()>;
 
     /// Provide a PoW-solution to the current block proposal.
     ///
@@ -3120,9 +3117,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self
-            .state
-            .mine_regtest_blocks_to_wallet(n_blocks).await?)
+        Ok(self.state.mine_regtest_blocks_to_wallet(n_blocks).await?)
     }
 
     // documented in trait. do not add doc-comment.

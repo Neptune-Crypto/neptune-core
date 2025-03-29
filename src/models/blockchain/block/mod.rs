@@ -7,6 +7,7 @@ pub mod block_kernel;
 pub mod block_selector;
 mod block_validation_error;
 pub mod difficulty_control;
+pub mod mock_block_generator;
 pub mod mutator_set_update;
 pub mod validity;
 
@@ -177,6 +178,7 @@ impl Eq for Block {}
 impl Block {
     /// Create a block template with an invalid block proof, from a block
     /// primitive witness.
+    #[cfg(test)]
     pub(crate) fn block_template_invalid_proof_from_witness(
         primitive_witness: BlockPrimitiveWitness,
         block_timestamp: Timestamp,
@@ -192,6 +194,7 @@ impl Block {
     /// Create a block template with an invalid block proof.
     ///
     /// To be used in tests where you don't care about block validity.
+    #[cfg(test)]
     pub(crate) fn block_template_invalid_proof(
         predecessor: &Block,
         transaction: Transaction,

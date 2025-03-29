@@ -15,7 +15,6 @@ pub(crate) mod tx_creation_config;
 pub mod tx_proving_capability;
 pub mod wallet;
 
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -48,6 +47,7 @@ use wallet::address::ReceivingAddress;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
@@ -70,15 +70,16 @@ use crate::locks::tokio::AtomicRwWriteGuard;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
+use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
+use crate::tx_initiation::export::KeyType;
 use crate::tx_initiation::initiator::TransactionInitiator;
 use crate::tx_initiation::send::TransactionSender;
 #[cfg(test)]
@@ -344,49 +345,60 @@ impl GlobalStateLock {
         Ok(())
     }
 
-    pub async fn mine_regtest_blocks_to_wallet(
-        &mut self,
-        n_blocks: u32,
-    ) -> Result<()> {
+    pub async fn mine_regtest_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<()> {
         for _ in 0..n_blocks {
             self.mine_regtest_block_to_wallet(Timestamp::now()).await?;
         }
         Ok(())
     }
 
-    pub async fn mine_regtest_block_to_wallet(
-        &mut self,
-        timestamp: Timestamp,
-    ) -> Result<()> {
-
+    pub async fn mine_regtest_block_to_wallet(&mut self, timestamp: Timestamp) -> Result<()> {
         if !self.cli.network.is_regtest() {
             bail!("wrong network.  network is not regtest");
         }
 
-        let gs = self.lock_guard().await;
-        let tip_block = gs.chain.light_state_clone();
-        let guesser_preimage = gs.wallet_state.wallet_entropy.guesser_preimage(tip_block.hash());
-        drop(gs);
+        let mut gsm = self.lock_guard_mut().await;
+        let tip_block = gsm.chain.light_state_clone();
+        let guesser_preimage = gsm
+            .wallet_state
+            .wallet_entropy
+            .guesser_preimage(tip_block.hash());
+        let composer_address = gsm
+            .wallet_state
+            .next_unused_spending_key(KeyType::Symmetric)
+            .await
+            .unwrap()
+            .to_address()
+            .unwrap();
+        drop(gsm);
 
-        // for regtest network (only) the returned tx will have PrimitiveWitness proof.
-        let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
-            &tip_block,
-            self,
+        let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_without_pow(
+            tip_block,
+            composer_address,
             timestamp,
-            (TritonVmJobPriority::Normal, None).into(),
+            rand::random(), // seed.
         )
         .await?;
 
-        let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
+        // todo: the generator methods should accept guesser digest param.
         block.set_header_guesser_digest(guesser_preimage.hash());
 
-        self
-            .set_new_self_composed_tip(block, expected_composer_utxos)
+        let composer_tx_outputs: Vec<_> = composer_tx_outputs.into();
+
+        // todo: mock block should return these, and also guesser utxos.
+        let expected_utxos: Vec<_> = composer_tx_outputs.into_iter().filter_map(|o| {
+            match (o.is_offchain(), o.is_owned()) {
+                (true, true) => Some(o.into_expected_utxo(UtxoNotifier::OwnMinerComposeBlock)),
+                _ => None,
+            }
+        }).collect();
+
+        // todo: missing guesser utxos.
+        self.set_new_self_composed_tip(block, expected_utxos)
             .await?;
 
         Ok(())
     }
-
 }
 
 impl Deref for GlobalStateLock {

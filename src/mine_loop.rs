@@ -4,7 +4,6 @@ use std::cmp::max;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::tx_initiation::export::TransactionProofType;
 use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
@@ -58,6 +57,7 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::tx_initiation::export::TransactionProofType;
 use crate::tx_initiation::export::TxInputList;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
@@ -1053,7 +1053,7 @@ pub(crate) mod mine_loop_tests {
             composer_parameters,
             timestamp,
             proving_power,
-            proving_power.into(),  // target proof type.
+            proving_power.into(), // target proof type.
             vm_job_queue,
             job_options,
         )

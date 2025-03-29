@@ -30,6 +30,8 @@ impl GenesisNode {
     pub fn default_args() -> Args {
         let mut args = Args::default();
 
+        args.network = Network::RegTest;
+
         if let Ok(dd) = Self::integration_test_data_directory(Network::Main) {
             args.data_dir = Some(dd.root_dir_path());
         }
