@@ -1827,6 +1827,12 @@ mod test {
     use crate::tests::shared::invalid_empty_block;
     use crate::MINER_CHANNEL_CAPACITY;
 
+    impl MainLoopHandler {
+        fn mutable(&mut self) -> MutableMainLoopState {
+            MutableMainLoopState::new(std::mem::take(&mut self.task_handles))
+        }
+    }
+
     struct TestSetup {
         main_loop_handler: MainLoopHandler,
         main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
@@ -1905,8 +1911,7 @@ mod test {
             ..
         } = setup(1, 0).await;
         let network = main_loop_handler.global_state_lock.cli().network;
-        let mut mutable_main_loop_state =
-            MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
+        let mut mutable_main_loop_state = main_loop_handler.mutable();
 
         let block1 = invalid_empty_block(&Block::genesis(network));
 
@@ -2000,8 +2005,7 @@ mod test {
                 main_to_peer_rx: _main_to_peer_rx,
                 ..
             } = setup(num_outgoing_connections, num_incoming_connections).await;
-            let mut mutable_main_loop_state =
-                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
 
             main_loop_handler
                 .block_sync(&mut mutable_main_loop_state)
@@ -2151,8 +2155,7 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
             let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
-            let mut mutable_main_loop_state =
-                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
 
             assert!(
                 main_loop_handler
@@ -2341,8 +2344,7 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
-            let mut mutable_state =
-                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
+            let mut mutable_state = main_loop_handler.mutable();
             main_loop_handler
                 .discover_peers(&mut mutable_state)
                 .await
@@ -2371,8 +2373,7 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
-            let mut mutable_state =
-                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
+            let mut mutable_state = main_loop_handler.mutable();
             main_loop_handler
                 .discover_peers(&mut mutable_state)
                 .await
@@ -2440,8 +2441,7 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
 
-            let mut mutable_main_loop_state =
-                MutableMainLoopState::new(std::mem::take(&mut main_loop_handler.task_handles));
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
 
             // check sanity: at startup, we are connected to the initial number of peers
             assert_eq!(
