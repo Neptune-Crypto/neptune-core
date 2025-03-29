@@ -172,11 +172,11 @@ pub struct Args {
 
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
-    pub(crate) peer_port: u16,
+    pub peer_port: u16,
 
     /// Port on which to listen for RPC connections.
     #[clap(long, default_value = "9799", value_name = "PORT")]
-    pub(crate) rpc_port: u16,
+    pub rpc_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
