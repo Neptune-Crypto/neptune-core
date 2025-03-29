@@ -1997,6 +1997,7 @@ mod test {
             let num_incoming_connections = 0;
             let TestSetup {
                 mut main_loop_handler,
+                main_to_peer_rx: _main_to_peer_rx,
                 ..
             } = setup(num_outgoing_connections, num_incoming_connections).await;
             let mut mutable_main_loop_state =
