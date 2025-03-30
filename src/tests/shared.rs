@@ -1024,7 +1024,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     mut selected_mempool_txs: Vec<Transaction>,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_txos, transaction_details) =
-        prepare_coinbase_transaction_stateless(predecessor_block, composer_parameters, timestamp)?;
+        prepare_coinbase_transaction_stateless(predecessor_block, composer_parameters, timestamp);
 
     let coinbase_transaction =
         fake_create_transaction_from_details_for_tests(transaction_details).await;
