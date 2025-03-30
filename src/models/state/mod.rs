@@ -47,7 +47,6 @@ use wallet::address::ReceivingAddress;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
@@ -74,6 +73,7 @@ use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
@@ -358,11 +358,8 @@ impl GlobalStateLock {
         }
 
         let mut gsm = self.lock_guard_mut().await;
+
         let tip_block = gsm.chain.light_state_clone();
-        let guesser_preimage = gsm
-            .wallet_state
-            .wallet_entropy
-            .guesser_preimage(tip_block.hash());
         let composer_address = gsm
             .wallet_state
             .next_unused_spending_key(KeyType::Symmetric)
@@ -370,34 +367,49 @@ impl GlobalStateLock {
             .unwrap()
             .to_address()
             .unwrap();
+        let guesser_key = gsm
+            .wallet_state
+            .wallet_entropy
+            .guesser_spending_key(tip_block.hash());
+
         drop(gsm);
 
-        let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_without_pow(
+        let (block, composer_tx_outputs) = MockBlockGenerator::mock_successor_without_pow(
             tip_block,
             composer_address,
+            guesser_key,
             timestamp,
             rand::random(), // seed.
         )
         .await?;
 
-        // todo: the generator methods should accept guesser digest param.
-        block.set_header_guesser_digest(guesser_preimage.hash());
-
         let composer_tx_outputs: Vec<_> = composer_tx_outputs.into();
 
-        // todo: mock block should return these, and also guesser utxos.
-        let expected_utxos: Vec<_> = composer_tx_outputs.into_iter().filter_map(|o| {
-            match (o.is_offchain(), o.is_owned()) {
+        // tbd: maybe mock block should return these
+        let expected_utxos: Vec<_> = composer_tx_outputs
+            .into_iter()
+            .filter_map(|o| match (o.is_offchain(), o.is_owned()) {
                 (true, true) => Some(o.into_expected_utxo(UtxoNotifier::OwnMinerComposeBlock)),
                 _ => None,
-            }
-        }).collect();
+            })
+            .collect();
 
-        // todo: missing guesser utxos.
-        self.set_new_self_composed_tip(block, expected_utxos)
+        // note: guesser utxos will be found by
+        // WalletState::update_wallet_state_with_new_block() inside this call.
+        //
+        // todo: we should be passing blocks around with Arc, not Box
+        // or on stack.  Arc would make this clone cheap.
+        self.set_new_self_composed_tip(block.clone(), expected_utxos)
             .await?;
 
-        Ok(())
+        // inform main-loop.  to add to mempool and broadcast.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::ProofOfWorkSolution(Box::new(block)))
+            .await
+            .map_err(|_| {
+                warn!("Receiver in mining loop closed prematurely");
+                anyhow::anyhow!("internal error.  block not added to blockchain")
+            })
     }
 }
 

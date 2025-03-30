@@ -23,6 +23,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::verifier::cache_true_claim;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 
@@ -32,13 +33,18 @@ pub(crate) struct MockBlockGenerator;
 impl MockBlockGenerator {
     /// Create a fake block proposal; will pass `is_valid` but fail pow-check. Will
     /// be a valid block except for proof and PoW.
-    pub async fn mock_block_proposal_from_tx(predecessor: Block, tx: Transaction) -> Block {
+    pub async fn mock_block_from_tx_without_pow(
+        predecessor: Block,
+        tx: Transaction,
+        guesser_key: HashLockKey,
+    ) -> Block {
         let timestamp = tx.kernel.timestamp;
 
         let primitive_witness = BlockPrimitiveWitness::new(predecessor, tx);
 
         let body = primitive_witness.body().to_owned();
-        let header = primitive_witness.header(timestamp, None);
+        let mut header = primitive_witness.header(timestamp, None);
+        header.guesser_digest = guesser_key.after_image();
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
@@ -55,9 +61,11 @@ impl MockBlockGenerator {
     pub async fn mock_block_from_tx(
         predecessor: Arc<Block>,
         tx: Transaction,
+        guesser_key: HashLockKey,
         seed: [u8; 32],
     ) -> Block {
-        let mut block = Self::mock_block_proposal_from_tx((*predecessor).clone(), tx).await;
+        let mut block =
+            Self::mock_block_from_tx_without_pow((*predecessor).clone(), tx, guesser_key).await;
 
         let mut rng = StdRng::from_seed(seed);
 
@@ -96,10 +104,10 @@ impl MockBlockGenerator {
         shuffle_seed: [u8; 32],
     ) -> Result<Transaction> {
         let TransactionProof::SingleProof(lhs_proof) = lhs.proof else {
-            bail!("arguments must be bogus singleproof transactions")
+            bail!("merge error: arguments must be singleproof transactions")
         };
         let TransactionProof::SingleProof(rhs_proof) = rhs.proof else {
-            bail!("arguments must be bogus singleproof transactions")
+            bail!("merge error: arguments must be singleproof transactions")
         };
         let merge_witness = MergeWitness::from_transactions(
             lhs.kernel,
@@ -153,8 +161,7 @@ impl MockBlockGenerator {
         for tx_to_include in selected_mempool_txs {
             block_transaction =
                 Self::merge_mock_transactions(block_transaction, tx_to_include, rng.random())
-                    .await
-                    .expect("Must be able to merge transactions in mining context");
+                    .await?;
         }
 
         Ok((block_transaction, composer_txos))
@@ -163,6 +170,7 @@ impl MockBlockGenerator {
     async fn mock_block_successor(
         predecessor: Arc<Block>,
         composer_address: ReceivingAddress,
+        guesser_key: HashLockKey,
         timestamp: Timestamp,
         seed: [u8; 32],
         with_valid_pow: bool,
@@ -180,9 +188,10 @@ impl MockBlockGenerator {
         .await?;
 
         let block = if with_valid_pow {
-            Self::mock_block_from_tx(predecessor, block_tx, rng.random()).await
+            Self::mock_block_from_tx(predecessor, block_tx, guesser_key, rng.random()).await
         } else {
-            Self::mock_block_proposal_from_tx((*predecessor).clone(), block_tx).await
+            Self::mock_block_from_tx_without_pow((*predecessor).clone(), block_tx, guesser_key)
+                .await
         };
 
         Ok((block, composer_tx_outputs))
@@ -191,10 +200,19 @@ impl MockBlockGenerator {
     pub async fn mock_successor_without_pow(
         predecessor: Arc<Block>,
         composer_address: ReceivingAddress,
+        guesser_key: HashLockKey,
         timestamp: Timestamp,
         seed: [u8; 32],
     ) -> Result<(Block, TxOutputList)> {
-        Self::mock_block_successor(predecessor, composer_address, timestamp, seed, false).await
+        Self::mock_block_successor(
+            predecessor,
+            composer_address,
+            guesser_key,
+            timestamp,
+            seed,
+            false,
+        )
+        .await
     }
 
     // pub async fn mock_successor(
