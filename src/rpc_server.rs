@@ -1817,10 +1817,19 @@ pub trait RPC {
     /// ```
     async fn restart_miner(token: rpc_auth::Token) -> RpcResult<()>;
 
-    /// mines a block to node's wallet.  (regtest network only)
+    /// mine a series of blocks to the node's wallet. (regtest network only)
     ///
-    /// todo: docs
+    /// these blocks can be generated quickly because they do not have
+    /// a real ZK proof.  they have a witness "proof" and will validate correctly.
+    /// witness proofs contain secrets that must not be shared, so this is
+    /// allowed only on the regtest network, for development purposes.
+    ///
+    /// The timestamp of each block will be the current system time, meaning
+    /// that they will be temporally very close to eachother.
+    ///
+    /// see [api::regtest::RegTest::mine_regtest_blocks_to_wallet()]
     async fn mine_regtest_blocks_to_wallet(token: rpc_auth::Token, n_blocks: u32) -> RpcResult<()>;
+
 
     /// Provide a PoW-solution to the current block proposal.
     ///

@@ -6,8 +6,9 @@
 //! by providing types for performing common user tasks.
 //!
 //! further, this module aims to:
-//! 1. bring the public rust API to parity with the RPC layer.
-//! 2. be the layer beneath the RPC layer, so those method just call these.
+//! 1. simplify and/or enable common tasks.
+//! 2. bring the public rust API to parity with the RPC layer.
+//! 3. be the layer beneath the RPC layer, so those methods wrap these.
 pub mod export;
 pub mod regtest;
 pub mod tx_initiation;

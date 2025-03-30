@@ -15,13 +15,25 @@ This module aims to:
 It has its own conventions and rules, detailed below.
 Please read before making any modifications.
 
+## rpc layer integration
+
+goals:
+
+1. provide a method for each rpc endpoint to wrap.
+2. provide a path towards adding another rpc mechanism, or switching entirely.
+
+non-goal:  exactly mirror the rpc endpoints.
+
+in particular:
+
+1. we do not need to be a single monolithic type, like the RPCServer type.  we should and do group methods into modules by functional area.
+2. methods do not need to be exactly the same as the rpc endpoints.  We may have additional types, methods, and parameters where it makes sense to do so.
+
 ## module owner
 
 this module has a module owner that enforces the rules and oversees things remain in a cohesive state, conventions are followed, etc.
 
-It is intentional that submitting a PR to this module may incur more
-rigorous scrutiny than other areas, and that this module will change
-more slowly than internal areas of the codebase.
+as a public-facing module, it is intentional that submitting a PR to this module may incur more rigorous scrutiny than other areas, and that this module will change more slowly than internal areas of the codebase.
 
 The module-owner can be changed by a vote of the core team members
 or if the module-owner resigns.
@@ -40,12 +52,13 @@ the present module owner is github user: dan-da
 
 4. make real error types, using thiserror.
 
-5. anyhow not allowed in returned errors.
+5. anyhow::Error not allowed in returned errors.
 
 6. all public types and methods must be documented.
-   do not submit PR until this is true.
+   please do not submit PR until this is true.
 
-7. no unit tests. all tests are integration tests instead. this forces usage of public API only. eat your own dog food.
+7. no unit tests. all tests are integration tests instead. this forces usage of public API only. eat your own dog food. it also
+helps keep the source files smaller.
 
 8. each new type or method must have an integration test that
    exercises it.
@@ -74,25 +87,7 @@ to be written.  suggestions welcome.
 
 # integration test coverage
 
-We can use tarpaulin for a code coverage report.
+to be written. suggestions welcome.
 
-install:
-
-```
-cargo install cargo-tarpaulin
-```
-
-obtain basic report:
-
-```
-cargo tarpaulin --package api crate::tests
-
-```
-
-obtain html report:
-
-```
-cargo tarpaulin --package api --out Html crate::tests
-```
-
-more to be written. suggestions welcome.
+note: I tried tarpaulin but it has problems with the first
+integration test.  grcov may be our best option.
