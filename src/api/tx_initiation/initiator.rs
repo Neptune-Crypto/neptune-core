@@ -28,13 +28,13 @@ use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
-use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
-use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
-use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-use crate::tx_initiation::export::Timestamp;
+use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
+use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::api::export::Timestamp;
 use crate::GlobalStateLock;
 
 /// provides an API for building and sending neptune transactions.

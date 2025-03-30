@@ -110,9 +110,9 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
-use crate::tx_initiation;
-use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use crate::api::tx_initiation;
+use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -1625,8 +1625,8 @@ pub trait RPC {
     /// # use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     /// # use neptune_cash::rpc_server::RPCClient;
     /// # use neptune_cash::rpc_auth;
-    /// # use neptune_cash::tx_initiation::export::ChangePolicy;
-    /// # use neptune_cash::tx_initiation::export::OutputFormat;
+    /// # use neptune_cash::api::export::ChangePolicy;
+    /// # use neptune_cash::api::export::OutputFormat;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;

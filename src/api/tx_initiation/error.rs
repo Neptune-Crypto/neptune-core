@@ -4,9 +4,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::tx_initiation::export::BlockHeight;
-use crate::tx_initiation::export::NativeCurrencyAmount;
-use crate::tx_initiation::export::WitnessValidationError;
+use crate::api::export::BlockHeight;
+use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::WitnessValidationError;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]

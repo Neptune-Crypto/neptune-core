@@ -7,16 +7,16 @@ use std::sync::Arc;
 
 use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::StateLock;
-use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
-use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
-use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
-use crate::tx_initiation::export::ChangePolicy;
-use crate::tx_initiation::export::NativeCurrencyAmount;
-use crate::tx_initiation::export::Timestamp;
-use crate::tx_initiation::export::TxCreationArtifacts;
-use crate::tx_initiation::export::TxOutputList;
+use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
+use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+use crate::api::export::ChangePolicy;
+use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::Timestamp;
+use crate::api::export::TxCreationArtifacts;
+use crate::api::export::TxOutputList;
 use crate::GlobalStateLock;
 
 // provides crate-internal API(s)

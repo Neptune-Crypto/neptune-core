@@ -30,7 +30,7 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::GlobalState;
 use crate::models::state::StateLock;
-use crate::tx_initiation::error::CreateTxError;
+use crate::api::tx_initiation::error::CreateTxError;
 use crate::Block;
 use crate::WalletState;
 

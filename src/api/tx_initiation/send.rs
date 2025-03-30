@@ -15,14 +15,14 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::StateLock;
-use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
-use crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
-use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-use crate::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
-use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-use crate::tx_initiation::export::TransactionProofType;
+use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
+use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::api::export::TransactionProofType;
 use crate::GlobalStateLock;
 
 #[derive(Debug)]

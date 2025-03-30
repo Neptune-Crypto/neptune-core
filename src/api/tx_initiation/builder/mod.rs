@@ -14,20 +14,20 @@
 //! ```rust
 //! # use std::sync::Arc;
 //! # use neptune_cash::job_queue::triton_vm::vm_job_queue;
-//! # use neptune_cash::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-//! # use neptune_cash::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-//! # use neptune_cash::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
-//! # use neptune_cash::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
-//! # use neptune_cash::tx_initiation::builder::transaction_builder::TransactionBuilder;
-//! # use neptune_cash::tx_initiation::export::TransactionProofType;
-//! # use neptune_cash::tx_initiation::export::ReceivingAddress;
-//! # use neptune_cash::tx_initiation::export::NativeCurrencyAmount;
-//! # use neptune_cash::tx_initiation::export::ChangePolicy;
-//! # use neptune_cash::tx_initiation::export::GlobalStateLock;
-//! # use neptune_cash::tx_initiation::export::InputSelectionPolicy;
-//! # use neptune_cash::tx_initiation::export::StateLock;
-//! # use neptune_cash::tx_initiation::export::Timestamp;
-//! # use neptune_cash::tx_initiation::export::TxCreationArtifacts;
+//! # use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
+//! # use neptune_cash::api::export::TransactionProofType;
+//! # use neptune_cash::api::export::ReceivingAddress;
+//! # use neptune_cash::api::export::NativeCurrencyAmount;
+//! # use neptune_cash::api::export::ChangePolicy;
+//! # use neptune_cash::api::export::GlobalStateLock;
+//! # use neptune_cash::api::export::InputSelectionPolicy;
+//! # use neptune_cash::api::export::StateLock;
+//! # use neptune_cash::api::export::Timestamp;
+//! # use neptune_cash::api::export::TxCreationArtifacts;
 //!
 //! async fn send_transaction(gsl: &mut GlobalStateLock, recipient: ReceivingAddress, amount: NativeCurrencyAmount, change_policy: ChangePolicy, fee: NativeCurrencyAmount) -> anyhow::Result<TxCreationArtifacts> {
 //!
@@ -106,11 +106,11 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use neptune_cash::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-//! # use neptune_cash::tx_initiation::export::TransactionProofType;
-//! # use neptune_cash::tx_initiation::export::TransactionProof;
-//! # use neptune_cash::tx_initiation::export::TransactionDetails;
-//! # use neptune_cash::tx_initiation::export::GlobalStateLock;
+//! # use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+//! # use neptune_cash::api::export::TransactionProofType;
+//! # use neptune_cash::api::export::TransactionProof;
+//! # use neptune_cash::api::export::TransactionDetails;
+//! # use neptune_cash::api::export::GlobalStateLock;
 //! # use neptune_cash::job_queue::triton_vm::vm_job_queue;
 //!
 //! # async fn example(tx_details_rc: Arc<TransactionDetails>, gsl: GlobalStateLock) ->

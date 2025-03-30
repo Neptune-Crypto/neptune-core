@@ -15,7 +15,7 @@ use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 ///
 /// an instance of this type is necessary to record and broadcast (send) a
 /// transaction with
-/// [record_and_broadcast_transaction()](crate::tx_initiation::initiator::TransactionInitiator::record_and_broadcast_transaction()).
+/// [record_and_broadcast_transaction()](crate::api::tx_initiation::initiator::TransactionInitiator::record_and_broadcast_transaction()).
 ///
 /// A [Transaction] contains blinded data that can be sent over the network to
 /// other neptune-core nodes.  The [TransactionDetails] contains the unblinded

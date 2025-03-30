@@ -1,9 +1,9 @@
 mod common;
 
 use common::genesis_node::GenesisNode;
-use neptune_cash::tx_initiation::export::KeyType;
-use neptune_cash::tx_initiation::export::NativeCurrencyAmount;
-use neptune_cash::tx_initiation::export::Timestamp;
+use neptune_cash::api::export::KeyType;
+use neptune_cash::api::export::NativeCurrencyAmount;
+use neptune_cash::api::export::Timestamp;
 use tracing_test::traced_test;
 
 #[traced_test]

@@ -18,8 +18,8 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::tx_initiation::error::CreateTxError;
-use crate::tx_initiation::export::TxCreationArtifacts;
+use crate::api::tx_initiation::error::CreateTxError;
+use crate::api::export::TxCreationArtifacts;
 
 /// a builder for [Transaction] and [TxCreationArtifacts]
 ///

@@ -1824,7 +1824,7 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
-    use crate::tx_initiation::export::Transaction;
+    use crate::api::export::Transaction;
 
     impl WalletState {
         /// Delete all guesser-preimage keys from database and cache.

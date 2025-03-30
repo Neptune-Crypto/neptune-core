@@ -18,7 +18,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::tx_initiation::error::CreateTxError;
+use crate::api::tx_initiation::error::CreateTxError;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// contains the unblinded data that a [Transaction](crate::models::blockchain::transaction::Transaction) is generated from,

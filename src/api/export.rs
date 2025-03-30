@@ -22,5 +22,5 @@ pub use crate::models::state::wallet::transaction_input::TxInputList;
 pub use crate::models::state::wallet::transaction_output::TxOutputList;
 pub use crate::models::state::GlobalStateLock;
 pub use crate::models::state::StateLock;
-pub use crate::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-pub use crate::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+pub use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;

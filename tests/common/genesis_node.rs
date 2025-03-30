@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use neptune_cash::config_models::cli_args::Args;
 use neptune_cash::config_models::data_directory::DataDirectory;
-use neptune_cash::tx_initiation::export::GlobalStateLock;
-use neptune_cash::tx_initiation::export::Network;
+use neptune_cash::api::export::GlobalStateLock;
+use neptune_cash::api::export::Network;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::task::JoinHandle;

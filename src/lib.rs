@@ -21,7 +21,7 @@ pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_auth;
 pub mod rpc_server;
-pub mod tx_initiation;
+pub mod api;
 pub mod util_types;
 
 #[cfg(test)]

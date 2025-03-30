@@ -66,7 +66,7 @@ mod wallet_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-    use crate::tx_initiation::export::Transaction;
+    use crate::api::export::Transaction;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...

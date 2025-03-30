@@ -79,11 +79,11 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
-use crate::tx_initiation::export::KeyType;
-use crate::tx_initiation::initiator::TransactionInitiator;
-use crate::tx_initiation::send::TransactionSender;
+use crate::api::export::KeyType;
+use crate::api::tx_initiation::initiator::TransactionInitiator;
+use crate::api::tx_initiation::send::TransactionSender;
 #[cfg(test)]
-use crate::tx_initiation::test_util;
+use crate::api::tx_initiation::test_util;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
@@ -441,7 +441,7 @@ impl DerefMut for GlobalStateLock {
 /// ```rust
 /// use neptune_cash::models::state::GlobalState;
 /// use neptune_cash::models::state::GlobalStateLock;
-/// use neptune_cash::tx_initiation::export::StateLock;
+/// use neptune_cash::api::export::StateLock;
 /// fn worker(gs: &GlobalState, truth: bool) {
 ///    // do something with gs and truth.
 /// }
@@ -494,7 +494,7 @@ impl DerefMut for GlobalStateLock {
 /// }
 /// ```
 ///
-/// example usage as callee: see source of [TxOutputListBuilder::build()](crate::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder::build())
+/// example usage as callee: see source of [TxOutputListBuilder::build()](crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder::build())
 ///
 /// advanced usage as caller: see source of [TransactionSender::send()](TransactionSender::send())
 #[derive(Debug)]
@@ -1726,7 +1726,7 @@ mod global_state_tests {
     use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
-    use crate::tx_initiation::export::TxOutputList;
+    use crate::api::export::TxOutputList;
 
     mod handshake {
         use super::*;

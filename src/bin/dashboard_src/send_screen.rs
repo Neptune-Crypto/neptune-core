@@ -15,7 +15,7 @@ use neptune_cash::models::state::wallet::change_policy::ChangePolicy;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
-use neptune_cash::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use ratatui::layout::Alignment;
 use ratatui::layout::Margin;
 use ratatui::style::Color;

@@ -25,7 +25,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 
 /// represents a transaction output, as used by
-/// [TransactionDetailsBuilder](crate::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder)
+/// [TransactionDetailsBuilder](crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder)
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
 /// and claim a given UTXO.

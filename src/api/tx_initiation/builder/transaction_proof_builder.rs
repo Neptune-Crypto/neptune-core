@@ -35,7 +35,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::tx_initiation::error::CreateProofError;
+use crate::api::tx_initiation::error::CreateProofError;
 
 /// a builder for [TransactionProof]
 ///
