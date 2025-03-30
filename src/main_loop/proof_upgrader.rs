@@ -308,6 +308,7 @@ impl UpgradeJob {
         // process in a loop.  in case a new block comes in while processing
         // the current tx, then we can move on to the next, and so on.
         loop {
+            /* Prepare upgrade */
             // Record that we're attempting an upgrade.
             global_state_lock
                 .lock_guard_mut()
@@ -333,6 +334,7 @@ impl UpgradeJob {
                 )
             };
 
+            /* Perform upgrade */
             // No locks may be held here!
             let offchain_notifications = global_state_lock.cli().fee_notification;
             let (upgraded, expected_utxos) = match upgrade_job
@@ -366,6 +368,7 @@ impl UpgradeJob {
                 }
             };
 
+            /* Check if upgrade resulted in valid transaction */
             upgrade_job = {
                 let mut global_state = global_state_lock.lock_guard_mut().await;
                 let tip_mutator_set = global_state
@@ -377,8 +380,10 @@ impl UpgradeJob {
                     upgraded.kernel.mutator_set_hash == tip_mutator_set.hash();
 
                 if transaction_is_up_to_date {
-                    // Did the transaction get mined while the proof upgrade job was
-                    // running? If so, don't share it or insert it into the mempool.
+                    // Did the transaction get mined while the proof upgrade
+                    // job was running? If so, don't share it or insert it into
+                    // the mempool. Notice that this double-spend check can
+                    // only be made if the mutator set is up to date.
                     if !upgraded.is_confirmable_relative_to(&tip_mutator_set) {
                         let verbose_log_msg = upgrade_job.double_spend_warn_msg();
                         warn!("Upgraded transaction is no longer confirmable. {verbose_log_msg}");
@@ -386,7 +391,7 @@ impl UpgradeJob {
                         return;
                     }
 
-                    // happy path
+                    /* Handle successful upgrade */
                     // Insert tx into mempool before notifying peers, so we're
                     // sure to have it when they ask.
                     global_state
