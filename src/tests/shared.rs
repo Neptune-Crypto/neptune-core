@@ -51,7 +51,7 @@ use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::JobQueue;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
@@ -113,6 +113,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::HandshakeData;
+use crate::RPCServerToMain;
 use crate::PEER_CHANNEL_CAPACITY;
 use crate::VERSION;
 
@@ -244,12 +245,21 @@ pub(crate) async fn mock_genesis_global_state(
 
     let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
+    // dummy channel
+    let (rpc_to_main_tx, mut rpc_to_main_rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(5);
+    tokio::spawn(async move {
+        while let Some(i) = rpc_to_main_rx.recv().await {
+            tracing::trace!("mock Main got message = {:?}", i);
+        }
+    });
+
     GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
         cli.clone(),
         mempool,
+        rpc_to_main_tx,
     )
 }
 
@@ -714,12 +724,14 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         guesser_fraction,
     );
 
+    let proving_capability = TxProvingCapability::PrimitiveWitness;
+
     let (tx, composer_txos) = make_coinbase_transaction_stateless(
         previous_block,
         composer_parameters,
         block_timestamp,
-        TxProvingCapability::PrimitiveWitness,
-        JobQueue::dummy(),
+        proving_capability,
+        TritonVmJobQueue::dummy(),
         (TritonVmJobPriority::Normal, None).into(),
     )
     .await
@@ -820,8 +832,7 @@ pub(crate) async fn mock_genesis_archival_state(
 /// block proof.
 pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     global_state_lock: &mut GlobalStateLock,
-    prev_block_digest: Digest,
-    timestamp: Timestamp,
+    timestamp: Option<Timestamp>,
 ) -> Result<Block> {
     let tip_block = global_state_lock
         .lock_guard()
@@ -829,6 +840,9 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .chain
         .light_state()
         .to_owned();
+
+    let timestamp =
+        timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
 
     let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
         &tip_block,
@@ -843,7 +857,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .await
         .wallet_state
         .wallet_entropy
-        .guesser_preimage(prev_block_digest);
+        .guesser_preimage(tip_block.hash());
     let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
     block.set_header_guesser_digest(guesser_preimage.hash());
 

@@ -1,5 +1,6 @@
 use super::archival_state::ArchivalState;
 use super::light_state::LightState;
+use crate::Block;
 
 /// `BlockChainState` provides an `Archival` variant
 /// for full nodes and a `Light` variant for light nodes.
@@ -13,7 +14,6 @@ use super::light_state::LightState;
 ///
 // silence possible clippy bug / false positive.
 // see: https://github.com/rust-lang/rust-clippy/issues/9798
-#[expect(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum BlockchainState {
     /// represents a Archival blockchain state
@@ -64,10 +64,18 @@ impl BlockchainState {
 
     /// retrieve light state, ie the current tip.
     #[inline]
-    pub fn light_state(&self) -> &LightState {
+    pub fn light_state(&self) -> &Block {
         match self {
             Self::Archival(bac) => &bac.light_state,
             Self::Light(light_state) => light_state,
+        }
+    }
+
+    #[inline]
+    pub fn light_state_clone(&self) -> LightState {
+        match self {
+            Self::Archival(bac) => bac.light_state.clone(),
+            Self::Light(light_state) => light_state.clone(),
         }
     }
 

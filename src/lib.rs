@@ -8,6 +8,7 @@
 
 // danda: making all of these pub for now, so docs are generated.
 // later maybe we ought to split some stuff out into re-usable crate(s)...?
+pub mod api;
 pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
@@ -20,8 +21,6 @@ pub mod models;
 pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_auth;
-#[expect(clippy::too_many_arguments)]
-// clippy  + tarpc workaround.  see https://github.com/google/tarpc/issues/502
 pub mod rpc_server;
 pub mod util_types;
 
@@ -91,7 +90,7 @@ const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
+pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);
     }
@@ -162,7 +161,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
     let networking_state = NetworkingState::new(peer_map, peer_databases);
 
-    let light_state: LightState = LightState::from(latest_block.clone());
+    let light_state: LightState = LightState::from(latest_block);
     let blockchain_archival_state = BlockchainArchivalState {
         light_state,
         archival_state,
@@ -171,14 +170,19 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     let mempool = Mempool::new(
         cli_args.max_mempool_size,
         cli_args.max_mempool_num_tx,
-        latest_block.hash(),
+        blockchain_state.light_state().hash(),
     );
+
+    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
+        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
         cli_args,
         mempool,
+        rpc_server_to_main_tx.clone(),
     );
 
     // See #239.  <https://github.com/Neptune-Crypto/neptune-core/issues/239>
@@ -278,8 +282,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
     // Start RPC server for CLI request and more. It's important that this is done as late
     // as possible, so requests do not hang while initialization code runs.
-    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
-        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
         format!("127.0.0.1:{}", global_state_lock.cli().rpc_port),
         Json::default,
@@ -323,22 +325,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("Started RPC server");
 
     // Handle incoming connections, messages from peer tasks, and messages from the mining task
-    info!("Starting main loop");
-    let mut main_loop_handler = MainLoopHandler::new(
+    Ok(MainLoopHandler::new(
         incoming_peer_listener,
         global_state_lock,
         main_to_peer_broadcast_tx,
         peer_task_to_main_tx,
         main_to_miner_tx,
-    );
-    main_loop_handler
-        .run(
-            peer_task_to_main_rx,
-            miner_to_main_rx,
-            rpc_server_to_main_rx,
-            task_join_handles,
-        )
-        .await
+        peer_task_to_main_rx,
+        miner_to_main_rx,
+        rpc_server_to_main_rx,
+        task_join_handles,
+    ))
 }
 
 /// Time a fn call.  Duration is returned as a float in seconds.

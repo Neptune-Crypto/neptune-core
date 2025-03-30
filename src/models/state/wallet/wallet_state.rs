@@ -59,7 +59,8 @@ use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::wallet::transaction_input::TxInput;
+use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
@@ -394,13 +395,12 @@ impl WalletState {
 
     /// Extract `ExpectedUtxo`s from the `TxOutputList` that require off-chain
     /// notifications and that are destined for this wallet.
-    pub(crate) fn extract_expected_utxos(
+    pub(crate) fn extract_expected_utxos<'a>(
         &self,
-        tx_outputs: TxOutputList,
+        tx_outputs: impl Iterator<Item = &'a TxOutput>,
         notifier: UtxoNotifier,
     ) -> Vec<ExpectedUtxo> {
         tx_outputs
-            .iter()
             .filter(|txo| txo.is_offchain())
             .filter_map(|txo| {
                 self.find_spending_key_for_utxo(&txo.utxo())
@@ -1198,6 +1198,7 @@ impl WalletState {
                 StrongUtxoKey,
                 (MsMembershipProof, u64, Digest),
             > = HashMap::default();
+
             let mut all_existing_mutxos: HashMap<StrongUtxoKey, u64> = HashMap::default();
             let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
@@ -1252,7 +1253,6 @@ impl WalletState {
                 all_existing_mutxos,
             )
         }
-
         let tx_kernel = new_block.kernel.body.transaction_kernel.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
@@ -1375,10 +1375,13 @@ impl WalletState {
                 let is_guesser_fee = incoming_utxo.is_guesser_fee();
                 info!(
                     "Received UTXO in block {}, height {}\nvalue = {}\n\
-                    is guesser fee: {is_guesser_fee}\n\n",
+                    is guesser fee: {is_guesser_fee}\ntime-lock: {}\n\n",
                     new_block.hash(),
                     new_block.kernel.header.height,
                     utxo.get_native_currency_amount(),
+                    utxo.release_date()
+                        .map(|t| t.standard_format())
+                        .unwrap_or_else(|| "none".into()),
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =
@@ -1445,6 +1448,10 @@ impl WalletState {
         // apply all removal records
         debug!("Block has {} removal records", removal_records.len());
 
+        // let mut changed_mutxo = vec![];
+        let all_mutxo = monitored_utxos.get_all().await;
+        let mut update_mutxos: Vec<(Index, MonitoredUtxo)> = vec![];
+
         // reversed twice, so matches order in block.
         let mut removal_record_index: usize = 0;
         while let Some(removal_record) = removal_records.pop() {
@@ -1478,15 +1485,17 @@ impl WalletState {
                         removal_record_index
                     );
 
-                    let mut spent_mutxo = monitored_utxos.get(*mutxo_list_index).await;
+                    let mut spent_mutxo =
+                        all_mutxo.get(*mutxo_list_index as usize).unwrap().clone();
                     spent_mutxo.mark_as_spent(new_block);
-                    monitored_utxos.set(*mutxo_list_index, spent_mutxo).await;
+                    update_mutxos.push((*mutxo_list_index, spent_mutxo));
                 }
             }
 
             msa_state.remove(removal_record);
             removal_record_index += 1;
         }
+        monitored_utxos.set_many(update_mutxos).await;
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
@@ -1648,14 +1657,75 @@ impl WalletState {
         }
     }
 
+    /// Returns all spendable inputs.
+    ///
+    /// wallet_status must be current as of present tip.
+    ///
+    ///   excludes utxos:
+    ///     + that are timelocked in the future
+    ///     + that are unspendable (no spending key)
+    ///     + that are already spent in the mempool
+    pub(crate) fn spendable_inputs(
+        &self,
+        wallet_status: WalletStatus,
+        timestamp: Timestamp,
+    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+        // Build a hashset of all tx inputs presently in the mempool.
+        let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
+            .mempool_spent_utxos
+            .iter()
+            .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
+            .map(|(_, absi, _)| *absi)
+            .collect();
+
+        // filter spendable inputs.
+        wallet_status.synced_unspent.into_iter().filter_map(
+            move |(wallet_status_element, membership_proof)| {
+                // filter out UTXOs that are still timelocked.
+                if !wallet_status_element.utxo.can_spend_at(timestamp) {
+                    return None;
+                }
+
+                // filter out inputs that are already spent by txs in mempool.
+                let absolute_index_set =
+                    membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
+                if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
+                    return None;
+                }
+
+                // filter out inputs that we can't spend
+                let Some(spending_key) =
+                    self.find_spending_key_for_utxo(&wallet_status_element.utxo)
+                else {
+                    warn!(
+                        "spending key not found for utxo: {:?}",
+                        wallet_status_element.utxo
+                    );
+                    return None;
+                };
+
+                // Create the transaction input object
+                Some(
+                    UnlockedUtxo::unlock(
+                        wallet_status_element.utxo.clone(),
+                        spending_key,
+                        membership_proof.clone(),
+                    )
+                    .into(),
+                )
+            },
+        )
+    }
+
     /// Allocate sufficient UTXOs to generate a transaction.
     ///
     /// Requested amount `total_spend` must include fees that are paid in the
     /// transaction.
     ///
-    /// The argument `utxo_filter` is an optional predicate which, if set,
-    /// filters for UTXOs where the predicate evaluates to true. If not set,
-    /// all UTXOs are allowed.
+    /// note: this fn is replaced by TxInputListBuilder and
+    /// TransactionInitiator::select_spendable_inputs().  It can be removed once
+    /// tests are updated.
+    #[cfg(test)]
     pub(crate) async fn allocate_sufficient_input_funds(
         &self,
         total_spend: NativeCurrencyAmount,
@@ -1663,66 +1733,22 @@ impl WalletState {
         mutator_set_accumulator: &MutatorSetAccumulator,
         timestamp: Timestamp,
     ) -> Result<Vec<UnlockedUtxo>> {
-        // We only attempt to generate a transaction using those UTXOs that have up-to-date
-        // membership proofs.
         let wallet_status = self
             .get_wallet_status(tip_digest, mutator_set_accumulator)
             .await;
 
-        // Start selecting inputs.
-        // If there aren't enough inputs, we will discover after the next loop,
-        // and handle the corresponding error gracefully where we catch it.
-        let mut input_funds = vec![];
-        let mut total_available_amount_ignoring_mempool = NativeCurrencyAmount::zero();
+        let mut input_funds = Vec::with_capacity(wallet_status.synced_unspent.len());
         let mut allocated_amount = NativeCurrencyAmount::zero();
-        let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
-            .mempool_spent_utxos
-            .iter()
-            .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
-            .map(|(_, absi, _)| *absi)
-            .collect();
-        for (wallet_status_element, membership_proof) in &wallet_status.synced_unspent {
-            let utxo_amount = wallet_status_element.utxo.get_native_currency_amount();
 
+        for input in self.spendable_inputs(wallet_status, timestamp) {
             // Don't allocate more than needed
             if allocated_amount >= total_spend {
                 break;
             }
 
-            // Don't attempt to use UTXOs that are still timelocked.
-            if !wallet_status_element.utxo.can_spend_at(timestamp) {
-                continue;
-            }
-
-            // Don't use inputs that we can't spend
-            let Some(spending_key) = self.find_spending_key_for_utxo(&wallet_status_element.utxo)
-            else {
-                warn!(
-                    "spending key not found for utxo: {:?}",
-                    wallet_status_element.utxo
-                );
-                continue;
-            };
-
-            // Create the transaction input object
-            let unlocked_utxo = UnlockedUtxo::unlock(
-                wallet_status_element.utxo.clone(),
-                spending_key,
-                membership_proof.clone(),
-            );
-
-            // Don't use inputs that are already spent by txs in mempool.
-            total_available_amount_ignoring_mempool =
-                total_available_amount_ignoring_mempool + utxo_amount;
-            let absolute_index_set =
-                membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
-            if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
-                continue;
-            }
-
             // Select the input
-            input_funds.push(unlocked_utxo);
-            allocated_amount = allocated_amount + utxo_amount;
+            allocated_amount = allocated_amount + input.utxo.get_native_currency_amount();
+            input_funds.push(input.into());
         }
 
         // If there aren't enough funds, catch and report error gracefully
@@ -1730,7 +1756,6 @@ impl WalletState {
             bail!(
                 "UTXO allocation failed.\n\
                 Requested: {total_spend}\n\
-                Available, ignoring mempool: {total_available_amount_ignoring_mempool}\n\
                 Allocated: {allocated_amount}"
             )
         }
@@ -1776,12 +1801,15 @@ impl WalletState {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::sync::Arc;
+
     use generation_address::GenerationSpendingKey;
     use rand::random;
     use rand::Rng;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
@@ -2034,8 +2062,7 @@ pub(crate) mod tests {
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let tx_block2 = bob
-            .lock_guard_mut()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs.clone().into(),
                 fee,
@@ -2047,7 +2074,7 @@ pub(crate) mod tests {
             .transaction;
 
         // Make block 2, verify that Alice registers correct balance.
-        let block2 = invalid_block_with_transaction(&block1, tx_block2.clone());
+        let block2 = invalid_block_with_transaction(&block1, tx_block2.clone().into());
         bob.lock_guard_mut()
             .await
             .set_new_tip(block2.clone())
@@ -2079,8 +2106,7 @@ pub(crate) mod tests {
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
         let tx_block3 = bob
-            .lock_guard_mut()
-            .await
+            .tx_initiator_internal()
             .create_transaction(
                 tx_outputs.into(),
                 fee,
@@ -2090,7 +2116,7 @@ pub(crate) mod tests {
             .await
             .unwrap()
             .transaction;
-        let block3 = invalid_block_with_transaction(&block2, tx_block3.clone());
+        let block3 = invalid_block_with_transaction(&block2, tx_block3.clone().into());
         alice
             .lock_guard_mut()
             .await
@@ -2117,7 +2143,7 @@ pub(crate) mod tests {
     async fn test_invalid_type_script_states() {
         let network = Network::Main;
         let cli = cli_args::Args::default();
-        let (block1, mut bob, bob_key) = bob_mines_one_block(network).await;
+        let (block1, bob, bob_key) = bob_mines_one_block(network).await;
 
         let alice_wallet_secret = WalletEntropy::new_random();
         let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -2139,9 +2165,8 @@ pub(crate) mod tests {
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-        let mut tx_block2 = bob
-            .lock_guard_mut()
-            .await
+        let mut tx_block2: Transaction = bob
+            .tx_initiator_internal()
             .create_transaction(
                 vec![txo.clone()].into(),
                 fee,
@@ -2150,7 +2175,8 @@ pub(crate) mod tests {
             )
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
 
         let mut bad_utxo = txo.utxo();
         bad_utxo = bad_utxo.append_to_coin_state(0, random());
@@ -2159,7 +2185,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(vec![bad_txo.clone()].into(), UtxoNotifier::Cli);
+            .extract_expected_utxos(vec![bad_txo.clone()].iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await
@@ -2221,7 +2247,7 @@ pub(crate) mod tests {
         let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut alice = mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
 
-        let (block1, mut bob, bob_key) = bob_mines_one_block(network).await;
+        let (block1, bob, bob_key) = bob_mines_one_block(network).await;
 
         alice
             .lock_guard_mut()
@@ -2240,9 +2266,8 @@ pub(crate) mod tests {
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-        let mut tx_block2 = bob
-            .lock_guard_mut()
-            .await
+        let mut tx_block2: Transaction = bob
+            .tx_initiator_internal()
             .create_transaction(
                 vec![txo.clone()].into(),
                 fee,
@@ -2251,7 +2276,8 @@ pub(crate) mod tests {
             )
             .await
             .unwrap()
-            .transaction;
+            .transaction
+            .into();
         let unrecognized_typescript = Coin {
             type_script_hash: random(),
             state: vec![random(), random()],
@@ -2261,7 +2287,7 @@ pub(crate) mod tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(vec![bad_txo.clone()].into(), UtxoNotifier::Cli);
+            .extract_expected_utxos(vec![bad_txo.clone()].iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await
@@ -2547,7 +2573,7 @@ pub(crate) mod tests {
                 .write_block_as_tip(&new_block)
                 .await
                 .unwrap();
-            bob.chain.light_state_mut().set_block(new_block.clone());
+            *bob.chain.light_state_mut() = new_block.clone().into();
 
             latest_block = new_block;
         }
@@ -2955,14 +2981,13 @@ pub(crate) mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(a_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-            let mut tx_spending_guesser_fee = bob
-                .global_state_lock
-                .lock_guard()
-                .await
-                .create_transaction(vec![].into(), fee, block2_timestamp, config)
+            let mut tx_spending_guesser_fee: Transaction = bob
+                .tx_initiator_internal()
+                .create_transaction(Vec::<TxOutput>::new().into(), fee, block2_timestamp, config)
                 .await
                 .unwrap()
-                .transaction;
+                .transaction
+                .into();
             assert!(
                 tx_spending_guesser_fee.is_valid().await,
                 "Tx spending guesser-fee UTXO must be valid."
@@ -3092,13 +3117,10 @@ pub(crate) mod tests {
             let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
 
             // mine a block to our wallet.  we should have 100 coins after.
-            let tip_digest = mine_block_to_wallet_invalid_block_proof(
-                &mut global_state_lock,
-                genesis_block.hash(),
-                timestamp,
-            )
-            .await?
-            .hash();
+            let tip_digest =
+                mine_block_to_wallet_invalid_block_proof(&mut global_state_lock, Some(timestamp))
+                    .await?
+                    .hash();
 
             let tx = {
                 // verify that confirmed and unconfirmed balances.
@@ -3123,18 +3145,21 @@ pub(crate) mod tests {
                         rng.random(),
                     )),
                     send_amt,
+                    UtxoNotificationMedium::OnChain,
                 )];
+                drop(gs);
 
-                let tx_outputs = gs.generate_tx_outputs(
-                    outputs,
-                    UtxoNotificationMedium::OnChain,
-                    UtxoNotificationMedium::OnChain,
-                );
+                let tx_outputs = global_state_lock
+                    .tx_initiator()
+                    .generate_tx_outputs(outputs)
+                    .await;
 
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-                gs.create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, config)
+                global_state_lock
+                    .tx_initiator_internal()
+                    .create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, config)
                     .await?
                     .transaction
             };
@@ -3144,7 +3169,7 @@ pub(crate) mod tests {
             global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert(tx, TransactionOrigin::Own)
+                .mempool_insert((*tx).clone(), TransactionOrigin::Own)
                 .await;
 
             {
@@ -3195,12 +3220,12 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs() {
             async fn outgoing_transaction(
-                alice_global_lock: &GlobalStateLock,
+                alice_global_lock: &mut GlobalStateLock,
                 amount: NativeCurrencyAmount,
                 fee: NativeCurrencyAmount,
                 timestamp: Timestamp,
                 change_key: SpendingKey,
-            ) -> Result<Transaction> {
+            ) -> Result<Arc<Transaction>> {
                 let mut rng = rand::rng();
                 let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
                 let tx_output = TxOutput::onchain_native_currency(
@@ -3214,12 +3239,10 @@ pub(crate) mod tests {
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
-                    .global_state_lock
-                    .lock_guard()
-                    .await
+                    .tx_initiator_internal()
                     .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
-                    .map(|tx| tx.into())
+                    .map(|tx| tx.transaction)
             }
 
             let network = Network::Main;
@@ -3280,7 +3303,7 @@ pub(crate) mod tests {
 
             // generate one transaction
             let tx1 = outgoing_transaction(
-                &alice,
+                &mut alice,
                 NativeCurrencyAmount::coins(1),
                 NativeCurrencyAmount::coins(1),
                 now,
@@ -3293,12 +3316,12 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(tx1, TransactionOrigin::Own)
+                .mempool_insert((*tx1).clone(), TransactionOrigin::Own)
                 .await;
 
             // generate a second transaction
             let tx2 = outgoing_transaction(
-                &alice,
+                &mut alice,
                 NativeCurrencyAmount::coins(1),
                 NativeCurrencyAmount::coins(1),
                 now,
@@ -3311,7 +3334,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(tx2, TransactionOrigin::Own)
+                .mempool_insert((*tx2).clone(), TransactionOrigin::Own)
                 .await;
 
             // verify that the mempool contains two transactions
@@ -3323,7 +3346,7 @@ pub(crate) mod tests {
             // mempool.
             assert!(
                 outgoing_transaction(
-                    &alice,
+                    &mut alice,
                     NativeCurrencyAmount::coins(1),
                     NativeCurrencyAmount::coins(1),
                     now,
@@ -3692,12 +3715,12 @@ pub(crate) mod tests {
         async fn mutxos_spent_in_orphaned_blocks_are_still_spendable() {
             /// Crate an outgoing transaction. Panics on insufficient balance.
             async fn outgoing_transaction(
-                alice_global_lock: &GlobalStateLock,
+                alice_global_lock: &mut GlobalStateLock,
                 amount: NativeCurrencyAmount,
                 fee: NativeCurrencyAmount,
                 timestamp: Timestamp,
                 change_key: SpendingKey,
-            ) -> Transaction {
+            ) -> std::sync::Arc<Transaction> {
                 let mut rng = rand::rng();
                 let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
                 let tx_output = TxOutput::onchain_native_currency(
@@ -3711,9 +3734,7 @@ pub(crate) mod tests {
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
                 alice_global_lock
-                    .global_state_lock
-                    .lock_guard()
-                    .await
+                    .tx_initiator_internal()
                     .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
                     .unwrap()
@@ -3758,7 +3779,7 @@ pub(crate) mod tests {
             let timestamp = network.launch_date() + Timestamp::months(14);
             let change_key = alice_wallet.nth_symmetric_key(0).into();
             let spending_tx_1a = outgoing_transaction(
-                &alice_global_lock,
+                &mut alice_global_lock,
                 NativeCurrencyAmount::coins(19),
                 NativeCurrencyAmount::coins(1),
                 timestamp,
@@ -3766,7 +3787,7 @@ pub(crate) mod tests {
             )
             .await;
 
-            let block_1a = invalid_block_with_transaction(&genesis, spending_tx_1a);
+            let block_1a = invalid_block_with_transaction(&genesis, spending_tx_1a.into());
             let block_1b = invalid_empty_block(&genesis);
             let block_2b = invalid_empty_block(&block_1b);
             alice_global_lock
@@ -3812,7 +3833,7 @@ pub(crate) mod tests {
             // Verify that MUTXOs can be used to create a similar transaction to the one
             // that was reorganized away.
             let _ = outgoing_transaction(
-                &alice_global_lock,
+                &mut alice_global_lock,
                 NativeCurrencyAmount::coins(19),
                 NativeCurrencyAmount::coins(1),
                 timestamp,
@@ -3969,8 +3990,7 @@ pub(crate) mod tests {
                 .recover_change_off_chain(premine_change_key)
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
             let transaction = premine_receiver
-                .lock_guard()
-                .await
+                .tx_initiator_internal()
                 .create_transaction(
                     vec![tx_output].into(),
                     NativeCurrencyAmount::coins(0),
@@ -3980,7 +4000,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .transaction;
-            let block_1 = invalid_block_with_transaction(&genesis_block, transaction);
+            let block_1 = invalid_block_with_transaction(&genesis_block, transaction.into());
 
             // some possible CLI configurations:
             // scan mode is inactive
