@@ -27,7 +27,7 @@ pub async fn send_alice_to_bob() -> anyhow::Result<()> {
         .to_address()
         .unwrap(); // for now.
 
-    alice_gsl.mine_regtest_blocks_to_wallet(5).await?;
+    alice_gsl.regtest_mut().mine_regtest_blocks_to_wallet(5).await?;
 
     let mut alice_sender = alice_gsl.tx_sender_mut();
 

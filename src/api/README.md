@@ -4,12 +4,13 @@ The **api** module implements a public api layer for neptune-core.
 
 This module aims to:
 
-1. bring the public rust API to parity with the RPC layer.
-2. be the layer beneath the RPC layer, so that layer becomes very thin.
-3. power integration tests using only `pub` api, in neptune_core/tests
-4. be clean and fully documented.
-5. be stable and versioned.
-6. have complete test coverage.
+1. simplify and/or enable common tasks.
+2. bring the public rust API to parity with the RPC layer.
+3. be the layer beneath the RPC layer, so that layer becomes very thin.
+4. power integration tests using only `pub` api, in neptune_core/tests
+5. be clean and fully documented.
+6. be stable and versioned.
+7. have complete test coverage.
 
 It has its own conventions and rules, detailed below.
 Please read before making any modifications.
@@ -21,6 +22,9 @@ this module has a module owner that enforces the rules and oversees things remai
 It is intentional that submitting a PR to this module may incur more
 rigorous scrutiny than other areas, and that this module will change
 more slowly than internal areas of the codebase.
+
+The module-owner can be changed by a vote of the core team members
+or if the module-owner resigns.
 
 the present module owner is github user: dan-da
 
@@ -49,16 +53,20 @@ the present module owner is github user: dan-da
 
 ## conventions and recommendations
 
-1. prefer methods over standalone functions.
+1. long doc-comments, short methods.
 
-2. prefer Result over Option.
+2. prefer methods over standalone functions.
 
-3. use a worker type for each public type, so that public types have single statement methods.
+3. prefer Result over Option.
 
-4. keep methods as short as possible, even private methods.  If the
-method starts getting long, maybe it doesn't belong in this layer.  Or find a way to break it up.
+4. consider accepting StateLock if writing multiple types or methods that caller could/should call with a shared lock. eg see the builder types in tx_initiator.
 
-5. provide example usage in doc-comments for public methods and types.
+5. use a worker type for each public type, so that public types have single statement methods.
+
+6. keep methods as short as possible, even private methods.  If the
+method starts getting long, find a way to break it up, or maybe it doesn't belong in this layer.
+
+7. provide example usage in doc-comments for public methods and types.
 
 ## api versioning and stability
 
@@ -66,4 +74,25 @@ to be written.  suggestions welcome.
 
 # integration test coverage
 
-to be written. suggestions welcome.
+We can use tarpaulin for a code coverage report.
+
+install:
+
+```
+cargo install cargo-tarpaulin
+```
+
+obtain basic report:
+
+```
+cargo tarpaulin --package api crate::tests
+
+```
+
+obtain html report:
+
+```
+cargo tarpaulin --package api --out Html crate::tests
+```
+
+more to be written. suggestions welcome.
