@@ -57,7 +57,6 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::tx_initiation::export::TransactionProofType;
 use crate::tx_initiation::export::TxInputList;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
@@ -382,7 +381,6 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     proving_power: TxProvingCapability,
-    proof_type: TransactionProofType,
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, TxOutputList)> {
@@ -397,7 +395,6 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .job_queue(vm_job_queue)
         .proof_job_options(job_options)
         .tx_proving_capability(proving_power)
-        .proof_type(proof_type)
         .build()
         .await?;
 
@@ -546,24 +543,14 @@ pub(crate) async fn create_block_transaction_from(
         .await
         .composer_parameters(coinbase_recipient_spending_key.to_address().into());
 
-    // A coinbase transaction implies mining. So we must create a SingleProof.
-    // (or return an error if machine in incapable)
-    //
-    // however: for regtest network, we lower the proof-type to PrimitiveWitness
-    // so that blocks can be generated immediately.
-    let proof_type = if global_state_lock.cli().network.is_regtest() {
-        TransactionProofType::PrimitiveWitness
-    } else {
-        TransactionProofType::SingleProof
-    };
-
+    // A coinbase transaction implies mining. So you *must*
+    // be able to create a SingleProof.
     let vm_job_queue = vm_job_queue();
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters,
         timestamp,
-        global_state_lock.cli().proving_capability(),
-        proof_type,
+        TxProvingCapability::SingleProof,
         vm_job_queue.clone(),
         job_options.clone(),
     )
@@ -1053,7 +1040,6 @@ pub(crate) mod mine_loop_tests {
             composer_parameters,
             timestamp,
             proving_power,
-            proving_power.into(), // target proof type.
             vm_job_queue,
             job_options,
         )
