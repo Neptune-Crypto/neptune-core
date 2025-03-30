@@ -2,6 +2,8 @@
 //!
 //! They are exported here in one location for caller convenience.
 
+pub use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 pub use crate::config_models::network::Network;
 pub use crate::models::blockchain::block::block_height::BlockHeight;
 pub use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
@@ -22,5 +24,3 @@ pub use crate::models::state::wallet::transaction_input::TxInputList;
 pub use crate::models::state::wallet::transaction_output::TxOutputList;
 pub use crate::models::state::GlobalStateLock;
 pub use crate::models::state::StateLock;
-pub use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
-pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;

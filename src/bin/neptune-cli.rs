@@ -17,6 +17,7 @@ use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
@@ -35,7 +36,6 @@ use neptune_cash::models::state::wallet::wallet_status::WalletStatusExportFormat
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
-use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;

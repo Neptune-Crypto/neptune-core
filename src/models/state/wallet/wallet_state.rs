@@ -1809,6 +1809,7 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
@@ -1824,7 +1825,6 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
-    use crate::api::export::Transaction;
 
     impl WalletState {
         /// Delete all guesser-preimage keys from database and cache.

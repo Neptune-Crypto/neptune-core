@@ -39,6 +39,7 @@ mod wallet_tests {
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
     use super::*;
+    use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
@@ -66,7 +67,6 @@ mod wallet_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-    use crate::api::export::Transaction;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...

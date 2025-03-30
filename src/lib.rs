@@ -8,6 +8,7 @@
 
 // danda: making all of these pub for now, so docs are generated.
 // later maybe we ought to split some stuff out into re-usable crate(s)...?
+pub mod api;
 pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
@@ -21,7 +22,6 @@ pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_auth;
 pub mod rpc_server;
-pub mod api;
 pub mod util_types;
 
 #[cfg(test)]

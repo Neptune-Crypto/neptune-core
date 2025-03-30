@@ -59,6 +59,7 @@ use super::peer::transfer_block::TransferBlock;
 use super::peer::SyncChallenge;
 use super::peer::SyncChallengeResponse;
 use super::proof_abstractions::timestamp::Timestamp;
+use crate::api;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
@@ -69,7 +70,6 @@ use crate::locks::tokio::AtomicRwWriteGuard;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
-use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
@@ -79,11 +79,6 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
-use crate::api::export::KeyType;
-use crate::api::tx_initiation::initiator::TransactionInitiator;
-use crate::api::tx_initiation::send::TransactionSender;
-#[cfg(test)]
-use crate::api::tx_initiation::test_util;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
@@ -222,23 +217,30 @@ impl GlobalStateLock {
     }
 
     #[cfg(test)]
-    pub(crate) fn tx_initiator_internal(&self) -> test_util::TransactionInitiatorInternal {
-        test_util::TransactionInitiatorInternal::new(self.clone())
+    pub(crate) fn tx_initiator_internal(
+        &self,
+    ) -> api::tx_initiation::test_util::TransactionInitiatorInternal {
+        api::tx_initiation::test_util::TransactionInitiatorInternal::new(self.clone())
     }
 
     /// retrieve a transaction initiator in a mutable context.
-    pub fn tx_initiator_mut(&mut self) -> TransactionInitiator {
-        TransactionInitiator::new(self.clone())
+    pub fn tx_initiator_mut(&mut self) -> api::tx_initiation::initiator::TransactionInitiator {
+        api::tx_initiation::initiator::TransactionInitiator::new(self.clone())
     }
 
     /// retrieve a transaction initiator in an immutable context.
-    pub fn tx_initiator(&self) -> TransactionInitiator {
-        TransactionInitiator::new(self.clone())
+    pub fn tx_initiator(&self) -> api::tx_initiation::initiator::TransactionInitiator {
+        api::tx_initiation::initiator::TransactionInitiator::new(self.clone())
     }
 
     /// retrieve a transaction sender in a mutable context.
-    pub fn tx_sender_mut(&mut self) -> TransactionSender {
-        TransactionSender::new(self.clone())
+    pub fn tx_sender_mut(&mut self) -> api::tx_initiation::send::TransactionSender {
+        api::tx_initiation::send::TransactionSender::new(self.clone())
+    }
+
+    /// retrieve a transaction sender in a mutable context.
+    pub fn regtest_mut(&mut self) -> api::regtest::RegTest {
+        api::regtest::RegTest::new(self.clone())
     }
 
     /// Set tip to a block that we composed.
@@ -343,73 +345,6 @@ impl GlobalStateLock {
         gsm.flush_databases().await.expect("flushed DBs");
 
         Ok(())
-    }
-
-    pub async fn mine_regtest_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<()> {
-        for _ in 0..n_blocks {
-            self.mine_regtest_block_to_wallet(Timestamp::now()).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn mine_regtest_block_to_wallet(&mut self, timestamp: Timestamp) -> Result<()> {
-        if !self.cli.network.is_regtest() {
-            bail!("wrong network.  network is not regtest");
-        }
-
-        let mut gsm = self.lock_guard_mut().await;
-
-        let tip_block = gsm.chain.light_state_clone();
-        let composer_address = gsm
-            .wallet_state
-            .next_unused_spending_key(KeyType::Symmetric)
-            .await
-            .unwrap()
-            .to_address()
-            .unwrap();
-        let guesser_key = gsm
-            .wallet_state
-            .wallet_entropy
-            .guesser_spending_key(tip_block.hash());
-
-        drop(gsm);
-
-        let (block, composer_tx_outputs) = MockBlockGenerator::mock_successor_without_pow(
-            tip_block,
-            composer_address,
-            guesser_key,
-            timestamp,
-            rand::random(), // seed.
-        )
-        .await?;
-
-        let composer_tx_outputs: Vec<_> = composer_tx_outputs.into();
-
-        // tbd: maybe mock block should return these
-        let expected_utxos: Vec<_> = composer_tx_outputs
-            .into_iter()
-            .filter_map(|o| match (o.is_offchain(), o.is_owned()) {
-                (true, true) => Some(o.into_expected_utxo(UtxoNotifier::OwnMinerComposeBlock)),
-                _ => None,
-            })
-            .collect();
-
-        // note: guesser utxos will be found by
-        // WalletState::update_wallet_state_with_new_block() inside this call.
-        //
-        // todo: we should be passing blocks around with Arc, not Box
-        // or on stack.  Arc would make this clone cheap.
-        self.set_new_self_composed_tip(block.clone(), expected_utxos)
-            .await?;
-
-        // inform main-loop.  to add to mempool and broadcast.
-        self.rpc_server_to_main_tx
-            .send(RPCServerToMain::ProofOfWorkSolution(Box::new(block)))
-            .await
-            .map_err(|_| {
-                warn!("Receiver in mining loop closed prematurely");
-                anyhow::anyhow!("internal error.  block not added to blockchain")
-            })
     }
 }
 
@@ -1710,6 +1645,7 @@ mod global_state_tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
+    use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -1726,7 +1662,6 @@ mod global_state_tests {
     use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
-    use crate::api::export::TxOutputList;
 
     mod handshake {
         use super::*;

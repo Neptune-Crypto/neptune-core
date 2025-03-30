@@ -13,13 +13,13 @@
 
 use std::sync::Arc;
 
+use crate::api::export::TxCreationArtifacts;
+use crate::api::tx_initiation::error::CreateTxError;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::api::tx_initiation::error::CreateTxError;
-use crate::api::export::TxCreationArtifacts;
 
 /// a builder for [Transaction] and [TxCreationArtifacts]
 ///

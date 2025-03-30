@@ -14,6 +14,7 @@ use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
 
+use crate::api::tx_initiation::error::CreateTxError;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -30,7 +31,6 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::GlobalState;
 use crate::models::state::StateLock;
-use crate::api::tx_initiation::error::CreateTxError;
 use crate::Block;
 use crate::WalletState;
 
