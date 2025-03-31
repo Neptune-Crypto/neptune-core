@@ -14,6 +14,7 @@ use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::database::PeerDatabases;
+use crate::models::peer::bootstrap_info::BootstrapInfo;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerStanding;
@@ -94,7 +95,7 @@ pub struct NetworkingState {
     /// Timestamp for when the last tx-proof upgrade was attempted. Does not
     /// record latest successful upgrade, merely latest attempt. This is to
     /// prevent excessive runs of the proof-upgrade functionality.
-    pub last_tx_proof_upgrade_attempt: std::time::SystemTime,
+    pub last_tx_proof_upgrade_attempt: SystemTime,
 
     /// Disconnection times of past peers. Can be used to determine if a connection
     /// request should be accepted or rejected.
@@ -106,6 +107,16 @@ pub struct NetworkingState {
     ///
     /// Only the peer tasks may update this map.
     disconnection_times: HashMap<InstanceId, SystemTime>,
+
+    /// Helps identify whether some peer helps to bootstrap the network.
+    ///
+    /// Once enough peers are found, no additional connection to bootstrap nodes
+    /// are made.
+    //
+    // This information is recorded here as opposed to the `PeerInfo` in the
+    // `PeerMap` because it must outlive connections to the peer. Otherwise, it
+    // would be impossible to suppress connection attempts to bootstrap nodes.
+    pub(crate) bootstrap_status: HashMap<SocketAddr, BootstrapInfo>,
 }
 
 impl NetworkingState {
@@ -120,6 +131,7 @@ impl NetworkingState {
             // after startup of the client.
             last_tx_proof_upgrade_attempt: SystemTime::now(),
             disconnection_times: HashMap::new(),
+            bootstrap_status: HashMap::new(),
         }
     }
 
