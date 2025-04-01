@@ -1,4 +1,29 @@
 
+## [0.2.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.1..v0.2.2) - 2025-04-01
+
+### 🐛 Bug Fixes
+
+- Add missing fields from Display impl of `BlockHeader` ([8f01e3a2](https://github.com/Neptune-Crypto/neptune-core/commit/8f01e3a2))
+- Display impl of BlockHeader ([a33267b0](https://github.com/Neptune-Crypto/neptune-core/commit/a33267b0))
+- *(peer_loop)* Don't hold read lock responding with transction ([3510716c](https://github.com/Neptune-Crypto/neptune-core/commit/3510716c))
+- Avoid holding read-lock across peer.send() ([d37a5d77](https://github.com/Neptune-Crypto/neptune-core/commit/d37a5d77))
+- *(proof_upgrader)* Check for double-spending ([1db6dc42](https://github.com/Neptune-Crypto/neptune-core/commit/1db6dc42))
+
+### 📚 Documentation
+
+- Add user guide about scan mode ([c3a187dc](https://github.com/Neptune-Crypto/neptune-core/commit/c3a187dc) / [a11fcd54](https://github.com/Neptune-Crypto/neptune-core/commit/a11fcd54))
+- *(proof_upgrader)* Add some context to upgrade-handler ([8e8f368a](https://github.com/Neptune-Crypto/neptune-core/commit/8e8f368a))
+
+### ♻️  Refactor
+
+- Fix argument order in fee gobbler ([90abab4f](https://github.com/Neptune-Crypto/neptune-core/commit/90abab4f))
+- Allow duplicated values in `incoming_randomness.dat` ([c97f29a4](https://github.com/Neptune-Crypto/neptune-core/commit/c97f29a4))
+
+### ✅ Testing
+
+- *(proof_upgrader)* Test merge-output being double-spender ([7e8bb13e](https://github.com/Neptune-Crypto/neptune-core/commit/7e8bb13e))
+
+
 ## [0.2.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.0..v0.2.1) - 2025-03-26
 
 ### ✨ Features
