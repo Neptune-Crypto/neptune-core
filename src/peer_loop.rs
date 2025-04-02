@@ -1753,8 +1753,11 @@ impl PeerLoopHandler {
 
                 // Handle messages from main task
                 main_msg_res = from_main_rx.recv() => {
-                    let main_msg = main_msg_res
-                        .unwrap_or_else(|e| panic!("Failed to read from main loop: {e}"));
+                    let main_msg = main_msg_res.unwrap_or_else(|err| {
+                        let err_msg = format!("Failed to read from main loop: {err}");
+                        error!(err_msg);
+                        panic!("{err_msg}");
+                    });
                     let close_connection = self
                         .handle_main_task_message(main_msg, &mut peer, peer_state_info)
                         .await
