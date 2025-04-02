@@ -14,6 +14,7 @@ pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
+pub mod payment_proof;
 
 use anyhow::bail;
 use anyhow::ensure;
