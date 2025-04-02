@@ -1094,7 +1094,12 @@ mod test {
         // Alice is premine recipient and has mined on block, so she can make
         // (at least) two transaction.
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
-        let mut alice = state_with_premine_and_self_mined_blocks(network, &mut rng, 1).await;
+        let cli_args = cli_args::Args {
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+        let mut alice = state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;
 
         let mut transactions = vec![];
         for _ in 0..=1 {

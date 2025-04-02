@@ -258,14 +258,15 @@ pub(crate) async fn mock_genesis_global_state(
 /// guessing was done by the returned entity. Tip has height of
 /// `num_blocks_mined`.
 pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
-    network: Network,
+    cli_args: cli_args::Args,
     rng: &mut T,
     num_blocks_mined: usize,
 ) -> GlobalStateLock {
     let wallet = WalletEntropy::devnet_wallet();
     let own_key = wallet.nth_generation_spending_key_for_tests(0);
+    let network = cli_args.network;
     let mut global_state_lock =
-        mock_genesis_global_state(network, 2, wallet.clone(), cli_args::Args::default()).await;
+        mock_genesis_global_state(network, 2, wallet.clone(), cli_args).await;
     let mut previous_block = Block::genesis(network);
 
     for _ in 0..num_blocks_mined {
