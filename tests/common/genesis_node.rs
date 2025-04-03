@@ -12,6 +12,7 @@ use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::config_models::cli_args::Args;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
+use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::task::JoinHandle;
@@ -54,6 +55,10 @@ impl GenesisNode {
 
         if let Ok(dd) = Self::integration_test_data_directory(Network::Main) {
             args.data_dir = Some(dd.root_dir_path());
+        }
+
+        if node_instance == 0 {
+            args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
         }
 
         let caller = core::panic::Location::caller();

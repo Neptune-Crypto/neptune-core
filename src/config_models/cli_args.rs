@@ -249,7 +249,7 @@ pub struct Args {
     /// e.g. `--tx-proving-capability=singleproof` or
     /// `--tx-proving-capability=proofcollection`.
     #[clap(long)]
-    pub(crate) tx_proving_capability: Option<TxProvingCapability>,
+    pub tx_proving_capability: Option<TxProvingCapability>,
 
     /// Cache for the proving capability. If the above parameter is not set, we
     /// want to estimate proving capability and afterwards reuse the result from

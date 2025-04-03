@@ -83,8 +83,8 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
 /// scenario:
 /// 1. alice and bob run 2-node regtest network, from genesis.
 /// 2. alice and both each have no funds initially.
-/// 3. bob generates a receiving address and provides to alice.
-/// 4. alice mine's 3 blocks to her own wallet.
+/// 3. bob generates a receiving address and sends it to alice.
+/// 4. alice mines 3 blocks to her own wallet.
 /// 5. alice sends a payment to bob.
 /// 6. bob verifies the unconfirmed balance matches payment amount.
 #[tokio::test(flavor = "multi_thread")]
@@ -164,21 +164,20 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
     //
     // It seems previous blocks in this test succeed because there is no user Tx in the mempool.
 
-    /*
-        // alice mines another block to her wallet
-        alice.gsl
-            .api_mut()
-            .regtest_mut()
-            .mine_regtest_blocks_to_wallet(1)
-            .await?;
+    // alice mines another block to her wallet
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_regtest_blocks_to_wallet(1)
+        .await?;
 
-        bob.wait_until_block_height(4, timeout_secs).await?;
+    bob.wait_until_block_height(4, timeout_secs).await?;
 
-        // bob checks payment is reflected in his confirmed wallet balance
-        let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
-        assert_eq!(bob_balances.confirmed_available, payment_amount);
-        assert_eq!(bob_balances.unconfirmed_available, payment_amount);
-    */
+    // bob checks payment is reflected in his confirmed wallet balance
+    let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
+    assert_eq!(bob_balances.confirmed_available, payment_amount);
+    assert_eq!(bob_balances.unconfirmed_available, payment_amount);
 
     Ok(())
 }

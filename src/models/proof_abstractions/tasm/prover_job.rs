@@ -12,6 +12,7 @@
 use std::process::Stdio;
 
 use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
+use tasm_lib::triton_vm::error::InstructionError;
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
@@ -73,6 +74,9 @@ pub enum VmProcessError {
         proof."
     )]
     NoExitCode,
+
+    #[error("Triton VM failed: {0}")]
+    TritonVmFailed(InstructionError),
 }
 
 enum ProverProcessCompletion {
@@ -193,7 +197,9 @@ impl ProverJob {
             };
 
             if let Err(e) = run_result {
-                panic!("Triton VM should halt gracefully.\nError: {e}\n\n{vm_state_moved}");
+                return Err(ProverJobError::TritonVmProverFailed(
+                    VmProcessError::TritonVmFailed(e),
+                ));
             }
             vm_state_moved
         };
@@ -397,7 +403,17 @@ impl Job for ProverJob {
         tokio::select!(
             result = self.check_if_allowed() => {
                 if let Err(e) = result {
-                    return ProverJobResult::from(e).into()
+                    #[cfg(test)]
+                    if matches!(e, ProverJobError::TritonVmProverFailed(VmProcessError::TritonVmFailed(_))) {
+                        // when in test mode, allow "proving" false statements
+                    }
+                    else {
+                        return ProverJobResult::from(e).into()
+                    }
+                    #[cfg(not(test))]
+                    {
+                        return ProverJobResult::from(e).into()
+                    }
                 }
             }
 
