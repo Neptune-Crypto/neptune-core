@@ -5,6 +5,8 @@ use tasm_lib::prelude::Digest;
 use super::error::RegTestError;
 use crate::api::export::Timestamp;
 use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
+use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
+use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
@@ -122,6 +124,14 @@ impl RegTestPrivate {
             .wallet_entropy
             .guesser_spending_key(tip_block.hash());
 
+        // retrieve selected tx from mempool for block inclusion.
+        let txs_from_mempool = gs.mempool.get_transactions_for_block(
+            SIZE_20MB_IN_BYTES,
+            Some(MAX_NUM_TXS_TO_MERGE),
+            true, //only_merge_single_proofs
+            tip_block.mutator_set_accumulator_after().hash(),
+        );
+
         drop(gs);
 
         let (block, composer_tx_outputs) = MockBlockGenerator::mock_successor_with_pow(
@@ -130,6 +140,7 @@ impl RegTestPrivate {
             guesser_key,
             timestamp,
             rand::random(), // seed.
+            txs_from_mempool,
         )
         .await?;
 
@@ -162,7 +173,7 @@ impl RegTestPrivate {
             .send(RPCServerToMain::ProofOfWorkSolution(Box::new(block)))
             .await
             .map_err(|_| {
-                tracing::warn!("Receiver in mining loop closed prematurely");
+                tracing::warn!("channel send failed. channel 'rpc_server_to_main' closed unexpectedly. main_loop may have terminated prematurely.");
                 RegTestError::Failed("internal error. block not added to blockchain".into())
             })?;
 

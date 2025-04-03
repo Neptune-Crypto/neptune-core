@@ -249,7 +249,7 @@ pub struct Args {
     /// e.g. `--tx-proving-capability=singleproof` or
     /// `--tx-proving-capability=proofcollection`.
     #[clap(long)]
-    pub(crate) tx_proving_capability: Option<TxProvingCapability>,
+    pub tx_proving_capability: Option<TxProvingCapability>,
 
     /// Cache for the proving capability. If the above parameter is not set, we
     /// want to estimate proving capability and afterwards reuse the result from
@@ -520,6 +520,7 @@ impl Args {
             job_priority,
             job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
+                network: self.network,
             },
             cancel_job_rx: None,
         }

@@ -49,6 +49,7 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -85,6 +86,7 @@ async fn compose_block(
             max_log2_padded_height_for_proofs: global_state_lock
                 .cli()
                 .max_log2_padded_height_for_proofs,
+            network: global_state_lock.cli().network,
         },
         cancel_job_rx: Some(cancel_compose_rx),
     };
@@ -560,9 +562,6 @@ pub(crate) async fn create_block_transaction_from(
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
-    // TODO: Change this const to be defined through CLI arguments.
-    const MAX_NUM_TXS_TO_MERGE: usize = 7;
-
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();

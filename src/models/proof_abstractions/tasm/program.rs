@@ -96,6 +96,11 @@ pub(crate) async fn prove_consensus_program(
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
+    // regtest mode: just return a mock (empty) Proof
+    if proof_job_options.job_settings.network.is_regtest() {
+        return Ok(Proof(vec![]));
+    }
+
     // create a triton-vm-job-queue job for generating this proof.
     let job = ProverJob::new(
         program,
@@ -151,30 +156,6 @@ pub struct TritonVmProofJobOptions {
     pub cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,
 }
 
-impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
-    fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
-        let (job_priority, max_log2_padded_height_for_proofs) = v;
-        Self {
-            job_priority,
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs,
-            },
-            cancel_job_rx: None,
-        }
-    }
-}
-
-#[cfg(test)]
-impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
-    fn from(job_priority: TritonVmJobPriority) -> Self {
-        Self {
-            job_priority,
-            job_settings: Default::default(),
-            cancel_job_rx: None,
-        }
-    }
-}
-
 #[cfg(test)]
 pub mod test {
     use std::fs::create_dir_all;
@@ -201,6 +182,30 @@ pub mod test {
 
     const TEST_DATA_DIR: &str = "test_data";
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
+
+    impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
+        fn from(job_priority: TritonVmJobPriority) -> Self {
+            Self {
+                job_priority,
+                job_settings: Default::default(),
+                cancel_job_rx: None,
+            }
+        }
+    }
+
+    impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
+        fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
+            let (job_priority, max_log2_padded_height_for_proofs) = v;
+            Self {
+                job_priority,
+                job_settings: ProverJobSettings {
+                    max_log2_padded_height_for_proofs,
+                    network: Default::default(),
+                },
+                cancel_job_rx: None,
+            }
+        }
+    }
 
     pub(crate) trait ConsensusProgramSpecification: ConsensusProgram {
         /// The canonical reference source code for the consensus program, written in

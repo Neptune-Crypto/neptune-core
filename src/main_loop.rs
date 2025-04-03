@@ -500,11 +500,8 @@ impl MainLoopHandler {
 
         // Then notify all peers
         for updated in updated_txs {
-            self.main_to_peer_broadcast_tx
-                .send(MainToPeerTask::TransactionNotification(
-                    (&updated).try_into().unwrap(),
-                ))
-                .unwrap();
+            let pmsg = MainToPeerTask::TransactionNotification((&updated).try_into().unwrap());
+            self.main_to_peer_broadcast(pmsg);
         }
 
         // Tell miner that it can now start composing next block.
@@ -518,38 +515,37 @@ impl MainLoopHandler {
     /// any mempool transactions to be valid under this new block.
     ///
     /// Locking:
-    ///  * acquires `global_state_lock` for write
+    ///  * acquires `global_state_lock` for read and write
     async fn handle_self_guessed_block(
         &mut self,
         main_loop_state: &mut MutableMainLoopState,
         new_block: Box<Block>,
     ) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+        let incoming_block_is_more_canonical = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .incoming_block_is_more_canonical(&new_block);
 
-        if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
-            drop(global_state_mut); // don't hold across send()
+        if !incoming_block_is_more_canonical {
             warn!("Got new block from miner that was not child of tip. Discarding.");
             self.main_to_miner_tx.send(MainToMiner::Continue);
             return Ok(());
         }
+
         info!("Locally-mined block is new tip: {}", new_block.hash());
 
         // Share block with peers first thing.
         info!("broadcasting new block to peers");
-        if self
-            .main_to_peer_broadcast_tx
-            .send(MainToPeerTask::Block(new_block.clone()))
-            .is_err()
-        {
-            let num_peers = global_state_mut.net.peer_map.len();
-            warn!(
-                "broadcasting to peers failed.  peer connections: {}",
-                num_peers
-            );
-        }
+        let pmsg = MainToPeerTask::Block(new_block.clone());
+        self.main_to_peer_broadcast(pmsg);
 
-        let update_jobs = global_state_mut.set_new_tip(*new_block).await?;
-        drop(global_state_mut);
+        let update_jobs = self
+            .global_state_lock
+            .lock_guard_mut()
+            .await
+            .set_new_tip(*new_block)
+            .await?;
 
         self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
@@ -611,11 +607,8 @@ impl MainLoopHandler {
                 }
 
                 if !self.global_state_lock.cli().secret_compositions {
-                    self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::BlockProposalNotification((&block).into()))
-                    .expect(
-                        "Peer handler broadcast channel prematurely closed. This should never happen.",
-                    );
+                    let pmsg = MainToPeerTask::BlockProposalNotification((&block).into());
+                    self.main_to_peer_broadcast(pmsg);
                 }
 
                 {
@@ -737,9 +730,8 @@ impl MainLoopHandler {
                 };
 
                 // Inform all peers about new block
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Block(Box::new(last_block.clone())))
-                    .expect("Peer handler broadcast was closed. This should never happen");
+                let pmsg = MainToPeerTask::Block(Box::new(last_block.clone()));
+                self.main_to_peer_broadcast(pmsg);
 
                 // Spawn task to handle mempool tx-updating after new blocks.
                 // TODO: Do clever trick to collapse all jobs relating to the same transaction,
@@ -857,10 +849,9 @@ impl MainLoopHandler {
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
                     (&pt2m_transaction.transaction).try_into()?;
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::TransactionNotification(
-                        transaction_notification,
-                    ))?;
+
+                let pmsg = MainToPeerTask::TransactionNotification(transaction_notification);
+                self.main_to_peer_broadcast(pmsg);
             }
             PeerTaskToMain::BlockProposal(block) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::BlockProposal");
@@ -892,8 +883,8 @@ impl MainLoopHandler {
                 }
 
                 // Notify all peers of the block proposal we just accepted
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::BlockProposalNotification((&*block).into()))?;
+                let pmsg = MainToPeerTask::BlockProposalNotification((&*block).into());
+                self.main_to_peer_broadcast(pmsg);
 
                 self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
             }
@@ -919,8 +910,8 @@ impl MainLoopHandler {
 
                 // tell to disconnect
                 if let Some((peer_socket, _peer_info)) = longest_lived_peer {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::Disconnect(peer_socket.to_owned()))?;
+                    let pmsg = MainToPeerTask::Disconnect(peer_socket.to_owned());
+                    self.main_to_peer_broadcast(pmsg);
                 }
             }
         }
@@ -976,8 +967,8 @@ impl MainLoopHandler {
             i => info!("Disconnecting from {i} peers."),
         }
         for peer in peers_to_disconnect {
-            self.main_to_peer_broadcast_tx
-                .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
+            let pmsg = MainToPeerTask::Disconnect(peer.connected_address());
+            self.main_to_peer_broadcast(pmsg);
         }
 
         Ok(())
@@ -1087,8 +1078,8 @@ impl MainLoopHandler {
 
         // Ask all peers for their peer lists. This will eventually – once the
         // responses have come in – update the list of potential peers.
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::MakePeerDiscoveryRequest)?;
+        let pmsg = MainToPeerTask::MakePeerDiscoveryRequest;
+        self.main_to_peer_broadcast(pmsg);
 
         // Get a peer candidate from the list of potential peers. Generally,
         // the peer lists requested in the previous step will not have come in
@@ -1126,10 +1117,8 @@ impl MainLoopHandler {
         // Immediately request the new peer's peer list. This allows
         // incorporating the new peer's peers into the list of potential peers,
         // to be used in the next round of peer discovery.
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::MakeSpecificPeerDiscoveryRequest(
-                peer_candidate,
-            ))?;
+        let m2pmsg = MainToPeerTask::MakeSpecificPeerDiscoveryRequest(peer_candidate);
+        self.main_to_peer_broadcast(m2pmsg);
 
         Ok(())
     }
@@ -1210,8 +1199,8 @@ impl MainLoopHandler {
                 .get_potential_peers_for_sync_request(own_cumulative_pow);
 
             for peer in peers_to_punish {
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::PeerSynchronizationTimeout(peer))?;
+                let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
+                self.main_to_peer_broadcast(pmsg);
             }
 
             return Ok(());
@@ -1223,8 +1212,8 @@ impl MainLoopHandler {
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
-            self.main_to_peer_broadcast_tx
-                .send(MainToPeerTask::PeerSynchronizationTimeout(peer))?;
+            let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
+            self.main_to_peer_broadcast(pmsg);
         }
 
         if !try_new_request {
@@ -1273,15 +1262,12 @@ impl MainLoopHandler {
             "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
             chosen_peer, own_tip_hash, own_tip_height
         );
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::RequestBlockBatch(
-                MainToPeerTaskBatchBlockRequest {
-                    peer_addr_target: *chosen_peer,
-                    known_blocks: ordered_preferred_block_digests,
-                    anchor_mmr: anchor.block_mmr.clone(),
-                },
-            ))
-            .expect("Sending message to peers must succeed");
+        let pmsg = MainToPeerTask::RequestBlockBatch(MainToPeerTaskBatchBlockRequest {
+            peer_addr_target: *chosen_peer,
+            known_blocks: ordered_preferred_block_digests,
+            anchor_mmr: anchor.block_mmr.clone(),
+        });
+        self.main_to_peer_broadcast(pmsg);
 
         // Record that this request was sent to the peer
         let requested_block_height = own_tip_height.next();
@@ -1702,8 +1688,8 @@ impl MainLoopHandler {
                 // Is this a transaction we can share with peers? If so, share
                 // it immediately.
                 if let Ok(notification) = transaction.as_ref().try_into() {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::TransactionNotification(notification))?;
+                    let pmsg = MainToPeerTask::TransactionNotification(notification);
+                    self.main_to_peer_broadcast(pmsg);
                 } else {
                     // Otherwise, upgrade its proof quality, and share it by
                     // spinning up the proof upgrader.
@@ -1760,8 +1746,8 @@ impl MainLoopHandler {
                     let notification = TransactionNotification::try_from(tx);
                     match notification {
                         Ok(notification) => {
-                            self.main_to_peer_broadcast_tx
-                                .send(MainToPeerTask::TransactionNotification(notification))?;
+                            let pmsg = MainToPeerTask::TransactionNotification(notification);
+                            self.main_to_peer_broadcast(pmsg);
                         }
                         Err(error) => {
                             warn!("{error}");
@@ -1814,9 +1800,8 @@ impl MainLoopHandler {
         self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
         // Send 'bye' message to all peers.
-        let _result = self
-            .main_to_peer_broadcast_tx
-            .send(MainToPeerTask::DisconnectAll());
+        let pmsg = MainToPeerTask::DisconnectAll();
+        self.main_to_peer_broadcast(pmsg);
         debug!("sent bye");
 
         // Flush all databases
@@ -1831,6 +1816,20 @@ impl MainLoopHandler {
         futures::future::join_all(task_handles).await;
 
         Ok(())
+    }
+
+    // broadcasts message to peers (if any connected)
+    //
+    // panics if broadcast failed and channel receiver_count is non-zero
+    // indicating we have peer connections.
+    fn main_to_peer_broadcast(&self, msg: MainToPeerTask) {
+        if self.main_to_peer_broadcast_tx.send(msg).is_err() {
+            // tbd: maybe we should just log an error and ignore rather
+            // than panic.  but for now this preserves prior behavior
+
+            let receiver_count = self.main_to_peer_broadcast_tx.receiver_count();
+            assert_eq!(receiver_count, 0);
+        }
     }
 }
 

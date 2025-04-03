@@ -12,6 +12,7 @@ use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::config_models::cli_args::Args;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
+use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::task::JoinHandle;
@@ -127,7 +128,7 @@ impl GenesisNode {
     ///
     /// caller should obtain cluster_id via `cluster_id()` method.
     ///
-    /// node arguments are generated with `default_args_for_cluster()`.   
+    /// node arguments are generated with `default_args_for_cluster()`.
     pub async fn start_connected_cluster<const N: usize>(
         cluster_id: &str,
         num_nodes: u8,
@@ -240,6 +241,54 @@ impl GenesisNode {
         while self.gsl.lock_guard().await.mempool.get(txid).is_none() {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!("tx not in mempool after {} seconds", timeout_secs);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    /// wait until wallet unconfirmed balance does not match confirmed balance
+    ///
+    /// when a transaction is accepted by neptune-core it may take a short
+    /// time until it actually appears in the mempool.  This method waits for
+    /// an uncomfirmed balance discrepancy, a proxy indicator of arriving funds.
+    pub async fn wait_until_unconfirmed_balance(&self, timeout_secs: u16) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            let balances = self.gsl.api().wallet().balances(Timestamp::now()).await;
+            if balances.confirmed_total != balances.unconfirmed_total {
+                break;
+            }
+
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!(
+                    "confirmed and unconfirmed balance still match after {} seconds",
+                    timeout_secs
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    /// wait until wallet unconfirmed balance matches confirmed balance
+    ///
+    /// when a block is mined with funds destined for our wallet
+    /// those unconfirmed funds become comfirmed.  This method provides
+    /// a proxy indicator that this has happened.
+    pub async fn wait_until_confirmed_balance(&self, timeout_secs: u16) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            let balances = self.gsl.api().wallet().balances(Timestamp::now()).await;
+            if balances.confirmed_total == balances.unconfirmed_total {
+                break;
+            }
+
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!(
+                    "confirmed and unconfirmed balance still match after {} seconds",
+                    timeout_secs
+                );
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }

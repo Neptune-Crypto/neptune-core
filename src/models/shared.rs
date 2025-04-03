@@ -31,3 +31,6 @@ impl From<Block> for LatestBlockInfo {
 }
 
 pub const SIZE_20MB_IN_BYTES: usize = 20_000_000;
+
+// TODO: Change this const to be defined through CLI arguments.
+pub(crate) const MAX_NUM_TXS_TO_MERGE: usize = 7;

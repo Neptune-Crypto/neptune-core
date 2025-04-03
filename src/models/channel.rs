@@ -16,7 +16,7 @@ use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 use super::state::wallet::monitored_utxo::MonitoredUtxo;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToMiner {
     /// Communicates that a new block is now considered canonical
     NewBlock,
@@ -63,7 +63,7 @@ pub(crate) struct NewBlockFound {
     pub block: Box<Block>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MinerToMain {
     NewBlockFound(NewBlockFound),
     BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
@@ -105,7 +105,7 @@ impl From<&Block> for BlockProposalNotification {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
     BlockProposalNotification(BlockProposalNotification),
@@ -149,7 +149,7 @@ impl MainToPeerTask {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, strum::Display)]
 pub(crate) enum PeerTaskToMain {
     NewBlocks(Vec<Block>),
     AddPeerMaxBlockHeight {
@@ -204,7 +204,7 @@ pub(crate) struct ClaimUtxoData {
 }
 
 /// represents messages that can be sent from RPC server to main loop.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::Display)]
 pub enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),
     BroadcastMempoolTransactions,

@@ -175,6 +175,7 @@ impl MockBlockGenerator {
         timestamp: Timestamp,
         seed: [u8; 32],
         with_valid_pow: bool,
+        mempool_tx: Vec<Transaction>,
     ) -> Result<(Block, TxOutputList)> {
         let mut rng = StdRng::from_seed(seed);
 
@@ -183,7 +184,7 @@ impl MockBlockGenerator {
             composer_parameters,
             timestamp,
             rng.random(),
-            vec![],
+            mempool_tx,
         )
         .await?;
 
@@ -231,6 +232,7 @@ impl MockBlockGenerator {
         guesser_key: HashLockKey,
         timestamp: Timestamp,
         seed: [u8; 32],
+        mempool_tx: Vec<Transaction>,
     ) -> Result<(Block, TxOutputList)> {
         Self::mock_block_successor(
             predecessor,
@@ -239,6 +241,7 @@ impl MockBlockGenerator {
             timestamp,
             seed,
             true,
+            mempool_tx,
         )
         .await
     }

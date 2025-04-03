@@ -39,7 +39,7 @@ static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::Ha
 /// claim and verification succeeds, the claim is added to the cache. The only
 /// other way to populate the cache is through method `cache_true_claim`.
 pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
-    // presently this is only used if network is regtest.
+    // presently this is only populated if network is regtest.
     if CLAIMS_CACHE.lock().await.contains(&claim) {
         return true;
     }
