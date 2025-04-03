@@ -976,6 +976,10 @@ pub(crate) mod mine_loop_tests {
     use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
+
+    use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1042,9 +1046,13 @@ pub(crate) mod mine_loop_tests {
     /// Does *not* update the timestamp of the block and therefore also does not
     /// update the difficulty field, as this applies to the next block and only
     /// changes as a result of the timestamp of this block.
-    pub(crate) fn mine_iteration_for_tests(block: &mut Block, rng: &mut StdRng) {
-        let nonce = rng.random();
-        block.set_header_nonce(nonce);
+    pub(crate) fn mine_iteration_for_tests(block: &mut Block, test_runner: &mut TestRunner) {
+        block.set_header_nonce(
+            proptest_arbitrary_interop::arb::<Digest>()
+                .new_tree(test_runner)
+                .unwrap()
+                .current(),
+        );
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds
@@ -1727,7 +1735,8 @@ pub(crate) mod mine_loop_tests {
 
     #[test]
     fn fast_kernel_mast_hash_agrees_with_mast_hash_function_valid_block() {
-        let block_primitive_witness = deterministic_block_primitive_witness();
+        let block_primitive_witness =
+            deterministic_block_primitive_witness(&mut TestRunner::deterministic());
         let a_block = block_primitive_witness.predecessor_block();
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(a_block);
         assert_eq!(

@@ -73,9 +73,7 @@ impl TryFrom<&Block> for TransferBlock {
 
 #[cfg(test)]
 mod test {
-    use rand::rngs::StdRng;
-    use rand::Rng;
-    use rand::SeedableRng;
+
     use tracing_test::traced_test;
 
     use super::*;
@@ -113,7 +111,7 @@ mod test {
         let [block1] = fake_valid_sequence_of_blocks_for_tests(
             &genesis,
             Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).random(),
+            &mut proptest::test_runner::TestRunner::deterministic(),
         )
         .await;
 

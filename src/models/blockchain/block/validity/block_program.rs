@@ -326,6 +326,7 @@ impl ConsensusProgram for BlockProgram {
 #[cfg(test)]
 pub(crate) mod test {
     use itertools::Itertools;
+    use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -414,7 +415,8 @@ pub(crate) mod test {
     #[traced_test]
     #[test]
     fn block_program_halts_gracefully() {
-        let block_primitive_witness = deterministic_block_primitive_witness();
+        let block_primitive_witness =
+            deterministic_block_primitive_witness(&mut TestRunner::deterministic());
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
                 .body()
@@ -549,7 +551,8 @@ pub(crate) mod test {
 
     #[test]
     fn can_verify_block_program_with_two_claims() {
-        let block_primitive_witness = deterministic_block_primitive_witness();
+        let block_primitive_witness =
+            deterministic_block_primitive_witness(&mut TestRunner::deterministic());
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
                 .body()

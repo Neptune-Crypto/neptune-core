@@ -902,6 +902,7 @@ impl SyncChallengeResponse {
 
 #[cfg(test)]
 mod tests {
+    use proptest::test_runner::TestRunner;
     use rand::random;
 
     use super::*;
@@ -928,10 +929,13 @@ mod tests {
     #[tokio::test]
     async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
         let genesis = Block::genesis(Network::Main);
-        let mut rng = rand::rng();
         let ten_blocks: [Block; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
-            fake_valid_sequence_of_blocks_for_tests(&genesis, Timestamp::minutes(20), rng.random())
-                .await;
+            fake_valid_sequence_of_blocks_for_tests(
+                &genesis,
+                Timestamp::minutes(20),
+                &mut TestRunner::deterministic(),
+            )
+            .await;
 
         let to_pow_witness = |block: &Block| {
             BlockHeaderWithBlockHashWitness::new(

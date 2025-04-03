@@ -1058,6 +1058,7 @@ impl Block {
 
 #[cfg(test)]
 pub(crate) mod block_tests {
+    use proptest::test_runner::TestRunner;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1300,9 +1301,11 @@ pub(crate) mod block_tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
-        let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+        // let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-        let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
+        let mut block1 =
+            fake_valid_successor_for_tests(&genesis_block, now, &mut TestRunner::deterministic())
+                .await;
 
         let timestamp = block1.kernel.header.timestamp;
         assert!(block1.is_valid(&genesis_block, timestamp).await);
@@ -1405,8 +1408,9 @@ pub(crate) mod block_tests {
     }
 
     mod block_is_valid {
-        use rand::rngs::StdRng;
-        use rand::SeedableRng;
+        use proptest::array;
+        use proptest::prelude::{any, Strategy};
+        use proptest::strategy::ValueTree;
 
         use super::*;
         use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -1418,7 +1422,7 @@ pub(crate) mod block_tests {
         #[tokio::test]
         async fn blocks_with_0_to_10_inputs_and_successors_are_valid() {
             // Scenario: Build different blocks of height 2, with varying number
-            // of inputs. Verify all are valid. The build a block of height 3
+            // of inputs. Verify all are valid. Then build a block of height 3
             // with non-zero inputs and verify validity. This should ensure that
             // at least one of block 2's guesser fee UTXOs shift the active
             // window of the mutator set's Bloom filter, ensuring that the
@@ -1429,10 +1433,12 @@ pub(crate) mod block_tests {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-            let block1 =
-                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
-                    .await;
+            // let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+            let mut test_runner = dbg!(TestRunner::deterministic());
+            let block1 = dbg!(
+                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, &mut test_runner)
+                    .await
+            );
 
             let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice = mock_genesis_global_state(
@@ -1454,7 +1460,10 @@ pub(crate) mod block_tests {
                 .unwrap();
             let output_to_self = TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
-                rng.random(),
+                proptest_arbitrary_interop::arb::<Digest>()
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current(),
                 alice_key.to_address().unwrap(),
                 true,
             );
@@ -1500,7 +1509,10 @@ pub(crate) mod block_tests {
                     .clone()
                     .merge_with(
                         tx2,
-                        rng.random(),
+                        array::uniform32(any::<u8>())
+                            .new_tree(&mut test_runner)
+                            .unwrap()
+                            .current(),
                         &TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
@@ -1555,7 +1567,10 @@ pub(crate) mod block_tests {
                     .clone()
                     .merge_with(
                         tx3,
-                        rng.random(),
+                        array::uniform32(any::<u8>())
+                            .new_tree(&mut test_runner)
+                            .unwrap()
+                            .current(),
                         &TritonVmJobQueue::dummy(),
                         TritonVmProofJobOptions::default(),
                     )
@@ -1591,10 +1606,14 @@ pub(crate) mod block_tests {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
-            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+            // let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-            let mut block1 =
-                fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
+            let mut block1 = fake_valid_successor_for_tests(
+                &genesis_block,
+                now,
+                &mut TestRunner::deterministic(),
+            )
+            .await;
 
             // Set block timestamp 4 minutes in the future.  (is valid)
             let future_time1 = now + Timestamp::minutes(4);

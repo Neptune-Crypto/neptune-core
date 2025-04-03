@@ -2819,11 +2819,14 @@ pub(crate) mod tests {
 
     mod guesser_fee_utxos {
         use futures::channel::oneshot;
-        use guesser_fee_utxos::composer_parameters::ComposerParameters;
+        use proptest::strategy::ValueTree;
+
+        use proptest::prelude::Strategy;
+        use proptest::test_runner::TestRunner;
         use rand::rng;
 
         use super::*;
-        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+
         use crate::mine_loop::composer_parameters;
         use crate::mine_loop::guess_nonce;
         use crate::mine_loop::GuessingConfiguration;
@@ -2848,11 +2851,11 @@ pub(crate) mod tests {
             let block1_timestamp = network.launch_date() + Timestamp::minutes(2);
 
             // Create a random block proposal.
-            let mut rng = rand::rng();
+            // let mut rng = rand::rng();
             let block1_proposal = fake_valid_block_proposal_successor_for_test(
                 &genesis_block,
                 block1_timestamp,
-                rng.random(),
+                &mut TestRunner::deterministic(),
             )
             .await;
 
@@ -3046,7 +3049,12 @@ pub(crate) mod tests {
             // Can make tx with PoW-loot.
             let block2_timestamp = block1.header().timestamp + Timestamp::minutes(2);
             let fee = NativeCurrencyAmount::coins(1);
-            let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
+            let a_key = GenerationSpendingKey::derive_from_seed(
+                proptest_arbitrary_interop::arb::<Digest>()
+                    .new_tree(&mut TestRunner::deterministic())
+                    .unwrap()
+                    .current(),
+            );
             let (mut tx_spending_guesser_fee, _, _) = bob
                 .global_state_lock
                 .lock_guard()
@@ -3071,18 +3079,17 @@ pub(crate) mod tests {
             // below test function.
             tx_spending_guesser_fee.proof = TransactionProof::invalid();
 
-            let composer_parameters = ComposerParameters::new(
+            let composer_parameters = composer_parameters::propcompose_of_nonce(
                 a_key.to_address().into(),
-                rng.random(),
                 Some(a_key.privacy_preimage()),
-                0.5f64,
-                FeeNotificationPolicy::OffChain,
             );
+            let mut test_runner = proptest::test_runner::TestRunner::deterministic();
+            // let seed = proptest::strategy::ValueTree::current(&proptest::prelude::any:: <[u8;32]>().new_tree(&mut test_runner).unwrap());
             let (block2_tx, _) = fake_create_block_transaction_for_tests(
                 &block1,
-                composer_parameters,
+                composer_parameters.boxed(),
                 block2_timestamp,
-                rng.random(),
+                &mut test_runner,
                 vec![tx_spending_guesser_fee],
             )
             .await

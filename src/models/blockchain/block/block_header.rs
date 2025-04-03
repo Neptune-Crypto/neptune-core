@@ -265,6 +265,7 @@ impl BlockHeaderWithBlockHashWitness {
 
 #[cfg(test)]
 pub(crate) mod block_header_tests {
+    use proptest::test_runner::TestRunner;
     use rand::Rng;
 
     use super::*;
@@ -307,7 +308,8 @@ pub(crate) mod block_header_tests {
 
     #[test]
     fn witness_agrees_with_block_hash() {
-        let block_primitive_witness = deterministic_block_primitive_witness();
+        let block_primitive_witness =
+            deterministic_block_primitive_witness(&mut TestRunner::deterministic());
         let block = Block::block_template_invalid_proof_from_witness(
             block_primitive_witness,
             Timestamp::now(),

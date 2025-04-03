@@ -213,11 +213,13 @@ pub(crate) mod test {
             .boxed()
     }
 
-    pub(crate) fn deterministic_block_primitive_witness() -> BlockPrimitiveWitness {
-        let mut test_runner = TestRunner::deterministic();
+    pub(crate) fn deterministic_block_primitive_witness(
+        test_runner: &mut TestRunner,
+    ) -> BlockPrimitiveWitness {
+        // let mut test_runner = TestRunner::deterministic();
 
         BlockPrimitiveWitness::arbitrary()
-            .new_tree(&mut test_runner)
+            .new_tree(test_runner)
             .unwrap()
             .current()
     }

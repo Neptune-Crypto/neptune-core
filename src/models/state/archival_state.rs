@@ -3578,13 +3578,12 @@ mod archival_state_tests {
         #[tokio::test]
         async fn stored_block_hash_witness_agrees_with_block_hash() {
             let network = Network::Main;
-            let mut rng = rand::rng();
             let mut archival_state = make_test_archival_state(network).await;
             let genesis_block = Block::genesis(network);
             let blocks: [Block; 3] = fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::now(),
-                rng.random(),
+                &mut proptest::test_runner::TestRunner::deterministic(),
             )
             .await;
             for block in &blocks {

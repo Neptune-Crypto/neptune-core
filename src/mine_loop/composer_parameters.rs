@@ -7,12 +7,47 @@ use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 
 #[derive(Debug, Clone, PartialEq)]
+// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub(crate) struct ComposerParameters {
     reward_address: ReceivingAddress,
     sender_randomness: Digest,
     maybe_receiver_preimage: Option<Digest>,
     guesser_fee_fraction: f64,
     notification_policy: FeeNotificationPolicy,
+}
+#[cfg(test)]
+use proptest_arbitrary_interop::arb;
+#[cfg(test)]
+proptest::prop_compose! {
+    pub fn propcompose_of_addr_and_nonce() (
+        reward_address in arb::<crate::models::state::wallet::address::generation_address::GenerationReceivingAddress>(),
+        sender_randomness in arb::<Digest>(),
+    ) -> ComposerParameters {
+        ComposerParameters::new(
+            reward_address.into(),
+            sender_randomness,
+            None,
+            0.5f64,
+            FeeNotificationPolicy::OffChain,
+        )
+    }
+}
+#[cfg(test)]
+proptest::prop_compose! {
+    pub fn propcompose_of_nonce(
+        reward_address: ReceivingAddress,
+        maybe_receiver_preimage: Option<Digest>
+    ) (
+        sender_randomness in arb::<Digest>(),
+    ) -> ComposerParameters {
+        ComposerParameters::new(
+            reward_address.clone(),
+            sender_randomness,
+            maybe_receiver_preimage,
+            0.5f64,
+            FeeNotificationPolicy::OffChain,
+        )
+    }
 }
 
 impl ComposerParameters {

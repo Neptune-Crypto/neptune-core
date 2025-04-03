@@ -32,7 +32,9 @@ mod tests {
 
     #[test]
     fn block_notification_hash_matches_block_hash() {
-        let witness = deterministic_block_primitive_witness();
+        let witness = deterministic_block_primitive_witness(
+            &mut proptest::test_runner::TestRunner::deterministic(),
+        );
         let a_block = witness.predecessor_block();
         let as_notification: PeerBlockNotification = a_block.into();
         assert_eq!(
