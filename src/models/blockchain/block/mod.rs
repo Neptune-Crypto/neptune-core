@@ -1081,11 +1081,14 @@ impl Block {
 #[cfg(test)]
 pub(crate) mod block_tests {
     use macro_rules_attr::apply;
+    use proptest::collection;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use test_strategy::proptest;
     use tracing_test::traced_test;
     use twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 
@@ -1160,12 +1163,13 @@ pub(crate) mod block_tests {
         );
     }
 
-    #[test]
-    fn block_subsidy_calculation_terminates() {
-        Block::block_subsidy(BFieldElement::MAX.into());
+    proptest::proptest! {
+        #[test]
+        fn block_subsidy_calculation_terminates(height_arb in arb::<BFieldElement>()) {
+            Block::block_subsidy(BFieldElement::MAX.into());
 
-        let random_height: BFieldElement = random();
-        Block::block_subsidy(random_height.into());
+            Block::block_subsidy(height_arb.into());
+        }
     }
 
     #[test]
@@ -1357,9 +1361,14 @@ pub(crate) mod block_tests {
         }
     }
 
-    #[apply(shared_tokio_runtime)]
-    async fn can_prove_block_ancestry() {
-        let mut rng = rand::rng();
+    #[proptest(async = "tokio")]
+    async fn can_prove_block_ancestry(
+        #[strategy(collection::vec(arb::<Digest>(), 55))] mut sender_randomness_vec: Vec<Digest>,
+        #[strategy(0..54usize)] index: usize,
+        #[strategy(collection::vec(arb::<WalletEntropy>(), 55))] mut wallet_secret_vec: Vec<
+            WalletEntropy,
+        >,
+    ) {
         let network = Network::RegTest;
         let genesis_block = Block::genesis(network);
         let mut blocks = vec![];
@@ -1374,10 +1383,17 @@ pub(crate) mod block_tests {
         let mut mmra = MmrAccumulator::new_from_leafs(vec![genesis_block.hash()]);
 
         for i in 0..55 {
-            let wallet_secret = WalletEntropy::new_random();
-            let key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let (new_block, _) =
-                make_mock_block(blocks.last().unwrap(), None, key, rng.random()).await;
+            let key = wallet_secret_vec
+                .pop()
+                .unwrap()
+                .nth_generation_spending_key_for_tests(0);
+            let (new_block, _) = make_mock_block(
+                blocks.last().unwrap(),
+                None,
+                key,
+                sender_randomness_vec.pop().unwrap(),
+            )
+            .await;
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
@@ -1392,7 +1408,6 @@ pub(crate) mod block_tests {
         let last_block_mmra = blocks.last().unwrap().body().block_mmr_accumulator.clone();
         assert_eq!(mmra, last_block_mmra);
 
-        let index = rand::rng().random_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
 
         let leaf_index = index as u64;
