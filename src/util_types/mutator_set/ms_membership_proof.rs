@@ -8,9 +8,6 @@ use std::ops::IndexMut;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -23,7 +20,6 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-use super::chunk_dictionary::pseudorandom_chunk_dictionary;
 use super::chunk_dictionary::ChunkDictionary;
 use super::commit;
 use super::get_swbf_indices;
@@ -556,46 +552,17 @@ impl MsMembershipProof {
     }
 }
 
-/// Generate a pseudorandom mutator set membership proof from the given seed, for testing
-/// purposes.
-pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembershipProof {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let sender_randomness: Digest = rng.random();
-    let receiver_preimage: Digest = rng.random();
-    let (auth_path_aocl, aocl_leaf_index) =
-        pseudorandom_mmr_membership_proof_with_index(rng.random());
-    let target_chunks: ChunkDictionary = pseudorandom_chunk_dictionary(rng.random());
-    MsMembershipProof {
-        sender_randomness,
-        receiver_preimage,
-        aocl_leaf_index,
-        auth_path_aocl,
-        target_chunks,
-    }
-}
-
-/// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
-/// for testing purposes.
-pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembershipProof, u64) {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let leaf_index: u64 = rng.random();
-    let authentication_path: Vec<Digest> = (0..rng.random_range(0..15))
-        .map(|_| rng.random())
-        .collect_vec();
-    (
-        MmrMembershipProof {
-            authentication_path,
-        },
-        leaf_index,
-    )
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Either;
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use proptest::collection;
+    use proptest::prelude::any;
+    use proptest::prelude::*;
+    use proptest::prop_compose;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -611,7 +578,37 @@ mod tests {
     use crate::util_types::mutator_set::commit;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
-    use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
+
+    const N: usize = 100;
+
+    prop_compose! {
+        /// Generate a pseudorandom mutator set membership proof from the given seed, for testing purposes.
+        pub fn propcompose_msmembershipproof() (
+            sender_randomness in arb::<Digest>(),
+            receiver_preimage in arb::<Digest>(),
+            (auth_path_aocl, aocl_leaf_index) in propcompose_mmrmembershipproof_with_index(),
+            target_chunks in crate::util_types::mutator_set::chunk_dictionary::chunk_dict_tests::propcompose_chunkdict(),
+        ) -> MsMembershipProof {
+            MsMembershipProof {
+                sender_randomness,
+                receiver_preimage,
+                aocl_leaf_index,
+                auth_path_aocl,
+                target_chunks,
+            }
+        }
+    }
+
+    prop_compose! {
+        /// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
+        /// for testing purposes.
+        pub fn propcompose_mmrmembershipproof_with_index() (len in 0..15usize) (
+            authentication_path in collection::vec(arb::<Digest>(), len),
+            leaf_index in any::<u64>()
+        ) -> (MmrMembershipProof, u64) {
+            (MmrMembershipProof {authentication_path}, leaf_index)
+        }
+    }
 
     #[test]
     fn mp_equality_test() {
@@ -699,12 +696,15 @@ mod tests {
         }
     }
 
-    #[apply(shared_tokio_runtime)]
-    async fn revert_update_from_remove_test() {
-        let n = 100;
-        let mut rng = rand::rng();
-
-        let own_index = rng.next_u32() as usize % n;
+    #[test_strategy::proptest(async = "tokio")]
+    async fn revert_update_from_remove_test(
+        #[strategy(0..N)] own_index: usize,
+        #[strategy(collection::vec(arb::<Digest>(), N))] mut item_vec: Vec<Digest>,
+        #[strategy(collection::vec(arb::<Digest>(), N))] mut sender_randomness_vec: Vec<Digest>,
+        #[strategy(collection::vec(arb::<Digest>(), N))] mut receiver_preimage_vec: Vec<Digest>,
+        #[strategy(collection::vec(any::<bool>(), N))] mut condition: Vec<bool>,
+        #[any] cutoff_rand: usize,
+    ) {
         let mut own_membership_proof = None;
         let mut own_item = None;
 
@@ -714,10 +714,10 @@ mod tests {
         let mut membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
 
         // add items
-        for i in 0..n {
-            let item: Digest = random();
-            let sender_randomness: Digest = random();
-            let receiver_preimage: Digest = random();
+        for i in 0..N {
+            let item: Digest = item_vec.pop().unwrap();
+            let sender_randomness: Digest = sender_randomness_vec.pop().unwrap();
+            let receiver_preimage: Digest = receiver_preimage_vec.pop().unwrap();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
 
             for (oi, mp) in &mut membership_proofs {
@@ -768,12 +768,12 @@ mod tests {
         // generate some removal records
         let mut removal_records = vec![];
         for (item, membership_proof) in membership_proofs {
-            if rng.next_u32() % 2 == 1 {
+            if condition.pop().unwrap() {
                 let removal_record = archival_mutator_set.drop(item, &membership_proof).await;
                 removal_records.push(removal_record);
             }
         }
-        let cutoff_point = 1 + (rng.next_u32() as usize % (removal_records.len() - 1));
+        let cutoff_point = 1 + (cutoff_rand % (removal_records.len() - 1));
         let mut membership_proof_snapshot = None;
 
         // apply removal records
@@ -1394,10 +1394,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_decode_mutator_set_membership_proof() {
-        for _ in 0..100 {
-            let msmp = random_mutator_set_membership_proof();
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 100, .. ProptestConfig::default()
+          })]
+        #[test]
+        fn test_decode_mutator_set_membership_proof(msmp in propcompose_msmembershipproof()) {
             let encoded = msmp.encode();
             let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
             assert_eq!(msmp, decoded);

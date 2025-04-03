@@ -44,22 +44,6 @@ impl TxInput {
     pub fn native_currency_amount(&self) -> NativeCurrencyAmount {
         self.utxo.get_native_currency_amount()
     }
-
-    #[cfg(test)]
-    pub fn new_random(amount: NativeCurrencyAmount) -> Self {
-        use crate::models::blockchain::transaction::lock_script::LockScript;
-        use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
-        use crate::models::state::wallet::address::SpendingKey;
-        use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
-
-        let lock_script = LockScript::anyone_can_spend();
-        let key: SpendingKey = GenerationSpendingKey::derive_from_seed(rand::random()).into();
-        Self(UnlockedUtxo::unlock(
-            Utxo::new_native_currency(lock_script.clone(), amount),
-            key.lock_script_and_witness(),
-            pseudorandom_mutator_set_membership_proof(rand::random()),
-        ))
-    }
 }
 
 /// Represents a list of [TxInput]
