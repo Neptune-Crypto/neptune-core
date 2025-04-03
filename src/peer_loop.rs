@@ -1916,7 +1916,6 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
-    use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -2051,7 +2050,7 @@ mod peer_loop_tests {
         let [block_1_with_different_genesis] = fake_valid_sequence_of_blocks_for_tests(
             &different_genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
@@ -2162,7 +2161,7 @@ mod peer_loop_tests {
         let [mut block_without_valid_pow] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
 
@@ -2244,7 +2243,8 @@ mod peer_loop_tests {
         let genesis_block: Block = Block::genesis(network);
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let block_1 = fake_valid_block_for_tests(&alice, &mut TestRunner::deterministic()).await;
+        let block_1 =
+            fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).random()).await;
         assert!(
             block_1.is_valid(&genesis_block, now).await,
             "Block must be valid for this test to make sense"
@@ -2307,7 +2307,7 @@ mod peer_loop_tests {
             fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
-                &mut TestRunner::deterministic(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
         let blocks = vec![
@@ -2376,17 +2376,16 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let genesis_block: Block = Block::genesis(network);
         let peer_address = get_dummy_socket_address(0);
-        let mut test_runner = TestRunner::deterministic();
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut test_runner,
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
-            &mut test_runner,
+            StdRng::seed_from_u64(5550002).random(),
         )
         .await;
         assert_ne!(block_2_b.hash(), block_2_a.hash());
@@ -2493,17 +2492,16 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let genesis_block = Block::genesis(network);
         let peer_address = get_dummy_socket_address(0);
-        let mut test_runner = TestRunner::deterministic();
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut test_runner,
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
-            &mut test_runner,
+            StdRng::seed_from_u64(5550002).random(),
         )
         .await;
         assert_ne!(block_2_a.hash(), block_2_b.hash());
@@ -2627,17 +2625,16 @@ mod peer_loop_tests {
         let genesis_block = Block::genesis(network);
         let peer_address = get_dummy_socket_address(0);
 
-        let mut test_runner = TestRunner::deterministic();
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut test_runner,
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
-            &mut test_runner,
+            StdRng::seed_from_u64(5550002).random(),
         )
         .await;
         assert_ne!(block_2_a.hash(), block_2_b.hash());
@@ -2683,12 +2680,12 @@ mod peer_loop_tests {
         // Scenario: client only knows genesis block. Then receives block
         // notification of height 1. Must request block 1.
         let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(5552401);
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
                 .unwrap();
-        let block_1 =
-            fake_valid_block_for_tests(&state_lock, &mut TestRunner::deterministic()).await;
+        let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
         let notification_height1 = (&block_1).into();
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockNotification(notification_height1)),
@@ -2720,6 +2717,7 @@ mod peer_loop_tests {
         // Scenario: client only knows blocks up to height 7. Then receives block-
         // request-by-height for height 7. Must respond with block 7.
         let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(5552401);
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
@@ -2728,7 +2726,7 @@ mod peer_loop_tests {
         let blocks: [Block; 7] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            rng.random(),
         )
         .await;
         let block7 = blocks.last().unwrap().to_owned();
@@ -2769,12 +2767,12 @@ mod peer_loop_tests {
         // Scenario: client only knows genesis block. Then receives block 1.
 
         let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(5550001);
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
 
-        let block_1 =
-            fake_valid_block_for_tests(&state_lock, &mut TestRunner::deterministic()).await;
+        let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
@@ -2833,7 +2831,7 @@ mod peer_loop_tests {
         let [block_1, block_2] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
 
@@ -2892,6 +2890,7 @@ mod peer_loop_tests {
         // process as the alternative is that the program will crash because it runs out of RAM.
 
         let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(5550001);
         let (
             _peer_broadcast_tx,
             from_main_rx_clone,
@@ -2911,7 +2910,7 @@ mod peer_loop_tests {
         let [block_1, _block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            rng.random(),
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -2988,7 +2987,7 @@ mod peer_loop_tests {
         let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await.unwrap();
@@ -3054,7 +3053,7 @@ mod peer_loop_tests {
         let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
 
@@ -3142,7 +3141,7 @@ mod peer_loop_tests {
             fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
-                &mut TestRunner::deterministic(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -3246,7 +3245,7 @@ mod peer_loop_tests {
         let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
-            &mut TestRunner::deterministic(),
+            StdRng::seed_from_u64(5550001).random(),
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -3598,7 +3597,7 @@ mod peer_loop_tests {
             } = genesis_setup(Network::Main).await;
             let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
-                &mut TestRunner::deterministic(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
 
@@ -3639,7 +3638,7 @@ mod peer_loop_tests {
             } = genesis_setup(Network::Main).await;
             let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
-                &mut TestRunner::deterministic(),
+                StdRng::seed_from_u64(5550001).random(),
             )
             .await;
 
@@ -3803,9 +3802,6 @@ mod peer_loop_tests {
     }
 
     mod sync_challenges {
-        use proptest::prelude::Strategy;
-        use proptest::strategy::ValueTree;
-
         use super::*;
         use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn;
 
@@ -3830,7 +3826,7 @@ mod peer_loop_tests {
             let blocks: [Block; 11] = fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
-                &mut TestRunner::deterministic(),
+                [0u8; 32],
             )
             .await;
             for block in &blocks {
@@ -3977,8 +3973,7 @@ mod peer_loop_tests {
             let bob_socket_address = get_dummy_socket_address(0);
 
             let now = genesis_block.header().timestamp + Timestamp::hours(1);
-            let mut test_runner = TestRunner::deterministic();
-            let block_1 = fake_valid_block_for_tests(&alice, &mut test_runner).await;
+            let block_1 = fake_valid_block_for_tests(&alice, rng.random()).await;
             assert!(
                 block_1.is_valid(&genesis_block, now).await,
                 "Block must be valid for this test to make sense"
@@ -3987,19 +3982,13 @@ mod peer_loop_tests {
             alice.set_new_tip(block_1.clone()).await?;
             bob.set_new_tip(block_1.clone()).await?;
 
-            let dyn_n = (1usize..20)
-                .prop_map(|n| n + ALICE_SYNC_MODE_THRESHOLD)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
             // produce enough blocks to ensure alice needs to go into sync mode
             // with this block notification.
             let blocks = fake_valid_sequence_of_blocks_for_tests_dyn(
                 &block_1,
                 TARGET_BLOCK_INTERVAL,
-                &mut test_runner,
-                // rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20),
-                dyn_n,
+                rng.random(),
+                rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20),
             )
             .await;
             for block in &blocks {

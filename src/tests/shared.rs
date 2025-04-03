@@ -20,8 +20,6 @@ use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use proptest::collection::vec;
-use proptest::prelude::any;
-use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
@@ -104,6 +102,7 @@ use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
@@ -961,12 +960,13 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 pub(crate) async fn fake_valid_block_from_tx_for_tests(
     predecessor: &Block,
     tx: Transaction,
-    test_runner: &mut TestRunner,
+    seed: [u8; 32],
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx).await;
 
+    let mut rng = StdRng::from_seed(seed);
     while !block.has_proof_of_work(predecessor.header()) {
-        mine_iteration_for_tests(&mut block, test_runner);
+        mine_iteration_for_tests(&mut block, &mut rng);
     }
 
     block
@@ -995,8 +995,7 @@ async fn fake_create_transaction_from_details_for_tests(
 async fn fake_merge_transactions_for_tests(
     lhs: Transaction,
     rhs: Transaction,
-    shuffle_seed: BoxedStrategy<[u8; 32]>,
-    test_runner: &mut TestRunner,
+    shuffle_seed: [u8; 32],
 ) -> Result<Transaction> {
     let TransactionProof::SingleProof(lhs_proof) = lhs.proof else {
         bail!("arguments must be bogus singleproof transactions")
@@ -1004,13 +1003,8 @@ async fn fake_merge_transactions_for_tests(
     let TransactionProof::SingleProof(rhs_proof) = rhs.proof else {
         bail!("arguments must be bogus singleproof transactions")
     };
-    let merge_witness = MergeWitness::from_transactions(
-        lhs.kernel,
-        lhs_proof,
-        rhs.kernel,
-        rhs_proof,
-        shuffle_seed.new_tree(test_runner).unwrap().current(),
-    );
+    let merge_witness =
+        MergeWitness::from_transactions(lhs.kernel, lhs_proof, rhs.kernel, rhs_proof, shuffle_seed);
     let new_kernel = merge_witness.new_kernel.clone();
 
     let claim = SingleProof::claim(new_kernel.mast_hash());
@@ -1025,13 +1019,11 @@ async fn fake_merge_transactions_for_tests(
 /// Create a block-transaction with a bogus proof but such that `verify` passes.
 pub(crate) async fn fake_create_block_transaction_for_tests(
     predecessor_block: &Block,
-    composer_parameters: BoxedStrategy<ComposerParameters>,
+    composer_parameters: ComposerParameters,
     timestamp: Timestamp,
-    // shuffle_seed: [u8; 32],
-    test_runner: &mut TestRunner,
+    shuffle_seed: [u8; 32],
     mut selected_mempool_txs: Vec<Transaction>,
 ) -> Result<(Transaction, TxOutputList)> {
-    let composer_parameters = composer_parameters.new_tree(test_runner).unwrap().current();
     let (composer_txos, transaction_details) =
         prepare_coinbase_transaction_stateless(predecessor_block, composer_parameters, timestamp)?;
 
@@ -1049,15 +1041,12 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         selected_mempool_txs = vec![nop_transaction];
     }
 
+    let mut rng = StdRng::from_seed(shuffle_seed);
     for tx_to_include in selected_mempool_txs {
-        block_transaction = fake_merge_transactions_for_tests(
-            block_transaction,
-            tx_to_include,
-            any::<[u8; 32]>().boxed(),
-            test_runner,
-        )
-        .await
-        .expect("Must be able to merge transactions in mining context");
+        block_transaction =
+            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
+                .await
+                .expect("Must be able to merge transactions in mining context");
     }
 
     Ok((block_transaction, composer_txos))
@@ -1066,39 +1055,40 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
 async fn fake_block_successor(
     predecessor: &Block,
     timestamp: Timestamp,
-    // seed: [u8; 32],
+    seed: [u8; 32],
     with_valid_pow: bool,
-    test_runner: &mut TestRunner,
 ) -> Block {
-    fake_block_successor_with_merged_tx(predecessor, timestamp, with_valid_pow, vec![], test_runner)
-        .await
+    fake_block_successor_with_merged_tx(predecessor, timestamp, seed, with_valid_pow, vec![]).await
 }
 
 pub async fn fake_block_successor_with_merged_tx(
     predecessor: &Block,
     timestamp: Timestamp,
-    // seed: [u8; 32],
+    seed: [u8; 32],
     with_valid_pow: bool,
     txs: Vec<Transaction>,
-    test_runner: &mut TestRunner,
 ) -> Block {
-    // let mut rng = StdRng::from_seed(seed);
+    let mut rng = StdRng::from_seed(seed);
 
-    let composer_parameters =
-        crate::mine_loop::composer_parameters::propcompose_of_addr_and_nonce();
+    let composer_parameters = ComposerParameters::new(
+        GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
+        rng.random(),
+        None,
+        0.5f64,
+        FeeNotificationPolicy::OffChain,
+    );
     let (block_tx, _) = fake_create_block_transaction_for_tests(
         predecessor,
-        composer_parameters.boxed(),
+        composer_parameters,
         timestamp,
-        // seed,
-        &mut TestRunner::deterministic(),
+        rng.random(),
         txs,
     )
     .await
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(predecessor, block_tx, test_runner).await
+        fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.random()).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }
@@ -1107,19 +1097,17 @@ pub async fn fake_block_successor_with_merged_tx(
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
-    // seed: [u8; 32],
-    test_runner: &mut TestRunner,
+    seed: [u8; 32],
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, false, test_runner).await
+    fake_block_successor(predecessor, timestamp, seed, false).await
 }
 
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
-    // seed: [u8; 32],
-    test_runner: &mut TestRunner,
+    seed: [u8; 32],
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, true, test_runner).await
+    fake_block_successor(predecessor, timestamp, seed, true).await
 }
 
 /// Create a block with coinbase going to self. For testing purposes.
@@ -1129,14 +1117,13 @@ pub(crate) async fn fake_valid_successor_for_tests(
 /// will not pass `triton_vm::verify`, as its validity is only mocked.
 pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
-    // seed: [u8; 32],
-    test_runner: &mut TestRunner,
+    seed: [u8; 32],
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
-        test_runner,
+        seed,
     )
     .await
 }
@@ -1150,10 +1137,9 @@ pub(crate) async fn fake_valid_block_for_tests(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     predecessor: &Block,
     block_interval: Timestamp,
-    // seed: [u8; 32],
-    test_runner: &mut TestRunner,
+    seed: [u8; 32],
 ) -> [Block; N] {
-    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, test_runner, N)
+    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, seed, N)
         .await
         .try_into()
         .unwrap()
@@ -1168,17 +1154,16 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     mut predecessor: &Block,
     block_interval: Timestamp,
-    // seed: [u8; 32],
-    test_runner: &mut TestRunner,
+    seed: [u8; 32],
     n: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
-    // let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
     for _ in 0..n {
         let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
-            test_runner,
+            rng.random(),
         )
         .await;
         blocks.push(block);

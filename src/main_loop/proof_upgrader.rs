@@ -795,7 +795,6 @@ pub(super) fn get_upgrade_task_from_mempool(
 
 #[cfg(test)]
 mod test {
-    use proptest::test_runner::TestRunner;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
@@ -1140,14 +1139,9 @@ mod test {
         let block1 = alice.lock_guard().await.chain.light_state().to_owned();
 
         let now = block1.header().timestamp + Timestamp::hours(1);
-        let block2 = fake_block_successor_with_merged_tx(
-            &block1,
-            now,
-            false,
-            vec![mined_tx],
-            &mut TestRunner::deterministic(),
-        )
-        .await;
+        let block2 =
+            fake_block_successor_with_merged_tx(&block1, now, rng.random(), false, vec![mined_tx])
+                .await;
         alice.set_new_tip(block2).await.unwrap();
 
         let (main_to_peer_tx, mut main_to_peer_rx) =

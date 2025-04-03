@@ -3002,12 +3002,7 @@ mod global_state_tests {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let block1 = fake_valid_successor_for_tests(
-            &genesis_block,
-            now,
-            &mut proptest::test_runner::TestRunner::deterministic(),
-        )
-        .await;
+        let block1 = fake_valid_successor_for_tests(&genesis_block, now, Default::default()).await;
 
         global_state_lock.set_new_tip(block1).await.unwrap();
 

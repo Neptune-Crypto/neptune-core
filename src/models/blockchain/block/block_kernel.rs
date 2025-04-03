@@ -58,7 +58,6 @@ impl MastHash for BlockKernel {
 
 #[cfg(test)]
 mod tests {
-    use proptest::test_runner::TestRunner;
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::twenty_first::prelude::MerkleTree;
@@ -70,8 +69,7 @@ mod tests {
 
     #[test]
     fn kernel_hash_calculation() {
-        let block_primitive_witness =
-            deterministic_block_primitive_witness(&mut TestRunner::deterministic());
+        let block_primitive_witness = deterministic_block_primitive_witness();
         let invalid_block = Block::block_template_invalid_proof_from_witness(
             block_primitive_witness,
             Timestamp::now(),
