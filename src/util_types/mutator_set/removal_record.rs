@@ -378,6 +378,7 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 mod removal_record_tests {
     use itertools::Itertools;
+    use proptest::strategy::ValueTree;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
     use rand::RngCore;
@@ -825,7 +826,12 @@ mod removal_record_tests {
     #[test]
     fn test_removal_record_decode() {
         for _ in 0..10 {
-            let removal_record = random_removal_record();
+            let removal_record = proptest::prelude::Strategy::new_tree(
+                &proptest_arbitrary_interop::arb::<RemovalRecord>(),
+                &mut proptest::test_runner::TestRunner::deterministic(),
+            )
+            .unwrap()
+            .current();
             let encoded = removal_record.encode();
             let decoded = *RemovalRecord::decode(&encoded).unwrap();
             assert_eq!(removal_record, decoded);
@@ -837,7 +843,15 @@ mod removal_record_tests {
         let mut rng = rand::rng();
         for _ in 0..10 {
             let length = rng.random_range(0..10);
-            let removal_records = vec![random_removal_record(); length];
+            let removal_records = vec![
+                proptest::prelude::Strategy::new_tree(
+                    &proptest_arbitrary_interop::arb::<RemovalRecord>(),
+                    &mut proptest::test_runner::TestRunner::deterministic()
+                )
+                .unwrap()
+                .current();
+                length
+            ];
             let encoded = removal_records.encode();
             let decoded = *Vec::<RemovalRecord>::decode(&encoded).unwrap();
             assert_eq!(removal_records, decoded);
@@ -847,7 +861,12 @@ mod removal_record_tests {
     #[test]
     fn test_absindexset_record_decode() {
         for _ in 0..100 {
-            let removal_record = random_removal_record();
+            let removal_record = proptest::prelude::Strategy::new_tree(
+                &proptest_arbitrary_interop::arb::<RemovalRecord>(),
+                &mut proptest::test_runner::TestRunner::deterministic(),
+            )
+            .unwrap()
+            .current();
             let encoded_absindexset = removal_record.absolute_indices.encode();
             let decoded_absindexset = *AbsoluteIndexSet::decode(&encoded_absindexset).unwrap();
             assert_eq!(removal_record.absolute_indices, decoded_absindexset);

@@ -976,6 +976,7 @@ pub(crate) mod mine_loop_tests {
     use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
+    use proptest::prelude::Strategy;
     use tracing_test::traced_test;
 
     use super::*;
@@ -983,6 +984,7 @@ pub(crate) mod mine_loop_tests {
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
+
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1109,6 +1111,38 @@ pub(crate) mod mine_loop_tests {
                     );
                 })
                 .count();
+        // let transaction = proptest::collection::vec(arb::AdditionRecord, num_outputs)
+        // .prop_map(|outputs| make_mock_transaction_with_mutator_set_hash(
+        //     vec![],
+        //     outputs,
+        //     previous_block.mutator_set_accumulator_after().hash(),
+        // ));
+        // let start_time = Timestamp::now();
+        // let block = transaction.prop_map(|transaction| Block::block_template_invalid_proof(
+        //     &previous_block,
+        //     transaction,
+        //     start_time,
+        //     target_block_interval,
+        // ));
+        // let threshold = previous_block.header().difficulty.target();
+        // let num_iterations_launched = 1_000_000;
+        // let tick = std::time::SystemTime::now();
+        // // (kernel_auth_path, header_auth_path)
+        // let block_auth_paths = block.prop_map(|block| precalculate_block_auth_paths(&block));
+
+        // let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+        // let num_iterations_run = block_auth_paths.prop_map(|block_auth_paths| rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
+        // .map_init(rand::rng, |prng, _i| {
+        //     guess_nonce_iteration(
+        //         block_auth_paths.0,
+        //         threshold,
+        //         sleepy_guessing,
+        //         prng,
+        //         block_auth_paths.1,
+        //         &worker_task_tx,
+        //     );
+        // })
+        // .count());
         drop(worker_task_rx);
 
         let time_spent_mining = tick.elapsed().unwrap();
@@ -1866,10 +1900,15 @@ pub(crate) mod mine_loop_tests {
         let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
         let k = (-4.0 / cofactor).ceil() as usize;
 
+        let mut test_runner = proptest::test_runner::TestRunner::deterministic();
+
         let mut predecessor_header = random_block_header();
         predecessor_header.difficulty = Difficulty::from(difficulty);
         let predecessor_body = BlockBody::new(
-            random_transaction_kernel(),
+            random_transaction_kernel()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current(),
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),
@@ -1886,7 +1925,10 @@ pub(crate) mod mine_loop_tests {
         successor_header.prev_block_digest = predecessor_block.hash();
         // note that successor's difficulty is random
         let successor_body = BlockBody::new(
-            random_transaction_kernel(),
+            random_transaction_kernel()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current(),
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),

@@ -48,6 +48,29 @@ pub struct TransactionKernel {
     #[get_size(ignore)]
     mast_sequences: OnceLock<Vec<Vec<BFieldElement>>>,
 }
+#[cfg(test)]
+use proptest_arbitrary_interop::arb;
+#[cfg(test)]
+proptest::prop_compose! {
+    pub fn propcompose_of_mutator(
+        inputs: Vec<RemovalRecord>,
+        outputs: Vec<AdditionRecord>,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+    ) (mutator_set_hash in arb::<Digest>()) -> TransactionKernel {
+        TransactionKernelProxy {
+            inputs: inputs.clone(),
+            outputs: outputs.clone(),
+            public_announcements: vec![],
+            fee,
+            timestamp,
+            coinbase: None,
+            mutator_set_hash,
+            merge_bit: false,
+        }
+        .into_kernel()
+    }
+}
 
 impl std::fmt::Display for TransactionKernel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -414,52 +437,38 @@ impl TransactionKernelModifier {
 #[cfg(test)]
 pub mod transaction_kernel_tests {
     use itertools::Itertools;
+    use proptest::prelude::any;
     use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use rand::random;
-    use rand::rngs::StdRng;
+
     use rand::Rng;
     use rand::RngCore;
-    use rand::SeedableRng;
 
     use super::*;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
-    use crate::tests::shared::pseudorandom_amount;
-    use crate::tests::shared::pseudorandom_option;
-    use crate::tests::shared::pseudorandom_public_announcement;
-    use crate::tests::shared::random_public_announcement;
     use crate::tests::shared::random_transaction_kernel;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
-    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
-    pub fn pseudorandom_transaction_kernel(
-        seed: [u8; 32],
-        num_inputs: usize,
-        num_outputs: usize,
-        num_public_announcements: usize,
-    ) -> TransactionKernel {
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let inputs = (0..num_inputs)
-            .map(|_| pseudorandom_removal_record(rng.random::<[u8; 32]>()))
-            .collect_vec();
-        let outputs = (0..num_outputs)
-            .map(|_| pseudorandom_addition_record(rng.random::<[u8; 32]>()))
-            .collect_vec();
-        let public_announcements = (0..num_public_announcements)
-            .map(|_| pseudorandom_public_announcement(rng.random::<[u8; 32]>()))
-            .collect_vec();
-        let fee = pseudorandom_amount(rng.random::<[u8; 32]>());
-        let coinbase =
-            pseudorandom_option(rng.random(), pseudorandom_amount(rng.random::<[u8; 32]>()));
-        let timestamp: Timestamp = rng.random();
-        let mutator_set_hash: Digest = rng.random();
-        let merge_bit: bool = rng.random();
-
-        TransactionKernelProxy {
+    proptest::prop_compose! {
+        pub fn pseudorandom_transaction_kernel(
+            num_inputs: usize,
+            num_outputs: usize,
+            num_public_announcements: usize,
+        ) (
+            inputs in proptest::collection::vec(arb::<RemovalRecord>(), num_inputs),
+            outputs in proptest::collection::vec(arb::<AdditionRecord>(), num_outputs),
+            public_announcements in proptest::collection::vec(arb::<PublicAnnouncement>(), num_public_announcements),
+            fee in arb::<NativeCurrencyAmount>(),
+            coinbase in arb::<Option<NativeCurrencyAmount>>(),
+            timestamp in arb::<Timestamp>(),
+            mutator_set_hash in arb::<Digest>(),
+            merge_bit in any::<bool>(),
+        ) -> TransactionKernel {TransactionKernelProxy {
             inputs,
             outputs,
             public_announcements,
@@ -469,7 +478,7 @@ pub mod transaction_kernel_tests {
             mutator_set_hash,
             merge_bit,
         }
-        .into_kernel()
+        .into_kernel()}
     }
 
     #[test]
@@ -544,7 +553,10 @@ pub mod transaction_kernel_tests {
 
     #[test]
     pub fn decode_public_announcement() {
-        let pubscript = random_public_announcement();
+        let pubscript = arb::<PublicAnnouncement>()
+            .new_tree(&mut TestRunner::deterministic())
+            .unwrap()
+            .current();
         let encoded = pubscript.encode();
         let decoded = *PublicAnnouncement::decode(&encoded).unwrap();
         assert_eq!(pubscript, decoded);
@@ -552,7 +564,11 @@ pub mod transaction_kernel_tests {
 
     #[test]
     pub fn decode_public_announcements() {
-        let pubscripts = vec![random_public_announcement(), random_public_announcement()];
+        let pubscripts = [arb::<PublicAnnouncement>(), arb::<PublicAnnouncement>()]
+            .new_tree(&mut TestRunner::deterministic())
+            .unwrap()
+            .current()
+            .to_vec();
         let encoded = pubscripts.encode();
         let decoded = *Vec::<PublicAnnouncement>::decode(&encoded).unwrap();
         assert_eq!(pubscripts, decoded);
@@ -560,7 +576,10 @@ pub mod transaction_kernel_tests {
 
     #[test]
     pub fn test_decode_transaction_kernel() {
-        let kernel = random_transaction_kernel();
+        let kernel = random_transaction_kernel()
+            .new_tree(&mut TestRunner::deterministic())
+            .unwrap()
+            .current();
         let encoded = kernel.encode();
         let decoded = *TransactionKernel::decode(&encoded).unwrap();
         assert_eq!(kernel, decoded);

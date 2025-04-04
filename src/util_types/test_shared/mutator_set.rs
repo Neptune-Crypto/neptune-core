@@ -146,11 +146,6 @@ pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
     }
 }
 
-pub fn random_addition_record() -> AdditionRecord {
-    let mut rng = rand::rng();
-    pseudorandom_addition_record(rng.random::<[u8; 32]>())
-}
-
 pub fn pseudorandom_mmra(seed: [u8; 32]) -> MmrAccumulator {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let leaf_count = u64::from(rng.next_u32());
@@ -396,11 +391,6 @@ pub fn random_mutator_set_membership_proof() -> MsMembershipProof {
     pseudorandom_mutator_set_membership_proof(rand::rng().random())
 }
 
-pub fn random_removal_record() -> RemovalRecord {
-    let mut rng = rand::rng();
-    pseudorandom_removal_record(rng.random::<[u8; 32]>())
-}
-
 fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: Digest) -> bool {
     let mut acc = leaf;
     for (shift, &p) in path.iter().enumerate() {
@@ -416,12 +406,18 @@ fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: 
 #[cfg(test)]
 mod shared_tests_test {
     use super::*;
+    use proptest::strategy::ValueTree;
 
     #[tokio::test]
     async fn can_call() {
         let rcd = random_chunk_dictionary();
         assert!(!rcd.is_empty());
-        let _ = random_removal_record();
+        let _ = proptest::prelude::Strategy::new_tree(
+            &proptest_arbitrary_interop::arb::<RemovalRecord>(),
+            &mut proptest::test_runner::TestRunner::deterministic(),
+        )
+        .unwrap()
+        .current();
         let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;
