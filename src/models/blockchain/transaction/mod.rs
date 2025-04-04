@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -190,9 +191,9 @@ impl Transaction {
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
-    pub async fn is_valid(&self) -> bool {
+    pub async fn is_valid(&self, network: Network) -> bool {
         let kernel_hash = self.kernel.mast_hash();
-        self.proof.verify(kernel_hash).await
+        self.proof.verify(kernel_hash, network).await
     }
 
     /// Merge two transactions. Both input transactions must have a valid
@@ -283,8 +284,8 @@ impl Transaction {
     ///
     /// ... which also means the transaction is valid.
     // maybe this should just be called verify()  or validate()?
-    pub async fn verify_proof(&self) -> bool {
-        self.proof.verify(self.kernel.mast_hash()).await
+    pub async fn verify_proof(&self, network: Network) -> bool {
+        self.proof.verify(self.kernel.mast_hash(), network).await
     }
 }
 
@@ -392,6 +393,7 @@ mod transaction_tests {
     #[tokio::test]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
+            let network = Network::Main;
             let as_single_proof = SingleProof::produce(
                 &to_be_updated,
                 TritonVmJobQueue::dummy(),
@@ -403,7 +405,7 @@ mod transaction_tests {
                 kernel: to_be_updated.kernel,
                 proof: TransactionProof::SingleProof(as_single_proof),
             };
-            assert!(original_tx.is_valid().await);
+            assert!(original_tx.is_valid(network).await);
 
             let mutator_set_update =
                 MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone());
@@ -419,7 +421,7 @@ mod transaction_tests {
             .await
             .unwrap();
 
-            assert!(updated_tx.is_valid().await)
+            assert!(updated_tx.is_valid(network).await)
         }
 
         for (to_be_updated_params, mined_params) in [

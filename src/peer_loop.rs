@@ -1245,7 +1245,10 @@ impl PeerLoopHandler {
                 let transaction: Transaction = (*transaction).into();
 
                 // 1. If transaction is invalid, punish.
-                if !transaction.is_valid().await {
+                if !transaction
+                    .is_valid(self.global_state_lock.cli().network)
+                    .await
+                {
                     warn!("Received invalid tx");
                     self.punish(NegativePeerSanction::InvalidTransaction)
                         .await?;

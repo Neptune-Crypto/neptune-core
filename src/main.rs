@@ -3,7 +3,6 @@ use std::process;
 use anyhow::Result;
 use clap::Parser;
 use neptune_cash::config_models::cli_args;
-use neptune_cash::config_models::network::Network;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
 
@@ -17,8 +16,6 @@ pub fn main() -> Result<()> {
     let run_result = tokio_runtime.block_on(async {
         // Fetch the CLI arguments
         let args = cli_args::Args::parse();
-
-        let _ = Network::set_singleton(args.network);
 
         #[cfg(not(feature = "tokio-console"))]
         {

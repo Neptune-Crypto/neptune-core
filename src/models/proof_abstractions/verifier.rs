@@ -40,10 +40,10 @@ static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::Ha
 /// the verifier). When the test flag is set and the cache does not contain the
 /// claim and verification succeeds, the claim is added to the cache. The only
 /// other way to populate the cache is through method `cache_true_claim`.
-pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
+pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool {
     // security: we do not accept mock proofs unless we ourselves
     // are running a network that accepts mock-proofs, eg regtest.
-    if Network::singleton_instance().use_mock_proof() {
+    if network.use_mock_proof() {
         if proof.is_valid_mock() {
             return true;
         } else if proof.is_invalid_mock() {
@@ -96,6 +96,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_claims_cache() {
+        let network = Network::Main;
+
         // generate random claim and bogus proof
         let mut rng = rand::rng();
         let some_claim = Claim::new(rng.random())
@@ -104,12 +106,12 @@ pub(crate) mod test {
         let some_proof = bogus_proof(&some_claim);
 
         // verification must fail
-        assert!(!verify(some_claim.clone(), some_proof.clone()).await);
+        assert!(!verify(some_claim.clone(), some_proof.clone(), network).await);
 
         // put claim into cache
         cache_true_claim(some_claim.clone()).await;
 
         // verification must succeed
-        assert!(verify(some_claim, some_proof).await);
+        assert!(verify(some_claim, some_proof, network).await);
     }
 }

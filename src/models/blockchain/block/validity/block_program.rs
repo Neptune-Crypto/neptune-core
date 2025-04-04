@@ -20,6 +20,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::debug;
 
 use super::block_proof_witness::BlockProofWitness;
+use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
@@ -51,12 +52,13 @@ impl BlockProgram {
         block_body: &BlockBody,
         appendix: &BlockAppendix,
         proof: &Proof,
+        network: Network,
     ) -> bool {
         let claim = Self::claim(block_body, appendix);
         let proof_clone = proof.clone();
 
         debug!("** Calling triton_vm::verify to verify block proof ...");
-        let verdict = verify(claim, proof_clone).await;
+        let verdict = verify(claim, proof_clone, network).await;
         debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}.");
 
         verdict
