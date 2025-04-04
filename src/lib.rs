@@ -8,6 +8,7 @@
 
 // danda: making all of these pub for now, so docs are generated.
 // later maybe we ought to split some stuff out into re-usable crate(s)...?
+pub mod api;
 pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
@@ -20,8 +21,6 @@ pub mod models;
 pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_auth;
-#[expect(clippy::too_many_arguments)]
-// clippy  + tarpc workaround.  see https://github.com/google/tarpc/issues/502
 pub mod rpc_server;
 pub mod util_types;
 
@@ -91,7 +90,7 @@ const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
+pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);
     }
@@ -162,7 +161,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
     let networking_state = NetworkingState::new(peer_map, peer_databases);
 
-    let light_state: LightState = LightState::from(latest_block.clone());
+    let light_state: LightState = LightState::from(latest_block);
     let blockchain_archival_state = BlockchainArchivalState {
         light_state,
         archival_state,
@@ -171,54 +170,20 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     let mempool = Mempool::new(
         cli_args.max_mempool_size,
         cli_args.max_mempool_num_tx,
-        latest_block.hash(),
+        blockchain_state.light_state().hash(),
     );
+
+    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
+        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
         cli_args,
         mempool,
+        rpc_server_to_main_tx.clone(),
     );
-
-    // See #239.  <https://github.com/Neptune-Crypto/neptune-core/issues/239>
-    //
-    // We set a panic hook in order to catch all panics, including those that
-    // would ordinarily be swallowed by the tokio runtime.
-    //
-    // If a panic occurs, we must flush the databases to prevent any possible
-    // corruption before exiting.
-    let global_state_lock_hook = global_state_lock.clone();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        let mut msg = "Caught panic.\n".to_string();
-
-        // Print the stack trace
-        if let Some(location) = panic_info.location() {
-            msg += &format!("  location: {}\n", location);
-        }
-
-        if let Some(payload) = panic_info.payload().downcast_ref::<&str>() {
-            msg += &format!("  message: {}\n", payload);
-        }
-
-        msg += &format!("  backtrace:\n{}", std::backtrace::Backtrace::capture());
-
-        tracing::error!("{}", msg);
-
-        // we need to flush databases, which is async call. So we spawn a new task.
-        let mut global_state_lock_panic = global_state_lock_hook.clone();
-        let handle = tokio::spawn(async move {
-            tracing::info!("Flushing Database...");
-            let _ = global_state_lock_panic.flush_databases().await;
-            tracing::info!("*** DB flush complete. now exiting.  Bye! ****");
-
-            std::process::exit(1);
-        });
-        // wait for spawned task to complete.
-        while !handle.is_finished() {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-    }));
 
     // Check if we need to restore the wallet database, and if so, do it.
     info!("Checking if we need to restore UTXOs");
@@ -260,6 +225,15 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     }
     info!("Made outgoing connections to peers");
 
+    if global_state_lock.cli().mine() && global_state_lock.cli().network.is_regtest() {
+        tracing::warn!(
+            "Automatic mining in regtest mode is generally not recommended.
+This mode provides APIs for generating blocks programmatically in a controlled fashion.
+Automatic mining adds randomly generated blocks which makes the blockchain non-deterministic.
+"
+        );
+    }
+
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
@@ -278,8 +252,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
 
     // Start RPC server for CLI request and more. It's important that this is done as late
     // as possible, so requests do not hang while initialization code runs.
-    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
-        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
         format!("127.0.0.1:{}", global_state_lock.cli().rpc_port),
         Json::default,
@@ -323,22 +295,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("Started RPC server");
 
     // Handle incoming connections, messages from peer tasks, and messages from the mining task
-    info!("Starting main loop");
-    let mut main_loop_handler = MainLoopHandler::new(
+    Ok(MainLoopHandler::new(
         incoming_peer_listener,
         global_state_lock,
         main_to_peer_broadcast_tx,
         peer_task_to_main_tx,
         main_to_miner_tx,
-    );
-    main_loop_handler
-        .run(
-            peer_task_to_main_rx,
-            miner_to_main_rx,
-            rpc_server_to_main_rx,
-            task_join_handles,
-        )
-        .await
+        peer_task_to_main_rx,
+        miner_to_main_rx,
+        rpc_server_to_main_rx,
+        task_join_handles,
+    ))
 }
 
 /// Time a fn call.  Duration is returned as a float in seconds.

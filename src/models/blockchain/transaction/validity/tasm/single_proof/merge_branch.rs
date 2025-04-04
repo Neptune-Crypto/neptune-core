@@ -1104,14 +1104,14 @@ pub(crate) mod test {
 
         let single_proof_1 = SingleProof::produce(
             &primitive_witness_1,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
         let single_proof_2 = SingleProof::produce(
             &primitive_witness_2,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -1149,14 +1149,14 @@ pub(crate) mod test {
 
         let left_proof = SingleProof::produce(
             &left,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
         let right_proof = SingleProof::produce(
             &right,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await

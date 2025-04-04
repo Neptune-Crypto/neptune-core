@@ -421,6 +421,11 @@ impl<T> AtomicRw<T> {
             });
         }
     }
+
+    /// obtain inner Arc.
+    pub fn inner(&self) -> &Arc<RwLock<T>> {
+        &self.inner
+    }
 }
 
 /// A wrapper for [RwLockReadGuard] that can optionally call a callback to

@@ -20,7 +20,6 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use super::block_height::BlockHeight;
-use super::MINIMUM_BLOCK_TIME;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
@@ -447,10 +446,14 @@ pub(crate) fn difficulty_control(
 
 /// Determine an upper bound for the maximum possible cumulative proof-of-work
 /// after n blocks given the start conditions.
+///
+/// todo: this should accept target_block_interval and minimum_block_time params.
 pub(crate) fn max_cumulative_pow_after(
     cumulative_pow_start: ProofOfWork,
     difficulty_start: Difficulty,
     num_blocks: usize,
+    target_block_interval: Timestamp,
+    minimum_block_time: Timestamp,
 ) -> ProofOfWork {
     // If the observed interval between consecutive blocks is the minimum
     // allowed by the consensus rules, the clamped relative error is almost -1.
@@ -459,8 +462,8 @@ pub(crate) fn max_cumulative_pow_after(
     //   =  1 - (60 - 294) / 294 / 16,
     const EPSILON: f64 = 0.000001;
     let f = 1.0_f64
-        + (TARGET_BLOCK_INTERVAL.to_millis() - MINIMUM_BLOCK_TIME.to_millis()) as f64
-            / TARGET_BLOCK_INTERVAL.to_millis() as f64
+        + (target_block_interval.to_millis() - minimum_block_time.to_millis()) as f64
+            / target_block_interval.to_millis() as f64
             / 16.0
         + EPSILON;
     let mut max_difficulty: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
@@ -502,6 +505,7 @@ mod test {
     use rand_distr::Geometric;
     use test_strategy::proptest;
 
+    use super::super::MINIMUM_BLOCK_TIME;
     use super::*;
 
     impl Difficulty {
@@ -837,15 +841,33 @@ mod test {
     fn max_pow_after_doesnt_crash() {
         let init_cumpow = ProofOfWork::from_u64(200);
         let init_difficulty = Difficulty::from_u64(1000);
-        let _calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, 1_000_000_000);
-        let _calculated_again = max_cumulative_pow_after(init_cumpow, init_difficulty, usize::MAX);
+        let _calculated = max_cumulative_pow_after(
+            init_cumpow,
+            init_difficulty,
+            1_000_000_000,
+            TARGET_BLOCK_INTERVAL,
+            MINIMUM_BLOCK_TIME,
+        );
+        let _calculated_again = max_cumulative_pow_after(
+            init_cumpow,
+            init_difficulty,
+            usize::MAX,
+            TARGET_BLOCK_INTERVAL,
+            MINIMUM_BLOCK_TIME,
+        );
     }
 
     #[test]
     fn max_pow_after_accepts_zero_num_blocks() {
         let init_cumpow = ProofOfWork::from_u64(200);
         let init_difficulty = Difficulty::from_u64(1000);
-        let _calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, 0);
+        let _calculated = max_cumulative_pow_after(
+            init_cumpow,
+            init_difficulty,
+            0,
+            TARGET_BLOCK_INTERVAL,
+            MINIMUM_BLOCK_TIME,
+        );
     }
 
     #[proptest]
@@ -853,7 +875,13 @@ mod test {
         #[strategy(arb())] init_pow: ProofOfWork,
         #[strategy(arb())] init_difficulty: Difficulty,
     ) {
-        let max = max_cumulative_pow_after(init_pow, init_difficulty, 0);
+        let max = max_cumulative_pow_after(
+            init_pow,
+            init_difficulty,
+            0,
+            TARGET_BLOCK_INTERVAL,
+            MINIMUM_BLOCK_TIME,
+        );
         prop_assert!(
             max >= init_pow,
             "Max-calculator must upward bound pow-value for zero-blocks input"
@@ -872,7 +900,13 @@ mod test {
 
         let init_cumpow = ProofOfWork::from_u64(init_cumpow);
         let init_difficulty = Difficulty::from_u64(init_difficulty);
-        let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
+        let calculated = max_cumulative_pow_after(
+            init_cumpow,
+            init_difficulty,
+            num_blocks,
+            TARGET_BLOCK_INTERVAL,
+            MINIMUM_BLOCK_TIME,
+        );
 
         let approximation = max_cumulative_pow_after_iterative_test_impl(
             init_cumpow_upper_bound,
@@ -897,7 +931,13 @@ mod test {
         let init_cumpow = ProofOfWork::from_u64(init_cumpow);
         let init_difficulty = Difficulty::MINIMUM;
         let num_blocks = 1000;
-        let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
+        let calculated = max_cumulative_pow_after(
+            init_cumpow,
+            init_difficulty,
+            num_blocks,
+            TARGET_BLOCK_INTERVAL,
+            MINIMUM_BLOCK_TIME,
+        );
         let approximation =
             max_cumulative_pow_after_iterative_test_impl(init_cumpow, init_difficulty, num_blocks);
         let approximation_as_f64 = BigUint::from(approximation).to_f64().unwrap();

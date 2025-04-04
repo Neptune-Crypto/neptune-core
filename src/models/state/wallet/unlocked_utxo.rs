@@ -2,10 +2,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 
-use super::address::SpendingKey;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -20,12 +21,12 @@ pub struct UnlockedUtxo {
 impl UnlockedUtxo {
     pub fn unlock(
         utxo: Utxo,
-        spending_key: SpendingKey,
+        lock_script_and_witness: LockScriptAndWitness,
         membership_proof: MsMembershipProof,
     ) -> Self {
         Self {
             utxo,
-            lock_script_and_witness: spending_key.lock_script_and_witness(),
+            lock_script_and_witness,
             membership_proof,
         }
     }
@@ -47,5 +48,13 @@ impl UnlockedUtxo {
         let item = self.mutator_set_item();
         let msmp = &self.membership_proof;
         mutator_set.drop(item, msmp)
+    }
+
+    pub(crate) fn addition_record(&self) -> AdditionRecord {
+        commit(
+            self.mutator_set_item(),
+            self.membership_proof.sender_randomness,
+            self.membership_proof.receiver_preimage.hash(),
+        )
     }
 }

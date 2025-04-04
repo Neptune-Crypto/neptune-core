@@ -1256,9 +1256,10 @@ mod test {
     ) {
         // Negative test: Primitive witness spending inputs that are timelocked
         // must fail to validate.
-        prop_assert!(!Runtime::new()
+        prop_assert!(Runtime::new()
             .unwrap()
-            .block_on(primitive_witness.validate()));
+            .block_on(primitive_witness.validate())
+            .is_err());
     }
 
     #[proptest(cases = 10)]

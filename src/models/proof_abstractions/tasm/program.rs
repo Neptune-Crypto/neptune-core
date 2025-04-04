@@ -1,4 +1,5 @@
 use std::panic::RefUnwindSafe;
+use std::sync::Arc;
 
 use tasm_lib::library::Library;
 use tasm_lib::prelude::Digest;
@@ -59,12 +60,11 @@ where
     // the public API. The suppressed lints below are not nice, but I don't know
     // how else to make it work.
     #[expect(async_fn_in_trait)]
-    #[expect(private_interfaces)]
     async fn prove(
         &self,
         claim: Claim,
         nondeterminism: NonDeterminism,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         prove_consensus_program(
@@ -93,9 +93,14 @@ pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
-    triton_vm_job_queue: &TritonVmJobQueue,
+    triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
+    // regtest mode: just return a mock (empty) Proof
+    if proof_job_options.job_settings.network.is_regtest() {
+        return Ok(Proof(vec![]));
+    }
+
     // create a triton-vm-job-queue job for generating this proof.
     let job = ProverJob::new(
         program,
@@ -145,34 +150,10 @@ pub(crate) async fn prove_consensus_program(
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct TritonVmProofJobOptions {
+pub struct TritonVmProofJobOptions {
     pub job_priority: TritonVmJobPriority,
     pub job_settings: ProverJobSettings,
     pub cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,
-}
-
-impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
-    fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
-        let (job_priority, max_log2_padded_height_for_proofs) = v;
-        Self {
-            job_priority,
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs,
-            },
-            cancel_job_rx: None,
-        }
-    }
-}
-
-#[cfg(test)]
-impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
-    fn from(job_priority: TritonVmJobPriority) -> Self {
-        Self {
-            job_priority,
-            job_settings: Default::default(),
-            cancel_job_rx: None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -201,6 +182,30 @@ pub mod test {
 
     const TEST_DATA_DIR: &str = "test_data";
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
+
+    impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
+        fn from(job_priority: TritonVmJobPriority) -> Self {
+            Self {
+                job_priority,
+                job_settings: Default::default(),
+                cancel_job_rx: None,
+            }
+        }
+    }
+
+    impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
+        fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
+            let (job_priority, max_log2_padded_height_for_proofs) = v;
+            Self {
+                job_priority,
+                job_settings: ProverJobSettings {
+                    max_log2_padded_height_for_proofs,
+                    network: Default::default(),
+                },
+                cancel_job_rx: None,
+            }
+        }
+    }
 
     pub(crate) trait ConsensusProgramSpecification: ConsensusProgram {
         /// The canonical reference source code for the consensus program, written in
@@ -568,7 +573,7 @@ pub mod test {
             program,
             claim.clone(),
             NonDeterminism::default(),
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmProofJobOptions::default(),
         )
         .await

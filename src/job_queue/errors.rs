@@ -12,6 +12,6 @@ pub enum JobHandleError {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum JobQueueError {
-    #[error("channel send error adding job")]
+    #[error("channel send error adding job.  error: {0}")]
     AddJobError(String),
 }

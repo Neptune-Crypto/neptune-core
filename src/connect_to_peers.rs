@@ -104,7 +104,7 @@ async fn check_if_connection_is_allowed(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some_and(|standing| standing.is_bad()) {
+    if standing.is_some_and(|s| s.is_bad()) {
         let ip = peer_address.ip();
         warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);

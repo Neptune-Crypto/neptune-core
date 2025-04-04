@@ -2,6 +2,7 @@ pub mod proof_upgrader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -29,6 +30,7 @@ use tracing::warn;
 
 use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
+use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::macros::fn_name;
@@ -123,6 +125,11 @@ pub struct MainLoopHandler {
 
     // note: MainToMinerChannel::send() does not block.  might log error.
     main_to_miner_tx: MainToMinerChannel,
+
+    peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+    miner_to_main_rx: mpsc::Receiver<MinerToMain>,
+    rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+    task_handles: Vec<JoinHandle<()>>,
 
     #[cfg(test)]
     mock_now: Option<SystemTime>,
@@ -385,12 +392,19 @@ fn stay_in_sync_mode(
 }
 
 impl MainLoopHandler {
+    // todo: find a way to avoid triggering lint
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         incoming_peer_listener: TcpListener,
         global_state_lock: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         main_to_miner_tx: mpsc::Sender<MainToMiner>,
+
+        peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+        miner_to_main_rx: mpsc::Receiver<MinerToMain>,
+        rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+        task_handles: Vec<JoinHandle<()>>,
     ) -> Self {
         let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {
             Some(main_to_miner_tx)
@@ -403,9 +417,19 @@ impl MainLoopHandler {
             main_to_miner_tx: MainToMinerChannel(maybe_main_to_miner_tx),
             main_to_peer_broadcast_tx,
             peer_task_to_main_tx,
+
+            peer_task_to_main_rx,
+            miner_to_main_rx,
+            rpc_server_to_main_rx,
+            task_handles,
+
             #[cfg(test)]
             mock_now: None,
         }
+    }
+
+    pub fn global_state_lock(&mut self) -> GlobalStateLock {
+        self.global_state_lock.clone()
     }
 
     /// Allows for mocked timestamps such that time dependencies may be tested.
@@ -432,7 +456,7 @@ impl MainLoopHandler {
     /// Sends the result back through the provided channel.
     async fn update_mempool_jobs(
         update_jobs: Vec<UpdateMutatorSetDataJob>,
-        job_queue: &TritonVmJobQueue,
+        job_queue: Arc<TritonVmJobQueue>,
         transaction_update_sender: mpsc::Sender<Vec<Transaction>>,
         proof_job_options: TritonVmProofJobOptions,
     ) {
@@ -446,7 +470,7 @@ impl MainLoopHandler {
             // they block the composer from continuing.
             // TODO: Handle errors better here.
             let job_result = job
-                .upgrade(job_queue, proof_job_options.clone())
+                .upgrade(job_queue.clone(), proof_job_options.clone())
                 .await
                 .unwrap();
             result.push(job_result);
@@ -476,11 +500,8 @@ impl MainLoopHandler {
 
         // Then notify all peers
         for updated in updated_txs {
-            self.main_to_peer_broadcast_tx
-                .send(MainToPeerTask::TransactionNotification(
-                    (&updated).try_into().unwrap(),
-                ))
-                .unwrap();
+            let pmsg = MainToPeerTask::TransactionNotification((&updated).try_into().unwrap());
+            self.main_to_peer_broadcast(pmsg);
         }
 
         // Tell miner that it can now start composing next block.
@@ -494,30 +515,37 @@ impl MainLoopHandler {
     /// any mempool transactions to be valid under this new block.
     ///
     /// Locking:
-    ///  * acquires `global_state_lock` for write
+    ///  * acquires `global_state_lock` for read and write
     async fn handle_self_guessed_block(
         &mut self,
         main_loop_state: &mut MutableMainLoopState,
         new_block: Box<Block>,
     ) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+        let incoming_block_is_more_canonical = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .incoming_block_is_more_canonical(&new_block);
 
-        if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
-            drop(global_state_mut); // don't hold across send()
+        if !incoming_block_is_more_canonical {
             warn!("Got new block from miner that was not child of tip. Discarding.");
             self.main_to_miner_tx.send(MainToMiner::Continue);
             return Ok(());
         }
+
         info!("Locally-mined block is new tip: {}", new_block.hash());
 
         // Share block with peers first thing.
         info!("broadcasting new block to peers");
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::Block(new_block.clone()))
-            .expect("Peer handler broadcast channel prematurely closed.");
+        let pmsg = MainToPeerTask::Block(new_block.clone());
+        self.main_to_peer_broadcast(pmsg);
 
-        let update_jobs = global_state_mut.set_new_tip(*new_block).await?;
-        drop(global_state_mut);
+        let update_jobs = self
+            .global_state_lock
+            .lock_guard_mut()
+            .await
+            .set_new_tip(*new_block)
+            .await?;
 
         self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
@@ -565,18 +593,22 @@ impl MainLoopHandler {
                 }
 
                 // Ensure proposal validity before sharing
-                if !block.is_valid(&current_tip, block.header().timestamp).await {
+                if !block
+                    .is_valid(
+                        &current_tip,
+                        block.header().timestamp,
+                        self.global_state_lock.cli().network,
+                    )
+                    .await
+                {
                     error!("Own block proposal invalid. This should not happen.");
                     self.main_to_miner_tx.send(MainToMiner::Continue);
                     return Ok(None);
                 }
 
                 if !self.global_state_lock.cli().secret_compositions {
-                    self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::BlockProposalNotification((&block).into()))
-                    .expect(
-                        "Peer handler broadcast channel prematurely closed. This should never happen.",
-                    );
+                    let pmsg = MainToPeerTask::BlockProposalNotification((&block).into());
+                    self.main_to_peer_broadcast(pmsg);
                 }
 
                 {
@@ -698,9 +730,8 @@ impl MainLoopHandler {
                 };
 
                 // Inform all peers about new block
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Block(Box::new(last_block.clone())))
-                    .expect("Peer handler broadcast was closed. This should never happen");
+                let pmsg = MainToPeerTask::Block(Box::new(last_block.clone()));
+                self.main_to_peer_broadcast(pmsg);
 
                 // Spawn task to handle mempool tx-updating after new blocks.
                 // TODO: Do clever trick to collapse all jobs relating to the same transaction,
@@ -818,10 +849,9 @@ impl MainLoopHandler {
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
                     (&pt2m_transaction.transaction).try_into()?;
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::TransactionNotification(
-                        transaction_notification,
-                    ))?;
+
+                let pmsg = MainToPeerTask::TransactionNotification(transaction_notification);
+                self.main_to_peer_broadcast(pmsg);
             }
             PeerTaskToMain::BlockProposal(block) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::BlockProposal");
@@ -853,8 +883,8 @@ impl MainLoopHandler {
                 }
 
                 // Notify all peers of the block proposal we just accepted
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::BlockProposalNotification((&*block).into()))?;
+                let pmsg = MainToPeerTask::BlockProposalNotification((&*block).into());
+                self.main_to_peer_broadcast(pmsg);
 
                 self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
             }
@@ -880,8 +910,8 @@ impl MainLoopHandler {
 
                 // tell to disconnect
                 if let Some((peer_socket, _peer_info)) = longest_lived_peer {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::Disconnect(peer_socket.to_owned()))?;
+                    let pmsg = MainToPeerTask::Disconnect(peer_socket.to_owned());
+                    self.main_to_peer_broadcast(pmsg);
                 }
             }
         }
@@ -937,8 +967,8 @@ impl MainLoopHandler {
             i => info!("Disconnecting from {i} peers."),
         }
         for peer in peers_to_disconnect {
-            self.main_to_peer_broadcast_tx
-                .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
+            let pmsg = MainToPeerTask::Disconnect(peer.connected_address());
+            self.main_to_peer_broadcast(pmsg);
         }
 
         Ok(())
@@ -1048,8 +1078,8 @@ impl MainLoopHandler {
 
         // Ask all peers for their peer lists. This will eventually – once the
         // responses have come in – update the list of potential peers.
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::MakePeerDiscoveryRequest)?;
+        let pmsg = MainToPeerTask::MakePeerDiscoveryRequest;
+        self.main_to_peer_broadcast(pmsg);
 
         // Get a peer candidate from the list of potential peers. Generally,
         // the peer lists requested in the previous step will not have come in
@@ -1087,10 +1117,8 @@ impl MainLoopHandler {
         // Immediately request the new peer's peer list. This allows
         // incorporating the new peer's peers into the list of potential peers,
         // to be used in the next round of peer discovery.
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::MakeSpecificPeerDiscoveryRequest(
-                peer_candidate,
-            ))?;
+        let m2pmsg = MainToPeerTask::MakeSpecificPeerDiscoveryRequest(peer_candidate);
+        self.main_to_peer_broadcast(m2pmsg);
 
         Ok(())
     }
@@ -1171,8 +1199,8 @@ impl MainLoopHandler {
                 .get_potential_peers_for_sync_request(own_cumulative_pow);
 
             for peer in peers_to_punish {
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::PeerSynchronizationTimeout(peer))?;
+                let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
+                self.main_to_peer_broadcast(pmsg);
             }
 
             return Ok(());
@@ -1184,8 +1212,8 @@ impl MainLoopHandler {
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
-            self.main_to_peer_broadcast_tx
-                .send(MainToPeerTask::PeerSynchronizationTimeout(peer))?;
+            let pmsg = MainToPeerTask::PeerSynchronizationTimeout(peer);
+            self.main_to_peer_broadcast(pmsg);
         }
 
         if !try_new_request {
@@ -1200,8 +1228,7 @@ impl MainLoopHandler {
         let candidate_peers = main_loop_state
             .sync_state
             .get_potential_peers_for_sync_request(own_cumulative_pow);
-        let mut rng = rand::rng();
-        let chosen_peer = candidate_peers.choose(&mut rng);
+        let chosen_peer = candidate_peers.choose(&mut rand::rng());
         assert!(
             chosen_peer.is_some(),
             "A synchronization candidate must be available for a request. \
@@ -1235,15 +1262,12 @@ impl MainLoopHandler {
             "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
             chosen_peer, own_tip_hash, own_tip_height
         );
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::RequestBlockBatch(
-                MainToPeerTaskBatchBlockRequest {
-                    peer_addr_target: *chosen_peer,
-                    known_blocks: ordered_preferred_block_digests,
-                    anchor_mmr: anchor.block_mmr.clone(),
-                },
-            ))
-            .expect("Sending message to peers must succeed");
+        let pmsg = MainToPeerTask::RequestBlockBatch(MainToPeerTaskBatchBlockRequest {
+            peer_addr_target: *chosen_peer,
+            known_blocks: ordered_preferred_block_digests,
+            anchor_mmr: anchor.block_mmr.clone(),
+        });
+        self.main_to_peer_broadcast(pmsg);
 
         // Record that this request was sent to the peer
         let requested_block_height = own_tip_height.next();
@@ -1317,7 +1341,7 @@ impl MainLoopHandler {
         // like mining, or proving our own transaction. Running the prover takes
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
-        let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+        let vm_job_queue = vm_job_queue();
         let perform_ms_update_if_needed =
             self.global_state_lock.cli().proving_capability() == TxProvingCapability::SingleProof;
 
@@ -1329,7 +1353,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     upgrade_candidate
                         .handle_upgrade(
-                            &vm_job_queue,
+                            vm_job_queue,
                             tx_origin,
                             perform_ms_update_if_needed,
                             global_state_lock_clone,
@@ -1353,7 +1377,7 @@ impl MainLoopHandler {
     ) {
         // job completion of the spawned task is communicated through the
         // `update_mempool_txs_handle` channel.
-        let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+        let vm_job_queue = vm_job_queue();
         if let Some(handle) = main_loop_state.update_mempool_txs_handle.as_ref() {
             handle.abort();
         }
@@ -1373,7 +1397,7 @@ impl MainLoopHandler {
                 .spawn(async move {
                     Self::update_mempool_jobs(
                         update_jobs,
-                        &vm_job_queue,
+                        vm_job_queue.clone(),
                         update_sender,
                         job_options,
                     )
@@ -1384,13 +1408,11 @@ impl MainLoopHandler {
         main_loop_state.update_mempool_receiver = update_receiver;
     }
 
-    pub(crate) async fn run(
-        &mut self,
-        mut peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
-        mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
-        mut rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
-        task_handles: Vec<JoinHandle<()>>,
-    ) -> Result<i32> {
+    pub async fn run(&mut self) -> Result<i32> {
+        info!("Starting main loop");
+
+        let task_handles = std::mem::take(&mut self.task_handles);
+
         // Handle incoming connections, messages from peer tasks, and messages from the mining task
         let mut main_loop_state = MutableMainLoopState::new(task_handles);
 
@@ -1528,7 +1550,7 @@ impl MainLoopHandler {
                 }
 
                 // Handle messages from peer tasks
-                Some(msg) = peer_task_to_main_rx.recv() => {
+                Some(msg) = self.peer_task_to_main_rx.recv() => {
                     debug!("Received message sent to main task.");
                     self.handle_peer_task_message(
                         msg,
@@ -1538,7 +1560,7 @@ impl MainLoopHandler {
                 }
 
                 // Handle messages from miner task
-                Some(main_message) = miner_to_main_rx.recv() => {
+                Some(main_message) = self.miner_to_main_rx.recv() => {
                     let exit_code = self.handle_miner_task_message(main_message, &mut main_loop_state).await?;
 
                     if let Some(exit_code) = exit_code {
@@ -1553,7 +1575,7 @@ impl MainLoopHandler {
                 }
 
                 // Handle messages from rpc server task
-                Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
+                Some(rpc_server_message) = self.rpc_server_to_main_rx.recv() => {
                     let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone(), &mut main_loop_state).await?;
                     if shutdown_after_execution {
                         break SUCCESS_EXIT_CODE
@@ -1567,9 +1589,18 @@ impl MainLoopHandler {
                     // Check number of peers we are connected to and connect to
                     // more peers if needed.
                     debug!("Timer: peer discovery job");
-                    self.prune_peers().await?;
-                    self.reconnect(&mut main_loop_state).await?;
-                    self.discover_peers(&mut main_loop_state).await?;
+
+                    // this check makes regtest mode behave in a local, controlled way
+                    // because no regtest nodes attempt to discover eachother, so the only
+                    // peers are those that are manually added.
+                    // see: https://github.com/Neptune-Crypto/neptune-core/issues/539#issuecomment-2764701027
+                    if self.global_state_lock.cli().network.is_regtest() {
+                        debug!("peer discovery disabled in regtest mode.")
+                    } else {
+                        self.prune_peers().await?;
+                        self.reconnect(&mut main_loop_state).await?;
+                        self.discover_peers(&mut main_loop_state).await?;
+                    }
                 }
 
                 // Handle synchronization (i.e. batch-downloading of blocks)
@@ -1651,26 +1682,23 @@ impl MainLoopHandler {
                     transaction.kernel.mutator_set_hash
                 );
 
-                // insert transaction into mempool
-                self.global_state_lock
-                    .lock_guard_mut()
-                    .await
-                    .mempool_insert(*transaction.clone(), TransactionOrigin::Own)
-                    .await;
+                // note: this Tx must already have been added to the mempool by
+                // sender.  This occurs in GlobalStateLock::record_transaction().
 
                 // Is this a transaction we can share with peers? If so, share
                 // it immediately.
                 if let Ok(notification) = transaction.as_ref().try_into() {
-                    self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::TransactionNotification(notification))?;
+                    let pmsg = MainToPeerTask::TransactionNotification(notification);
+                    self.main_to_peer_broadcast(pmsg);
                 } else {
                     // Otherwise, upgrade its proof quality, and share it by
                     // spinning up the proof upgrader.
-                    let TransactionProof::Witness(primitive_witness) = transaction.proof else {
+                    let TransactionProof::Witness(primitive_witness) = transaction.proof.clone()
+                    else {
                         panic!("Expected Primitive witness. Got: {:?}", transaction.proof);
                     };
 
-                    let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+                    let vm_job_queue = vm_job_queue();
 
                     let proving_capability = self.global_state_lock.cli().proving_capability();
                     let upgrade_job =
@@ -1687,7 +1715,7 @@ impl MainLoopHandler {
                         .spawn(async move {
                         upgrade_job
                             .handle_upgrade(
-                                &vm_job_queue,
+                                vm_job_queue.clone(),
                                 TransactionOrigin::Own,
                                 true,
                                 global_state_lock_clone,
@@ -1718,8 +1746,8 @@ impl MainLoopHandler {
                     let notification = TransactionNotification::try_from(tx);
                     match notification {
                         Ok(notification) => {
-                            self.main_to_peer_broadcast_tx
-                                .send(MainToPeerTask::TransactionNotification(notification))?;
+                            let pmsg = MainToPeerTask::TransactionNotification(notification);
+                            self.main_to_peer_broadcast(pmsg);
                         }
                         Err(error) => {
                             warn!("{error}");
@@ -1772,9 +1800,8 @@ impl MainLoopHandler {
         self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
         // Send 'bye' message to all peers.
-        let _result = self
-            .main_to_peer_broadcast_tx
-            .send(MainToPeerTask::DisconnectAll());
+        let pmsg = MainToPeerTask::DisconnectAll();
+        self.main_to_peer_broadcast(pmsg);
         debug!("sent bye");
 
         // Flush all databases
@@ -1789,6 +1816,20 @@ impl MainLoopHandler {
         futures::future::join_all(task_handles).await;
 
         Ok(())
+    }
+
+    // broadcasts message to peers (if any connected)
+    //
+    // panics if broadcast failed and channel receiver_count is non-zero
+    // indicating we have peer connections.
+    fn main_to_peer_broadcast(&self, msg: MainToPeerTask) {
+        if self.main_to_peer_broadcast_tx.send(msg).is_err() {
+            // tbd: maybe we should just log an error and ignore rather
+            // than panic.  but for now this preserves prior behavior
+
+            let receiver_count = self.main_to_peer_broadcast_tx.receiver_count();
+            assert_eq!(receiver_count, 0);
+        }
     }
 }
 
@@ -1807,11 +1848,13 @@ mod test {
     use crate::tests::shared::invalid_empty_block;
     use crate::MINER_CHANNEL_CAPACITY;
 
+    impl MainLoopHandler {
+        fn mutable(&mut self) -> MutableMainLoopState {
+            MutableMainLoopState::new(std::mem::take(&mut self.task_handles))
+        }
+    }
+
     struct TestSetup {
-        peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
-        miner_to_main_rx: mpsc::Receiver<MinerToMain>,
-        rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
-        task_join_handles: Vec<JoinHandle<()>>,
         main_loop_handler: MainLoopHandler,
         main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
     }
@@ -1860,21 +1903,20 @@ mod test {
         let (_rpc_server_to_main_tx, rpc_server_to_main_rx) =
             mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
 
+        let task_join_handles = vec![];
+
         let main_loop_handler = MainLoopHandler::new(
             incoming_peer_listener,
             state,
             main_to_peer_tx,
             peer_to_main_tx,
             main_to_miner_tx,
-        );
-
-        let task_join_handles = vec![];
-
-        TestSetup {
-            miner_to_main_rx,
             peer_to_main_rx,
+            miner_to_main_rx,
             rpc_server_to_main_rx,
             task_join_handles,
+        );
+        TestSetup {
             main_loop_handler,
             main_to_peer_rx,
         }
@@ -1883,15 +1925,13 @@ mod test {
     #[tokio::test]
     async fn handle_self_guessed_block_new_tip() {
         // A new tip is registered by main_loop. Verify correct state update.
-        let test_setup = setup(1, 0).await;
         let TestSetup {
-            task_join_handles,
             mut main_loop_handler,
             mut main_to_peer_rx,
             ..
-        } = test_setup;
+        } = setup(1, 0).await;
         let network = main_loop_handler.global_state_lock.cli().network;
-        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+        let mut mutable_main_loop_state = main_loop_handler.mutable();
 
         let block1 = invalid_empty_block(&Block::genesis(network));
 
@@ -1980,14 +2020,12 @@ mod test {
         async fn sync_mode_abandoned_on_global_timeout() {
             let num_outgoing_connections = 0;
             let num_incoming_connections = 0;
-            let test_setup = setup(num_outgoing_connections, num_incoming_connections).await;
             let TestSetup {
-                task_join_handles,
                 mut main_loop_handler,
+                main_to_peer_rx: _main_to_peer_rx,
                 ..
-            } = test_setup;
-
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            } = setup(num_outgoing_connections, num_incoming_connections).await;
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
 
             main_loop_handler
                 .block_sync(&mut mutable_main_loop_state)
@@ -2073,19 +2111,19 @@ mod test {
 
     mod proof_upgrader {
         use super::*;
-        use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
-        use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+        use crate::models::state::tx_creation_config::TxCreationConfig;
+        use crate::models::state::wallet::transaction_output::TxOutput;
 
         async fn tx_no_outputs(
-            global_state_lock: &GlobalStateLock,
+            global_state_lock: &mut GlobalStateLock,
             tx_proof_type: TxProvingCapability,
             fee: NativeCurrencyAmount,
-        ) -> Transaction {
+        ) -> Arc<Transaction> {
             let change_key = global_state_lock
                 .lock_guard()
                 .await
@@ -2101,20 +2139,16 @@ mod test {
                 .timestamp
                 + Timestamp::months(7);
 
-            let global_state = global_state_lock.lock_guard().await;
-            global_state
-                .create_transaction_with_prover_capability(
-                    vec![].into(),
-                    change_key.into(),
-                    UtxoNotificationMedium::OffChain,
-                    fee,
-                    in_seven_months,
-                    tx_proof_type,
-                    &TritonVmJobQueue::dummy(),
-                )
+            let config = TxCreationConfig::default()
+                .recover_change_off_chain(change_key.into())
+                .with_prover_capability(tx_proof_type);
+            global_state_lock
+                .api()
+                .tx_initiator_internal()
+                .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
-                .0
+                .transaction
         }
 
         #[tokio::test]
@@ -2122,15 +2156,11 @@ mod test {
         async fn upgrade_proof_collection_to_single_proof_foreign_tx() {
             let num_outgoing_connections = 0;
             let num_incoming_connections = 0;
-            let test_setup = setup(num_outgoing_connections, num_incoming_connections).await;
             let TestSetup {
-                peer_to_main_rx,
-                miner_to_main_rx,
-                rpc_server_to_main_rx,
-                task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-            } = test_setup;
+                ..
+            } = setup(num_outgoing_connections, num_incoming_connections).await;
 
             // Force instance to create SingleProofs, otherwise CI and other
             // weak machines fail.
@@ -2145,7 +2175,7 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
             let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
 
             assert!(
                 main_loop_handler
@@ -2157,7 +2187,7 @@ mod test {
 
             let fee = NativeCurrencyAmount::coins(1);
             let proof_collection_tx = tx_no_outputs(
-                &main_loop_handler.global_state_lock,
+                &mut main_loop_handler.global_state_lock,
                 TxProvingCapability::ProofCollection,
                 fee,
             )
@@ -2167,7 +2197,7 @@ mod test {
                 .global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert(proof_collection_tx.clone(), TransactionOrigin::Foreign)
+                .mempool_insert((*proof_collection_tx).clone(), TransactionOrigin::Foreign)
                 .await;
 
             assert!(
@@ -2252,10 +2282,10 @@ mod test {
 
             // These values are kept alive as the transmission-counterpart will
             // otherwise fail on `send`.
-            drop(peer_to_main_rx);
-            drop(miner_to_main_rx);
-            drop(rpc_server_to_main_rx);
-            drop(main_to_peer_rx);
+            // drop(peer_to_main_rx);
+            // drop(miner_to_main_rx);
+            // drop(rpc_server_to_main_rx);
+            // drop(main_to_peer_rx);
         }
     }
 
@@ -2267,12 +2297,11 @@ mod test {
         async fn prune_peers_too_many_connections() {
             let num_init_peers_outgoing = 10;
             let num_init_peers_incoming = 4;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                mut main_to_peer_rx,
                 mut main_loop_handler,
+                mut main_to_peer_rx,
                 ..
-            } = test_setup;
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: num_init_peers_outgoing as usize,
@@ -2297,12 +2326,11 @@ mod test {
         async fn prune_peers_not_too_many_connections() {
             let num_init_peers_outgoing = 10;
             let num_init_peers_incoming = 1;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                main_to_peer_rx,
                 mut main_loop_handler,
+                main_to_peer_rx,
                 ..
-            } = test_setup;
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: 200,
@@ -2323,12 +2351,10 @@ mod test {
         async fn skip_peer_discovery_if_peer_limit_is_exceeded() {
             let num_init_peers_outgoing = 2;
             let num_init_peers_incoming = 0;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                task_join_handles,
                 mut main_loop_handler,
                 ..
-            } = test_setup;
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: 0,
@@ -2338,8 +2364,9 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
+            let mut mutable_state = main_loop_handler.mutable();
             main_loop_handler
-                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
+                .discover_peers(&mut mutable_state)
                 .await
                 .unwrap();
 
@@ -2352,10 +2379,8 @@ mod test {
             let num_init_peers_outgoing = 2;
             let num_init_peers_incoming = 0;
             let TestSetup {
-                task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-                peer_to_main_rx: _keep_channel_open,
                 ..
             } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
@@ -2368,8 +2393,9 @@ mod test {
                 .global_state_lock
                 .set_cli(mocked_cli)
                 .await;
+            let mut mutable_state = main_loop_handler.mutable();
             main_loop_handler
-                .discover_peers(&mut MutableMainLoopState::new(task_join_handles))
+                .discover_peers(&mut mutable_state)
                 .await
                 .unwrap();
 
@@ -2418,15 +2444,11 @@ mod test {
             let network = Network::Main;
             let num_init_peers_outgoing = 5;
             let num_init_peers_incoming = 0;
-            let test_setup = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
             let TestSetup {
-                mut peer_to_main_rx,
-                miner_to_main_rx: _,
-                rpc_server_to_main_rx: _,
-                task_join_handles,
                 mut main_loop_handler,
                 mut main_to_peer_rx,
-            } = test_setup;
+                ..
+            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: usize::from(num_init_peers_outgoing) + 1,
@@ -2439,7 +2461,7 @@ mod test {
                 .set_cli(mocked_cli)
                 .await;
 
-            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
 
             // check sanity: at startup, we are connected to the initial number of peers
             assert_eq!(
@@ -2545,7 +2567,7 @@ mod test {
 
             // `answer_peer_wrapper` should send a
             // `DisconnectFromLongestLivedPeer` message to main
-            let peer_to_main_message = peer_to_main_rx.recv().await.unwrap();
+            let peer_to_main_message = main_loop_handler.peer_task_to_main_rx.recv().await.unwrap();
             assert!(matches!(
                 peer_to_main_message,
                 PeerTaskToMain::DisconnectFromLongestLivedPeer,

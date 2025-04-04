@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,7 +16,7 @@ use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 use super::state::wallet::monitored_utxo::MonitoredUtxo;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToMiner {
     /// Communicates that a new block is now considered canonical
     NewBlock,
@@ -62,7 +63,7 @@ pub(crate) struct NewBlockFound {
     pub block: Box<Block>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MinerToMain {
     NewBlockFound(NewBlockFound),
     BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
@@ -104,7 +105,7 @@ impl From<&Block> for BlockProposalNotification {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
     BlockProposalNotification(BlockProposalNotification),
@@ -148,7 +149,7 @@ impl MainToPeerTask {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, strum::Display)]
 pub(crate) enum PeerTaskToMain {
     NewBlocks(Vec<Block>),
     AddPeerMaxBlockHeight {
@@ -202,9 +203,10 @@ pub(crate) struct ClaimUtxoData {
     pub(crate) expected_utxo: ExpectedUtxo,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum RPCServerToMain {
-    BroadcastTx(Box<Transaction>),
+/// represents messages that can be sent from RPC server to main loop.
+#[derive(Clone, Debug, strum::Display)]
+pub enum RPCServerToMain {
+    BroadcastTx(Arc<Transaction>),
     BroadcastMempoolTransactions,
     ClearMempool,
     ProofOfWorkSolution(Box<Block>),

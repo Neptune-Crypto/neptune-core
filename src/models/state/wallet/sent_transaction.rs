@@ -24,22 +24,22 @@ pub struct SentTransaction {
     pub tip_when_sent: Digest, // tip block when sent.  (not when confirmed)
 }
 
-impl From<(TransactionDetails, Digest)> for SentTransaction {
-    fn from(data: (TransactionDetails, Digest)) -> Self {
+impl From<(&TransactionDetails, Digest)> for SentTransaction {
+    fn from(data: (&TransactionDetails, Digest)) -> Self {
         let (td, tip_when_sent) = data;
         Self::new(td, tip_when_sent)
     }
 }
 
 impl SentTransaction {
-    pub(crate) fn new(td: TransactionDetails, tip_when_sent: Digest) -> Self {
+    pub(crate) fn new(td: &TransactionDetails, tip_when_sent: Digest) -> Self {
         Self {
             tx_inputs: td
                 .tx_inputs
-                .into_iter()
-                .map(|u| (u.mutator_set_mp().aocl_leaf_index, u.utxo))
+                .iter()
+                .map(|u| (u.mutator_set_mp().aocl_leaf_index, u.utxo.clone()))
                 .collect(),
-            tx_outputs: td.tx_outputs,
+            tx_outputs: td.tx_outputs.clone(),
             fee: td.fee,
             timestamp: td.timestamp,
             tip_when_sent,
