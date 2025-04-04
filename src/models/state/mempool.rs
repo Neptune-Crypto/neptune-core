@@ -1685,7 +1685,7 @@ mod tests {
             .await
             .unwrap()
             .transaction;
-        assert!(unmined_tx.is_valid().await);
+        assert!(unmined_tx.is_valid(network).await);
         assert!(
             unmined_tx.is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after())
         );
@@ -1731,7 +1731,10 @@ mod tests {
                 "Mempool tx must stay confirmable after new block of height {} has been applied",
                 next_block.header().height
             );
-            assert!(mempool_txs[0].is_valid().await, "Tx should be valid.");
+            assert!(
+                mempool_txs[0].is_valid(network).await,
+                "Tx should be valid."
+            );
             assert_eq!(
                 next_block.hash(),
                 alice.lock_guard().await.mempool.tip_digest,

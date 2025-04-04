@@ -1261,7 +1261,8 @@ pub(crate) mod mine_loop_tests {
                         .proof
                         .clone()
                         .into_single_proof()
-                        .clone()
+                        .clone(),
+                    network,
                 )
                 .await,
                 "Transaction proof for coinbase transaction must be valid."

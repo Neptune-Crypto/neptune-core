@@ -14,6 +14,7 @@ use tracing::trace;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -269,7 +270,7 @@ impl ProofCollection {
         }
     }
 
-    pub(crate) async fn verify(&self, txk_mast_hash: Digest) -> bool {
+    pub(crate) async fn verify(&self, txk_mast_hash: Digest, network: Network) -> bool {
         debug!("verifying, txk hash: {}", txk_mast_hash);
         debug!("verifying, salted inputs hash: {}", self.salted_inputs_hash);
         debug!(
@@ -342,6 +343,7 @@ impl ProofCollection {
         let rri = verify(
             removal_records_integrity_claim.clone(),
             self.removal_records_integrity.clone(),
+            network,
         )
         .await;
         debug!("{rri}");
@@ -349,6 +351,7 @@ impl ProofCollection {
         let k2o = verify(
             kernel_to_outputs_claim.clone(),
             self.kernel_to_outputs.clone(),
+            network,
         )
         .await;
         debug!("{k2o}");
@@ -356,6 +359,7 @@ impl ProofCollection {
         let cls = verify(
             collect_lock_scripts_claim.clone(),
             self.collect_lock_scripts.clone(),
+            network,
         )
         .await;
         debug!("{cls}");
@@ -363,19 +367,20 @@ impl ProofCollection {
         let cts = verify(
             collect_type_scripts_claim.clone(),
             self.collect_type_scripts.clone(),
+            network,
         )
         .await;
         debug!("{cts}");
         debug!("verifying that all lock scripts halt ...");
         let mut lsh = true;
         for (cl, pr) in lock_script_claims.iter().zip(self.lock_scripts_halt.iter()) {
-            lsh &= verify(cl.clone(), pr.clone()).await;
+            lsh &= verify(cl.clone(), pr.clone(), network).await;
         }
         debug!("{lsh}");
         debug!("verifying that all type scripts halt ...");
         let mut tsh = true;
         for (cl, pr) in type_script_claims.iter().zip(self.type_scripts_halt.iter()) {
-            tsh &= verify(cl.clone(), pr.clone()).await;
+            tsh &= verify(cl.clone(), pr.clone(), network).await;
         }
         debug!("{tsh}");
 

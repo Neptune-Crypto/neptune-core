@@ -3138,7 +3138,7 @@ pub(crate) mod tests {
                 .transaction
                 .into();
             assert!(
-                tx_spending_guesser_fee.is_valid().await,
+                tx_spending_guesser_fee.is_valid(network).await,
                 "Tx spending guesser-fee UTXO must be valid."
             );
 
