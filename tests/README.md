@@ -12,6 +12,13 @@ For example, we can think about an author of GUI wallet software for neptune.  W
 
 background: <https://doc.rust-lang.org/rust-by-example/testing/integration_testing.html>
 
+## nocapture behavior
+
+Since each test is in a separate crate, `tracing` events do not get displayed, even with `cargo test --nocapture`.  If #[traced_test] is used only the events from the test itself appear, none from neptune_cash.
+
+To workaround this limitation, use:
+
+`NOCAPTURE=1 cargo test --nocapture`
 
 ## regtest mode
 

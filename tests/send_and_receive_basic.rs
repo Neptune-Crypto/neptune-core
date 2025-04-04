@@ -307,12 +307,12 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
         alice_balances_after_confirmed
     );
     assert_eq!(
-        alice_balances_after_confirmed.confirmed_available,
-        alice_balances_after_confirmed.unconfirmed_available
+        alice_balances_after_confirmed.confirmed_total.to_string(),
+        alice_balances_after_confirmed.unconfirmed_total.to_string()
     );
     assert_eq!(
-        alice_balances_after_send.unconfirmed_available,
-        alice_balances_after_confirmed.confirmed_available,
+        (alice_balances_after_send.unconfirmed_total + 128.into() + fee_amount).to_string(),
+        alice_balances_after_confirmed.confirmed_total.to_string(),
     );
 
     Ok(())
