@@ -286,13 +286,13 @@ mod test {
     use itertools::Itertools;
     use proptest::collection::vec;
     use proptest::prop_assert;
+    use proptest::strategy::ValueTree;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
     use test_strategy::proptest;
 
     use super::MsaAndRecords;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
-    use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     impl MsaAndRecords {
         /// Split an [MsaAndRecords] into multiple instances of the same type.
@@ -358,7 +358,16 @@ mod test {
         let mut original = MsaAndRecords::default();
         let total = split.into_iter().sum::<usize>();
         for _ in 0..total {
-            original.removal_records.push(random_removal_record());
+            original.removal_records.push(
+                proptest::prelude::Strategy::new_tree(
+                    &proptest_arbitrary_interop::arb::<
+                        crate::util_types::mutator_set::removal_record::RemovalRecord,
+                    >(),
+                    &mut proptest::test_runner::TestRunner::deterministic(),
+                )
+                .unwrap()
+                .current(),
+            );
             original
                 .membership_proofs
                 .push(random_mutator_set_membership_proof());

@@ -3681,6 +3681,9 @@ mod rpc_server_tests {
     use anyhow::Result;
     use num_traits::One;
     use num_traits::Zero;
+    use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -4372,16 +4375,17 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let mut rng = rand::rng();
         let num_public_announcements_block1 = 7;
         let num_inputs = 0;
         let num_outputs = 2;
         let tx_block1 = pseudorandom_transaction_kernel(
-            rng.random(),
             num_inputs,
             num_outputs,
             num_public_announcements_block1,
-        );
+        )
+        .new_tree(&mut TestRunner::deterministic())
+        .unwrap()
+        .current();
         let tx_block1 = Transaction {
             kernel: tx_block1,
             proof: TransactionProof::invalid(),

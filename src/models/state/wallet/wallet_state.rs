@@ -4041,6 +4041,8 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
+        use proptest::test_runner::TestRunner;
+
         use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::job_queue::JobQueue;
@@ -4295,7 +4297,7 @@ pub(crate) mod tests {
                 })
                 .collect_vec();
 
-            let kernel = pseudorandom_transaction_kernel(rng.random(), 10, 10, 10);
+            let kernel = pseudorandom_transaction_kernel(10, 10, 10);
 
             // create master list of UTXOs with context
             struct UtxoContext {
@@ -4305,6 +4307,10 @@ pub(crate) mod tests {
                 absolute_index: u64,
                 incoming_utxo: IncomingUtxo,
             }
+            let kernel = proptest::strategy::ValueTree::current(
+                &proptest::prelude::Strategy::new_tree(&kernel, &mut TestRunner::deterministic())
+                    .unwrap(),
+            );
             let mut public_announcements = kernel.public_announcements.clone();
             let mut addition_records = kernel.outputs.clone();
             let mut all_utxos = vec![];
