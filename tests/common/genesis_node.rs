@@ -157,6 +157,8 @@ impl GenesisNode {
     ///
     /// note: no dummy components are used.
     pub async fn start_node(args: Args) -> anyhow::Result<Self> {
+        let _ = Network::set_singleton(args.network.clone());
+
         let mut main_loop_handler = neptune_cash::initialize(args).await?;
         let gsl = main_loop_handler.global_state_lock();
 

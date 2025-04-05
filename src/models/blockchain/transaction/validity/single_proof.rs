@@ -10,10 +10,11 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
-use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
+use crate::triton_vm::prelude::*;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;

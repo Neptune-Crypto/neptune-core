@@ -1,5 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -10,6 +12,8 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::models::blockchain::block::block_header;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+
+static INSTANCE: OnceLock<Arc<Network>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {
@@ -85,6 +89,30 @@ impl Network {
 
     pub fn is_regtest(&self) -> bool {
         matches!(self, Self::RegTest)
+    }
+
+    /// indicates if the network uses mock proofs
+    ///
+    /// mock proofs enable transactions and blocks to be created quickly
+    /// but must only be used for testing purposes.
+    ///
+    /// note: for now only the RegTest network uses mock proofs, but that could
+    /// change in the future so it is best use this method rather than checking
+    /// for is_regtest().
+    pub fn use_mock_proof(&self) -> bool {
+        matches!(self, Self::RegTest)
+    }
+
+    /// set singletone value.
+    ///
+    /// can be called successfully once per process execution.
+    /// useful for integration tests whose args cause Self::parse() to fail.
+    pub fn set_singleton(args: impl Into<Arc<Self>>) -> Result<(), Arc<Self>> {
+        INSTANCE.set(args.into())
+    }
+
+    pub fn singleton_instance() -> Arc<Self> {
+        INSTANCE.get_or_init(|| Arc::new(Self::Main)).clone()
     }
 }
 

@@ -26,8 +26,8 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::native_currency::NativeCurrency;
 use crate::models::blockchain::transaction::utxo::Coin;
-use crate::models::blockchain::type_scripts::triton_instr;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::triton_vm::prelude::triton_instr;
 
 /// Records an amount of Neptune coins. Amounts are internally represented by an
 /// atomic unit called Neptune atomic units (nau), which itself is represented

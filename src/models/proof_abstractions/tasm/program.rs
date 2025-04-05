@@ -13,6 +13,7 @@ use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -97,8 +98,8 @@ pub(crate) async fn prove_consensus_program(
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // regtest mode: just return a mock (empty) Proof
-    if proof_job_options.job_settings.network.is_regtest() {
-        return Ok(Proof(vec![]));
+    if proof_job_options.job_settings.network.use_mock_proof() {
+        return Ok(Proof::valid_mock(claim));
     }
 
     // create a triton-vm-job-queue job for generating this proof.
@@ -391,7 +392,7 @@ pub mod test {
                 return None;
             }
         }
-        let proof = Proof(proof_data);
+        let proof = Proof::from(proof_data);
         Some(proof)
     }
 
@@ -554,7 +555,7 @@ pub mod test {
                 }
             }
 
-            let proof = Proof(proof_data);
+            let proof = Proof::from(proof_data);
             println!("got proof.");
 
             return Some((proof, server));
@@ -603,8 +604,9 @@ pub mod test {
             .unwrap_or_else(|_| panic!("cannot create '{TEST_DATA_DIR}' directory"));
         path.push(Path::new(&name));
 
-        let proof = triton_vm::prove(Stark::default(), claim, program, nondeterminism)
-            .expect("cannot produce proof");
+        let proof: Proof = triton_vm::prove(Stark::default(), claim, program, nondeterminism)
+            .expect("cannot produce proof")
+            .into();
 
         save_proof(&path, &proof);
         proof

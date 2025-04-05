@@ -7,7 +7,6 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::triton_vm::proof::Claim;
 use tracing::debug;
 use tracing::info;
 use tracing::trace;
@@ -23,6 +22,7 @@ use crate::models::blockchain::transaction::validity::collect_lock_scripts::Coll
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
 use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
 use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -30,7 +30,6 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::triton_vm::proof::Proof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {

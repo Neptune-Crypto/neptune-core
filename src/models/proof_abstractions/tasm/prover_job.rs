@@ -23,12 +23,12 @@ use crate::job_queue::traits::JobCompletion;
 use crate::job_queue::traits::JobResult;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
-use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 
 /// represents an error running a [ProverJob]
@@ -164,9 +164,6 @@ impl ProverJob {
     // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
     // error is returned.
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
-        // regtest mode: we should never be here
-        assert!(!self.job_settings.network.is_regtest());
-
         tracing::debug!("executing VM program to determine complexity (padded-height)");
         tracing::debug!("job settings: {:?}", self.job_settings);
 
@@ -249,6 +246,12 @@ impl ProverJob {
     /// there, generate it and store it to disk.
     #[cfg_attr(test, expect(clippy::unused_async))]
     async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
+        // produce mock proofs if network so requires. (ie RegTest)
+        if self.job_settings.network.use_mock_proof() {
+            let proof = Proof::valid_mock(self.claim.clone());
+            return ProverProcessCompletion::Finished(proof).into();
+        }
+
         // todo: make test version async, cancellable.
         #[cfg(test)]
         {

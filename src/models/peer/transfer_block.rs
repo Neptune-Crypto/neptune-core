@@ -3,7 +3,6 @@ use anyhow::ensure;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::triton_vm::proof::Proof;
 
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -11,6 +10,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 /// Data structure for communicating blocks with peers. The hash digest is not
 /// communicated such that the receiver is forced to calculate it themselves.

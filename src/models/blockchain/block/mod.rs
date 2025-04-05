@@ -54,6 +54,7 @@ use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;

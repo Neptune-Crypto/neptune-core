@@ -31,15 +31,14 @@ use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::proof_abstractions::verifier::cache_true_claim;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::triton_vm::proof::Proof;
 
 /// a builder for [TransactionProof]
 ///
@@ -185,7 +184,7 @@ impl<'a> TransactionProofBuilder<'a> {
         };
 
         if network.is_regtest() {
-            return Ok(Self::build_mock_proof(tx_details).await);
+            return Ok(Self::build_mock_proof(tx_details));
         }
 
         let Some(job_queue) = self.job_queue else {
@@ -244,10 +243,9 @@ impl<'a> TransactionProofBuilder<'a> {
         Ok(transaction_proof)
     }
 
-    async fn build_mock_proof(tx_details: &TransactionDetails) -> TransactionProof {
+    fn build_mock_proof(tx_details: &TransactionDetails) -> TransactionProof {
         let kernel = PrimitiveWitness::from_transaction_details(tx_details).kernel;
         let claim = SingleProof::claim(kernel.mast_hash());
-        cache_true_claim(claim.clone()).await;
-        TransactionProof::SingleProof(Proof(vec![]))
+        TransactionProof::SingleProof(Proof::valid_mock(claim))
     }
 }

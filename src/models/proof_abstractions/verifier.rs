@@ -1,8 +1,10 @@
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
+
+use crate::config_models::network::Network;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 // This claims-cache stores mock proof-claims that are simply asserted to be valid.
 //
@@ -39,16 +41,27 @@ static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::Ha
 /// claim and verification succeeds, the claim is added to the cache. The only
 /// other way to populate the cache is through method `cache_true_claim`.
 pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
-    // presently this is only populated if network is regtest.
+    // security: we do not accept mock proofs unless we ourselves
+    // are running a network that accepts mock-proofs, eg regtest.
+    if Network::singleton_instance().use_mock_proof() {
+        if proof.is_valid_mock() {
+            return true;
+        } else if proof.is_invalid_mock() {
+            return false;
+        }
+    }
+
+    // presently this is used by certain unit tests.
     if CLAIMS_CACHE.lock().await.contains(&claim) {
         return true;
     }
 
     let claim_clone = claim.clone();
-    let verdict =
-        task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim_clone, &proof))
-            .await
-            .expect("should be able to verify proof in new tokio task");
+    let verdict = task::spawn_blocking(move || {
+        triton_vm::verify(Stark::default(), &claim_clone, &proof.into())
+    })
+    .await
+    .expect("should be able to verify proof in new tokio task");
 
     // tbd: we might want to enable a cache for mainnet usage.
     // but we should probably use a cache that has a configurable max
@@ -62,7 +75,8 @@ pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
 }
 
 /// Add a claim to the [`CLAIMS_CACHE`].
-/// only used for tests and regtest mode.
+/// only used for tests at present.
+#[cfg(test)]
 pub(crate) async fn cache_true_claim(claim: Claim) {
     CLAIMS_CACHE.lock().await.insert(claim);
 }
@@ -77,7 +91,7 @@ pub(crate) mod test {
     use super::*;
 
     pub(crate) fn bogus_proof(claim: &Claim) -> Proof {
-        Proof(Tip5::hash_varlen(&claim.encode()).values().to_vec())
+        Proof::from(Tip5::hash_varlen(&claim.encode()).values().to_vec())
     }
 
     #[tokio::test]

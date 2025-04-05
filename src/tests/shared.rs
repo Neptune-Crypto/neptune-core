@@ -32,7 +32,6 @@ use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
-use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::broadcast;
@@ -74,6 +73,7 @@ use crate::models::blockchain::transaction::transaction_kernel::transaction_kern
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -970,8 +970,8 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
         let block_proof_witness = BlockProofWitness::produce(primitive_witness);
         let appendix = block_proof_witness.appendix();
         let claim = BlockProgram::claim(&body, &appendix);
-        cache_true_claim(claim).await;
-        (appendix, BlockProof::SingleProof(Proof(vec![])))
+        cache_true_claim(claim.clone()).await;
+        (appendix, BlockProof::SingleProof(Proof::invalid()))
     };
 
     Block::new(header, body, appendix, proof)
@@ -1004,11 +1004,11 @@ async fn fake_create_transaction_from_details_for_tests(
     let kernel = PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
 
     let claim = SingleProof::claim(kernel.mast_hash());
-    cache_true_claim(claim).await;
+    cache_true_claim(claim.clone()).await;
 
     Transaction {
         kernel,
-        proof: TransactionProof::SingleProof(Proof(vec![])),
+        proof: TransactionProof::SingleProof(Proof::invalid()),
     }
 }
 
@@ -1034,7 +1034,7 @@ async fn fake_merge_transactions_for_tests(
 
     Ok(Transaction {
         kernel: new_kernel,
-        proof: TransactionProof::SingleProof(Proof(vec![])),
+        proof: TransactionProof::SingleProof(Proof::invalid()),
     })
 }
 

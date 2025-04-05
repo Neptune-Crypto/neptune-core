@@ -335,6 +335,14 @@ enum Command {
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
+    /******** RegTest Mode ********/
+    /// mine a series of blocks to the node's wallet. (regtest network only)
+    MineBlocksToWallet {
+        /// number of blocks to mine
+        #[clap(default_value = "1")]
+        num_blocks: u32,
+    },
+
     /******** WALLET -- offline actions ********/
     /// generate a new wallet
     GenerateWallet {
@@ -1172,6 +1180,15 @@ async fn main() -> Result<()> {
         Command::PruneAbandonedMonitoredUtxos => {
             let prunt_res_count = client.prune_abandoned_monitored_utxos(ctx, token).await??;
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
+        }
+
+        /******** RegTest Mode *********/
+        Command::MineBlocksToWallet { num_blocks } => {
+            println!("Sending command to mine block(s).");
+            client
+                .mine_blocks_to_wallet(ctx, token, num_blocks)
+                .await??;
+            println!("Command completed successfully");
         }
     }
 
