@@ -705,7 +705,7 @@ pub(crate) mod test {
             // verify the proof of the out-of-date transaction
             let claim: Claim =
                 Claim::new(single_proof_program_digest).with_input(old_txk_digest_as_input);
-            let proof: &Proof = &uw.old_proof;
+            let proof = &uw.old_proof;
             tasm::verify_stark(Stark::default(), &claim, proof);
 
             // authenticate the new mutator set accumulator against the txk mast hash

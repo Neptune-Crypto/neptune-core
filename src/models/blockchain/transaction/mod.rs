@@ -44,8 +44,8 @@ use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
 use self::transaction_kernel::TransactionKernelModifier;
 use self::transaction_kernel::TransactionKernelProxy;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::proof::Claim;
-use crate::triton_vm::proof::Proof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// represents arbitrary data that can be stored in a transaction on the public blockchain

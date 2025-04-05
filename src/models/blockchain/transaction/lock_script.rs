@@ -14,6 +14,7 @@ use twenty_first::math::tip5::Digest;
 
 use super::utxo::Utxo;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::models::blockchain::transaction::Proof;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::prelude::twenty_first;

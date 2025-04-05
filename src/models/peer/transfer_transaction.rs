@@ -2,9 +2,9 @@ use anyhow::bail;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumIter;
-use tasm_lib::triton_vm::proof::Proof;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;

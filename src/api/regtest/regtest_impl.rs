@@ -51,11 +51,8 @@ impl RegTest {
     ///
     /// The timestamp of each block will be the current system time, meaning
     /// that they will be temporally very close to eachother.
-    pub async fn mine_regtest_blocks_to_wallet(
-        &mut self,
-        n_blocks: u32,
-    ) -> Result<(), RegTestError> {
-        self.worker.mine_regtest_blocks_to_wallet(n_blocks).await
+    pub async fn mine_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<(), RegTestError> {
+        self.worker.mine_blocks_to_wallet(n_blocks).await
     }
 
     /// mine a single block to the node's wallet with a custom timestamp
@@ -68,11 +65,11 @@ impl RegTest {
     /// by recipients and will validate without error.
     ///
     /// Mock proofs are allowed only on the regtest network, for development purposes.
-    pub async fn mine_regtest_block_to_wallet(
+    pub async fn mine_block_to_wallet(
         &mut self,
         timestamp: Timestamp,
     ) -> Result<Digest, RegTestError> {
-        self.worker.mine_regtest_block_to_wallet(timestamp).await
+        self.worker.mine_block_to_wallet(timestamp).await
     }
 }
 
@@ -87,21 +84,18 @@ impl RegTestPrivate {
     }
 
     // see description in [RegTest]
-    async fn mine_regtest_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<(), RegTestError> {
+    async fn mine_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<(), RegTestError> {
         for _ in 0..n_blocks {
-            self.mine_regtest_block_to_wallet(Timestamp::now()).await?;
+            self.mine_block_to_wallet(Timestamp::now()).await?;
         }
         Ok(())
     }
 
     // see description in [RegTest]
-    async fn mine_regtest_block_to_wallet(
-        &mut self,
-        timestamp: Timestamp,
-    ) -> Result<Digest, RegTestError> {
+    async fn mine_block_to_wallet(&mut self, timestamp: Timestamp) -> Result<Digest, RegTestError> {
         let gsl = &mut self.global_state_lock;
 
-        if !gsl.cli().network.is_regtest() {
+        if !gsl.cli().network.use_mock_proof() {
             return Err(RegTestError::WrongNetwork);
         }
 

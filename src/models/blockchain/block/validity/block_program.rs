@@ -15,7 +15,6 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::debug;
@@ -26,6 +25,7 @@ use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -568,7 +568,7 @@ pub(crate) mod test {
         .unwrap();
 
         let block_proof_witness = BlockProofWitness::produce(block_primitive_witness)
-            .with_claim_test(halt_claim, halt_proof);
+            .with_claim_test(halt_claim, halt_proof.into());
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
         let rust_output = BlockProgram
