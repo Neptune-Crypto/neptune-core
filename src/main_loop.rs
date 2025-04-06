@@ -521,31 +521,49 @@ impl MainLoopHandler {
         main_loop_state: &mut MutableMainLoopState,
         new_block: Box<Block>,
     ) -> Result<()> {
-        let incoming_block_is_more_canonical = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .incoming_block_is_more_canonical(&new_block);
+        let new_block_hash = new_block.hash();
 
-        if !incoming_block_is_more_canonical {
-            warn!("Got new block from miner that was not child of tip. Discarding.");
-            self.main_to_miner_tx.send(MainToMiner::Continue);
-            return Ok(());
-        }
+        // clone block in advance, so lock is held less time.
+        // note that this clone is wasted if block is not more canonical
+        // but that should be the less common case.
+        //
+        // perf: in the future we should use Arc systematically to avoid these
+        // expensive block clones.
+        let new_block_clone = (*new_block).clone();
 
-        info!("Locally-mined block is new tip: {}", new_block.hash());
+        // important!  the is_canonical check and set_new_tip() need to be an
+        // atomic operation, ie called within the same write-lock acquisition.
+        //
+        // this avoids a race condition where block B and C are both more
+        // canonical than A, but B is more than C, yet C replaces B because it
+        // was only checked against A.
+        //
+        // we release the lock as quickly as possible.
+        let update_jobs = {
+            let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
-        // Share block with peers first thing.
-        info!("broadcasting new block to peers");
-        let pmsg = MainToPeerTask::Block(new_block.clone());
+            // bail out if incoming block is not more canonical than present tip.
+            if !gsm.incoming_block_is_more_canonical(&new_block) {
+                drop(gsm); // drop lock right away before send.
+                warn!("Got new block from miner that was not child of tip. Discarding.");
+                self.main_to_miner_tx.send(MainToMiner::Continue);
+                return Ok(());
+            }
+
+            // set new tip and obtain list of update-jobs to perform.
+            // the jobs update mutator-set data for:
+            //   all tx if we are in composer role.
+            //   else self-owned tx.
+            // see: Mempool::update_with_block_and_predecessor()
+            gsm.set_new_tip(new_block_clone).await?
+        }; // write-lock is dropped here.
+
+        // Share block with peers right away.
+        let pmsg = MainToPeerTask::Block(new_block);
         self.main_to_peer_broadcast(pmsg);
 
-        let update_jobs = self
-            .global_state_lock
-            .lock_guard_mut()
-            .await
-            .set_new_tip(*new_block)
-            .await?;
+        info!("Locally-mined block is new tip: {}", new_block_hash);
+        info!("broadcasting new block to peers");
 
         self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
