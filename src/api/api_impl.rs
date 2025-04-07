@@ -37,13 +37,6 @@ impl From<GlobalStateLock> for Api {
 }
 
 impl Api {
-    #[cfg(test)]
-    pub(crate) fn tx_initiator_internal(
-        &self,
-    ) -> api::tx_initiation::test_util::TransactionInitiatorInternal {
-        self.global_state_lock.clone().into()
-    }
-
     /// retrieve a transaction initiator in a mutable context.
     pub fn tx_initiator_mut(&mut self) -> api::tx_initiation::initiator::TransactionInitiator {
         self.global_state_lock.clone().into()
@@ -71,6 +64,18 @@ impl Api {
 
     /// retrieve a transaction recipient in immutable context.
     pub fn wallet(&self) -> api::wallet::Wallet {
+        self.global_state_lock.clone().into()
+    }
+}
+
+#[cfg(test)]
+impl Api {
+    /// retrieve a crate-internal transaction initiator
+    ///
+    /// for calling "traditional" create_transaction()
+    pub(crate) fn tx_initiator_internal(
+        &self,
+    ) -> api::tx_initiation::test_util::TransactionInitiatorInternal {
         self.global_state_lock.clone().into()
     }
 }
