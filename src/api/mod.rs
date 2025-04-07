@@ -1,13 +1,17 @@
 //! public api for common neptune-core operations
 //!
-//! the neptune-core library crate has been implemented to build the
-//! neptune-core (binary) server.  As such, it was not built with
-//! a cohesive public API in mind.
+//! The neptune-core library crate has been implemented to build the
+//! neptune-core (binary) server.  As such, it was not built with a cohesive
+//! public API in mind.
 //!
 //! This module aims to:
 //! 1. simplify and/or enable common tasks.
 //! 2. bring the public rust API to parity with the RPC layer.
 //! 3. be the layer beneath the RPC layer, so those methods wrap these.
+//!
+//! This module is a work-in-progress and is presently incomplete for many tasks
+//! that a wallet software might need to do, however it can serve as a starting
+//! point.
 //!
 //! Starting out, it is necessary to understand how to start a node
 //! and obtain a GlobalStateLock handle.  here's how:
