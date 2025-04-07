@@ -15,12 +15,12 @@
 //!
 //! see [Transaction Initiation Sequence](super::super#transaction-initiation-sequence)
 //!
-//! If the caller has a powerful enough machine, they can generate
-//! a ProofCollection or SingleProof themself before passing the transaction
-//! to neptune-core.  This takes load off the entire network and may
-//! lower the caller's fee.
+//! If you have a powerful enough machine, you can generate a ProofCollection or
+//! SingleProof yourself before passing the transaction to neptune-core.  This
+//! takes load off the entire network and may lower the transaction fee
+//! requirements.
 //!
-//! see [Caller Provides Proof Initiation Sequence](super::super#caller-provides-proof-initiation-sequence)
+//! see [Client Provides Proof Initiation Sequence](super::super#client-provides-proof-initiation-sequence)
 //!
 //! see [builder](super) for examples of using the builders together.
 
@@ -110,7 +110,7 @@ impl TransactionProofBuilder {
     /// Given the serialized nature of the job-queue, it is possible or even likely
     /// that other jobs may precede this one.
     ///
-    /// The caller can query the job_queue to determine how many jobs are in the
+    /// One can query the job_queue to determine how many jobs are in the
     /// queue.
     ///
     /// RegTest mode:

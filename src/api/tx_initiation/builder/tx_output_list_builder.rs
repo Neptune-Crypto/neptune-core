@@ -213,10 +213,10 @@ impl TxOutputListBuilder {
 
     /// build the list of [TxOutput], with [StateLock]
     ///
-    /// note: a caller that already holds a read-lock or write-lock over
-    /// [GlobalState](crate::models::state::GlobalState) should provide a ReadGuard or WriteGuard.  The builder
-    /// will use the already-acquired lock, which can still be used in other
-    /// calls by the caller.
+    /// note: if you already acquired a read-lock or write-lock over
+    /// [GlobalState](crate::models::state::GlobalState) you should provide a
+    /// ReadGuard or WriteGuard.  The builder will use the already-acquired
+    /// lock, which can still be used afterwards.
     pub async fn build(self, state_lock: &StateLock<'_>) -> TxOutputList {
         match state_lock {
             StateLock::Lock(gsl) => {

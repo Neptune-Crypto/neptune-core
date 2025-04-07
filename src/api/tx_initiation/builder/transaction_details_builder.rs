@@ -108,8 +108,8 @@ impl TransactionDetailsBuilder {
 
     /// build [TransactionDetails] and possibly mutate wallet state, acquiring write-lock if necessary.
     ///
-    /// some basic validation of inputs is performed however the result could
-    /// still represent an invalid transaction.  The caller can call
+    /// Some basic validation of inputs is performed however the result could
+    /// still represent an invalid transaction.  One can call
     /// [TransactionDetails::validate()] on the result.  Otherwise, the
     /// transaction will be fully validated by the triton VM before it is
     /// recorded and and broadcast.

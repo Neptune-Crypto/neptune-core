@@ -3,11 +3,9 @@
 //! note that `TxCreationArtifacts` contains a `Transaction` as well
 //! as [TransactionDetails].
 //!
-//! It is expected that usually callers will prefer to build
-//! [TxCreationArtifacts] as it can be used as input for the
-//! record_and_broadcast() API.  For this reason the build() method produces a
-//! `TxCreationArtifacts`.  However the build_transaction() method is also
-//! provided in case caller wants a standalone `Transaction`.
+//! The build() method produces `TxCreationArtifacts` because it can be used as
+//! input for the record_and_broadcast() API.  However the build_transaction()
+//! method is also provided in case a standalone `Transaction` is desired.
 //!
 //! see [builder](super) for examples of using the builders together.
 
@@ -51,7 +49,7 @@ impl TransactionBuilder {
     /// build a [TxCreationArtifacts]
     ///
     /// note: the builder does not validate the resulting artifacts.
-    /// caller can do so with [TxCreationArtifacts::verify()]
+    /// That can be done with [TxCreationArtifacts::verify()]
     pub fn build(self, network: Network) -> Result<TxCreationArtifacts, CreateTxError> {
         let (Some(details), Some(proof)) = (self.transaction_details, self.transaction_proof)
         else {
@@ -75,7 +73,7 @@ impl TransactionBuilder {
     /// build a [Transaction]
     ///
     /// note: the builder does not validate the resulting transaction.
-    /// caller can do so with [Transaction::verify_proof()]
+    /// That can be done with with [Transaction::verify_proof()].
     pub fn build_transaction(self) -> Result<Transaction, CreateTxError> {
         let (Some(tx_details), Some(proof)) = (self.transaction_details, self.transaction_proof)
         else {

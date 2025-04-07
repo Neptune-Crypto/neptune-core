@@ -30,7 +30,7 @@ use crate::GlobalStateLock;
 /// When `Wallet` is dropped, the guard will also be dropped and the lock
 /// released.
 ///
-/// If the caller wishes to continue using the guard then `StateLock::from(wallet)`
+/// If one wishes to continue using the guard then `StateLock::from(wallet)`
 /// or `Wallet::into_inner()` may be used to regain ownership.
 ///
 /// ### case: global-state-lock provided
@@ -70,8 +70,8 @@ impl<'a> From<Wallet<'a>> for StateLock<'a> {
 impl<'a> Wallet<'a> {
     /// convert into inner `StateLock`
     ///
-    /// this is useful if the `StateLock` holds a lock guard and the caller
-    /// wishes to continue using the guard.
+    /// this is useful if the `StateLock` holds a lock guard and one wishes to
+    /// continue using the guard.
     ///
     /// note: this is a convienence fn as `into()` also exists.
     pub fn into_inner(self) -> StateLock<'a> {

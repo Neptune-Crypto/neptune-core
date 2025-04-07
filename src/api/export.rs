@@ -1,6 +1,6 @@
 //! provides common types used in the crate's public API
 //!
-//! They are exported here in one location for caller convenience.
+//! They are exported here in one location for convenience.
 
 pub use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;

@@ -1,14 +1,13 @@
 //! provides flexible APIs for creating and sending neptune transactions.
 //!
-//! This is the mid-level neptune-core API layer. It provides [TransactionInitiator]
-//! which wraps the [builder](super::builder) API.
+//! [TransactionInitiator] wraps the [builder](super::builder) API.
 //!
-//! The builder API is a bit more verbose but is also easy
-//! to use.  Some callers may prefer it instead.
+//! The builder API is a bit more verbose but is also easy to use.
 //!
 //! This API is callable by rust users of this crate as well as the RPC server.
 //!
-//! The intent is to present the same API for both rust callers and RPC callers.
+//! The intent is to present the same (or similar) API for both rust usage and
+//! RPC usage when creating transactions.
 //!
 //! see [tx_initiation](super) for other APIs.
 
@@ -174,7 +173,7 @@ impl TransactionInitiator {
     /// Note that in a typical scenario, the transaction will not be broadcast
     /// or confirmed into a block right away. The proof must be upgraded first.
     ///
-    /// Callers with a powerful machine have the option to upgrade the proof
+    /// Those with a powerful machine have the option to upgrade the proof
     /// themself before calling this method, in which case the transaction will
     /// be broadcast and available for confirmation right away.
     ///

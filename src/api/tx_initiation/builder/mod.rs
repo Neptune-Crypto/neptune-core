@@ -100,7 +100,7 @@
 //! }
 //! ```
 //!
-//! # case: caller generates `SingleProof`
+//! # case: Client generates `SingleProof` outside neptune-core
 //!
 //! In this case the proof generation step can be changed to:
 //!

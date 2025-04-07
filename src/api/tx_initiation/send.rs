@@ -1,7 +1,8 @@
 //! provides an easy-to-use `TransactionSender` with single send() method.
 //!
 //! This is highest-level and easiest to use API for sending a transaction.
-//! callers should prefer it to lower-level APIs unless there is a need for
+//!
+//! It should be preferred to lower-level APIs unless there is a need for
 //! greater flexibility than this provides.
 //!
 //! see [tx_initiation](super) for other available API.
@@ -62,7 +63,7 @@ impl From<GlobalStateLock> for TransactionSender {
 }
 
 impl TransactionSender {
-    // caller should call offchain-notifications() on the returned value
+    // You should call offchain-notifications() on the returned value
     // to retrieve (and store) offchain notifications, if any.
     pub async fn send(
         &mut self,

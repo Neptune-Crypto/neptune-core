@@ -7,7 +7,7 @@
 //! The `InputSelectionPolicy` enum provides a set of policies for selecting
 //! inputs.
 //!
-//! If the caller wishes to use custom logic for selecting and ordering inputs
+//! If one wishes to use custom logic for selecting and ordering inputs
 //! that can be done by manipulating the spendable inputs directly, and then
 //! pass `InputSelectionPolicy::ByProvidedOrder` to the builder.
 //!

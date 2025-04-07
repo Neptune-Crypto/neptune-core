@@ -13,8 +13,7 @@
 //!
 //! note: The only API that neptune-core truly needs for transaction initiation
 //! is [record_and_broadcast_transaction()](initiator::TransactionInitiator::record_and_broadcast_transaction()).
-//! Everything else is provided to facilitate transaction creation for the
-//! caller.
+//! Everything else is provided to facilitate transaction creation.
 //!
 //! # Transaction Initiation Sequence
 //!
@@ -25,22 +24,22 @@
 //!  4. assemble the transaction.
 //!  5. record and broadcast the transaction.
 //!
-//!  (caller is done)
+//!  (6-10 are internal to neptune-core)
 //!
-//!  6. neptune-core upgrades the proof to ProofCollection.
-//!  7. neptune-core broadcasts the transaction to other nodes.
+//!  6. upgrade the proof to ProofCollection.
+//!  7. broadcast the transaction to other nodes.
 //!  8. a powerful node upgrades the proof to SingleProof, collecting a portion of fee.
 //!  9. a composer adds the proof to a block-template
 //! 10. a prover (miner) mines the Tx into a block.
 //!
 //! note: `TransactionSender::send()` performs steps 1-5.
 //!
-//! # Caller Provides Proof Initiation Sequence
+//! # Client Provides Proof Initiation Sequence
 //!
-//! The caller can save neptune network resources and possibly
-//! save on fees by generating a `SingleProof` themself. This requires
-//! a powerful machine.  As of this writing, minimum requirements are
-//! 64 CPU cores and 128Gb RAM, with 256Gb RAM or more being faster.
+//! One can save neptune network resources and possibly save on fees by
+//! generating a `SingleProof` yourself, outside neptune-core. This requires a
+//! powerful machine.  As of this writing, minimum requirements are 64 CPU cores
+//! and 128Gb RAM, with 256Gb RAM or more being faster.
 //!
 //! This sequence looks like:
 //!
@@ -50,7 +49,7 @@
 //!  4. assemble the transaction.
 //!  5. record and broadcast the transaction.
 //!
-//!  (caller is done)
+//!  (6-8 are internal to neptune-core)
 //!
 //!  6. neptune-core broadcasts the transaction to other nodes.
 //!  7. a composer adds the proof to a block-template
