@@ -83,12 +83,11 @@ struct RegTestPrivate {
 }
 
 impl RegTestPrivate {
-    // this type should not be instantiated directly, but instead retrieved via
-    // GlobalStateLock::tx_initiator()
     fn new(global_state_lock: GlobalStateLock) -> Self {
         Self { global_state_lock }
     }
 
+    // see description in [RegTest]
     async fn mine_regtest_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<(), RegTestError> {
         for _ in 0..n_blocks {
             self.mine_regtest_block_to_wallet(Timestamp::now()).await?;
@@ -96,6 +95,7 @@ impl RegTestPrivate {
         Ok(())
     }
 
+    // see description in [RegTest]
     async fn mine_regtest_block_to_wallet(
         &mut self,
         timestamp: Timestamp,
@@ -169,6 +169,9 @@ impl RegTestPrivate {
         let block_hash = block.hash();
 
         // inform main-loop.  to add to mempool and broadcast.
+        //
+        // todo: ideally we would pass a listener here to wait on, so that
+        // once the block is added we get notified, rather than polling.
         gsl.rpc_server_to_main_tx()
             .send(RPCServerToMain::ProofOfWorkSolution(Box::new(block)))
             .await
@@ -177,12 +180,21 @@ impl RegTestPrivate {
                 RegTestError::Failed("internal error. block not added to blockchain".into())
             })?;
 
+        // wait until the main-loop has actually added the block to the canonical chain
+        // or 5 second timeout happens.
+        //
+        // otherwise, wallet balance might not (yet) see coinbase funds, etc.
+        //
+        // note: temporary until listener approach is implemented.
         Self::wait_until_block_in_chain(&self.global_state_lock, block_hash).await?;
 
         Ok(block_hash)
     }
 
-    pub async fn wait_until_block_in_chain(
+    // waits (polls) until block is found in canonical chain or 5 second timeout occurs.
+    //
+    // note: temporary until listener approach is implemented.
+    async fn wait_until_block_in_chain(
         gsl: &GlobalStateLock,
         block_hash: Digest,
     ) -> Result<(), RegTestError> {
@@ -200,7 +212,6 @@ impl RegTestPrivate {
                 {
                     return Ok(());
                 }
-                // todo: something better.
                 return Err(RegTestError::Failed(
                     "block not in blockchain after 5 seconds".into(),
                 ));
