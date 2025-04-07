@@ -31,13 +31,12 @@
 //! }
 //! ```
 
-use std::sync::Arc;
-
 use super::error;
 use crate::api::export::TransactionProofType;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -124,24 +123,34 @@ impl TransactionSender {
 
         tracing::info!("send: proving tx:\n{}", tx_details);
 
-        let tx_details_rc = Arc::new(tx_details);
+        let witness = tx_details.primitive_witness();
+        let kernel = witness.kernel.clone();
 
         // generate proof
         let proof = TransactionProofBuilder::new()
-            .transaction_details(tx_details_rc.clone())
+            .transaction_details(&tx_details)
+            .primitive_witness(witness)
             .job_queue(vm_job_queue())
             .tx_proving_capability(gsl.cli().proving_capability())
             .proof_type(target_proof_type)
-            .build(gsl.cli().network)
+            .network(gsl.cli().network)
+            .build()
             .await?;
 
         tracing::info!("send: assembling tx");
 
-        // assemble transaction
-        let tx_creation_artifacts = TransactionBuilder::new()
-            .transaction_details(tx_details_rc.clone())
+        // create transaction
+        let transaction = TransactionBuilder::new()
+            .transaction_kernel(kernel)
             .transaction_proof(proof)
-            .build(gsl.cli().network)?;
+            .build()?;
+
+        // assemble transaction artifacts
+        let tx_creation_artifacts = TxCreationArtifactsBuilder::new()
+            .transaction_details(tx_details)
+            .transaction(transaction)
+            .network(gsl.cli().network)
+            .build()?;
 
         tracing::info!("send: recording tx");
 

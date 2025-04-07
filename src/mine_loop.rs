@@ -391,23 +391,33 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     let (composer_outputs, transaction_details) =
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
 
+    let witness = PrimitiveWitness::from_transaction_details(&transaction_details);
+
     info!("Start: generate single proof for coinbase transaction");
 
-    let tx_details_arc = Arc::new(transaction_details);
+    // note: we provide an owned witness to proof-builder and clone the kernel
+    // because this fn accepts arbitrary proving power and generates proof to
+    // match highest.  If we were guaranteed to NOT be generating a witness
+    // proof, we could use primitive_witness_ref() instead to avoid clone.
+
+    let kernel = witness.kernel.clone();
+
     let proof = TransactionProofBuilder::new()
-        .transaction_details(tx_details_arc.clone())
+        .transaction_details(&transaction_details)
+        .primitive_witness(witness)
         .job_queue(vm_job_queue)
         .proof_job_options(job_options)
         .tx_proving_capability(proving_power)
-        .build(network)
+        .network(network)
+        .build()
         .await?;
 
     info!("Done: generating single proof for coinbase transaction");
 
     let transaction = TransactionBuilder::new()
-        .transaction_details(tx_details_arc)
+        .transaction_kernel(kernel)
         .transaction_proof(proof)
-        .build_transaction()?;
+        .build()?;
 
     Ok((transaction, composer_outputs))
 }

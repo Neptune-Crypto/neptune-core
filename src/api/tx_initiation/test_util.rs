@@ -3,8 +3,6 @@
 //!
 //! Going forward test authors are encouraged to use the public APIs instead.
 
-use std::sync::Arc;
-
 use crate::api::export::ChangePolicy;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Timestamp;
@@ -13,6 +11,7 @@ use crate::api::export::TxOutputList;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::models::state::tx_creation_config::TxCreationConfig;
@@ -81,23 +80,33 @@ impl TransactionInitiatorInternal {
             .await?;
         drop(state_lock);
 
-        let tx_details_rc = Arc::new(tx_details);
+        let witness = tx_details.primitive_witness();
+        let kernel = witness.kernel.clone();
 
         // generate proof
         let proof = TransactionProofBuilder::new()
-            .transaction_details(tx_details_rc.clone())
+            .transaction_details(&tx_details)
+            .primitive_witness(witness)
             .job_queue(tx_creation_config.job_queue())
             .proof_job_options(tx_creation_config.proof_job_options())
             .tx_proving_capability(tx_creation_config.prover_capability())
-            .build(self.global_state_lock.cli().network)
+            .network(self.global_state_lock.cli().network)
+            .build()
             .await?;
 
-        // assemble transaction
-        let tx_creation_artifacts = TransactionBuilder::new()
-            .transaction_details(tx_details_rc.clone())
+        // create transaction
+        let transaction = TransactionBuilder::new()
+            .transaction_kernel(kernel)
             .transaction_proof(proof)
-            .build(self.global_state_lock.cli().network)?;
+            .build()?;
 
-        Ok(tx_creation_artifacts)
+        // assemble artifacts
+        let artifacts = TxCreationArtifactsBuilder::new()
+            .transaction_details(tx_details)
+            .transaction(transaction)
+            .network(self.global_state_lock.cli().network)
+            .build()?;
+
+        Ok(artifacts)
     }
 }

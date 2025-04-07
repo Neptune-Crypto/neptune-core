@@ -2978,7 +2978,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api()
             .tx_initiator()
-            .assemble_transaction(Arc::new(transaction_details), transaction_proof)?)
+            .assemble_transaction(&transaction_details, transaction_proof)?)
     }
 
     // documented in trait. do not add doc-comment.
@@ -2996,7 +2996,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api()
             .tx_initiator()
-            .assemble_transaction_artifacts(Arc::new(transaction_details), transaction_proof)?)
+            .assemble_transaction_artifacts(transaction_details, transaction_proof)?)
     }
 
     // documented in trait. do not add doc-comment.

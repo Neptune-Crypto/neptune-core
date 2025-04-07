@@ -292,6 +292,10 @@ impl TransactionDetails {
             .validate()
             .await?)
     }
+
+    pub fn primitive_witness(&self) -> PrimitiveWitness {
+        self.into()
+    }
 }
 
 #[cfg(test)]

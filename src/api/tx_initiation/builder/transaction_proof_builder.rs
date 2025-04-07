@@ -45,23 +45,54 @@ use crate::triton_vm::proof::Proof;
 ///
 /// see [module docs](self) for details.
 #[derive(Debug, Default)]
-pub struct TransactionProofBuilder {
-    transaction_details: Option<Arc<TransactionDetails>>,
+pub struct TransactionProofBuilder<'a> {
+    transaction_details: Option<&'a TransactionDetails>,
+    primitive_witness: Option<PrimitiveWitness>,
+    primitive_witness_ref: Option<&'a PrimitiveWitness>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
     tx_proving_capability: TxProvingCapability,
     proof_type: Option<TransactionProofType>,
+    network: Option<Network>,
 }
 
-impl TransactionProofBuilder {
+impl<'a> TransactionProofBuilder<'a> {
     /// instantiate
     pub fn new() -> Self {
         Default::default()
     }
 
     /// add transaction details (required)
-    pub fn transaction_details(mut self, transaction_details: Arc<TransactionDetails>) -> Self {
+    pub fn transaction_details(mut self, transaction_details: &'a TransactionDetails) -> Self {
         self.transaction_details = Some(transaction_details);
+        self
+    }
+
+    /// add primitive witness (optional)
+    ///
+    /// If not provided, the builder will generate a `PrimitiveWitness` from the
+    /// `TransactionDetails`.
+    ///
+    /// Note that a `PrimitiveWitness` contais a `TransactionKernel` which is
+    /// an input to a `Transaction`.  Thus when generating a transaction
+    /// it can avoid duplicate work to generate a witness, clone the kernel,
+    /// provide the witness here, and then provide the kernel to the
+    /// `TransactionBuilder`.
+    ///
+    /// It is also possible and may be more convenient to work only with
+    /// `TransactionDetails`.
+    pub fn primitive_witness(mut self, witness: PrimitiveWitness) -> Self {
+        self.primitive_witness = Some(witness);
+        self
+    }
+
+    /// add transaction details reference (optional)
+    ///
+    /// Note that if the target proof-type is `PrimitiveWitness` then the
+    /// reference will be cloned when building and it may be better to use the
+    /// `primitive_witness()` method.
+    pub fn primitive_witness_ref(mut self, witness: &'a PrimitiveWitness) -> Self {
+        self.primitive_witness_ref = Some(witness);
         self
     }
 
@@ -93,6 +124,12 @@ impl TransactionProofBuilder {
         self
     }
 
+    /// add network (required)
+    pub fn network(mut self, network: Network) -> Self {
+        self.network = Some(network);
+        self
+    }
+
     /// generate the proof.
     ///
     /// if the target proof-type is Witness, this will return immediately.
@@ -110,8 +147,7 @@ impl TransactionProofBuilder {
     /// Given the serialized nature of the job-queue, it is possible or even likely
     /// that other jobs may precede this one.
     ///
-    /// One can query the job_queue to determine how many jobs are in the
-    /// queue.
+    /// One can query the job_queue to determine how many jobs are in the queue.
     ///
     /// RegTest mode:
     ///
@@ -143,13 +179,13 @@ impl TransactionProofBuilder {
     /// Although the job-queue provides a method for cancelling jobs, this builder
     /// does not presently expose it.  As such, there is no way to cancel a job
     /// once build() is called.  That funtionality may be exposed later.
-    pub async fn build(self, network: Network) -> Result<TransactionProof, CreateProofError> {
-        let Some(tx_details) = self.transaction_details else {
+    pub async fn build(self) -> Result<TransactionProof, CreateProofError> {
+        let (Some(tx_details), Some(network)) = (self.transaction_details, self.network) else {
             return Err(CreateProofError::MissingRequirement);
         };
 
         if network.is_regtest() {
-            return Ok(Self::build_mock_proof(tx_details.as_ref()).await);
+            return Ok(Self::build_mock_proof(tx_details).await);
         }
 
         let Some(job_queue) = self.job_queue else {
@@ -171,16 +207,38 @@ impl TransactionProofBuilder {
             return Err(CreateProofError::TooWeak);
         }
 
-        let primitive_witness = PrimitiveWitness::from_transaction_details(&tx_details);
-
         let transaction_proof = match proof_type {
-            TransactionProofType::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
-            TransactionProofType::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(&primitive_witness, job_queue, proof_job_options).await?,
-            ),
-            TransactionProofType::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, job_queue, proof_job_options).await?,
-            ),
+            TransactionProofType::PrimitiveWitness => {
+                // use primitive_witness, else primitive_witness_ref, else tx_details
+                let witness = self.primitive_witness.unwrap_or_else(|| {
+                    self.primitive_witness_ref
+                        .cloned()
+                        .unwrap_or_else(|| tx_details.into())
+                });
+                TransactionProof::Witness(witness)
+            }
+            TransactionProofType::ProofCollection => {
+                TransactionProof::ProofCollection(match self.primitive_witness_ref {
+                    Some(witness) => {
+                        ProofCollection::produce(witness, job_queue, proof_job_options).await?
+                    }
+                    None => {
+                        let witness = self.primitive_witness.unwrap_or_else(|| tx_details.into());
+                        ProofCollection::produce(&witness, job_queue, proof_job_options).await?
+                    }
+                })
+            }
+            TransactionProofType::SingleProof => {
+                TransactionProof::SingleProof(match self.primitive_witness_ref {
+                    Some(witness) => {
+                        SingleProof::produce(witness, job_queue, proof_job_options).await?
+                    }
+                    None => {
+                        let witness = self.primitive_witness.unwrap_or_else(|| tx_details.into());
+                        SingleProof::produce(&witness, job_queue, proof_job_options).await?
+                    }
+                })
+            }
         };
 
         Ok(transaction_proof)

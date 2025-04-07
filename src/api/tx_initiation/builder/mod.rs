@@ -15,10 +15,11 @@
 //! # use std::sync::Arc;
 //! # use neptune_cash::job_queue::triton_vm::vm_job_queue;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-//! # use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-//! # use neptune_cash::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 //! # use neptune_cash::api::export::TransactionProofType;
 //! # use neptune_cash::api::export::ReceivingAddress;
 //! # use neptune_cash::api::export::NativeCurrencyAmount;
@@ -72,31 +73,37 @@
 //!        .await?;
 //!    drop(state_lock); // release lock asap.
 //!
-//!    let tx_details_rc = Arc::new(tx_details);
-//!
 //!    // generate simplistic PrimitiveWitness "proof"
 //!    // This exposes secrets, so tx cannot be broadcast until
 //!    // proof is upgraded.
 //!    let proof = TransactionProofBuilder::new()
-//!        .transaction_details(tx_details_rc.clone())
+//!        .transaction_details(&tx_details)
 //!        .job_queue(vm_job_queue())
 //!        .tx_proving_capability(gsl.cli().proving_capability())
 //!        .proof_type(TransactionProofType::PrimitiveWitness)
-//!        .build(gsl.cli().network)
+//!        .network(gsl.cli().network)
+//!        .build()
 //!        .await?;
 //!
 //!    // assemble transaction
-//!    let tx_creation_artifacts = TransactionBuilder::new()
-//!        .transaction_details(tx_details_rc.clone())
+//!    let transaction = TransactionBuilder::new()
+//!        .transaction_details(&tx_details)
 //!        .transaction_proof(proof)
-//!        .build(gsl.cli().network)?;
+//!        .build()?;
+//!
+//!    // assemble artifacts
+//!    let artifacts = TxCreationArtifactsBuilder::new()
+//!        .transaction_details(tx_details)
+//!        .transaction(transaction)
+//!        .network(gsl.cli().network)
+//!        .build()?;
 //!
 //!    // record and broadcast tx
 //!    gsl.api().tx_initiator()
-//!        .record_and_broadcast_transaction(&tx_creation_artifacts)
+//!        .record_and_broadcast_transaction(&artifacts)
 //!        .await?;
 //!
-//!    Ok(tx_creation_artifacts)
+//!    Ok(artifacts)
 //! }
 //! ```
 //!
@@ -113,17 +120,17 @@
 //! # use neptune_cash::api::export::GlobalStateLock;
 //! # use neptune_cash::job_queue::triton_vm::vm_job_queue;
 //!
-//! # async fn example(tx_details_rc: Arc<TransactionDetails>, gsl: GlobalStateLock) ->
-//! anyhow::Result<TransactionProof> {
+//! # async fn example(tx_details: TransactionDetails, gsl: GlobalStateLock) -> anyhow::Result<TransactionProof> {
 //!
 //! // generate SingleProof
 //! // This will take minutes even on a very powerful machine.
 //! let proof = TransactionProofBuilder::new()
-//!     .transaction_details(tx_details_rc.clone())
+//!     .transaction_details(&tx_details)
 //!     .job_queue(vm_job_queue())
 //!     .tx_proving_capability(gsl.cli().proving_capability())
 //!     .proof_type(TransactionProofType::SingleProof)
-//!     .build(gsl.cli().network)
+//!     .network(gsl.cli().network)
+//!     .build()
 //!     .await?;
 //! # Ok(proof)
 //! # }
@@ -131,5 +138,6 @@
 pub mod transaction_builder;
 pub mod transaction_details_builder;
 pub mod transaction_proof_builder;
+pub mod tx_artifacts_builder;
 pub mod tx_input_list_builder;
 pub mod tx_output_list_builder;

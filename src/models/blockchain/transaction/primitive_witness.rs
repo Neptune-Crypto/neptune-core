@@ -122,6 +122,12 @@ pub struct PrimitiveWitness {
     pub kernel: TransactionKernel,
 }
 
+impl From<&TransactionDetails> for PrimitiveWitness {
+    fn from(details: &TransactionDetails) -> Self {
+        Self::from_transaction_details(details)
+    }
+}
+
 impl Display for PrimitiveWitness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let coinbase_str = match self.kernel.coinbase {

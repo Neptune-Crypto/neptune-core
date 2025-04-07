@@ -12,7 +12,6 @@ use tracing_subscriber::FmtSubscriber;
 ///
 /// note that one cannot do both as there can be only one global
 /// default subscriber.
-
 #[track_caller]
 pub fn tracing_logger() {
     if std::env::var("NOCAPTURE").is_err() {

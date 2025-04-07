@@ -17,6 +17,7 @@ use super::error;
 use crate::api::export::Timestamp;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -141,13 +142,13 @@ impl TransactionInitiator {
     /// see [TransactionBuilder] for details.
     pub fn assemble_transaction(
         &self,
-        transaction_details: Arc<TransactionDetails>,
+        transaction_details: &TransactionDetails,
         transaction_proof: TransactionProof,
     ) -> Result<Transaction, error::CreateTxError> {
         TransactionBuilder::new()
             .transaction_details(transaction_details)
             .transaction_proof(transaction_proof)
-            .build_transaction()
+            .build()
     }
 
     /// assembles transaction details and a proof into transaction artifacts.
@@ -155,13 +156,19 @@ impl TransactionInitiator {
     /// see [TransactionBuilder] for details.
     pub fn assemble_transaction_artifacts(
         &self,
-        transaction_details: Arc<TransactionDetails>,
+        transaction_details: TransactionDetails,
         transaction_proof: TransactionProof,
     ) -> Result<TxCreationArtifacts, error::CreateTxError> {
-        TransactionBuilder::new()
-            .transaction_details(transaction_details)
+        let transaction = TransactionBuilder::new()
+            .transaction_details(&transaction_details)
             .transaction_proof(transaction_proof)
-            .build(self.global_state_lock.cli().network)
+            .build()?;
+
+        TxCreationArtifactsBuilder::new()
+            .transaction(transaction)
+            .transaction_details(transaction_details)
+            .network(self.global_state_lock.cli().network)
+            .build()
     }
 
     /// records a transaction into the wallet, mempool, and begins
