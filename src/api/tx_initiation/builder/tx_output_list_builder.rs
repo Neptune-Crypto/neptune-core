@@ -263,20 +263,7 @@ impl TxOutputListBuilder {
                     let utxo = Utxo::new_native_currency(address.lock_script(), amt);
                     let owned = wallet_state.can_unlock(&utxo);
 
-                    match medium {
-                        UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency(
-                            amt,
-                            sender_randomness,
-                            address,
-                            owned,
-                        ),
-                        UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
-                            amt,
-                            sender_randomness,
-                            address,
-                            owned,
-                        ),
-                    }
+                    TxOutput::native_currency(amt, sender_randomness, address, medium, owned)
                 }
 
                 OutputFormat::AddressAndUtxo(address, utxo) => {
