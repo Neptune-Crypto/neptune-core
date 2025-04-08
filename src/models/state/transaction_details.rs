@@ -25,7 +25,18 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 /// contains the unblinded data that a [Transaction](crate::models::blockchain::transaction::Transaction) is generated from,
 /// minus the [TransactionProof](crate::models::blockchain::transaction::TransactionProof).
 ///
-/// basically, `TransactionDetails` + `TransactionProof` --> `Transaction`.
+/// conceptually, `TransactionDetails` + `TransactionProof` --> `Transaction`.
+///
+/// or in more detail:
+///
+/// ```text
+/// TransactionDetails -> (TransactionKernel, PrimitiveWitness)
+/// (TransactionKernel, PrimitiveWitness) -> (TransactionKernel, ProofCollection)
+/// (TransactionKernel, ProofCollection) -> (TransactionKernel, SingleProof)
+/// (TransactionKernel, SingleProof) -> (TransactionKernel, SingleProof)
+/// TransactionProof = PrimitiveWitness | ProofCollection | SingleProof
+/// Transaction = TransactionKernel + TransactionProof
+/// ```
 ///
 /// security: This type contains secrets (keys) and should never be shared.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -10,6 +10,7 @@ pub mod shared;
 pub(crate) mod transaction_details;
 pub(crate) mod transaction_kernel_id;
 pub(crate) mod tx_creation_artifacts;
+
 #[cfg(test)]
 pub(crate) mod tx_creation_config;
 pub mod tx_proving_capability;
