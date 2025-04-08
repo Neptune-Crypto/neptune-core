@@ -258,6 +258,7 @@ impl TransactionDetailsBuilder {
             coinbase,
             timestamp,
             tip_block.mutator_set_accumulator_after(),
+            state_lock.cli().network,
         )?)
     }
 

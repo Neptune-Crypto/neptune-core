@@ -2933,6 +2933,7 @@ pub(crate) mod tests {
                 &genesis_block,
                 block1_timestamp,
                 rng.random(),
+                network,
             )
             .await;
 
@@ -3160,6 +3161,7 @@ pub(crate) mod tests {
                 block2_timestamp,
                 rng.random(),
                 vec![tx_spending_guesser_fee],
+                network,
             )
             .await
             .unwrap();

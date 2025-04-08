@@ -2062,6 +2062,7 @@ mod peer_loop_tests {
             &different_genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
@@ -2173,6 +2174,7 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
 
@@ -2319,6 +2321,7 @@ mod peer_loop_tests {
                 &genesis_block,
                 Timestamp::hours(1),
                 StdRng::seed_from_u64(5550001).random(),
+                network,
             )
             .await;
         let blocks = vec![
@@ -2391,12 +2394,14 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).random(),
+            network,
         )
         .await;
         assert_ne!(block_2_b.hash(), block_2_a.hash());
@@ -2507,12 +2512,14 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).random(),
+            network,
         )
         .await;
         assert_ne!(block_2_a.hash(), block_2_b.hash());
@@ -2640,12 +2647,14 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
         let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).random(),
+            network,
         )
         .await;
         assert_ne!(block_2_a.hash(), block_2_b.hash());
@@ -2738,6 +2747,7 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             rng.random(),
+            network,
         )
         .await;
         let block7 = blocks.last().unwrap().to_owned();
@@ -2843,6 +2853,7 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
 
@@ -2922,6 +2933,7 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             rng.random(),
+            network,
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -2999,6 +3011,7 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await.unwrap();
@@ -3065,6 +3078,7 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
 
@@ -3153,6 +3167,7 @@ mod peer_loop_tests {
                 &genesis_block,
                 Timestamp::hours(1),
                 StdRng::seed_from_u64(5550001).random(),
+                network,
             )
             .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -3257,6 +3272,7 @@ mod peer_loop_tests {
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
         state_lock.set_new_tip(block_1.clone()).await?;
@@ -3846,6 +3862,7 @@ mod peer_loop_tests {
                 &genesis_block,
                 Timestamp::hours(1),
                 [0u8; 32],
+                network,
             )
             .await;
             for block in &blocks {
@@ -4007,6 +4024,7 @@ mod peer_loop_tests {
                 &block_1,
                 TARGET_BLOCK_INTERVAL,
                 rng.random(),
+                network,
                 rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20),
             )
             .await;

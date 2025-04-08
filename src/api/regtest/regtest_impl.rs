@@ -141,6 +141,7 @@ impl RegTestPrivate {
             timestamp,
             rand::random(), // seed.
             txs_from_mempool,
+            gsl.cli().network,
         )
         .await?;
 

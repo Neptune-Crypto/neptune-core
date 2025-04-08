@@ -13,6 +13,7 @@ use tracing::error;
 use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::api::tx_initiation::error::CreateTxError;
+use crate::config_models::network::Network;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -35,6 +36,7 @@ pub struct TransactionDetails {
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
     pub mutator_set_accumulator: MutatorSetAccumulator,
+    pub network: Network,
 }
 
 // so we can emit a detailed log msg when sending a transaction.
@@ -53,6 +55,7 @@ impl Display for TransactionDetails {
     outputs: {},
     change_outputs: {},
     owned_outputs: {},
+    network: {},
 "#,
             self.timestamp.standard_format(),
             self.spend_amount(),
@@ -75,7 +78,8 @@ impl Display for TransactionDetails {
             self.tx_outputs
                 .owned_iter()
                 .map(|o| o.native_currency_amount())
-                .join(", ")
+                .join(", "),
+            self.network,
         )
     }
 }
@@ -83,13 +87,18 @@ impl Display for TransactionDetails {
 impl TransactionDetails {
     /// Create (`TransactionDetails` for) a nop-transaction, with no inputs and
     /// no outputs. Can be used if a merge bit needs to be flipped.
-    pub(crate) fn nop(mutator_set_accumulator: MutatorSetAccumulator, now: Timestamp) -> Self {
+    pub(crate) fn nop(
+        mutator_set_accumulator: MutatorSetAccumulator,
+        now: Timestamp,
+        network: Network,
+    ) -> Self {
         Self::fee_gobbler(
             NativeCurrencyAmount::zero(),
             Digest::default(),
             mutator_set_accumulator,
             now,
             UtxoNotifyMethod::None,
+            network,
         )
     }
 
@@ -108,6 +117,7 @@ impl TransactionDetails {
         mutator_set_accumulator: MutatorSetAccumulator,
         now: Timestamp,
         notification_method: UtxoNotifyMethod,
+        network: Network,
     ) -> Self {
         let gobbling_utxos = if gobbled_fee.is_zero() {
             vec![]
@@ -158,6 +168,7 @@ impl TransactionDetails {
             -gobbled_fee,
             now,
             mutator_set_accumulator,
+            network,
         )
         .expect("new_without_coinbase should succeed when total output amount is zero and no inputs are provided")
     }
@@ -177,6 +188,7 @@ impl TransactionDetails {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        network: Network,
     ) -> Result<TransactionDetails> {
         Self::new(
             tx_inputs,
@@ -185,6 +197,7 @@ impl TransactionDetails {
             Some(coinbase),
             timestamp,
             mutator_set_accumulator,
+            network,
         )
     }
 
@@ -202,6 +215,7 @@ impl TransactionDetails {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        network: Network,
     ) -> Result<TransactionDetails> {
         Self::new(
             tx_inputs,
@@ -210,6 +224,7 @@ impl TransactionDetails {
             None,
             timestamp,
             mutator_set_accumulator,
+            network,
         )
     }
 
@@ -227,6 +242,7 @@ impl TransactionDetails {
         coinbase: Option<NativeCurrencyAmount>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        network: Network,
     ) -> Result<TransactionDetails> {
         let tx_inputs: TxInputList = tx_inputs.into();
         let tx_outputs: TxOutputList = tx_outputs.into();
@@ -264,6 +280,7 @@ impl TransactionDetails {
             coinbase,
             timestamp,
             mutator_set_accumulator,
+            network,
         })
     }
 
@@ -322,6 +339,7 @@ mod test {
             mutator_set_accumulator,
             now,
             notification_method,
+            Network::Main,
         );
 
         assert!(

@@ -131,6 +131,7 @@ impl MockBlockGenerator {
     /// Create a block-transaction with a bogus proof but such that `verify` passes.
     /// note: pub(crate) for now so we don't expose ComposerParameters.
     pub async fn create_mock_block_transaction(
+        network: Network,
         predecessor_block: &Block,
         composer_parameters: ComposerParameters,
         timestamp: Timestamp,
@@ -141,6 +142,7 @@ impl MockBlockGenerator {
             predecessor_block,
             composer_parameters,
             timestamp,
+            network,
         )?;
 
         let coinbase_transaction = Self::mock_transaction_from_details(&transaction_details).await;
@@ -152,6 +154,7 @@ impl MockBlockGenerator {
             let nop_details = TransactionDetails::nop(
                 predecessor_block.mutator_set_accumulator_after(),
                 timestamp,
+                network,
             );
             let nop_transaction = Self::mock_transaction_from_details(&nop_details).await;
 
@@ -168,18 +171,29 @@ impl MockBlockGenerator {
         Ok((block_transaction, composer_txos))
     }
 
-    async fn mock_block_successor(
+    /// Create a mock block with coinbase going to self.
+    ///
+    /// For reg-test mode purposes.
+    ///
+    /// The block will be valid both in terms of PoW and and will pass the
+    /// Block::is_valid() function.
+    ///
+    /// The associated (claim, proof) pair will pass `triton_vm::verify`,
+    /// only if the network is regtest.  (The proof is mocked).
+    pub async fn mock_successor_with_pow(
         predecessor: Arc<Block>,
         composer_parameters: ComposerParameters,
         guesser_key: HashLockKey,
         timestamp: Timestamp,
         seed: [u8; 32],
-        with_valid_pow: bool,
         mempool_tx: Vec<Transaction>,
+        network: Network,
     ) -> Result<(Block, TxOutputList)> {
+        let with_valid_pow = true;
         let mut rng = StdRng::from_seed(seed);
 
         let (block_tx, composer_tx_outputs) = Self::create_mock_block_transaction(
+            network,
             &predecessor,
             composer_parameters,
             timestamp,
@@ -207,105 +221,4 @@ impl MockBlockGenerator {
 
         Ok((block, composer_tx_outputs))
     }
-
-    // pub async fn mock_successor_without_pow(
-    //     predecessor: Arc<Block>,
-    //     composer_parameters: ComposerParameters,
-    //     guesser_key: HashLockKey,
-    //     timestamp: Timestamp,
-    //     seed: [u8; 32],
-    // ) -> Result<(Block, TxOutputList)> {
-    //     Self::mock_block_successor(
-    //         predecessor,
-    //         composer_parameters,
-    //         guesser_key,
-    //         timestamp,
-    //         seed,
-    //         false,
-    //     )
-    //     .await
-    // }
-
-    pub async fn mock_successor_with_pow(
-        predecessor: Arc<Block>,
-        composer_parameters: ComposerParameters,
-        guesser_key: HashLockKey,
-        timestamp: Timestamp,
-        seed: [u8; 32],
-        mempool_tx: Vec<Transaction>,
-    ) -> Result<(Block, TxOutputList)> {
-        Self::mock_block_successor(
-            predecessor,
-            composer_parameters,
-            guesser_key,
-            timestamp,
-            seed,
-            true,
-            mempool_tx,
-        )
-        .await
-    }
-    /*
-        /// Create a block with coinbase going to self. For testing purposes.
-        ///
-        /// The block will be valid both in terms of PoW and and will pass the
-        /// Block::is_valid() function. However, the associated (claim, proof) pair will
-        /// will not pass `triton_vm::verify`, as its validity is only mocked.
-        // pub async fn mock_block(
-        //     state_lock: &GlobalStateLock,
-        //     seed: [u8; 32],
-        // ) -> Block {
-        //     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-        //     mock_successor(
-        //         &current_tip,
-        //         current_tip.header().timestamp + Timestamp::hours(1),
-        //         seed,
-        //     )
-        //     .await
-        // }
-
-        /// Create a deterministic sequence of valid blocks.
-        ///
-        /// Sequence is N-long. Every block i with i > 0 has block i-1 as its
-        /// predecessor; block 0 has the `predecessor` argument as predecessor. Every
-        /// block is valid in terms of both `is_valid` and `has_proof_of_work`. But
-        /// the STARK proofs are mocked.
-        // pub async fn mock_sequence_of_blocks<const N: usize>(
-        //     predecessor: Arc<Block>,
-        //     block_interval: Timestamp,
-        //     seed: [u8; 32],
-        // ) -> [Arc<Block>; N] {
-        //     Self::mock_sequence_of_blocks_dyn(predecessor, block_interval, seed, N)
-        //         .await
-        //         .try_into()
-        //         .unwrap()
-        // }
-
-        /// Create a deterministic sequence of valid blocks.
-        ///
-        /// Sequence is N-long. Every block i with i > 0 has block i-1 as its
-        /// predecessor; block 0 has the `predecessor` argument as predecessor. Every
-        /// block is valid in terms of both `is_valid` and `has_proof_of_work`. But
-        /// the STARK proofs are mocked.
-        // pub async fn mock_sequence_of_blocks_dyn(
-        //     mut predecessor: Arc<Block>,
-        //     block_interval: Timestamp,
-        //     seed: [u8; 32],
-        //     n: usize,
-        // ) -> Vec<Arc<Block>> {
-        //     let mut blocks = vec![];
-        //     let mut rng: StdRng = SeedableRng::from_seed(seed);
-        //     for _ in 0..n {
-        //         let block = Self::mock_successor(
-        //             predecessor.clone(),
-        //             predecessor.header().timestamp + block_interval,
-        //             rng.random(),
-        //         )
-        //         .await;
-        //         predecessor = Arc::new(block);
-        //         blocks.push(predecessor.clone());
-        //     }
-        //     blocks
-        // }
-    */
 }

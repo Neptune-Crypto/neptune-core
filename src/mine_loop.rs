@@ -388,8 +388,12 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     job_options: TritonVmProofJobOptions,
     network: Network,
 ) -> Result<(Transaction, TxOutputList)> {
-    let (composer_outputs, transaction_details) =
-        prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
+    let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
+        latest_block,
+        composer_parameters,
+        timestamp,
+        network,
+    )?;
 
     let witness = PrimitiveWitness::from_transaction_details(&transaction_details);
 
@@ -495,6 +499,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
     latest_block: &Block,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
+    network: Network,
 ) -> Result<(TxOutputList, TransactionDetails)> {
     let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
@@ -528,6 +533,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         guesser_fee,
         timestamp,
         mutator_set_accumulator,
+        network,
     )
     .expect(
         "all inputs' ms membership proofs must be valid because inputs are empty;\
@@ -620,8 +626,11 @@ pub(crate) async fn create_block_transaction_from(
     // If necessary, populate list with nop-tx.
     // Guarantees that some merge happens in below loop, which sets merge-bit.
     if transactions_to_merge.is_empty() {
-        let nop =
-            TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
+        let nop = TransactionDetails::nop(
+            predecessor_block.mutator_set_accumulator_after(),
+            timestamp,
+            global_state_lock.cli().network,
+        );
         let nop = PrimitiveWitness::from_transaction_details(&nop);
         let nop_proof =
             SingleProof::produce(&nop, vm_job_queue.clone(), job_options.clone()).await?;

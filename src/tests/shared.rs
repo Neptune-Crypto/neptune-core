@@ -1045,9 +1045,14 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     timestamp: Timestamp,
     shuffle_seed: [u8; 32],
     mut selected_mempool_txs: Vec<Transaction>,
+    network: Network,
 ) -> Result<(Transaction, TxOutputList)> {
-    let (composer_txos, transaction_details) =
-        prepare_coinbase_transaction_stateless(predecessor_block, composer_parameters, timestamp)?;
+    let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
+        predecessor_block,
+        composer_parameters,
+        timestamp,
+        network,
+    )?;
 
     let coinbase_transaction =
         fake_create_transaction_from_details_for_tests(transaction_details).await;
@@ -1056,8 +1061,11 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     if selected_mempool_txs.is_empty() {
         // create the nop-tx and merge into the coinbase transaction to set the
         // merge bit to allow the tx to be included in a block.
-        let nop_details =
-            TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
+        let nop_details = TransactionDetails::nop(
+            predecessor_block.mutator_set_accumulator_after(),
+            timestamp,
+            network,
+        );
         let nop_transaction = fake_create_transaction_from_details_for_tests(nop_details).await;
 
         selected_mempool_txs = vec![nop_transaction];
@@ -1079,8 +1087,17 @@ async fn fake_block_successor(
     timestamp: Timestamp,
     seed: [u8; 32],
     with_valid_pow: bool,
+    network: Network,
 ) -> Block {
-    fake_block_successor_with_merged_tx(predecessor, timestamp, seed, with_valid_pow, vec![]).await
+    fake_block_successor_with_merged_tx(
+        predecessor,
+        timestamp,
+        seed,
+        with_valid_pow,
+        vec![],
+        network,
+    )
+    .await
 }
 
 pub async fn fake_block_successor_with_merged_tx(
@@ -1089,6 +1106,7 @@ pub async fn fake_block_successor_with_merged_tx(
     seed: [u8; 32],
     with_valid_pow: bool,
     txs: Vec<Transaction>,
+    network: Network,
 ) -> Block {
     let mut rng = StdRng::from_seed(seed);
 
@@ -1105,6 +1123,7 @@ pub async fn fake_block_successor_with_merged_tx(
         timestamp,
         rng.random(),
         txs,
+        network,
     )
     .await
     .unwrap();
@@ -1120,16 +1139,18 @@ pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
     seed: [u8; 32],
+    network: Network,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, false).await
+    fake_block_successor(predecessor, timestamp, seed, false, network).await
 }
 
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
     seed: [u8; 32],
+    network: Network,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, true).await
+    fake_block_successor(predecessor, timestamp, seed, true, network).await
 }
 
 /// Create a block with coinbase going to self. For testing purposes.
@@ -1146,6 +1167,7 @@ pub(crate) async fn fake_valid_block_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
         seed,
+        state_lock.cli().network,
     )
     .await
 }
@@ -1160,8 +1182,9 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     predecessor: &Block,
     block_interval: Timestamp,
     seed: [u8; 32],
+    network: Network,
 ) -> [Block; N] {
-    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, seed, N)
+    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, seed, network, N)
         .await
         .try_into()
         .unwrap()
@@ -1177,6 +1200,7 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     mut predecessor: &Block,
     block_interval: Timestamp,
     seed: [u8; 32],
+    network: Network,
     n: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
@@ -1186,6 +1210,7 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
             predecessor,
             predecessor.header().timestamp + block_interval,
             rng.random(),
+            network,
         )
         .await;
         blocks.push(block);

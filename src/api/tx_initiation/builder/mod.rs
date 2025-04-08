@@ -95,7 +95,6 @@
 //!    let artifacts = TxCreationArtifactsBuilder::new()
 //!        .transaction_details(tx_details)
 //!        .transaction(transaction)
-//!        .network(gsl.cli().network)
 //!        .build()?;
 //!
 //!    // record and broadcast tx

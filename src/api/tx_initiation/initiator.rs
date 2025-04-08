@@ -167,7 +167,6 @@ impl TransactionInitiator {
         TxCreationArtifactsBuilder::new()
             .transaction(transaction)
             .transaction_details(transaction_details)
-            .network(self.global_state_lock.cli().network)
             .build()
     }
 

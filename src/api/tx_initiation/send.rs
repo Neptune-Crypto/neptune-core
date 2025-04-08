@@ -149,7 +149,6 @@ impl TransactionSender {
         let tx_creation_artifacts = TxCreationArtifactsBuilder::new()
             .transaction_details(tx_details)
             .transaction(transaction)
-            .network(gsl.cli().network)
             .build()?;
 
         tracing::info!("send: recording tx");

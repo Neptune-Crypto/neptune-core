@@ -514,6 +514,15 @@ impl<'a> StateLock<'a> {
         }
     }
 
+    /// returns present blockchain tip block.
+    pub fn cli(&self) -> &cli_args::Args {
+        match self {
+            Self::Lock(gsl) => gsl.cli(),
+            Self::WriteGuard(gsm) => gsm.cli(),
+            Self::ReadGuard(gs) => gs.cli(),
+        }
+    }
+
     pub async fn with<F, R, Args>(&self, func: F, args: Args) -> R
     where
         F: FnOnce(&GlobalState, Args) -> R,
@@ -2967,7 +2976,8 @@ mod global_state_tests {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let block1 = fake_valid_successor_for_tests(&genesis_block, now, Default::default()).await;
+        let block1 =
+            fake_valid_successor_for_tests(&genesis_block, now, Default::default(), network).await;
 
         global_state_lock.set_new_tip(block1).await.unwrap();
 

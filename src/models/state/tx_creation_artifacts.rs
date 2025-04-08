@@ -22,11 +22,6 @@ use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 /// data that the `Transaction` is generated from, minus the [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxCreationArtifacts {
-    // tbd: network doesn't necessarily belong here but is necessary
-    // for callers to obtain eg offchain_notifications correctly.
-    // perhaps it should be stored in TransactionDetails and/or Transaction,
-    // or maybe there is already some way to deduce it from Transaction?
-    pub(crate) network: Network,
     pub(crate) transaction: Arc<Transaction>,
     pub(crate) details: Arc<TransactionDetails>,
 }
@@ -52,7 +47,7 @@ impl TxCreationArtifacts {
     pub fn all_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
         self.details
             .tx_outputs
-            .offchain_notifications(self.network)
+            .offchain_notifications(self.details.network)
             .collect()
     }
 
@@ -60,7 +55,7 @@ impl TxCreationArtifacts {
     pub fn owned_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
         self.details
             .tx_outputs
-            .owned_offchain_notifications(self.network)
+            .owned_offchain_notifications(self.details.network)
             .collect()
     }
 
@@ -68,14 +63,14 @@ impl TxCreationArtifacts {
     pub fn unowned_offchain_notifications(&self) -> Vec<PrivateNotificationData> {
         self.details
             .tx_outputs
-            .unowned_offchain_notifications(self.network)
+            .unowned_offchain_notifications(self.details.network)
             .collect()
     }
 
     /// verifies that artifacts are consistent and valid.
     ///
     /// in particular:
-    ///  1. Self::network matches provided Network.
+    ///  1. Self::details.network matches provided Network.
     ///  2. Transaction and TransactionDetails match.
     ///  3. Transaction proof is valid, and thus the Tx itself is valid.
     ///
@@ -86,12 +81,13 @@ impl TxCreationArtifacts {
         // tbd: maybe we should get rid of the network arg.  it's present
         // out of abundance of caution.
 
-        // todo: (how) can we also verify that self.network matches the Tx?
+        // todo: (how) can we also verify that self.details.network matches the Tx?
+        // it could be spoofed.
 
         // note: we check the least expensive things first.
 
-        // 1. Self::network matches provided Network.
-        if network != self.network {
+        // 1. Self::details.network matches provided Network.
+        if network != self.details.network {
             return Err(TxCreationArtifactsError::NetworkMismatch);
         }
 

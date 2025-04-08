@@ -1188,7 +1188,8 @@ pub(crate) mod block_tests {
                 FeeNotificationPolicy::OffChain,
             );
             let (composer_txos, transaction_details) =
-                prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now).unwrap();
+                prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now, network)
+                    .unwrap();
             let coinbase_kernel =
                 PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
             let coinbase = Transaction {
@@ -1321,7 +1322,8 @@ pub(crate) mod block_tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-        let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
+        let mut block1 =
+            fake_valid_successor_for_tests(&genesis_block, now, rng.random(), network).await;
 
         let timestamp = block1.kernel.header.timestamp;
         assert!(block1.is_valid(&genesis_block, timestamp, network).await);
@@ -1450,9 +1452,13 @@ pub(crate) mod block_tests {
             let genesis_block = Block::genesis(network);
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-            let block1 =
-                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
-                    .await;
+            let block1 = fake_valid_successor_for_tests(
+                &genesis_block,
+                plus_seven_months,
+                rng.random(),
+                network,
+            )
+            .await;
 
             let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice = mock_genesis_global_state(
@@ -1610,7 +1616,7 @@ pub(crate) mod block_tests {
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
             let mut block1 =
-                fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
+                fake_valid_successor_for_tests(&genesis_block, now, rng.random(), network).await;
 
             // Set block timestamp 4 minutes in the future.  (is valid)
             let future_time1 = now + Timestamp::minutes(4);

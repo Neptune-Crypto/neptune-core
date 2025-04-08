@@ -3594,6 +3594,7 @@ mod archival_state_tests {
                 &genesis_block,
                 Timestamp::now(),
                 rng.random(),
+                network,
             )
             .await;
             for block in &blocks {

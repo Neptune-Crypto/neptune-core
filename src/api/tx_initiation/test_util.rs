@@ -104,7 +104,6 @@ impl TransactionInitiatorInternal {
         let artifacts = TxCreationArtifactsBuilder::new()
             .transaction_details(tx_details)
             .transaction(transaction)
-            .network(self.global_state_lock.cli().network)
             .build()?;
 
         Ok(artifacts)

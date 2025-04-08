@@ -539,6 +539,7 @@ impl UpgradeJob {
                 mutator_set,
                 old_tx_timestamp,
                 utxo_notification_method,
+                proof_job_options.job_settings.network,
             );
 
             let expected_utxos = if fee_notification_policy == FeeNotificationPolicy::OffChain {
@@ -1146,6 +1147,7 @@ mod test {
             rng.random(),
             false,
             vec![mined_tx.into()],
+            network,
         )
         .await;
         alice.set_new_tip(block2).await.unwrap();
