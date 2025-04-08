@@ -2300,13 +2300,6 @@ mod test {
                 },
                 other => panic!("Must have sent transaction notification to peer loop after successful proof upgrade. Got:\n{other:?}"),
             }
-
-            // These values are kept alive as the transmission-counterpart will
-            // otherwise fail on `send`.
-            // drop(peer_to_main_rx);
-            // drop(miner_to_main_rx);
-            // drop(rpc_server_to_main_rx);
-            // drop(main_to_peer_rx);
         }
     }
 
