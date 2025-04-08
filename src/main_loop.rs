@@ -1841,12 +1841,15 @@ impl MainLoopHandler {
     // panics if broadcast failed and channel receiver_count is non-zero
     // indicating we have peer connections.
     fn main_to_peer_broadcast(&self, msg: MainToPeerTask) {
-        if self.main_to_peer_broadcast_tx.send(msg).is_err() {
+        if let Err(e) = self.main_to_peer_broadcast_tx.send(msg) {
             // tbd: maybe we should just log an error and ignore rather
             // than panic.  but for now this preserves prior behavior
-
             let receiver_count = self.main_to_peer_broadcast_tx.receiver_count();
-            assert_eq!(receiver_count, 0);
+            assert_eq!(
+                receiver_count, 0,
+                "failed to broadcast message from main to {} peer loops: {:?}",
+                receiver_count, e
+            );
         }
     }
 }
