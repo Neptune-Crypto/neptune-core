@@ -69,6 +69,13 @@ impl TxCreationArtifacts {
 
     /// verifies that artifacts are consistent and valid.
     ///
+    /// this is a wrapper for `verify` that just returns bool
+    pub async fn is_valid(&self, network: Network) -> bool {
+        self.verify(network).await.is_ok()
+    }
+
+    /// verifies that artifacts are consistent and valid.
+    ///
     /// in particular:
     ///  1. Self::details.network matches provided Network.
     ///  2. Transaction and TransactionDetails match.
