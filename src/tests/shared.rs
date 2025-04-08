@@ -20,6 +20,7 @@ use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use proptest::collection::vec;
+use proptest::prelude::any;
 use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
@@ -30,7 +31,6 @@ use rand::distr::SampleString;
 // use rand::random;
 use rand::rngs::StdRng;
 use rand::Rng;
-use rand::RngCore;
 use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Proof;
@@ -175,7 +175,10 @@ pub fn get_dummy_version() -> VersionString {
 /// Return a handshake object with a randomly set instance ID
 pub(crate) fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
-        instance_id: rand::random(),
+        instance_id: any::<u128>()
+            .new_tree(&mut TestRunner::default())
+            .unwrap()
+            .current(),
         tip_header: Block::genesis(network).header().to_owned(),
         listen_port: Some(8080),
         network,
@@ -258,9 +261,9 @@ pub(crate) async fn mock_genesis_global_state(
 /// A state with a premine UTXO and self-mined blocks. Both composing and
 /// guessing was done by the returned entity. Tip has height of
 /// `num_blocks_mined`.
-pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
+pub(crate) async fn state_with_premine_and_self_mined_blocks(
     cli_args: cli_args::Args,
-    rng: &mut T,
+    seed: [u8; 32],
     num_blocks_mined: usize,
 ) -> GlobalStateLock {
     let wallet = WalletEntropy::devnet_wallet();
@@ -276,7 +279,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
             &previous_block,
             None,
             own_key,
-            rng.random(),
+            seed,
             0.5,
             guesser_preimage,
         )
@@ -588,13 +591,13 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     }
 }
 
-pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
-    let mut rng = rand::rng();
-    let item: Digest = rng.random();
-    let sender_randomness: Digest = rng.random();
-    let receiver_preimage: Digest = rng.random();
-    (item, sender_randomness, receiver_preimage)
-}
+// pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
+//     let mut rng = rand::rng();
+//     let item: Digest = rng.random();
+//     let sender_randomness: Digest = rng.random();
+//     let receiver_preimage: Digest = rng.random();
+//     (item, sender_randomness, receiver_preimage)
+// }
 
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(

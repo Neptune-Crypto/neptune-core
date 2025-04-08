@@ -1736,6 +1736,11 @@ impl GlobalState {
 mod global_state_tests {
     use itertools::Itertools;
     use num_traits::Zero;
+    use proptest::array;
+    use proptest::prelude::any;
+    use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1986,9 +1991,16 @@ mod global_state_tests {
         // Verify that duplicated entries in `incoming_randomness.dat` are
         // handled correctly.
         let network = Network::Main;
-        let mut rng = rand::rng();
         let cli_args = cli_args::Args::default_with_network(network);
-        let mut state = state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;
+        let mut state = state_with_premine_and_self_mined_blocks(
+            cli_args,
+            array::uniform32(any::<u8>())
+                .new_tree(&mut TestRunner::default())
+                .unwrap()
+                .current(),
+            1,
+        )
+        .await;
         let mut state = state.lock_guard_mut().await;
         let orignal_mutxos = state
             .wallet_state
@@ -2081,10 +2093,16 @@ mod global_state_tests {
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Main;
-        let mut rng = rand::rng();
         let cli_args = cli_args::Args::default_with_network(network);
-        let mut global_state_lock =
-            state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;
+        let mut global_state_lock = state_with_premine_and_self_mined_blocks(
+            cli_args,
+            array::uniform32(any::<u8>())
+                .new_tree(&mut TestRunner::default())
+                .unwrap()
+                .current(),
+            1,
+        )
+        .await;
 
         // Delete everything from monitored UTXO and from raw-hash keys.
         let mut global_state = global_state_lock.lock_guard_mut().await;

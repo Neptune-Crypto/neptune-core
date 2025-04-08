@@ -1900,7 +1900,7 @@ pub(crate) mod mine_loop_tests {
         let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
         let k = (-4.0 / cofactor).ceil() as usize;
 
-        let mut test_runner = proptest::test_runner::TestRunner::deterministic();
+        let mut test_runner = proptest::test_runner::TestRunner::default();
 
         let mut predecessor_header = random_block_header();
         predecessor_header.difficulty = Difficulty::from(difficulty);
