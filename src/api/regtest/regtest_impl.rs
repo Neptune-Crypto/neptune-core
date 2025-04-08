@@ -7,7 +7,6 @@ use crate::api::export::Timestamp;
 use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
 use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 
@@ -136,7 +135,7 @@ impl RegTestPrivate {
 
         let (block, composer_tx_outputs) = MockBlockGenerator::mock_successor_with_pow(
             tip_block,
-            composer_parameters,
+            composer_parameters.clone(),
             guesser_key,
             timestamp,
             rand::random(), // seed.
@@ -145,16 +144,8 @@ impl RegTestPrivate {
         )
         .await?;
 
-        let composer_tx_outputs: Vec<_> = composer_tx_outputs.into();
-
-        // tbd: maybe mock block should return these
-        let expected_utxos =
-            composer_tx_outputs
-                .into_iter()
-                .filter_map(|o| match (o.is_offchain(), o.is_owned()) {
-                    (true, true) => Some(o.into_expected_utxo(UtxoNotifier::OwnMinerComposeBlock)),
-                    _ => None,
-                });
+        // obtain utxos destined for our wallet from composer rewards.
+        let expected_utxos = composer_parameters.extract_expected_utxos(composer_tx_outputs);
 
         // note: guesser utxos will be found by
         // WalletState::update_wallet_state_with_new_block() inside this call.

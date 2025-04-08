@@ -400,15 +400,6 @@ impl TxOutput {
         let sender_randomness = self.sender_randomness();
         ExpectedUtxo::new(utxo, sender_randomness, receiver_preimage, notifier)
     }
-
-    pub(crate) fn into_expected_utxo(self, utxo_notifier: UtxoNotifier) -> ExpectedUtxo {
-        ExpectedUtxo::new(
-            self.utxo,
-            self.sender_randomness,
-            self.receiver_digest,
-            utxo_notifier,
-        )
-    }
 }
 
 /// Represents a list of [TxOutput]
