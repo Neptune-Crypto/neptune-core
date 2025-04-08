@@ -284,7 +284,14 @@ impl PrimitiveWitness {
     }
 
     /// Verify the transaction directly from primitive witness
-    ///fn valid
+    ///
+    /// this is a wrapper for `validate()` that just returns bool.
+    pub async fn is_valid(&self) -> bool {
+        self.validate().await.is_ok()
+    }
+
+    /// Verify the transaction directly from primitive witness
+    ///
     /// (without proofs or decomposing into subclaims).
     ///
     /// This method is an important part of the transaction initiation process
