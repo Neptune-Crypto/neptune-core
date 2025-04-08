@@ -37,7 +37,7 @@ use crate::BFieldElement;
 
 /// Enumerates key types with corresponding addresses
 ///
-/// `AddressableKey` enumerates the sub-set of [BaseKeyType](super::BaseKeyType)
+/// `AddressableKey` enumerates the sub-set of [BaseKeyType]
 /// variants that are represented in [ReceivingAddress].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -119,7 +119,7 @@ impl AddressableKeyType {
 /// method or struct may simply accept a `AddressableKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
 ///
-/// `AddressableKey` enumerates the sub-set of [BaseSpendingKey](super::BaseSpendingKey)
+/// `AddressableKey` enumerates the sub-set of [BaseSpendingKey]
 /// variants that are represented in [ReceivingAddress].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AddressableKey {
