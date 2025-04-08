@@ -51,8 +51,7 @@ pub enum InputSelectionPolicy {
     /// choose inputs by native currency amount in specified sort order.
     ByNativeCoinAmount(SortOrder),
 
-    /// choose inputs by utxo size in specified sort order
-    // is this useful?
+    /// choose inputs by utxo size (bytes) in specified sort order
     ByUtxoSize(SortOrder),
     // ##multicoin## : is something like this possible?
     // eg, so we can order by a particular token amount, like USDT.
