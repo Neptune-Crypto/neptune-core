@@ -4,7 +4,30 @@ use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
-#[cfg(test)]
+// This claims-cache stores mock proof-claims that are simply asserted to be valid.
+//
+// The cache is only used for tests and regtest mode!!
+//
+// The cache enables mock proofs to be generated and validated immediately
+// which enables mock blocks and transactions.
+//
+// important:  for regtest mode to work properly, peers must be able to
+// verify eachother's proofs. There is presently no mechanism to sync
+// the cache between peers, though that could be a possibility.
+//
+// HOWEVER: given that this is a process-wide cache, it is actually shared
+// between in-process peers such as when executing integration tests.
+//
+// In other words, distributed proving works for integration tests, but not
+// yet in a "real" regtest multi-node network.
+//
+// RAM Usage:
+//
+// Presently claims are never expired. So there is a very real chance of
+// blowing up RAM.  Maybe not so problematic since regtest is generally started
+// from genesis block anyway.
+//
+// see: https://github.com/Neptune-Crypto/neptune-core/issues/539
 static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::HashSet<Claim>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
@@ -16,7 +39,7 @@ static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::Ha
 /// claim and verification succeeds, the claim is added to the cache. The only
 /// other way to populate the cache is through method `cache_true_claim`.
 pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
-    #[cfg(test)]
+    // presently this is only populated if network is regtest.
     if CLAIMS_CACHE.lock().await.contains(&claim) {
         return true;
     }
@@ -27,6 +50,9 @@ pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
             .await
             .expect("should be able to verify proof in new tokio task");
 
+    // tbd: we might want to enable a cache for mainnet usage.
+    // but we should probably use a cache that has a configurable max
+    // size, so we don't blow up RAM.
     #[cfg(test)]
     if verdict {
         cache_true_claim(claim).await;
@@ -36,7 +62,7 @@ pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
 }
 
 /// Add a claim to the [`CLAIMS_CACHE`].
-#[cfg(test)]
+/// only used for tests and regtest mode.
 pub(crate) async fn cache_true_claim(claim: Claim) {
     CLAIMS_CACHE.lock().await.insert(claim);
 }

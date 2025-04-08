@@ -29,11 +29,13 @@ use crate::prelude::twenty_first;
 ///
 /// 588000 milliseconds equals 9.8 minutes.
 pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
+pub(crate) const TARGET_BLOCK_INTERVAL_REGTEST: Timestamp = Timestamp::millis(4);
 
 /// Minimum time between blocks.
 ///
 /// Blocks spaced apart by less than this amount of time are not valid.
 pub(crate) const MINIMUM_BLOCK_TIME: Timestamp = Timestamp::seconds(60);
+pub(crate) const MINIMUM_BLOCK_TIME_REGTEST: Timestamp = Timestamp::millis(2);
 
 /// Controls how long to wait before the difficulty for the *next* block is
 /// reduced.
@@ -134,7 +136,11 @@ impl BlockHeader {
             cumulative_proof_of_work: ProofOfWork::zero(),
 
             #[cfg(not(test))]
-            difficulty: Self::GENESIS_DIFFICULTY,
+            difficulty: if network.is_regtest() {
+                Difficulty::MINIMUM
+            } else {
+                Self::GENESIS_DIFFICULTY
+            },
 
             // Avoid setting this too high when running tests, otherwise CI
             // fails and tests take forever.

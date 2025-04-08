@@ -352,9 +352,9 @@ pub(crate) mod test {
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::GlobalStateLock;
@@ -480,7 +480,7 @@ pub(crate) mod test {
                 block_tx,
                 timestamp,
                 None,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmProofJobOptions::default(),
             )
             .await
@@ -509,20 +509,17 @@ pub(crate) mod test {
 
         let genesis_block = Block::genesis(network);
         let now = genesis_block.header().timestamp + Timestamp::months(12);
-        let (tx, _, _) = alice
-            .lock_guard()
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let tx: Transaction = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(vec![tx_output].into(), fee, now, config)
             .await
-            .create_transaction_with_prover_capability(
-                vec![tx_output].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OffChain,
-                fee,
-                now,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
-            )
-            .await
-            .unwrap();
+            .unwrap()
+            .transaction
+            .into();
         let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
 
         // Update transaction, stick it into block 2, and verify that block 2
@@ -533,7 +530,7 @@ pub(crate) mod test {
             &genesis_block.mutator_set_accumulator_after(),
             &block1.mutator_set_update(),
             tx.proof.into_single_proof(),
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
             Some(later),
         )
@@ -542,7 +539,7 @@ pub(crate) mod test {
 
         let block2 = mine_tx(&alice, tx, &block1, later).await;
         assert!(
-            !block2.is_valid(&block1, later).await,
+            !block2.is_valid(&block1, later, network).await,
             "Block doing a double-spend must be invalid."
         );
     }

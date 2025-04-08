@@ -8,6 +8,7 @@ use serde::Serialize;
 use strum::EnumIter;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
+use crate::models::blockchain::block::block_header;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
@@ -56,6 +57,34 @@ impl Network {
                 Timestamp(BFieldElement::new(1739275200000u64))
             }
         }
+    }
+
+    pub(crate) fn minimum_block_time(&self) -> Timestamp {
+        if self.is_regtest() {
+            block_header::MINIMUM_BLOCK_TIME_REGTEST
+        } else {
+            block_header::MINIMUM_BLOCK_TIME
+        }
+    }
+
+    pub(crate) fn target_block_interval(&self) -> Timestamp {
+        if self.is_regtest() {
+            block_header::TARGET_BLOCK_INTERVAL_REGTEST
+        } else {
+            block_header::TARGET_BLOCK_INTERVAL
+        }
+    }
+
+    pub fn is_mainnet(&self) -> bool {
+        matches!(self, Self::Main)
+    }
+
+    pub fn is_testnet(&self) -> bool {
+        matches!(self, Self::Testnet)
+    }
+
+    pub fn is_regtest(&self) -> bool {
+        matches!(self, Self::RegTest)
     }
 }
 

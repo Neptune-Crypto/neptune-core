@@ -1,3 +1,43 @@
+/// for calling a mutable async callback fn with correct StateLock variant
+/// this appears impossible to do without a macro.
+macro_rules! state_lock_call_mut_async {
+    ($state_lock:expr, $func:expr, $($arg:expr),*) => {
+        async {
+            match $state_lock {
+                StateLock::Lock(ref mut global_state_lock) => {
+                    $func(&mut *global_state_lock.lock_guard_mut().await, $($arg,)*).await
+                }
+                StateLock::WriteGuard(ref mut gsm) => {
+                    $func(&mut *gsm, $($arg,)*).await
+                }
+                StateLock::ReadGuard(_) => {
+                    panic!("can't call a mutable function on a read-guard")
+                }
+            }
+        }
+    };
+}
+
+/// for calling an immutable async callback fn with correct StateLock variant
+/// this appears impossible to do without a macro.
+macro_rules! state_lock_call_async {
+    ($state_lock:expr, $func:expr, $($arg:expr),*) => {
+        async {
+            match $state_lock {
+                StateLock::Lock(ref global_state_lock) => {
+                    $func(&*global_state_lock.lock_guard().await, $($arg,)*).await
+                }
+                StateLock::WriteGuard(ref gsm) => {
+                    $func(&*gsm, $($arg,)*).await
+                }
+                StateLock::ReadGuard(ref gs) => {
+                    $func(&*gs, $($arg,)*).await
+                }
+            }
+        }
+    };
+}
+
 /// returns name of current function.
 macro_rules! fn_name_bare {
     () => {{
@@ -59,6 +99,8 @@ pub(crate) use fn_name;
 pub(crate) use fn_name_bare;
 pub(crate) use log_scope_duration;
 pub(crate) use log_slow_scope;
+pub(crate) use state_lock_call_async;
+pub(crate) use state_lock_call_mut_async;
 
 #[cfg(test)]
 mod test {

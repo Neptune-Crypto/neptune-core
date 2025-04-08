@@ -108,6 +108,9 @@ impl NativeCurrencyAmount {
     }
 
     /// Create an NativeCurrencyAmount object of the given number of whole coins.
+    ///
+    /// Note that the maximum number of whole coins is 42 million which fits
+    /// within a u32.
     pub const fn coins(num_whole_coins: u32) -> NativeCurrencyAmount {
         assert!(
             num_whole_coins <= 42_000_000,
@@ -297,6 +300,20 @@ impl NativeCurrencyAmount {
     /// `display_lossless_can_produce_44_chars`.
     pub fn display_lossless(&self) -> String {
         self.display_n_decimals(34)
+    }
+}
+
+// mostly so that 0.into() works.  but also handy for any whole number amounts,
+// so it is not necessary to `use NativeCurrencyAmount` or `NumTraits::Zero`.
+//
+// rationale: while `NativeCurrencyAmount` wraps an i128 that is an internal
+// implementation detail. It could just as well wrap an array of bytes, or a
+// Rational, BigInt, or something else. The integer interface presented to the
+// world is that of the coins() method, which accepts a u32.  As such, this impl
+// From is approprate.
+impl From<u32> for NativeCurrencyAmount {
+    fn from(n: u32) -> Self {
+        Self::coins(n)
     }
 }
 

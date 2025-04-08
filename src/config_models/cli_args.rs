@@ -36,7 +36,7 @@ pub struct Args {
     ///
     /// macOS:   /Users/Alice/Library/Application Support/neptune/main
     #[clap(long, value_name = "DIR")]
-    pub(crate) data_dir: Option<PathBuf>,
+    pub data_dir: Option<PathBuf>,
 
     /// Ban connections to this node from IP address.
     ///
@@ -201,11 +201,11 @@ pub struct Args {
 
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
-    pub(crate) peer_port: u16,
+    pub peer_port: u16,
 
     /// Port on which to listen for RPC connections.
     #[clap(long, default_value = "9799", value_name = "PORT")]
-    pub(crate) rpc_port: u16,
+    pub rpc_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
@@ -228,11 +228,11 @@ pub struct Args {
 
     /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
     #[structopt(long)]
-    pub(crate) peers: Vec<SocketAddr>,
+    pub peers: Vec<SocketAddr>,
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "main", short)]
-    pub(crate) network: Network,
+    pub network: Network,
 
     /// Max number of membership proofs stored per owned UTXO
     #[structopt(long, default_value = "3")]
@@ -249,7 +249,7 @@ pub struct Args {
     /// e.g. `--tx-proving-capability=singleproof` or
     /// `--tx-proving-capability=proofcollection`.
     #[clap(long)]
-    pub(crate) tx_proving_capability: Option<TxProvingCapability>,
+    pub tx_proving_capability: Option<TxProvingCapability>,
 
     /// Cache for the proving capability. If the above parameter is not set, we
     /// want to estimate proving capability and afterwards reuse the result from
@@ -520,6 +520,7 @@ impl Args {
             job_priority,
             job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
+                network: self.network,
             },
             cancel_job_rx: None,
         }
@@ -527,7 +528,7 @@ impl Args {
 
     /// Get the proving capability CLI argument or estimate it if it is not set.
     /// Cache the result so we don't estimate more than once.
-    pub(crate) fn proving_capability(&self) -> TxProvingCapability {
+    pub fn proving_capability(&self) -> TxProvingCapability {
         *self.tx_proving_capability_cache.get_or_init(|| {
             if let Some(proving_capability) = self.tx_proving_capability {
                 proving_capability

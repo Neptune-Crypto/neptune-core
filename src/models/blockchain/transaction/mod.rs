@@ -1,21 +1,23 @@
+use std::sync::Arc;
+
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::prelude::twenty_first;
 
 pub mod lock_script;
 pub mod primitive_witness;
 pub mod transaction_kernel;
+pub mod transaction_proof;
 pub mod utxo;
 pub mod validity;
 
-use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
 #[cfg(any(test, feature = "arbitrary-impls"))]
@@ -26,10 +28,10 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tracing::info;
+pub(crate) use transaction_proof::TransactionProof;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use validity::proof_collection::ProofCollection;
@@ -42,7 +44,6 @@ use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
 use self::transaction_kernel::TransactionKernelModifier;
 use self::transaction_kernel::TransactionKernelProxy;
-use crate::models::proof_abstractions::verifier::verify;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::proof::Proof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -67,60 +68,6 @@ impl PublicAnnouncement {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub enum TransactionProof {
-    Witness(PrimitiveWitness),
-    SingleProof(Proof),
-    ProofCollection(ProofCollection),
-}
-
-impl TransactionProof {
-    pub(crate) fn into_single_proof(self) -> Proof {
-        match self {
-            TransactionProof::SingleProof(proof) => proof,
-            TransactionProof::Witness(_) => {
-                panic!("Expected SingleProof, got Witness")
-            }
-            TransactionProof::ProofCollection(_) => {
-                panic!("Expected SingleProof, got ProofCollection")
-            }
-        }
-    }
-
-    pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
-        match self {
-            TransactionProof::Witness(_) => bail!("Primitive witness does not have a proof"),
-            TransactionProof::ProofCollection(_) => Ok(TransactionProofQuality::ProofCollection),
-            TransactionProof::SingleProof(_) => Ok(TransactionProofQuality::SingleProof),
-        }
-    }
-
-    pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
-        match self {
-            TransactionProof::Witness(primitive_witness) => {
-                !primitive_witness.kernel.merge_bit
-                    && primitive_witness.validate().await
-                    && primitive_witness.kernel.mast_hash() == kernel_mast_hash
-            }
-            TransactionProof::SingleProof(single_proof) => {
-                let claim = SingleProof::claim(kernel_mast_hash);
-                verify(claim, single_proof.clone()).await
-            }
-            TransactionProof::ProofCollection(proof_collection) => {
-                proof_collection.verify(kernel_mast_hash).await
-            }
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum TransactionProofError {
-    CannotUpdateProofVariant,
-    CannotUpdatePrimitiveWitness,
-    CannotUpdateSingleProof,
-    ProverLockWasTaken,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
@@ -128,7 +75,27 @@ pub struct Transaction {
     pub proof: TransactionProof,
 }
 
+// for simpler Arc compatibility with existing tests.
+#[cfg(test)]
+impl From<Arc<Transaction>> for Transaction {
+    fn from(t: Arc<Transaction>) -> Self {
+        (*t).clone()
+    }
+}
+
 impl Transaction {
+    /// return transaction id.
+    ///
+    /// note that transactions created by users are temporary.  Once confirmed
+    /// into a block they are merged into a single block transaction.  So this
+    /// id will not correspond to anything on the blockchain except for the
+    /// single transaction in each block.
+    ///
+    /// These id are useful for referencing transactions in the mempool however.
+    pub fn txid(&self) -> TransactionKernelId {
+        self.kernel.txid()
+    }
+
     /// Create a new `Transaction` by updating the given one with the mutator
     /// set update. If `new_timestamp` is `None`, the timestamp from the old
     /// transaction kernel will be used.
@@ -143,7 +110,7 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: &MutatorSetUpdate,
         old_single_proof: Proof,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
     ) -> anyhow::Result<Transaction> {
@@ -246,7 +213,7 @@ impl Transaction {
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
         assert_eq!(
@@ -315,43 +282,25 @@ impl Transaction {
             .is_confirmable_relative_to(mutator_set_accumulator)
             .is_ok()
     }
+
+    /// verifies the transaction proof is valid
+    ///
+    /// ... which also means the transaction is valid.
+    // maybe this should just be called verify()  or validate()?
+    pub async fn verify_proof(&self) -> bool {
+        self.proof.verify(self.kernel.mast_hash()).await
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use tasm_lib::prelude::Digest;
-    use tasm_lib::twenty_first::bfe_vec;
     use tests::primitive_witness::SaltedUtxos;
 
     use super::*;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-    impl TransactionProof {
-        /// A proof that will always be invalid
-        pub(crate) fn invalid() -> Self {
-            Self::SingleProof(Proof(vec![]))
-        }
-
-        /// A proof that will always be invalid, with a specified size measured in
-        /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
-        pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {
-            Self::SingleProof(Proof(bfe_vec![0; size]))
-        }
-
-        pub(crate) fn into_proof_collection(self) -> ProofCollection {
-            match self {
-                TransactionProof::Witness(_primitive_witness) => {
-                    panic!("Expected ProofCollection, got Witness")
-                }
-                TransactionProof::SingleProof(_proof) => {
-                    panic!("Expected ProofCollection, got SingleProof")
-                }
-                TransactionProof::ProofCollection(proof_collection) => proof_collection,
-            }
-        }
-    }
 
     impl Transaction {
         /// Create a new transaction with primitive witness for a new mutator set.
@@ -449,7 +398,7 @@ mod transaction_tests {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
             let as_single_proof = SingleProof::produce(
                 &to_be_updated,
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -467,7 +416,7 @@ mod transaction_tests {
                 &to_be_updated.mutator_set_accumulator,
                 &mutator_set_update,
                 original_tx.proof.into_single_proof(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
                 None,
             )
@@ -523,7 +472,7 @@ mod transaction_tests {
             let TransactionProof::Witness(pw) = &transaction.proof else {
                 panic!("Expected primitive witness variant");
             };
-            assert!(pw.validate().await)
+            assert!(pw.validate().await.is_ok())
         }
 
         let mut test_runner = TestRunner::deterministic();
@@ -532,8 +481,8 @@ mod transaction_tests {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-        assert!(to_be_updated.validate().await);
-        assert!(mined.validate().await);
+        assert!(to_be_updated.validate().await.is_ok());
+        assert!(mined.validate().await.is_ok());
 
         let updated_with_block = update_with_block(to_be_updated.clone(), mined.clone());
         assert_valid_as_pw(&updated_with_block).await;

@@ -12,9 +12,11 @@
 use std::process::Stdio;
 
 use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
+use tasm_lib::triton_vm::error::InstructionError;
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
+use crate::config_models::network::Network;
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobCancelReceiver;
 use crate::job_queue::traits::JobCompletion;
@@ -73,6 +75,9 @@ pub enum VmProcessError {
         proof."
     )]
     NoExitCode,
+
+    #[error("Triton VM failed: {0}")]
+    TritonVmFailed(InstructionError),
 }
 
 enum ProverProcessCompletion {
@@ -123,8 +128,9 @@ impl From<ProverJobError> for ProverJobResult {
 }
 
 #[derive(Debug, Clone, Default, Copy)]
-pub(crate) struct ProverJobSettings {
+pub struct ProverJobSettings {
     pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
+    pub(crate) network: Network,
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +164,9 @@ impl ProverJob {
     // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
     // error is returned.
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
+        // regtest mode: we should never be here
+        assert!(!self.job_settings.network.is_regtest());
+
         tracing::debug!("executing VM program to determine complexity (padded-height)");
         tracing::debug!("job settings: {:?}", self.job_settings);
 
@@ -193,7 +202,9 @@ impl ProverJob {
             };
 
             if let Err(e) = run_result {
-                panic!("Triton VM should halt gracefully.\nError: {e}\n\n{vm_state_moved}");
+                return Err(ProverJobError::TritonVmProverFailed(
+                    VmProcessError::TritonVmFailed(e),
+                ));
             }
             vm_state_moved
         };

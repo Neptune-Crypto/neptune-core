@@ -114,12 +114,10 @@ impl EncryptedUtxoNotification {
     pub fn decrypt_with_spending_key(
         &self,
         spending_key: &SpendingKey,
-    ) -> Option<Result<UtxoNotificationPayload>> {
-        let decryption_result = spending_key
-            .decrypt(&self.ciphertext)?
-            .map(|(utxo, sender_randomness)| UtxoNotificationPayload::new(utxo, sender_randomness));
-
-        Some(decryption_result)
+    ) -> Result<UtxoNotificationPayload> {
+        spending_key
+            .decrypt(&self.ciphertext)
+            .map(|(utxo, sender_randomness)| UtxoNotificationPayload::new(utxo, sender_randomness))
     }
 }
 

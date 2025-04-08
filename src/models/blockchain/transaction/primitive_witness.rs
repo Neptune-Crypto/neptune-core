@@ -13,20 +13,20 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tracing::debug;
 use tracing::warn;
 
+use super::lock_script::LockScript;
 use super::lock_script::LockScriptAndWitness;
 use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelModifier;
 use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::TransactionDetails;
+use crate::api::export::TxInputList;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -122,6 +122,12 @@ pub struct PrimitiveWitness {
     pub kernel: TransactionKernel,
 }
 
+impl From<&TransactionDetails> for PrimitiveWitness {
+    fn from(details: &TransactionDetails) -> Self {
+        Self::from_transaction_details(details)
+    }
+}
+
 impl Display for PrimitiveWitness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let coinbase_str = match self.kernel.coinbase {
@@ -157,7 +163,7 @@ impl PrimitiveWitness {
     /// # Panics
     /// Panics if transaction validity cannot be satisfied.
     fn generate_primitive_witness(
-        unlocked_utxos: &[UnlockedUtxo],
+        unlocked_utxos: &TxInputList,
         output_utxos: Vec<Utxo>,
         sender_randomnesses: Vec<Digest>,
         receiver_digests: Vec<Digest>,
@@ -243,6 +249,7 @@ impl PrimitiveWitness {
             coinbase,
             timestamp,
             mutator_set_accumulator,
+            ..
         } = transaction_details;
 
         // complete transaction kernel
@@ -264,11 +271,10 @@ impl PrimitiveWitness {
 
         // populate witness
         let output_utxos = tx_outputs.utxos();
-        let unlocked_utxos = tx_inputs;
         let sender_randomnesses = tx_outputs.sender_randomnesses();
         let receiver_digests = tx_outputs.receiver_digests();
         Self::generate_primitive_witness(
-            unlocked_utxos,
+            tx_inputs,
             output_utxos,
             sender_randomnesses,
             receiver_digests,
@@ -277,10 +283,29 @@ impl PrimitiveWitness {
         )
     }
 
-    /// Verify the transaction directly from the primitive witness, without proofs or
-    /// decomposing into subclaims.
-    #[must_use]
-    pub async fn validate(&self) -> bool {
+    /// Verify the transaction directly from primitive witness
+    ///
+    /// this is a wrapper for `validate()` that just returns bool.
+    pub async fn is_valid(&self) -> bool {
+        self.validate().await.is_ok()
+    }
+
+    /// Verify the transaction directly from primitive witness
+    ///
+    /// (without proofs or decomposing into subclaims).
+    ///
+    /// This method is an important part of the transaction initiation process
+    /// as it is the "final say" with regards to whether most new transactions
+    /// gets accepted into the mempool or not.  As such, it returns a detailed
+    /// error type for the caller.
+    pub async fn validate(&self) -> Result<(), WitnessValidationError> {
+        // note: This method used to just return `bool` but callers need more
+        // detail than that when initiating a transaction if something goes
+        // wrong.
+        //
+        // We should consider adding detailed validation errors for the other
+        // proof types as well (if possible).
+
         for lock_script_and_witness in &self.lock_scripts_and_witnesses {
             let lock_script = lock_script_and_witness.program.clone();
             let secret_input = lock_script_and_witness.nondeterminism();
@@ -290,18 +315,24 @@ impl PrimitiveWitness {
             // Also, the lock script is satisfied if it halts gracefully (i.e., without crashing).
             // The output is irrelevant.
             let result = tokio::task::spawn_blocking(move || {
-                VM::run(lock_script, public_input, secret_input)
+                VM::run(lock_script.clone(), public_input, secret_input)
             })
             .await;
 
             let Ok(run_res) = result else {
-                warn!("Failed to spawn task for verifying lock script.");
-                return false;
+                let reason = "Failed to spawn task for verifying lock script.";
+                let error = WitnessValidationError::Failed(reason.into());
+                warn!("{}", error);
+                return Err(error);
             };
 
-            if let Err(e) = run_res {
-                warn!("Failed to verify lock script of transaction. Got: \"{e}\"");
-                return false;
+            if let Err(_e) = run_res {
+                // tbd: should we include the VMerror in InvalidLockScript error?
+                let error = WitnessValidationError::InvalidLockScript(
+                    LockScript::from(lock_script_and_witness).hash(),
+                );
+                warn!("{}", error);
+                return Err(error);
             }
         }
 
@@ -319,11 +350,12 @@ impl PrimitiveWitness {
             let item = Hash::hash(input_utxo);
             // TODO: write these functions in tasm
             if !self.mutator_set_accumulator.verify(item, membership_proof) {
-                warn!("Cannot generate removal record for an item with invalid membership proof.");
-                let witness_msa_hash = self.mutator_set_accumulator.hash();
-                debug!("witness mutator set hash: {witness_msa_hash}");
-                debug!("kernel mutator set hash:  {}", self.kernel.mutator_set_hash);
-                return false;
+                let error = WitnessValidationError::InvalidMembershipProof {
+                    witness_mutator_set_accumulator_hash: self.mutator_set_accumulator.hash(),
+                    kernel_mutator_set_hash: self.kernel.mutator_set_hash,
+                };
+                warn!("{} - {:#?}", error, error);
+                return Err(error);
             }
             let removal_record = self.mutator_set_accumulator.drop(item, membership_proof);
             witnessed_removal_records.push(removal_record);
@@ -344,12 +376,16 @@ impl PrimitiveWitness {
             .map(|tsaw| (tsaw.program.hash(), tsaw.program.to_owned()))
             .collect::<HashMap<_, _>>();
 
-        if !type_script_hashes
+        // all must be in dictionary.  so if we find first that is not then it
+        // is already an error.  note that the error only informs caller of the
+        // first unknown, not all.
+        if let Some(first) = type_script_hashes
             .iter()
-            .all(|tsh| type_script_dictionary.contains_key(tsh))
+            .find(|tsh| !type_script_dictionary.contains_key(tsh))
         {
-            warn!("Transaction contains input(s) or output(s) with unknown typescript.");
-            return false;
+            let error = WitnessValidationError::UnknownTypeScript(*first);
+            warn!("{}", error);
+            return Err(error);
         }
 
         // verify type scripts
@@ -374,16 +410,17 @@ impl PrimitiveWitness {
             .await;
 
             let Ok(run_res) = result else {
-                warn!("Failed to spawn task for verifying type script.");
-                return false;
+                let reason = "Failed to spawn task for verifying type script.";
+                let error = WitnessValidationError::Failed(reason.into());
+                warn!("{}", error);
+                return Err(error);
             };
 
-            if let Err(e) = run_res {
-                warn!(
-                    "Failed to verify type script {type_script_hash} of \
-                transaction. Got: \"{e}\""
-                );
-                return false;
+            if let Err(_e) = run_res {
+                // tbd: should we include the VMError in InvalidTypeScript error?
+                let error = WitnessValidationError::InvalidTypeScript(*type_script_hash);
+                warn!("{}", error);
+                return Err(error);
             }
         }
 
@@ -400,34 +437,26 @@ impl PrimitiveWitness {
             .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
             .collect_vec();
         if witnessed_removal_record_hashes != kernel_removal_record_hashes {
-            warn!("Removal records generated from witness do not match transaction kernel inputs.");
-            warn!(
-                "in witness: {}\nin kernel:  {}",
-                witnessed_removal_record_hashes.iter().join(","),
-                kernel_removal_record_hashes.iter().join(",")
-            );
-            return false;
+            let error = WitnessValidationError::RemovalRecordsMismatch {
+                witnessed_removal_record_hashes,
+                kernel_removal_record_hashes,
+            };
+            warn!("{} - {:#?}", error, error);
+            return Err(error);
         }
 
         if self.mutator_set_accumulator.hash() != self.kernel.mutator_set_hash {
-            warn!(
-                "Transaction's mutator set hash does not correspond to the mutator set the removal \
-                 records were derived from. Therefore: can't verify that the inputs even exist."
-            );
-            debug!(
-                "Transaction mutator set hash: {}",
-                self.kernel.mutator_set_hash
-            );
-            debug!(
-                "Witness mutator set hash: {}",
-                self.mutator_set_accumulator.hash()
-            );
-            return false;
+            let error = WitnessValidationError::MutatorSetMismatch {
+                witness_mutator_set_hash: self.mutator_set_accumulator.hash(),
+                transaction_mutator_set_hash: self.kernel.mutator_set_hash,
+            };
+            warn!("{} - {:#?}", error, error);
+            return Err(error);
         }
 
         // public announcements: there isn't anything to verify
 
-        true
+        Ok(())
     }
 
     /// Update a primitive witness to be valid under a new mutator set.
@@ -504,6 +533,42 @@ impl PrimitiveWitness {
 
         primitive_witness
     }
+}
+
+/// enumerates possible witness validation errors
+#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum WitnessValidationError {
+    #[error("invalid lock script. error: {0}")]
+    InvalidLockScript(Digest),
+
+    #[error("invalid membership proof")]
+    InvalidMembershipProof {
+        witness_mutator_set_accumulator_hash: Digest,
+        kernel_mutator_set_hash: Digest,
+    },
+
+    #[error("unknown typescript: {0}")]
+    UnknownTypeScript(Digest),
+
+    #[error("invalid type script: {0}")]
+    InvalidTypeScript(Digest),
+
+    #[error("removal records generated from witness do not match transaction kernel inputs")]
+    RemovalRecordsMismatch {
+        witnessed_removal_record_hashes: Vec<Digest>,
+        kernel_removal_record_hashes: Vec<Digest>,
+    },
+
+    #[error("transaction mutator set does not match witness mutator set")]
+    MutatorSetMismatch {
+        witness_mutator_set_hash: Digest,
+        transaction_mutator_set_hash: Digest,
+    },
+
+    // catch-all error, eg for anyhow errors
+    #[error("transaction could not be created.  reason: {0}")]
+    Failed(String),
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]

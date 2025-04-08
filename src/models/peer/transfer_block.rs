@@ -114,6 +114,7 @@ mod test {
             &genesis,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).random(),
+            network,
         )
         .await;
 

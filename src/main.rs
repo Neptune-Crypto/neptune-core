@@ -39,7 +39,8 @@ pub fn main() -> Result<()> {
             set_up_logger();
         }
 
-        neptune_cash::initialize(args).await
+        let mut main_loop_handler = neptune_cash::initialize(args).await?;
+        main_loop_handler.run().await
     });
 
     tokio_runtime.shutdown_timeout(tokio::time::Duration::from_secs(10));

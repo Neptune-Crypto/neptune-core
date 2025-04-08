@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
@@ -39,6 +40,8 @@ impl From<&[LabelledInstruction]> for LockScript {
 }
 
 impl LockScript {
+    const BURN_ERROR: i128 = 1_000_300;
+
     pub fn new(program: Program) -> Self {
         Self { program }
     }
@@ -54,6 +57,15 @@ impl LockScript {
 
     pub fn hash(&self) -> Digest {
         self.program.hash()
+    }
+
+    /// A lock script that is guaranteed to fail
+    pub(crate) fn burn() -> Self {
+        Self {
+            program: triton_program! {
+                push 0 assert error_id {Self::BURN_ERROR}
+            },
+        }
     }
 }
 
@@ -146,7 +158,7 @@ impl LockScriptAndWitness {
     pub(crate) async fn prove(
         &self,
         public_input: PublicInput,
-        triton_vm_job_queue: &TritonVmJobQueue,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);

@@ -10,6 +10,7 @@ use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
+use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
@@ -103,6 +104,13 @@ impl UpdateWitness {
         // update nondeterminism to account for verifying one STARK proof
         let claim = Claim::new(SingleProof.program().hash())
             .with_input(self.old_kernel_mast_hash.reversed().values().to_vec());
+
+        // this check is needed for regtest mode, to prevent a panic
+        // because regtest mode uses mock (empty) proofs.
+        if !triton_vm::verify(Stark::default(), &claim, &self.old_proof) {
+            tracing::warn!("attempting to update invalid transaction ...");
+            return;
+        }
         StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
             nondeterminism,
             &self.old_proof,
@@ -919,7 +927,7 @@ pub(crate) mod test {
             .unwrap();
         let old_proof = SingleProof::produce(
             &old_pw,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -985,7 +993,7 @@ pub(crate) mod test {
         );
         let old_proof = SingleProof::produce(
             &primitive_witness,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await

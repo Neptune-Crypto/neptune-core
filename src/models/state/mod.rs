@@ -8,7 +8,11 @@ pub mod mining_status;
 pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;
-pub mod transaction_kernel_id;
+pub(crate) mod transaction_kernel_id;
+pub(crate) mod tx_creation_artifacts;
+
+#[cfg(test)]
+pub(crate) mod tx_creation_config;
 pub mod tx_proving_capability;
 pub mod wallet;
 
@@ -18,6 +22,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -32,18 +37,15 @@ use mining_status::ComposingWorkInfo;
 use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
-use num_traits::CheckedSub;
 use num_traits::Zero;
 use tasm_lib::triton_vm::prelude::*;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
-use transaction_details::TransactionDetails;
 use transaction_kernel_id::TransactionKernelId;
 use twenty_first::math::digest::Digest;
+use tx_creation_artifacts::TxCreationArtifacts;
 use tx_proving_capability::TxProvingCapability;
-use wallet::address::ReceivingAddress;
-use wallet::address::SpendingKey;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -51,7 +53,6 @@ use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
-use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::peer::handshake_data::HandshakeData;
@@ -60,33 +61,30 @@ use super::peer::transfer_block::TransferBlock;
 use super::peer::SyncChallenge;
 use super::peer::SyncChallengeResponse;
 use super::proof_abstractions::timestamp::Timestamp;
+use crate::api;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
+use crate::locks::tokio::AtomicRwReadGuard;
+use crate::locks::tokio::AtomicRwWriteGuard;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
-use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposalRejectError;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::transaction_output::TxOutput;
-use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::models::state::wallet::transaction_input::TxInput;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
+use crate::RPCServerToMain;
 use crate::VERSION;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
@@ -150,16 +148,21 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-    vm_job_queue: TritonVmJobQueue,
+    // holding this sender here enables it be used by the tx_initiator rust API
+    // for broadcasting Tx as well as the RPC API.
+    // (we might consider renaming the channel.)
+    rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
 impl GlobalStateLock {
+    /// the key to the watery kingdom.
     pub fn new(
         wallet_state: WalletState,
         chain: BlockchainState,
         net: NetworkingState,
         cli: cli_args::Args,
         mempool: Mempool,
+        rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
     ) -> Self {
         let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool);
         let global_state_lock = sync_tokio::AtomicRw::from((
@@ -170,17 +173,8 @@ impl GlobalStateLock {
         Self {
             global_state_lock,
             cli,
-            vm_job_queue: TritonVmJobQueue::start(),
+            rpc_server_to_main_tx,
         }
-    }
-
-    /// returns reference-counted clone of the triton vm job queue.
-    ///
-    /// callers should execute resource intensive triton-vm tasks in this
-    /// queue to avoid running simultaneous tasks that could exceed hardware
-    /// capabilities.
-    pub(crate) fn vm_job_queue(&self) -> &TritonVmJobQueue {
-        &self.vm_job_queue
     }
 
     // check if mining
@@ -224,7 +218,18 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.flush_databases().await
     }
 
+    /// access the public Api in mutable context
+    pub fn api_mut(&mut self) -> api::Api {
+        self.clone().into()
+    }
+
+    /// access the public Api type in immutable context
+    pub fn api(&self) -> api::Api {
+        self.clone().into()
+    }
+
     /// Set tip to a block that we composed.
+    #[cfg(test)]
     pub async fn set_new_self_composed_tip(
         &mut self,
         new_block: Block,
@@ -264,11 +269,68 @@ impl GlobalStateLock {
         &self.cli
     }
 
+    /// retrieve sender for channel from RPC to main loop
+    ///
+    /// note that the tx_initiator API now uses this sender also.
+    pub fn rpc_server_to_main_tx(&self) -> tokio::sync::mpsc::Sender<RPCServerToMain> {
+        self.rpc_server_to_main_tx.clone()
+    }
+
     /// Test helper function for fine control of CLI parameters.
     #[cfg(test)]
     pub async fn set_cli(&mut self, cli: cli_args::Args) {
         self.lock_guard_mut().await.cli = cli.clone();
         self.cli = cli;
+    }
+
+    /// stores/records a transaction into local state (mempool and wallet)
+    pub async fn record_transaction(&mut self, tx_artifacts: &TxCreationArtifacts) -> Result<()> {
+        // verifies that:
+        //  1. Self::network matches provided Network.
+        //  2. Transaction and TransactionDetails match.
+        //  3. Transaction proof is valid, and thus the Tx itself is valid.
+        tx_artifacts.verify(self.cli().network).await?;
+
+        // clone is cheap as fields are Arc<T>
+        let transaction = tx_artifacts.transaction.clone();
+        let details = tx_artifacts.details.clone();
+
+        // acquire write-lock
+        let mut gsm = self.lock_guard_mut().await;
+
+        let utxos_sent_to_self = gsm
+            .wallet_state
+            .extract_expected_utxos(details.tx_outputs.iter(), UtxoNotifier::Myself);
+
+        // if the tx created offchain expected_utxos we must inform wallet.
+        if !utxos_sent_to_self.is_empty() {
+            tracing::debug!("add expected utxos");
+
+            // Inform wallet of any expected incoming utxos.  note that this
+            // mutates global state.
+            gsm.wallet_state
+                .add_expected_utxos(utxos_sent_to_self)
+                .await;
+        }
+
+        tracing::debug!("add sent-transaction to wallet.");
+
+        // inform wallet about the details of this sent transaction, so it
+        // can group inputs and outputs together, eg for history purposes.
+        let tip_digest = gsm.chain.light_state().hash();
+        gsm.wallet_state
+            .add_sent_transaction((details.as_ref(), tip_digest).into())
+            .await;
+
+        // insert transaction into mempool
+        // todo: we should use Arc<Tx> in mempool to avoid cloning large Tx.
+        gsm.mempool_insert((*transaction).clone(), TransactionOrigin::Own)
+            .await;
+
+        tracing::debug!("flush dbs");
+        gsm.flush_databases().await.expect("flushed DBs");
+
+        Ok(())
     }
 }
 
@@ -284,6 +346,217 @@ impl DerefMut for GlobalStateLock {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.global_state_lock
     }
+}
+
+/// abstracts over lock acquisition types for [GlobalStateLock]
+///
+/// this enables methods to be written that can accept whatever
+/// the caller has.
+///
+/// such generic methods can be called in series to share an already
+/// acquired lock-guard, or to each acquire its own lock-guard
+/// in the case of `Lock` variant.
+///
+/// Example usage:
+///
+/// ```rust
+/// use neptune_cash::models::state::GlobalState;
+/// use neptune_cash::models::state::GlobalStateLock;
+/// use neptune_cash::api::export::StateLock;
+/// fn worker(gs: &GlobalState, truth: bool) {
+///    // do something with gs and truth.
+/// }
+///
+/// // a callee that accepts &StateLock
+/// async fn callee(state_lock: &StateLock<'_>, truth: bool) {
+///     match state_lock {
+///        StateLock::Lock(gsl) => worker(&*gsl.lock_guard().await, truth),
+///        StateLock::ReadGuard(gs) => worker(&gs, truth),
+///        StateLock::WriteGuard(gs) => worker(&gs, truth),
+///    }
+/// }
+///
+/// // a caller that uses `Lock` variant
+/// async fn caller_1(gsl: GlobalStateLock) {
+///     // read-lock will be acquired each call.
+///     callee(&gsl.clone().into(), true).await;
+///     callee(&gsl.clone().into(), false).await;
+/// }
+///
+/// // a caller that uses `ReadLock` variant
+/// async fn caller_2(gsl: GlobalStateLock) {
+///     // read-lock is acquired only once.
+///     let sl = StateLock::from(gsl.lock_guard().await);
+///     callee(&sl, true).await;
+///     callee(&sl, false).await;
+/// }
+///
+/// // a caller that uses `WriteLock` variant
+/// async fn caller_3(mut gsl: GlobalStateLock) {
+///     // write-lock is acquired only once.
+///     let sl = StateLock::from(gsl.lock_guard_mut().await);
+///     callee(&sl, true).await;
+///     callee(&sl, false).await;
+/// }
+///
+/// // a caller that uses `ReadLock` variant and calls fn that accept `&GlobalState`
+/// async fn caller_4(gsl: GlobalStateLock) {
+///     // read-lock is acquired only once.
+///     let sl = StateLock::from(gsl.lock_guard().await);
+///     callee(&sl, true).await;
+///     callee(&sl, false).await;
+///
+///     // we can pass &GlobalState directly.
+///     worker(sl.gs(), true);
+///
+///     // convert back into a read-guard
+///     let gs = sl.into_read_guard();
+///     worker(&gs, false);
+/// }
+/// ```
+///
+/// example usage as callee: see source of [TxOutputListBuilder::build()](crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder::build())
+///
+/// advanced usage as caller: see source of [TransactionSender::send()](crate::api::tx_initiation::send::TransactionSender::send())
+#[derive(Debug)]
+pub enum StateLock<'a> {
+    /// holds an instance GlobalStateLock. can be used to
+    Lock(GlobalStateLock),
+    ReadGuard(AtomicRwReadGuard<'a, GlobalState>),
+    WriteGuard(AtomicRwWriteGuard<'a, GlobalState>),
+}
+
+impl From<GlobalStateLock> for StateLock<'_> {
+    fn from(g: GlobalStateLock) -> Self {
+        Self::Lock(g)
+    }
+}
+
+impl From<&GlobalStateLock> for StateLock<'_> {
+    fn from(g: &GlobalStateLock) -> Self {
+        Self::Lock(g.clone()) // cheap Arc clone.
+    }
+}
+
+impl<'a> From<AtomicRwReadGuard<'a, GlobalState>> for StateLock<'a> {
+    fn from(g: AtomicRwReadGuard<'a, GlobalState>) -> Self {
+        Self::ReadGuard(g)
+    }
+}
+
+impl<'a> From<AtomicRwWriteGuard<'a, GlobalState>> for StateLock<'a> {
+    fn from(g: AtomicRwWriteGuard<'a, GlobalState>) -> Self {
+        Self::WriteGuard(g)
+    }
+}
+
+impl<'a> StateLock<'a> {
+    /// instantiates a `StateLock::ReadGuard`
+    pub async fn read_guard(gsl: &'a GlobalStateLock) -> Self {
+        Self::ReadGuard(gsl.lock_guard().await)
+    }
+
+    /// instantiates a `StateLock::WriteGuard`
+    pub async fn write_guard(gsl: &'a mut GlobalStateLock) -> Self {
+        Self::WriteGuard(gsl.lock_guard_mut().await)
+    }
+
+    /// returns a `GlobalState` reference.
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// `Lock` variant, and a panic will occur if this happens.
+    pub fn gs(&self) -> &GlobalState {
+        match self {
+            Self::ReadGuard(g) => g,
+            Self::WriteGuard(g) => g,
+            Self::Lock(_) => panic!("wrong usage: not a guard"),
+        }
+    }
+
+    /// converts back into `GlobalStateLock`
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// variant other than `Lock`. A panic will occur if this happens.
+    pub fn into_lock(self) -> GlobalStateLock {
+        match self {
+            Self::Lock(g) => g,
+            _ => panic!("wrong usage: not a lock"),
+        }
+    }
+
+    /// converts back into `AtomicRwReadGuard`
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// variant other than `ReadGuard`. A panic will occur if this happens.
+    pub fn into_read_guard(self) -> AtomicRwReadGuard<'a, GlobalState> {
+        match self {
+            Self::ReadGuard(g) => g,
+            _ => panic!("wrong usage: not a read guard"),
+        }
+    }
+
+    /// converts back into `AtomicRwWriteGuard`
+    ///
+    /// panics: it is wrong-usage to call this method on a
+    /// variant other than `WriteGuard`. A panic will occur if this happens.
+    pub fn into_write_guard(self) -> AtomicRwWriteGuard<'a, GlobalState> {
+        match self {
+            Self::WriteGuard(g) => g,
+            _ => panic!("wrong usage: not a write guard"),
+        }
+    }
+
+    /// returns present blockchain tip block.
+    pub async fn tip(&self) -> Arc<Block> {
+        match self {
+            Self::Lock(gsl) => gsl.lock_guard().await.chain.light_state_clone(),
+            Self::WriteGuard(gsm) => gsm.chain.light_state_clone(),
+            Self::ReadGuard(gs) => gs.chain.light_state_clone(),
+        }
+    }
+
+    /// returns present blockchain tip block.
+    pub fn cli(&self) -> &cli_args::Args {
+        match self {
+            Self::Lock(gsl) => gsl.cli(),
+            Self::WriteGuard(gsm) => gsm.cli(),
+            Self::ReadGuard(gs) => gs.cli(),
+        }
+    }
+
+    pub async fn with<F, R, Args>(&self, func: F, args: Args) -> R
+    where
+        F: FnOnce(&GlobalState, Args) -> R,
+    {
+        match self {
+            StateLock::Lock(gsl) => {
+                let gs = gsl.lock_guard().await;
+                func(&gs, args)
+            }
+            StateLock::ReadGuard(guard) => func(guard, args),
+            StateLock::WriteGuard(guard) => func(guard, args),
+        }
+    }
+
+    pub async fn with_mut<F, R, Args>(&mut self, func: F, args: Args) -> R
+    where
+        F: FnOnce(&mut GlobalState, Args) -> R,
+    {
+        match self {
+            StateLock::Lock(gsl) => {
+                let mut gsm = gsl.lock_guard_mut().await;
+                func(&mut gsm, args)
+            }
+            StateLock::WriteGuard(guard) => func(&mut *guard, args),
+            StateLock::ReadGuard(_) => {
+                panic!("with_mut can only be used on Lock or WriteGuard variants.")
+            }
+        }
+    }
+
+    // for calling async callbacks, see macros:
+    //  state_lock_call_async
+    //  state_lock_call_mut_async
 }
 
 /// `GlobalState` handles all state of a Neptune node that is shared across its tasks.
@@ -308,6 +581,22 @@ pub struct GlobalState {
 
     /// The `mining_state` can be updated by main task, mining task, or RPC server.
     pub(crate) mining_state: MiningState,
+}
+
+impl Drop for GlobalState {
+    fn drop(&mut self) {
+        tracing::debug!("spawning flush db thread");
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    tracing::info!("GlobalState is dropping. flushing database");
+                    self.flush_databases().await
+                })
+                .unwrap();
+            });
+        });
+    }
 }
 
 impl GlobalState {
@@ -581,351 +870,20 @@ impl GlobalState {
         history
     }
 
-    /// Generate a change UTXO to ensure that the difference in input amount
-    /// and output amount goes back to us. Return the UTXO in a format compatible
-    /// with claiming it later on.
-    //
-    // "Later on" meaning: as an [ExpectedUtxo].
-    pub fn create_change_output(
+    /// retrieves all spendable inputs in the wallet as of the present tip.
+    ///
+    /// excludes utxos:
+    ///   + that are timelocked in the future
+    ///   + that are unspendable (no spending key)
+    ///   + that are already spent in the mempool
+    ///
+    /// note: ordering of the returned `TxInput` is undefined.
+    pub async fn wallet_spendable_inputs(
         &self,
-        change_amount: NativeCurrencyAmount,
-        change_key: SpendingKey,
-        change_utxo_notify_method: UtxoNotificationMedium,
-    ) -> Result<TxOutput> {
-        let Some(own_receiving_address) = change_key.to_address() else {
-            bail!("Cannot create change output when supplied spending key has no corresponding address.");
-        };
-
-        let receiver_digest = own_receiving_address.privacy_digest();
-        let change_sender_randomness = self.wallet_state.wallet_entropy.generate_sender_randomness(
-            self.chain.light_state().kernel.header.height,
-            receiver_digest,
-        );
-
-        let owned = true;
-        let change_output = match change_utxo_notify_method {
-            UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency(
-                change_amount,
-                change_sender_randomness,
-                own_receiving_address,
-                owned,
-            ),
-            UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
-                change_amount,
-                change_sender_randomness,
-                own_receiving_address,
-                owned,
-            ),
-        };
-
-        Ok(change_output)
-    }
-
-    /// generates TxOutputList from a list of address:amount pairs (outputs).
-    ///
-    /// This is a helper method for generating the `TxOutputList` that
-    /// is required by [Self::create_transaction()].
-    ///
-    /// Each output may use either `OnChain` or `OffChain` notifications.
-    ///
-    /// If a different behavior is desired, the TxOutputList can be
-    /// constructed manually.
-    pub fn generate_tx_outputs(
-        &self,
-        outputs: impl IntoIterator<Item = (ReceivingAddress, NativeCurrencyAmount)>,
-        owned_utxo_notify_medium: UtxoNotificationMedium,
-        unowned_utxo_notify_medium: UtxoNotificationMedium,
-    ) -> TxOutputList {
-        let block_height = self.chain.light_state().header().height;
-
-        // Convert outputs.  [address:amount] --> TxOutputList
-        let tx_outputs: Vec<_> = outputs
-            .into_iter()
-            .map(|(address, amount)| {
-                let sender_randomness = self
-                    .wallet_state
-                    .wallet_entropy
-                    .generate_sender_randomness(block_height, address.privacy_digest());
-
-                // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
-                // based on whether the address belongs to our wallet or not
-                TxOutput::auto(
-                    &self.wallet_state,
-                    address,
-                    amount,
-                    sender_randomness,
-                    owned_utxo_notify_medium,
-                    unowned_utxo_notify_medium,
-                )
-            })
-            .collect();
-
-        tx_outputs.into()
-    }
-
-    /// creates a Transaction.
-    ///
-    /// This API provides a simple-to-use interface for creating a transaction.
-    /// [Utxo](crate::models::blockchain::transaction::utxo::Utxo) inputs are automatically chosen and a change output is
-    /// automatically created, such that:
-    ///
-    ///   change = sum(inputs) - sum(outputs) - fee.
-    ///
-    /// The `tx_outputs` parameter should normally be generated with
-    /// [Self::generate_tx_outputs()] which determines which outputs should be
-    /// `OnChain` or `OffChain`.
-    ///
-    /// The return value is the created transaction and some change UTXO with
-    /// associated data or none if the transaction is already balanced. The
-    /// associated data allows the caller to expect and later claim the change
-    /// UTXO.
-    ///
-    /// After this call returns, it is the caller's responsibility to inform the
-    /// wallet of any returned ExpectedUtxo, ie `OffChain` secret
-    /// notifications, for utxos that match wallet keys.  Failure to do so can
-    /// result in loss of funds!
-    ///
-    /// The `change_utxo_notify_method` parameter should normally be
-    /// [UtxoNotificationMedium::OnChain] for safest transfer.
-    ///
-    /// The change_key should normally be a [SpendingKey::Symmetric] in
-    /// order to save blockchain space compared to a regular address.
-    ///
-    /// Note that `create_transaction()` does not modify any state and does not
-    /// require acquiring write lock.  This is important because internally it
-    /// calls prove() which is a very lengthy operation.
-    ///
-    /// Example:
-    ///
-    /// ```text
-    ///
-    /// // obtain a change key
-    /// // note that this is a SymmetricKey, not a regular (Generation) address.
-    /// let change_key = global_state_lock
-    ///     .lock_guard_mut()
-    ///     .await
-    ///     .wallet_state
-    ///     .wallet_secret
-    ///     .next_unused_spending_key(KeyType::Symmetric).await;
-    ///
-    /// // on-chain notification for all utxos destined for our wallet.
-    /// let change_notify_medium = UtxoNotificationMedium::OnChain;
-    ///
-    /// // obtain read lock
-    /// let state = self.state.lock_guard().await;
-    ///
-    /// // generate the tx_outputs
-    /// let mut tx_outputs = state.generate_tx_outputs(outputs, change_notify_medium)?;
-    ///
-    /// // Create the transaction
-    /// let (transaction, maybe_change_utxo) = state
-    ///     .create_transaction(
-    ///         tx_outputs,                     // all outputs except `change`
-    ///         change_key,                     // send `change` to this key
-    ///         change_notify_medium,           // how to notify about `change` utxo
-    ///         NativeCurrencyAmount::coins(2), // fee
-    ///         Timestamp::now(),               // Timestamp of transaction
-    ///     )
-    ///     .await?;
-    ///
-    /// // drop read lock.
-    /// drop(state);
-    ///
-    /// // Inform wallet of any expected incoming utxos.
-    /// if let Some(change_utxo) = maybe_change_utxo {
-    ///     state
-    ///         .lock_guard_mut()
-    ///         .await
-    ///         .wallet_state.add_expected_utxos_to_wallet(change_utxo.expected_utxo())
-    ///         .await?;
-    /// }
-    /// ```
-    pub async fn create_transaction(
-        &self,
-        tx_outputs: TxOutputList,
-        change_key: SpendingKey,
-        change_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
         timestamp: Timestamp,
-        triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<(Transaction, Option<TxOutput>)> {
-        self.create_transaction_with_prover_capability(
-            tx_outputs,
-            change_key,
-            change_utxo_notify_medium,
-            fee,
-            timestamp,
-            self.proving_capability(),
-            triton_vm_job_queue,
-        )
-        .await
-        .map(|(tx, _tx_details, output)| (tx, output))
-    }
-
-    /// Variant of [Self::create_transaction] that allows caller to specify
-    /// prover capability. [Self::create_transaction] is the preferred interface
-    /// for anything but tests.
-    #[expect(clippy::too_many_arguments)]
-    pub(crate) async fn create_transaction_with_prover_capability(
-        &self,
-        mut tx_outputs: TxOutputList,
-        change_key: SpendingKey,
-        change_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
-        timestamp: Timestamp,
-        prover_capability: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<(Transaction, TransactionDetails, Option<TxOutput>)> {
-        // TODO: Attempt to simplify method interface somehow, maybe by moving
-        // it to GlobalStateLock?
-        let tip = self.chain.light_state();
-        let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after();
-        let tip_digest = tip.hash();
-
-        // 1. create/add change output if necessary.
-        let total_spend = tx_outputs.total_native_coins() + fee;
-
-        // collect spendable inputs
-        let tx_inputs = self
-            .wallet_state
-            .allocate_sufficient_input_funds(
-                total_spend,
-                tip_digest,
-                &tip_mutator_set_accumulator,
-                timestamp,
-            )
-            .await?;
-
-        let total_spendable = tx_inputs
-            .iter()
-            .map(|x| x.utxo.get_native_currency_amount())
-            .sum();
-
-        // Add change, if required to balance tx.
-        let mut maybe_change_output = None;
-        if total_spend < total_spendable {
-            let amount = total_spendable.checked_sub(&total_spend).ok_or_else(|| {
-                anyhow::anyhow!("overflow subtracting total_spend from input_amount")
-            })?;
-
-            let change_utxo =
-                self.create_change_output(amount, change_key, change_utxo_notify_medium)?;
-            tx_outputs.push(change_utxo.clone());
-            maybe_change_output = Some(change_utxo);
-        }
-
-        let transaction_details = TransactionDetails::new_without_coinbase(
-            tx_inputs,
-            tx_outputs.to_owned(),
-            fee,
-            timestamp,
-            tip_mutator_set_accumulator,
-        )?;
-
-        // note: if this task is cancelled, the proving job will continue
-        // because TritonVmJobOptions::cancel_job_rx is None.
-        // see how compose_task handles cancellation in mine_loop.
-
-        // 2. Create the transaction
-        let transaction = Self::create_raw_transaction(
-            &transaction_details,
-            prover_capability,
-            triton_vm_job_queue,
-            (
-                TritonVmJobPriority::High,
-                self.cli.max_log2_padded_height_for_proofs,
-            )
-                .into(),
-        )
-        .await?;
-
-        Ok((transaction, transaction_details, maybe_change_output))
-    }
-
-    /// creates a Transaction.
-    ///
-    /// This API provides the caller complete control over selection of inputs
-    /// and outputs.  When fine grained control is not required,
-    /// [Self::create_transaction()] is easier to use and should be preferred.
-    ///
-    /// It is the caller's responsibility to provide inputs and outputs such
-    /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
-    ///
-    /// Note that this means the caller must calculate the `change` amount if any
-    /// and provide an output for the change.
-    ///
-    /// The `tx_outputs` parameter should normally be generated with
-    /// [Self::generate_tx_outputs()] which determines which outputs should be
-    /// notified `OnChain` or `OffChain`.
-    ///
-    /// After this call returns, it is the caller's responsibility to inform the
-    /// wallet of any returned [ExpectedUtxo] for utxos that match wallet keys.
-    /// Failure to do so can result in loss of funds!
-    ///
-    /// Note that `create_raw_transaction()` does not modify any state and does
-    /// not require acquiring write lock.  This is important because internally
-    /// it calls prove() which is a very lengthy operation.
-    ///
-    /// Example:
-    ///
-    /// See the implementation of [Self::create_transaction()].
-    pub(crate) async fn create_raw_transaction(
-        transaction_details: &TransactionDetails,
-        proving_power: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
-        proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Transaction> {
-        // note: this executes the prover which can take a very
-        //       long time, perhaps minutes.  The `await` here, should avoid
-        //       block the tokio executor and other async tasks.
-        Self::create_transaction_from_data_worker(
-            transaction_details,
-            proving_power,
-            triton_vm_job_queue,
-            proof_job_options,
-        )
-        .await
-    }
-
-    // note: this executes the prover which can take a very
-    //       long time, perhaps minutes. It should never be
-    //       called directly.
-    //       Use create_transaction_from_data() instead.
-    //
-    async fn create_transaction_from_data_worker(
-        transaction_details: &TransactionDetails,
-        proving_power: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
-        proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Transaction> {
-        let primitive_witness = PrimitiveWitness::from_transaction_details(transaction_details);
-
-        debug!("primitive witness for transaction: {}", primitive_witness);
-
-        info!(
-            "Start: generate proof for {}-in {}-out transaction",
-            primitive_witness.input_utxos.utxos.len(),
-            primitive_witness.output_utxos.utxos.len()
-        );
-        let kernel = primitive_witness.kernel.clone();
-        let proof = match proving_power {
-            TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
-            TxProvingCapability::LockScript => todo!(),
-            TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(
-                    &primitive_witness,
-                    triton_vm_job_queue,
-                    proof_job_options,
-                )
-                .await?,
-            ),
-            TxProvingCapability::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, triton_vm_job_queue, proof_job_options)
-                    .await?,
-            ),
-        };
-
-        Ok(Transaction { kernel, proof })
+    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+        let wallet_status = self.get_wallet_status_for_tip().await;
+        self.wallet_state.spendable_inputs(wallet_status, timestamp)
     }
 
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
@@ -1505,7 +1463,7 @@ impl GlobalState {
             .handle_mempool_events(mempool_events)
             .await;
 
-        self.chain.light_state_mut().set_block(new_block);
+        *self.chain.light_state_mut() = std::sync::Arc::new(new_block);
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip. Also reset set of exported block proposals.
@@ -1678,7 +1636,7 @@ impl GlobalState {
     }
 
     #[inline]
-    fn cli(&self) -> &cli_args::Args {
+    pub fn cli(&self) -> &cli_args::Args {
         &self.cli
     }
 
@@ -1747,10 +1705,17 @@ mod global_state_tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
+    use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+    use crate::models::state::wallet::address::BaseSpendingKey;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_block;
@@ -1897,36 +1862,34 @@ mod global_state_tests {
         let launch = genesis_block.kernel.header.timestamp;
         let six_months = Timestamp::months(6);
         let one_month = Timestamp::months(1);
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(bob_spending_key.into())
+            .with_prover_capability(TxProvingCapability::ProofCollection);
         assert!(bob
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 tx_outputs.clone(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy()
+                config.clone(),
             )
             .await
             .is_err());
 
         // one month after though, we should be
-        let (tx, _, _change_output) = bob
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+        let tx = bob
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 tx_outputs,
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
+                config.clone(),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         assert!(tx.is_valid().await);
 
         assert_eq!(
@@ -1953,20 +1916,18 @@ mod global_state_tests {
             output_utxos.push(output_utxo);
         }
 
-        let (new_tx, _, _change) = bob
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+        let new_tx = bob
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 output_utxos.into(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
+                config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         assert!(new_tx.is_valid().await);
         assert_eq!(
             4,
@@ -2216,7 +2177,7 @@ mod global_state_tests {
                 .get_known_raw_hash_lock_keys()
                 .collect_vec();
             assert_eq!(
-                vec![SpendingKey::RawHashLock(HashLockKey::from_preimage(
+                vec![BaseSpendingKey::RawHashLock(HashLockKey::from_preimage(
                     block1_guesser_preimage
                 ))],
                 cached_hash_lock_keys,
@@ -2678,27 +2639,33 @@ mod global_state_tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Generation)
-            .await
-            .unwrap();
-        let (tx_to_alice_and_bob, _, maybe_change_output) = premine_receiver
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
-                [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()]
-                    .concat()
-                    .into(),
-                genesis_key,
-                UtxoNotificationMedium::OffChain,
+            .await;
+        let config_alice_and_bob = TxCreationConfig::default()
+            .recover_change_off_chain(genesis_key)
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let tx_outputs_for_alice_and_bob =
+            [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()].concat();
+        let artifacts_alice_and_bob = premine_receiver
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                tx_outputs_for_alice_and_bob.clone().into(),
                 fee,
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config_alice_and_bob,
             )
             .await
             .unwrap();
-        let Some(change_output) = maybe_change_output else {
-            panic!("Expected change output to genesis receiver");
-        };
+        let tx_to_alice_and_bob: Transaction = artifacts_alice_and_bob.transaction.into();
+        assert_eq!(
+            tx_outputs_for_alice_and_bob.len() + 1,
+            artifacts_alice_and_bob.details.tx_outputs.len(),
+            "Expected change output to genesis receiver"
+        );
+        let change_output = (*artifacts_alice_and_bob.details.tx_outputs)
+            .clone()
+            .pop()
+            .unwrap();
 
         assert!(tx_to_alice_and_bob.is_valid().await);
         assert!(tx_to_alice_and_bob
@@ -2713,7 +2680,7 @@ mod global_state_tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 change_output.utxo(),
                 change_output.sender_randomness(),
-                genesis_key.privacy_preimage().unwrap(),
+                genesis_key.privacy_preimage(),
                 UtxoNotifier::Myself,
             ))
             .await;
@@ -2722,7 +2689,7 @@ mod global_state_tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2736,13 +2703,17 @@ mod global_state_tests {
             block_transaction,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
 
-        assert!(block_1.is_valid(&genesis_block, in_seven_months).await);
+        assert!(
+            block_1
+                .is_valid(&genesis_block, in_seven_months, network)
+                .await
+        );
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -2756,7 +2727,7 @@ mod global_state_tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(tx_outputs_for_alice.into(), UtxoNotifier::Cli);
+            .extract_expected_utxos(tx_outputs_for_alice.iter(), UtxoNotifier::Cli);
         alice
             .lock_guard_mut()
             .await
@@ -2768,7 +2739,7 @@ mod global_state_tests {
             .lock_guard()
             .await
             .wallet_state
-            .extract_expected_utxos(tx_outputs_for_bob.into(), UtxoNotifier::Cli);
+            .extract_expected_utxos(tx_outputs_for_bob.iter(), UtxoNotifier::Cli);
         bob.lock_guard_mut()
             .await
             .wallet_state
@@ -2860,22 +2831,24 @@ mod global_state_tests {
         // state is being updated correctly with new blocks; not the
         // use-`ProofCollection`-instead-of-`SingleProof` functionality.
         // Weaker machines need to use the proof server.
-        let (tx_from_alice, _, maybe_change_for_alice) = alice
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+        let config_alice = TxCreationConfig::default()
+            .recover_change_off_chain(alice_spending_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let artifacts_from_alice = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 tx_outputs_from_alice.clone().into(),
-                alice_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config_alice,
             )
             .await
             .unwrap();
-        assert!(
-            maybe_change_for_alice.is_none(),
+        let tx_from_alice = artifacts_from_alice.transaction;
+        assert_eq!(
+            tx_outputs_from_alice.len(),
+            artifacts_from_alice.details.tx_outputs.len(),
             "No change for Alice as she spent it all"
         );
 
@@ -2903,23 +2876,25 @@ mod global_state_tests {
                 false,
             ),
         ];
-        let (tx_from_bob, _, maybe_change_for_bob) = bob
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+        let config_bob = TxCreationConfig::default()
+            .recover_change_off_chain(bob_spending_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let artifacts_from_bob = bob
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 tx_outputs_from_bob.clone().into(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config_bob,
             )
             .await
             .unwrap();
+        let tx_from_bob = artifacts_from_bob.transaction;
 
-        assert!(
-            maybe_change_for_bob.is_none(),
+        assert_eq!(
+            tx_outputs_from_bob.len(),
+            artifacts_from_bob.details.tx_outputs.len(),
             "No change for Bob as he spent it all"
         );
 
@@ -2950,17 +2925,17 @@ mod global_state_tests {
 
         let block_transaction2 = coinbase_transaction2
             .merge_with(
-                tx_from_alice,
+                tx_from_alice.into(),
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap()
             .merge_with(
-                tx_from_bob,
+                tx_from_bob.into(),
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2975,12 +2950,12 @@ mod global_state_tests {
             block_transaction2,
             in_eight_months,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
-        assert!(block_2.is_valid(&block_1, in_eight_months).await);
+        assert!(block_2.is_valid(&block_1, in_eight_months, network).await);
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
@@ -3002,7 +2977,8 @@ mod global_state_tests {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let block1 = fake_valid_successor_for_tests(&genesis_block, now, Default::default()).await;
+        let block1 =
+            fake_valid_successor_for_tests(&genesis_block, now, Default::default(), network).await;
 
         global_state_lock.set_new_tip(block1).await.unwrap();
 
@@ -3012,7 +2988,7 @@ mod global_state_tests {
                 .await
                 .chain
                 .light_state()
-                .is_valid(&genesis_block, now)
+                .is_valid(&genesis_block, now, network)
                 .await,
             "light state tip must be a valid block"
         );
@@ -3024,7 +3000,7 @@ mod global_state_tests {
                 .archival_state()
                 .get_tip()
                 .await
-                .is_valid(&genesis_block, now)
+                .is_valid(&genesis_block, now, network)
                 .await,
             "archival state tip must be a valid block"
         );
@@ -3662,9 +3638,19 @@ mod global_state_tests {
         }
     }
 
+    // note: removed test have_to_specify_change_policy()
+    // because ChangePolicy::default() now exists, specifically
+    // so callers do NOT have to specify change policy unless
+    // they want something different.
+    //
+    // the default is: RecoverToNextUnusedKey
+    //    key-type: symmetric, medium: onchain,
+
     /// tests that pertain to restoring a wallet from seed-phrase
     /// and comparing onchain vs offchain notification methods.
     mod restore_wallet {
+        use num_traits::CheckedSub;
+
         use super::*;
         use crate::mine_loop::create_block_transaction_from;
         use crate::mine_loop::TxMergeOrigin;
@@ -3802,16 +3788,11 @@ mod global_state_tests {
                     .wallet_state
                     .next_unused_spending_key(KeyType::Generation)
                     .await
-                    .unwrap()
                     .to_address()
-                    .unwrap()
             };
 
             // in alice wallet: send pre-mined funds to bob
             let block_1 = {
-                let vm_job_queue = alice_state_lock.vm_job_queue().clone();
-                // let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
-
                 // store and verify alice's initial balance from pre-mine.
                 let alice_initial_balance = alice_state_lock
                     .lock_guard()
@@ -3827,35 +3808,42 @@ mod global_state_tests {
                     .await
                     .wallet_state
                     .next_unused_spending_key(change_key_type)
-                    .await
-                    .unwrap();
+                    .await;
 
                 // create an output for bob, worth 20.
-                let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let tx_outputs = alice_state_lock.lock_guard().await.generate_tx_outputs(
-                    outputs,
-                    change_notification_medium,
+                let outputs = vec![(
+                    bob_address,
+                    alice_to_bob_amount,
                     UtxoNotificationMedium::OnChain,
-                );
+                )];
+                let tx_outputs = alice_state_lock
+                    .api()
+                    .tx_initiator()
+                    .generate_tx_outputs(outputs)
+                    .await;
+                let outputs_len = tx_outputs.len();
 
                 // create tx.  utxo_notify_method is a test param.
-                let (alice_to_bob_tx, _, maybe_change_utxo) = alice_state_lock
-                    .lock_guard()
-                    .await
-                    .create_transaction_with_prover_capability(
+                let config = TxCreationConfig::default()
+                    .recover_to_provided_key(Arc::new(alice_change_key), change_notification_medium)
+                    .with_prover_capability(TxProvingCapability::SingleProof);
+                let artifacts = alice_state_lock
+                    .api()
+                    .tx_initiator_internal()
+                    .create_transaction(
                         tx_outputs.clone(),
-                        alice_change_key,
-                        change_notification_medium,
                         alice_to_bob_fee,
                         seven_months_post_launch,
-                        TxProvingCapability::SingleProof,
-                        &vm_job_queue,
+                        config,
                     )
                     .await
                     .unwrap();
-                let Some(change_utxo) = maybe_change_utxo else {
-                    panic!("A change Tx-output was expected");
-                };
+                let alice_to_bob_tx = artifacts.transaction;
+                assert_eq!(
+                    artifacts.details.tx_outputs.len(),
+                    outputs_len + 1,
+                    "A change Tx-output was expected"
+                );
 
                 // Inform alice wallet of any expected incoming utxos.
                 // note: no-op when all utxo notifications are sent on-chain.
@@ -3864,7 +3852,7 @@ mod global_state_tests {
                     .await
                     .wallet_state
                     .extract_expected_utxos(
-                        tx_outputs.concat_with(vec![change_utxo]),
+                        artifacts.details.tx_outputs.iter(),
                         UtxoNotifier::Myself,
                     );
                 alice_state_lock
@@ -3882,7 +3870,7 @@ mod global_state_tests {
                     &charlie_state_lock,
                     seven_months_post_launch,
                     (TritonVmJobPriority::Normal, None).into(),
-                    TxMergeOrigin::ExplicitList(vec![alice_to_bob_tx]),
+                    TxMergeOrigin::ExplicitList(vec![Arc::into_inner(alice_to_bob_tx).unwrap()]),
                 )
                 .await
                 .unwrap();
@@ -3891,7 +3879,7 @@ mod global_state_tests {
                     block_1_tx,
                     seven_months_post_launch,
                     None,
-                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::dummy(),
                     TritonVmJobPriority::default().into(),
                 )
                 .await

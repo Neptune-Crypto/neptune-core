@@ -733,14 +733,14 @@ impl SyncChallengeResponse {
 
     /// Determine whether the proofs in `SyncChallengeResponse` are valid. Also
     /// checks proof-of-work.
-    pub(crate) async fn is_valid(&self, now: Timestamp) -> bool {
+    pub(crate) async fn is_valid(&self, now: Timestamp, network: Network) -> bool {
         let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
             return false;
         };
         let Ok(tip) = Block::try_from(self.tip.clone()) else {
             return false;
         };
-        if !tip.is_valid(&tip_predecessor, now).await
+        if !tip.is_valid(&tip_predecessor, now, network).await
             || !tip.has_proof_of_work(tip_predecessor.header())
         {
             return false;
@@ -767,7 +767,9 @@ impl SyncChallengeResponse {
                 return false;
             };
 
-            if !child.is_valid(&parent, now).await || !child.has_proof_of_work(parent.header()) {
+            if !child.is_valid(&parent, now, network).await
+                || !child.has_proof_of_work(parent.header())
+            {
                 return false;
             }
         }
@@ -806,6 +808,8 @@ impl SyncChallengeResponse {
                     (stop_height - start_height)
                         .try_into()
                         .expect("difference of block heights guaranteed to be non-negative"),
+                    network.target_block_interval(),
+                    network.minimum_block_time(),
                 );
                 // cpow must increase for each block, and is upward-bounded. But
                 // since response may contain duplicates, allow equality.
@@ -871,6 +875,8 @@ impl SyncChallengeResponse {
                     start.1,
                     start.2,
                     (stop.0 - start.0).try_into().unwrap(),
+                    network.target_block_interval(),
+                    network.minimum_block_time(),
                 );
                 debug!(
                     "start ({} / {} / {}) -> stop ({} / {} / {}) with max {}",
@@ -927,11 +933,17 @@ mod tests {
 
     #[tokio::test]
     async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
-        let genesis = Block::genesis(Network::Main);
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
         let mut rng = rand::rng();
         let ten_blocks: [Block; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
-            fake_valid_sequence_of_blocks_for_tests(&genesis, Timestamp::minutes(20), rng.random())
-                .await;
+            fake_valid_sequence_of_blocks_for_tests(
+                &genesis,
+                Timestamp::minutes(20),
+                rng.random(),
+                network,
+            )
+            .await;
 
         let to_pow_witness = |block: &Block| {
             BlockHeaderWithBlockHashWitness::new(

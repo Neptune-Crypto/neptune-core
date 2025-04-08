@@ -89,6 +89,17 @@ pub struct SymmetricKey {
     seed: Digest,
 }
 
+// future improvements: a strong argument can be made that this type should not
+// have any methods with outside types as parameters or return types.  for
+// example:
+//
+// pub(crate) fn generate_public_announcement(
+//     &self,
+//     utxo_notification_payload: &UtxoNotificationPayload,
+// ) -> PublicAnnouncement;
+//
+// this method is dealing with types far outside the concern of
+// a key, which means the method belongs elsewhere.
 impl SymmetricKey {
     /// instantiate `SymmetricKey` from a random seed
     pub fn from_seed(seed: Digest) -> Self {

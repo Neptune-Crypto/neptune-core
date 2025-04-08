@@ -1156,12 +1156,12 @@ mod archival_state_tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::invalid_block_with_transaction;
@@ -1349,23 +1349,28 @@ mod archival_state_tests {
 
         let tx_output_anyone_can_spend =
             TxOutput::no_notification(utxo, rng.random(), rng.random(), false);
-        let (sender_tx, _, _change_output) = alice
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+        let config = TxCreationConfig::default()
+            .recover_change_on_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let sender_tx = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 vec![tx_output_anyone_can_spend].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OnChain,
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
+                config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
-        let mock_block_2 =
-            Block::block_template_invalid_proof(&block1, sender_tx, in_seven_months, None);
+        let mock_block_2 = Block::block_template_invalid_proof(
+            &block1,
+            (*sender_tx).clone(),
+            in_seven_months,
+            None,
+        );
 
         // Remove an element from the mutator set, verify that the active window DB is updated.
         alice.set_new_tip(mock_block_2.clone()).await.unwrap();
@@ -1455,37 +1460,34 @@ mod archival_state_tests {
         let fee = NativeCurrencyAmount::zero();
 
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
-        let (big_tx, _, _) = alice
-            .lock_guard()
+        let config_1a = TxCreationConfig::default()
+            .recover_change_on_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let big_tx = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(outputs.clone().into(), fee, in_seven_months, config_1a)
             .await
-            .create_transaction_with_prover_capability(
-                outputs.clone().into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OnChain,
-                fee,
-                in_seven_months,
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
-            )
-            .await
-            .unwrap();
-        let block_1a = invalid_block_with_transaction(&genesis_block, big_tx);
+            .unwrap()
+            .transaction;
+        let block_1a = invalid_block_with_transaction(&genesis_block, (*big_tx).clone());
 
-        let (empty_tx, _, _) = alice
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
-                vec![].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OnChain,
+        let config_1b = TxCreationConfig::default()
+            .recover_change_on_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let empty_tx = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                Vec::<TxOutput>::new().into(),
                 fee,
                 in_seven_months,
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
+                config_1b,
             )
             .await
-            .unwrap();
-        let block_1b = invalid_block_with_transaction(&genesis_block, empty_tx);
+            .unwrap()
+            .transaction;
+        let block_1b = invalid_block_with_transaction(&genesis_block, (*empty_tx).clone());
 
         alice.set_new_tip(block_1a.clone()).await.unwrap();
         alice.set_new_tip(block_1b.clone()).await.unwrap();
@@ -1556,21 +1558,17 @@ mod archival_state_tests {
         let num_blocks = 30;
         for _ in 0..num_blocks {
             let timestamp = previous_block.header().timestamp + Timestamp::months(7);
-            let (tx, _, _) = alice
-                .lock_guard()
+            let config = TxCreationConfig::default()
+                .recover_change_on_chain(alice_key.into())
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let tx = alice
+                .api()
+                .tx_initiator_internal()
+                .create_transaction(outputs.clone().into(), fee, timestamp, config)
                 .await
-                .create_transaction_with_prover_capability(
-                    outputs.clone().into(),
-                    alice_key.into(),
-                    UtxoNotificationMedium::OnChain,
-                    fee,
-                    timestamp,
-                    TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
-                )
-                .await
-                .unwrap();
-            let next_block = invalid_block_with_transaction(&previous_block, tx);
+                .unwrap()
+                .transaction;
+            let next_block = invalid_block_with_transaction(&previous_block, (*tx).clone());
 
             // 2. Update archival-mutator set with produced block
             alice.set_new_tip(next_block.clone()).await.unwrap();
@@ -1802,27 +1800,27 @@ mod archival_state_tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Symmetric)
-            .await
-            .unwrap();
-        let (tx_to_alice_and_bob, _, change_utxo) = premine_rec
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+            .await;
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(change_key)
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let artifacts_alice_and_bob = premine_rec
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 [
                     receiver_data_for_alice.clone(),
                     receiver_data_for_bob.clone(),
                 ]
                 .concat()
                 .into(),
-                change_key,
-                UtxoNotificationMedium::OffChain,
                 fee,
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config,
             )
             .await
             .unwrap();
+        let tx_to_alice_and_bob = artifacts_alice_and_bob.transaction;
         println!("Generated transaction for Alice and Bob.");
 
         let (cbtx, _composer_expected_utxos) = make_coinbase_transaction_from_state(
@@ -1843,9 +1841,9 @@ mod archival_state_tests {
 
         let block_tx = cbtx
             .merge_with(
-                tx_to_alice_and_bob,
+                tx_to_alice_and_bob.into(),
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1857,7 +1855,7 @@ mod archival_state_tests {
             block_tx,
             in_seven_months,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -1865,7 +1863,11 @@ mod archival_state_tests {
         println!("Generated block");
 
         // Verify validity, without requiring valid PoW.
-        assert!(block_1.is_valid(&genesis_block, in_seven_months).await);
+        assert!(
+            block_1
+                .is_valid(&genesis_block, in_seven_months, network)
+                .await
+        );
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -1877,9 +1879,10 @@ mod archival_state_tests {
         // Expect change UTXO, as it uses offchain notifications.
         {
             let mut premine_rec = premine_rec.lock_guard_mut().await;
-            let expected_utxos = premine_rec
-                .wallet_state
-                .extract_expected_utxos(vec![change_utxo.unwrap()].into(), UtxoNotifier::Cli);
+            let expected_utxos = premine_rec.wallet_state.extract_expected_utxos(
+                artifacts_alice_and_bob.details.tx_outputs.iter(),
+                UtxoNotifier::Cli,
+            );
             assert_eq!(expected_utxos.len(), 1);
             premine_rec
                 .wallet_state
@@ -1893,7 +1896,7 @@ mod archival_state_tests {
             let mut alice_state = alice.lock_guard_mut().await;
             let expected_utxos = alice_state
                 .wallet_state
-                .extract_expected_utxos(receiver_data_for_alice.into(), UtxoNotifier::Cli);
+                .extract_expected_utxos(receiver_data_for_alice.iter(), UtxoNotifier::Cli);
             alice_state
                 .wallet_state
                 .add_expected_utxos(expected_utxos)
@@ -1904,7 +1907,7 @@ mod archival_state_tests {
             let mut bob_state = bob.lock_guard_mut().await;
             let expected_utxos = bob_state
                 .wallet_state
-                .extract_expected_utxos(receiver_data_for_bob.into(), UtxoNotifier::Cli);
+                .extract_expected_utxos(receiver_data_for_bob.iter(), UtxoNotifier::Cli);
             bob_state
                 .wallet_state
                 .add_expected_utxos(expected_utxos)
@@ -2001,22 +2004,24 @@ mod archival_state_tests {
             .wallet_entropy
             .nth_symmetric_key_for_tests(0)
             .into();
-        let (tx_from_alice, _, alice_change) = alice
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+        let config_alice = TxCreationConfig::default()
+            .recover_change_off_chain(alice_change_key)
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let artifacts_alice = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 outputs_from_alice.clone(),
-                alice_change_key,
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config_alice,
             )
             .await
             .unwrap();
-        assert!(
-            alice_change.is_none(),
+        let tx_from_alice = artifacts_alice.transaction;
+        assert_eq!(
+            outputs_from_alice.len(),
+            artifacts_alice.details.tx_outputs.len(),
             "no change when consuming entire balance"
         );
         let outputs_from_bob: TxOutputList = vec![
@@ -2047,22 +2052,24 @@ mod archival_state_tests {
             .wallet_entropy
             .nth_symmetric_key_for_tests(0)
             .into();
-        let (tx_from_bob, _, bob_change) = bob
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
+        let config_bob = TxCreationConfig::default()
+            .recover_change_off_chain(bob_change_key)
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let tx_creation_artifacts_bob = bob
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
                 outputs_from_bob.clone(),
-                bob_change_key,
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                config_bob,
             )
             .await
             .unwrap();
-        assert!(
-            bob_change.is_none(),
+        let tx_from_bob = tx_creation_artifacts_bob.transaction;
+        assert_eq!(
+            outputs_from_bob.len(),
+            tx_creation_artifacts_bob.details.tx_outputs.len(),
             "no change when consuming entire balance"
         );
 
@@ -2088,17 +2095,17 @@ mod archival_state_tests {
         .unwrap();
         let block_tx2 = cbtx2
             .merge_with(
-                tx_from_alice,
+                tx_from_alice.into(),
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap()
             .merge_with(
-                tx_from_bob,
+                tx_from_bob.into(),
                 Default::default(),
-                &TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2108,7 +2115,7 @@ mod archival_state_tests {
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
             None,
-            &TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -2119,13 +2126,15 @@ mod archival_state_tests {
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
-        assert!(block_2.is_valid(&block_1, in_seven_months).await);
+        assert!(block_2.is_valid(&block_1, in_seven_months, network).await);
 
         // Expect incoming UTXOs
         {
             let mut premine_rec = premine_rec.lock_guard_mut().await;
             let expected = premine_rec.wallet_state.extract_expected_utxos(
-                outputs_from_bob.concat_with(outputs_from_alice),
+                outputs_from_bob
+                    .concat_with(Vec::from(outputs_from_alice))
+                    .iter(),
                 UtxoNotifier::Cli,
             );
             premine_rec.wallet_state.add_expected_utxos(expected).await;
@@ -3585,6 +3594,7 @@ mod archival_state_tests {
                 &genesis_block,
                 Timestamp::now(),
                 rng.random(),
+                network,
             )
             .await;
             for block in &blocks {

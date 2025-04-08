@@ -1,41 +1,115 @@
+use std::fmt::Display;
+
 use anyhow::bail;
 use anyhow::Result;
+use itertools::Itertools;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tracing::error;
 
 use super::wallet::transaction_output::TxOutput;
-use super::wallet::unlocked_utxo::UnlockedUtxo;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
+use crate::api::tx_initiation::error::CreateTxError;
+use crate::config_models::network::Network;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-/// Information, fetched from the state of the node, required to generate a
-/// transaction.
-#[derive(Debug, Clone)]
-pub(crate) struct TransactionDetails {
-    pub tx_inputs: Vec<UnlockedUtxo>,
+/// contains the unblinded data that a [Transaction](crate::models::blockchain::transaction::Transaction) is generated from,
+/// minus the [TransactionProof](crate::models::blockchain::transaction::TransactionProof).
+///
+/// conceptually, `TransactionDetails` + `TransactionProof` --> `Transaction`.
+///
+/// or in more detail:
+///
+/// ```text
+/// TransactionDetails -> (TransactionKernel, PrimitiveWitness)
+/// (TransactionKernel, PrimitiveWitness) -> (TransactionKernel, ProofCollection)
+/// (TransactionKernel, ProofCollection) -> (TransactionKernel, SingleProof)
+/// (TransactionKernel, SingleProof) -> (TransactionKernel, SingleProof)
+/// TransactionProof = PrimitiveWitness | ProofCollection | SingleProof
+/// Transaction = TransactionKernel + TransactionProof
+/// ```
+///
+/// security: This type contains secrets (keys) and should never be shared.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionDetails {
+    pub tx_inputs: TxInputList,
     pub tx_outputs: TxOutputList,
     pub fee: NativeCurrencyAmount,
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
     pub mutator_set_accumulator: MutatorSetAccumulator,
+    pub network: Network,
+}
+
+// so we can emit a detailed log msg when sending a transaction.
+impl Display for TransactionDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"TransactionDetails:
+    timestamp: {},
+    spend_amount: {},
+    inputs_amount: {},
+    outputs_amount: {},
+    fee: {},
+    coinbase: {},
+    inputs: {},
+    outputs: {},
+    change_outputs: {},
+    owned_outputs: {},
+    network: {},
+"#,
+            self.timestamp.standard_format(),
+            self.spend_amount(),
+            self.tx_inputs.total_native_coins(),
+            self.tx_outputs.total_native_coins(),
+            self.fee,
+            self.coinbase.unwrap_or_else(|| 0.into()),
+            self.tx_inputs
+                .iter()
+                .map(|o| o.native_currency_amount())
+                .join(", "),
+            self.tx_outputs
+                .iter()
+                .map(|o| o.native_currency_amount())
+                .join(", "),
+            self.tx_outputs
+                .change_iter()
+                .map(|o| o.native_currency_amount())
+                .join(", "),
+            self.tx_outputs
+                .owned_iter()
+                .map(|o| o.native_currency_amount())
+                .join(", "),
+            self.network,
+        )
+    }
 }
 
 impl TransactionDetails {
     /// Create (`TransactionDetails` for) a nop-transaction, with no inputs and
     /// no outputs. Can be used if a merge bit needs to be flipped.
-    pub(crate) fn nop(mutator_set_accumulator: MutatorSetAccumulator, now: Timestamp) -> Self {
+    pub(crate) fn nop(
+        mutator_set_accumulator: MutatorSetAccumulator,
+        now: Timestamp,
+        network: Network,
+    ) -> Self {
         Self::fee_gobbler(
             NativeCurrencyAmount::zero(),
             Digest::default(),
             mutator_set_accumulator,
             now,
             UtxoNotifyMethod::None,
+            network,
         )
     }
 
@@ -54,6 +128,7 @@ impl TransactionDetails {
         mutator_set_accumulator: MutatorSetAccumulator,
         now: Timestamp,
         notification_method: UtxoNotifyMethod,
+        network: Network,
     ) -> Self {
         let gobbling_utxos = if gobbled_fee.is_zero() {
             vec![]
@@ -67,13 +142,13 @@ impl TransactionDetails {
                         amount_liquid,
                         sender_randomness,
                         receiving_address.clone(),
-                        true,
+                        true, // owned
                     ),
                     TxOutput::onchain_native_currency(
                         amount_timelocked,
                         sender_randomness,
                         receiving_address,
-                        true,
+                        true, // owned
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],
@@ -82,13 +157,13 @@ impl TransactionDetails {
                         amount_liquid,
                         sender_randomness,
                         receiving_address.clone(),
-                        true,
+                        true, // owned
                     ),
                     TxOutput::offchain_native_currency(
                         amount_timelocked,
                         sender_randomness,
                         receiving_address,
-                        true,
+                        true, // owned
                     )
                     .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
                 ],
@@ -99,11 +174,12 @@ impl TransactionDetails {
         };
 
         TransactionDetails::new_without_coinbase(
-            vec![],
-            gobbling_utxos.into(),
+            TxInputList::empty(),
+            gobbling_utxos,
             -gobbled_fee,
             now,
             mutator_set_accumulator,
+            network,
         )
         .expect("new_without_coinbase should succeed when total output amount is zero and no inputs are provided")
     }
@@ -117,12 +193,13 @@ impl TransactionDetails {
     ///
     /// See also: [Self::new_without_coinbase].
     pub(crate) fn new_with_coinbase(
-        tx_inputs: Vec<UnlockedUtxo>,
-        tx_outputs: TxOutputList,
+        tx_inputs: impl Into<TxInputList>,
+        tx_outputs: impl Into<TxOutputList>,
         coinbase: NativeCurrencyAmount,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        network: Network,
     ) -> Result<TransactionDetails> {
         Self::new(
             tx_inputs,
@@ -131,6 +208,7 @@ impl TransactionDetails {
             Some(coinbase),
             timestamp,
             mutator_set_accumulator,
+            network,
         )
     }
 
@@ -143,11 +221,12 @@ impl TransactionDetails {
     ///
     /// See also: [Self::new_with_coinbase].
     pub(crate) fn new_without_coinbase(
-        tx_inputs: Vec<UnlockedUtxo>,
-        tx_outputs: TxOutputList,
+        tx_inputs: impl Into<TxInputList>,
+        tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        network: Network,
     ) -> Result<TransactionDetails> {
         Self::new(
             tx_inputs,
@@ -156,6 +235,7 @@ impl TransactionDetails {
             None,
             timestamp,
             mutator_set_accumulator,
+            network,
         )
     }
 
@@ -166,14 +246,18 @@ impl TransactionDetails {
     /// Returns an error if (any of)
     ///  - the transaction is not balanced
     ///  - some mutator set membership proof is invalid.
-    fn new(
-        tx_inputs: Vec<UnlockedUtxo>,
-        tx_outputs: TxOutputList,
+    pub(crate) fn new(
+        tx_inputs: impl Into<TxInputList>,
+        tx_outputs: impl Into<TxOutputList>,
         fee: NativeCurrencyAmount,
         coinbase: Option<NativeCurrencyAmount>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
+        network: Network,
     ) -> Result<TransactionDetails> {
+        let tx_inputs: TxInputList = tx_inputs.into();
+        let tx_outputs: TxOutputList = tx_outputs.into();
+
         // total amount to be spent -- determines how many and which UTXOs to use
         let total_spend = tx_outputs.total_native_coins() + fee;
         let total_input: NativeCurrencyAmount = tx_inputs
@@ -207,7 +291,38 @@ impl TransactionDetails {
             coinbase,
             timestamp,
             mutator_set_accumulator,
+            network,
         })
+    }
+
+    /// amount spent (excludes change and fee)
+    ///
+    /// ie: sum(inputs) - (change + fee)
+    pub fn spend_amount(&self) -> NativeCurrencyAmount {
+        let not_spend = self.tx_outputs.change_amount() + self.fee;
+
+        // sum(inputs) - (change + fee)
+        self.tx_inputs
+            .total_native_coins()
+            .checked_sub(&not_spend)
+            .unwrap_or_else(|| 0.into())
+    }
+
+    /// verifies the transaction details are valid.
+    ///
+    /// specifically, a [PrimitiveWitness] is built from these
+    /// details and validated in the triton VM.
+    pub async fn validate(&self) -> Result<(), CreateTxError> {
+        // note: we map the WitnessValidationError into CreateTxError as this
+        // method is called during Tx creation, and for consistency in that
+        // process.
+        Ok(PrimitiveWitness::from_transaction_details(self)
+            .validate()
+            .await?)
+    }
+
+    pub fn primitive_witness(&self) -> PrimitiveWitness {
+        self.into()
     }
 }
 
@@ -235,6 +350,7 @@ mod test {
             mutator_set_accumulator,
             now,
             notification_method,
+            Network::Main,
         );
 
         assert!(
