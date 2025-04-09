@@ -19,21 +19,15 @@ use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
-use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
+// use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
 use crate::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
-
-pub fn random_chunk_dictionary() -> ChunkDictionary {
-    let mut rng = rand::rng();
-    pseudorandom_chunk_dictionary(rng.random::<[u8; 32]>())
-}
 
 pub async fn get_all_indices_with_duplicates<
     MmrStorage: StorageVec<Digest> + Send + Sync,
@@ -384,10 +378,10 @@ pub fn random_swbf_active() -> ActiveWindow {
     aw
 }
 
-/// Generate a random MsMembershipProof. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_membership_proof() -> MsMembershipProof {
-    pseudorandom_mutator_set_membership_proof(rand::rng().random())
-}
+// /// Generate a random MsMembershipProof. For serialization testing. Might not be a consistent or valid object.
+// pub fn random_mutator_set_membership_proof() -> MsMembershipProof {
+//     propcompose_mutator_set_membership_proof(rand::rng().random())
+// }
 
 // pub fn random_removal_record() -> RemovalRecord {
 //     let mut rng = rand::rng();
@@ -408,19 +402,16 @@ fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: 
 
 #[cfg(test)]
 mod shared_tests_test {
-    use super::*;
-    use proptest::strategy::ValueTree;
+    use proptest_arbitrary_interop::arb;
 
-    #[tokio::test]
-    async fn can_call() {
-        let rcd = random_chunk_dictionary();
+    use super::*;
+
+    #[test_strategy::proptest(async = "tokio")]
+    async fn can_call(
+        // #strategy[proptest_arbitrary_interop::arb::<RemovalRecord>()] _rr: RemovalRecord,
+        #[strategy(arb::<ChunkDictionary>())] rcd: ChunkDictionary,
+    ) {
         assert!(!rcd.is_empty());
-        let _ = proptest::prelude::Strategy::new_tree(
-            &proptest_arbitrary_interop::arb::<RemovalRecord>(),
-            &mut proptest::test_runner::TestRunner::default(),
-        )
-        .unwrap()
-        .current();
         let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;

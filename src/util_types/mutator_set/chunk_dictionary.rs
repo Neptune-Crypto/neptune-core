@@ -6,10 +6,6 @@ use std::vec::IntoIter;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -179,32 +175,32 @@ impl IntoIterator for ChunkDictionary {
     }
 }
 
-/// Generate pseudorandom chunk dictionary from the given seed, for testing purposes.
-pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
+// /// Generate pseudorandom chunk dictionary from the given seed, for testing purposes.
+// pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
+//     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
-    let mut dictionary = vec![];
-    for _ in 0..37 {
-        let key = rng.next_u64();
-        let authpath: Vec<Digest> = (0..rng.random_range(0..6))
-            .map(|_| rng.random())
-            .collect_vec();
-        let chunk: Vec<u32> = (0..rng.random_range(0..17))
-            .map(|_| rng.random())
-            .collect_vec();
+//     let mut dictionary = vec![];
+//     for _ in 0..37 {
+//         let key = rng.next_u64();
+//         let authpath: Vec<Digest> = (0..rng.random_range(0..6))
+//             .map(|_| rng.random())
+//             .collect_vec();
+//         let chunk: Vec<u32> = (0..rng.random_range(0..17))
+//             .map(|_| rng.random())
+//             .collect_vec();
 
-        dictionary.push((
-            key,
-            (
-                MmrMembershipProof::new(authpath),
-                Chunk {
-                    relative_indices: chunk,
-                },
-            ),
-        ));
-    }
-    ChunkDictionary::new(dictionary)
-}
+//         dictionary.push((
+//             key,
+//             (
+//                 MmrMembershipProof::new(authpath),
+//                 Chunk {
+//                     relative_indices: chunk,
+//                 },
+//             ),
+//         ));
+//     }
+//     ChunkDictionary::new(dictionary)
+// }
 
 #[cfg(test)]
 mod chunk_dict_tests {
@@ -216,7 +212,7 @@ mod chunk_dict_tests {
     use super::*;
     use crate::util_types::archival_mmr::mmr_test::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
+    // use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
     #[tokio::test]
     async fn hash_test() {
@@ -309,10 +305,11 @@ mod chunk_dict_tests {
         assert_eq!((mp, chunk), s_back_non_empty.get(&key).unwrap().clone());
     }
 
-    #[test]
-    fn test_chunk_dictionary_decode() {
-        let chunk_dictionary = random_chunk_dictionary();
-
+    #[test_strategy::proptest]
+    fn test_chunk_dictionary_decode(
+        #[strategy(proptest_arbitrary_interop::arb:: <ChunkDictionary>())]
+        chunk_dictionary: ChunkDictionary,
+    ) {
         let encoded = chunk_dictionary.encode();
         let decoded = *ChunkDictionary::decode(&encoded).unwrap();
 
