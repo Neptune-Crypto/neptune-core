@@ -140,7 +140,8 @@ pub(crate) async fn prove_consensus_program(
     };
 
     // obtain resulting proof.
-    let result: Result<Proof, ProverJobError> = job_result?
+    let result: Result<Proof, ProverJobError> = job_result
+        .map_err(|e| e.into_sync())?
         .into_any()
         .downcast::<ProverJobResult>()
         .expect("downcast should succeed, else bug")

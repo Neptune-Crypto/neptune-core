@@ -18,14 +18,19 @@ pub trait JobResult: Any + Send + Sync + std::fmt::Debug {
 /// represents completion state of a job
 #[derive(Debug)]
 pub enum JobCompletion {
+    /// The job finished processing normally.
     Finished(Box<dyn JobResult>),
+    /// The job was cancelled before or during processing.
     Cancelled,
+    /// The job panicked during processing.
+    Panicked(Box<dyn std::any::Any + Send + 'static>),
 }
 impl std::fmt::Display for JobCompletion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             Self::Finished(_) => "Finished",
             Self::Cancelled => "Cancelled",
+            Self::Panicked(_) => "Panicked",
         };
 
         write!(f, "{}", str)
