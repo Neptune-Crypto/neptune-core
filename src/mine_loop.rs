@@ -976,7 +976,7 @@ pub(crate) mod mine_loop_tests {
     use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
-    use proptest::prelude::Strategy;
+
     use tracing_test::traced_test;
 
     use super::*;
@@ -1886,8 +1886,13 @@ pub(crate) mod mine_loop_tests {
         }
     }
 
-    #[test]
-    fn block_hash_relates_to_predecessor_difficulty() {
+    #[test_strategy::proptest]
+    fn block_hash_relates_to_predecessor_difficulty(
+        #[strategy(random_transaction_kernel())]
+        tx_kernel_predecessor: transaction_kernel::TransactionKernel,
+        #[strategy(random_transaction_kernel())]
+        tx_kernel_successor: transaction_kernel::TransactionKernel,
+    ) {
         let difficulty = 100u32;
         // Difficulty X means we expect X trials before success.
         // Modeling the process as a geometric distribution gives the
@@ -1900,15 +1905,10 @@ pub(crate) mod mine_loop_tests {
         let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
         let k = (-4.0 / cofactor).ceil() as usize;
 
-        let mut test_runner = proptest::test_runner::TestRunner::default();
-
         let mut predecessor_header = random_block_header();
         predecessor_header.difficulty = Difficulty::from(difficulty);
         let predecessor_body = BlockBody::new(
-            random_transaction_kernel()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current(),
+            tx_kernel_predecessor,
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),
@@ -1925,10 +1925,7 @@ pub(crate) mod mine_loop_tests {
         successor_header.prev_block_digest = predecessor_block.hash();
         // note that successor's difficulty is random
         let successor_body = BlockBody::new(
-            random_transaction_kernel()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current(),
+            tx_kernel_successor,
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),

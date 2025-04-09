@@ -1134,7 +1134,6 @@ impl ArchivalState {
 mod archival_state_tests {
 
     use itertools::Itertools;
-    use proptest::strategy::ValueTree;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -2582,16 +2581,13 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn find_canonical_block_with_input_genesis_block_test() {
+    #[test_strategy::proptest(async = "tokio")]
+    async fn find_canonical_block_with_input_genesis_block_test(
+        #[strategy(proptest_arbitrary_interop::arb::<AbsoluteIndexSet>())]
+        random_index_set: AbsoluteIndexSet,
+    ) {
         let network = Network::Main;
         let archival_state = make_test_archival_state(network).await;
-        let random_index_set = proptest::prelude::Strategy::new_tree(
-            &proptest_arbitrary_interop::arb::<AbsoluteIndexSet>(),
-            &mut proptest::test_runner::TestRunner::default(),
-        )
-        .unwrap()
-        .current();
 
         assert!(archival_state
             .find_canonical_block_with_input(random_index_set, None)

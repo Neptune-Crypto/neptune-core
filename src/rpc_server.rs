@@ -3681,9 +3681,6 @@ mod rpc_server_tests {
     use anyhow::Result;
     use num_traits::One;
     use num_traits::Zero;
-    use proptest::prelude::Strategy;
-    use proptest::strategy::ValueTree;
-    use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -4364,9 +4361,14 @@ mod rpc_server_tests {
             .is_none());
     }
 
+    const NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1: usize = 7;
+
     #[traced_test]
-    #[tokio::test]
-    async fn public_announcements_in_block_test() {
+    #[test_strategy::proptest(async = "tokio")]
+    async fn public_announcements_in_block_test(
+        #[strategy(pseudorandom_transaction_kernel(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
+        tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+    ) {
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
             network,
@@ -4375,17 +4377,6 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let num_public_announcements_block1 = 7;
-        let num_inputs = 0;
-        let num_outputs = 2;
-        let tx_block1 = pseudorandom_transaction_kernel(
-            num_inputs,
-            num_outputs,
-            num_public_announcements_block1,
-        )
-        .new_tree(&mut TestRunner::default())
-        .unwrap()
-        .current();
         let tx_block1 = Transaction {
             kernel: tx_block1,
             proof: TransactionProof::invalid(),
@@ -4407,7 +4398,7 @@ mod rpc_server_tests {
             "Must return expected public announcements"
         );
         assert_eq!(
-            num_public_announcements_block1,
+            NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1,
             block1_public_announcements.len(),
             "Must return expected number of public announcements"
         );

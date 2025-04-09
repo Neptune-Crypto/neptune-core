@@ -445,6 +445,7 @@ pub mod transaction_kernel_tests {
 
     use rand::Rng;
     use rand::RngCore;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -551,35 +552,30 @@ pub mod transaction_kernel_tests {
         );
     }
 
-    #[test]
-    pub fn decode_public_announcement() {
-        let pubscript = arb::<PublicAnnouncement>()
-            .new_tree(&mut TestRunner::deterministic())
-            .unwrap()
-            .current();
+    #[proptest]
+    fn decode_public_announcement(
+        #[strategy(arb::<PublicAnnouncement>())] pubscript: PublicAnnouncement,
+    ) {
         let encoded = pubscript.encode();
         let decoded = *PublicAnnouncement::decode(&encoded).unwrap();
         assert_eq!(pubscript, decoded);
     }
 
-    #[test]
-    pub fn decode_public_announcements() {
-        let pubscripts = [arb::<PublicAnnouncement>(), arb::<PublicAnnouncement>()]
-            .new_tree(&mut TestRunner::deterministic())
-            .unwrap()
-            .current()
-            .to_vec();
+    #[proptest]
+    fn decode_public_announcements(
+        #[strategy([arb::<PublicAnnouncement>(), arb::<PublicAnnouncement>()])] pubscripts: [PublicAnnouncement;
+            2],
+    ) {
+        let pubscripts = pubscripts.to_vec();
         let encoded = pubscripts.encode();
         let decoded = *Vec::<PublicAnnouncement>::decode(&encoded).unwrap();
         assert_eq!(pubscripts, decoded);
     }
 
-    #[test]
-    pub fn test_decode_transaction_kernel() {
-        let kernel = random_transaction_kernel()
-            .new_tree(&mut TestRunner::deterministic())
-            .unwrap()
-            .current();
+    #[proptest]
+    fn test_decode_transaction_kernel(
+        #[strategy(random_transaction_kernel())] kernel: TransactionKernel,
+    ) {
         let encoded = kernel.encode();
         let decoded = *TransactionKernel::decode(&encoded).unwrap();
         assert_eq!(kernel, decoded);
