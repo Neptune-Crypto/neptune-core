@@ -4308,7 +4308,7 @@ pub(crate) mod tests {
                 incoming_utxo: IncomingUtxo,
             }
             let kernel = proptest::strategy::ValueTree::current(
-                &proptest::prelude::Strategy::new_tree(&kernel, &mut TestRunner::deterministic())
+                &proptest::prelude::Strategy::new_tree(&kernel, &mut TestRunner::default())
                     .unwrap(),
             );
             let mut public_announcements = kernel.public_announcements.clone();

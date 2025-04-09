@@ -1171,6 +1171,7 @@ mod archival_state_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
+    // use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();
@@ -2585,13 +2586,12 @@ mod archival_state_tests {
     async fn find_canonical_block_with_input_genesis_block_test() {
         let network = Network::Main;
         let archival_state = make_test_archival_state(network).await;
-        let random_index_set: AbsoluteIndexSet = proptest::prelude::Strategy::new_tree(
-            &proptest_arbitrary_interop::arb::<RemovalRecord>(),
-            &mut proptest::test_runner::TestRunner::deterministic(),
+        let random_index_set = proptest::prelude::Strategy::new_tree(
+            &proptest_arbitrary_interop::arb::<AbsoluteIndexSet>(),
+            &mut proptest::test_runner::TestRunner::default(),
         )
         .unwrap()
-        .current()
-        .absolute_indices;
+        .current();
 
         assert!(archival_state
             .find_canonical_block_with_input(random_index_set, None)

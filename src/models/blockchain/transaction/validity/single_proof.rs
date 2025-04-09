@@ -985,15 +985,14 @@ mod test {
 
     mod update_tests {
         use rand::random;
-        use rand::rngs::StdRng;
-        use rand::Rng;
-        use rand::SeedableRng;
+
         use tasm_lib::hashing::merkle_verify::MerkleVerify;
         use twenty_first::prelude::Mmr;
 
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_additions_and_removals;
-        use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
+        use crate::util_types::mutator_set::removal_record::RemovalRecord;
+        // use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
         use super::*;
 
@@ -1166,11 +1165,15 @@ mod test {
         }
 
         fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
-            let mut rng = StdRng::seed_from_u64(0);
             let mut bad_witness = good_witness.clone();
 
             let mut new_inputs = bad_witness.new_kernel.inputs.clone();
-            new_inputs.push(pseudorandom_removal_record(rng.random()));
+            new_inputs.push(
+                arb::<RemovalRecord>()
+                    .new_tree(&mut TestRunner::default())
+                    .unwrap()
+                    .current(),
+            );
 
             bad_witness.new_kernel = TransactionKernelModifier::default()
                 .inputs(new_inputs)

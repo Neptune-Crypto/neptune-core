@@ -4383,7 +4383,7 @@ mod rpc_server_tests {
             num_outputs,
             num_public_announcements_block1,
         )
-        .new_tree(&mut TestRunner::deterministic())
+        .new_tree(&mut TestRunner::default())
         .unwrap()
         .current();
         let tx_block1 = Transaction {

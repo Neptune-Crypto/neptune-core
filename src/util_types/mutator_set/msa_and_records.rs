@@ -360,10 +360,8 @@ mod test {
         for _ in 0..total {
             original.removal_records.push(
                 proptest::prelude::Strategy::new_tree(
-                    &proptest_arbitrary_interop::arb::<
-                        crate::util_types::mutator_set::removal_record::RemovalRecord,
-                    >(),
-                    &mut proptest::test_runner::TestRunner::deterministic(),
+                    &arb::<crate::util_types::mutator_set::removal_record::RemovalRecord>(),
+                    &mut proptest::test_runner::TestRunner::default(),
                 )
                 .unwrap()
                 .current(),

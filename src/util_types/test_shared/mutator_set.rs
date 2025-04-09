@@ -25,11 +25,9 @@ use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 pub fn random_chunk_dictionary() -> ChunkDictionary {
@@ -120,23 +118,23 @@ pub fn random_mmra() -> MmrAccumulator {
     pseudorandom_mmra(rand::rng().random())
 }
 
-/// Generate a pseudorandom removal record from the given seed, for testing purposes.
-pub(crate) fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let absolute_indices = AbsoluteIndexSet::new(
-        &(0..NUM_TRIALS as usize)
-            .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
-            .collect_vec()
-            .try_into()
-            .unwrap(),
-    );
-    let target_chunks = pseudorandom_chunk_dictionary(rng.random::<[u8; 32]>());
+// /// Generate a pseudorandom removal record from the given seed, for testing purposes.
+// pub(crate) fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
+//     let mut rng: StdRng = SeedableRng::from_seed(seed);
+//     let absolute_indices = AbsoluteIndexSet::new(
+//         &(0..NUM_TRIALS as usize)
+//             .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
+//             .collect_vec()
+//             .try_into()
+//             .unwrap(),
+//     );
+//     let target_chunks = pseudorandom_chunk_dictionary(rng.random::<[u8; 32]>());
 
-    RemovalRecord {
-        absolute_indices,
-        target_chunks,
-    }
-}
+//     RemovalRecord {
+//         absolute_indices,
+//         target_chunks,
+//     }
+// }
 
 pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -391,6 +389,11 @@ pub fn random_mutator_set_membership_proof() -> MsMembershipProof {
     pseudorandom_mutator_set_membership_proof(rand::rng().random())
 }
 
+// pub fn random_removal_record() -> RemovalRecord {
+//     let mut rng = rand::rng();
+//     pseudorandom_removal_record(rng.random::<[u8; 32]>())
+// }
+
 fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: Digest) -> bool {
     let mut acc = leaf;
     for (shift, &p) in path.iter().enumerate() {
@@ -414,7 +417,7 @@ mod shared_tests_test {
         assert!(!rcd.is_empty());
         let _ = proptest::prelude::Strategy::new_tree(
             &proptest_arbitrary_interop::arb::<RemovalRecord>(),
-            &mut proptest::test_runner::TestRunner::deterministic(),
+            &mut proptest::test_runner::TestRunner::default(),
         )
         .unwrap()
         .current();

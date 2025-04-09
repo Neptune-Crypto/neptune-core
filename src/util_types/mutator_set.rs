@@ -86,10 +86,6 @@ pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) 
 
 #[cfg(test)]
 mod test {
-    use proptest::prelude::Strategy;
-    use proptest::strategy::ValueTree;
-    use proptest::test_runner::TestRunner;
-    use proptest_arbitrary_interop::arb;
     use rand::Rng;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use test::ms_membership_proof::MsMembershipProof;
@@ -110,13 +106,8 @@ mod test {
             "Batch index for empty MS must be zero"
         );
 
-        let mut test_runner = TestRunner::default();
         for i in 0..BATCH_SIZE {
-            let (item, sender_randomness, receiver_preimage) =
-                (arb::<Digest>(), arb::<Digest>(), arb::<Digest>())
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             mutator_set.add(&addition_record);
             assert_eq!(

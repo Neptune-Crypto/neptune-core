@@ -20,7 +20,6 @@ use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use proptest::collection::vec;
-use proptest::prelude::any;
 use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
@@ -28,7 +27,6 @@ use proptest::test_runner::TestRunner;
 use proptest_arbitrary_interop::arb;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
-// use rand::random;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -175,10 +173,7 @@ pub fn get_dummy_version() -> VersionString {
 /// Return a handshake object with a randomly set instance ID
 pub(crate) fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
-        instance_id: any::<u128>()
-            .new_tree(&mut TestRunner::default())
-            .unwrap()
-            .current(),
+        instance_id: rand::random(),
         tip_header: Block::genesis(network).header().to_owned(),
         listen_port: Some(8080),
         network,
@@ -590,14 +585,6 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
         mined_in_block: None,
     }
 }
-
-// pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
-//     let mut rng = rand::rng();
-//     let item: Digest = rng.random();
-//     let sender_randomness: Digest = rng.random();
-//     let receiver_preimage: Digest = rng.random();
-//     (item, sender_randomness, receiver_preimage)
-// }
 
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
