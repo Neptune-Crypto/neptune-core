@@ -243,11 +243,13 @@ impl SingleProof {
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
 
-        info!("Start: generate single proof");
+        let nondeterminism = single_proof_witness.nondeterminism();
+        info!("Start: generate single proof from proof collection");
+
         let proof = ProofBuilder::new()
             .program(SingleProof.program())
             .claim(claim)
-            .nondeterminism(|| single_proof_witness.nondeterminism())
+            .nondeterminism(|| nondeterminism)
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()

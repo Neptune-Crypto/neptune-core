@@ -3,10 +3,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
+use crate::api::export::NeptuneProof;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::PrimitiveWitness;
-use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::ProofCollection;
 use crate::models::blockchain::transaction::SingleProof;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
@@ -54,7 +54,7 @@ pub enum TransactionProof {
     /// a primitive-witness.  exposes secrets (keys).  this proof must not be shared.
     Witness(PrimitiveWitness),
     /// a strong proof.  required for confirming a transaction into a block.
-    SingleProof(Proof),
+    SingleProof(NeptuneProof),
     /// a weak proof that does not expose secrets. can be shared with peers, but cannot be confirmed into a block.
     ProofCollection(ProofCollection),
 }
@@ -77,7 +77,7 @@ impl TransactionProof {
     /// # Panics
     ///
     /// - If the proof type is any other than [TransactionProof::SingleProof].
-    pub(crate) fn into_single_proof(self) -> Proof {
+    pub(crate) fn into_single_proof(self) -> NeptuneProof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
             TransactionProof::Witness(_) => {
@@ -154,13 +154,13 @@ mod tests {
     impl TransactionProof {
         /// A proof that will always be invalid
         pub(crate) fn invalid() -> Self {
-            Self::SingleProof(Proof::from(vec![]))
+            Self::SingleProof(NeptuneProof::from(vec![]))
         }
 
         /// A proof that will always be invalid, with a specified size measured in
         /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
         pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {
-            Self::SingleProof(Proof::from(bfe_vec![0; size]))
+            Self::SingleProof(NeptuneProof::from(bfe_vec![0; size]))
         }
 
         pub(crate) fn into_proof_collection(self) -> ProofCollection {

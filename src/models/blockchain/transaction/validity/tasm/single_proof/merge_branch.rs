@@ -1,7 +1,9 @@
 pub mod authenticate_coinbase_fields;
 
 use std::cmp::max;
+use std::sync::Arc;
 
+use anyhow::Result;
 use authenticate_coinbase_fields::AuthenticateCoinbaseFields;
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
@@ -24,22 +26,30 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::verifier::stark_verify::StarkVerify;
+use tracing::info;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::blockchain::transaction::validity::single_proof::DISCRIMINANT_FOR_MERGE;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::models::blockchain::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
+use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionKernel;
 use crate::models::blockchain::transaction::TransactionKernelProxy;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 // Dictated by the witness type of SingleProof
@@ -56,15 +66,23 @@ pub struct MergeWitness {
 
 impl MergeWitness {
     /// Generate a `MergeWitness` from two transactions (kernels plus proofs).
-    /// Assumes the transactions can be merged. Also takes randomness for shuffling
+    /// Assumes the transactions can be merged. Takes randomness for shuffling
     /// the concatenations of inputs, outputs, and public announcements.
     pub(crate) fn from_transactions(
-        left_kernel: TransactionKernel,
-        left_proof: Proof,
-        right_kernel: TransactionKernel,
-        right_proof: Proof,
+        left: Transaction,
+        right: Transaction,
         shuffle_seed: [u8; 32],
     ) -> Self {
+        let left_kernel = left.kernel;
+        let right_kernel = right.kernel;
+
+        let TransactionProof::SingleProof(left_proof) = left.proof else {
+            panic!("cannot merge transactions that are not supported by singleproof");
+        };
+        let TransactionProof::SingleProof(right_proof) = right.proof else {
+            panic!("cannot merge transactions that are not supported by singleproof");
+        };
+
         let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed);
 
         Self {
@@ -74,6 +92,33 @@ impl MergeWitness {
             left_proof,
             right_proof,
         }
+    }
+
+    /// Compute the [`Transaction`] (with [`SingleProof`]) resulting from this
+    /// merger. Generates the proof for the merged transaction.
+    pub(crate) async fn merge(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> Result<Transaction> {
+        let new_kernel = self.new_kernel.clone();
+        let new_single_proof_witness = SingleProofWitness::from_merge(self);
+        let new_single_proof_claim = new_single_proof_witness.claim();
+        info!("Start: creating new single proof through merge");
+        let new_single_proof = SingleProof
+            .prove(
+                new_single_proof_claim,
+                new_single_proof_witness.nondeterminism(),
+                triton_vm_job_queue,
+                proof_job_options,
+            )
+            .await?;
+        info!("Done: creating new single proof through merge");
+
+        Ok(Transaction {
+            kernel: new_kernel,
+            proof: TransactionProof::SingleProof(new_single_proof),
+        })
     }
 
     /// Generate a new transaction kernel from two transactions.
@@ -1118,13 +1163,10 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        MergeWitness::from_transactions(
-            primitive_witness_1.kernel,
-            single_proof_1,
-            primitive_witness_2.kernel,
-            single_proof_2,
-            shuffle_seed,
-        )
+        let left_tx = Transaction::new_single_proof(primitive_witness_1.kernel, single_proof_1);
+        let right_tx = Transaction::new_single_proof(primitive_witness_2.kernel, single_proof_2);
+
+        MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed)
     }
 
     pub(crate) async fn deterministic_merge_witness_with_coinbase(
@@ -1163,12 +1205,9 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        MergeWitness::from_transactions(
-            left.kernel,
-            left_proof,
-            right.kernel,
-            right_proof,
-            shuffle_seed,
-        )
+        let left_tx = Transaction::new_single_proof(left.kernel, left_proof);
+        let right_tx = Transaction::new_single_proof(right.kernel, right_proof);
+
+        MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed)
     }
 }
