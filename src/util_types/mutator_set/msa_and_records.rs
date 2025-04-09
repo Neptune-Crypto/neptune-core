@@ -284,14 +284,13 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use proptest::collection::vec;
+    use proptest::collection::{self, vec};
     use proptest::prop_assert;
-    use proptest::strategy::ValueTree;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
-    use test_strategy::proptest;
 
     use super::MsaAndRecords;
+    use crate::util_types::mutator_set::removal_record::RemovalRecord;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
 
     impl MsaAndRecords {
@@ -328,7 +327,7 @@ mod test {
         }
     }
 
-    #[proptest(cases = 1)]
+    #[test_strategy::proptest(cases = 1)]
     fn msa_and_records_is_valid(
         #[strategy(0usize..10)] _num_removals: usize,
         #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
@@ -347,25 +346,18 @@ mod test {
 
     #[test]
     fn split_msa_and_records() {
-        split_prop([1]);
-        split_prop([0]);
-        split_prop([0, 5]);
-        split_prop([3, 4]);
-        split_prop([12, 2, 5]);
+        proptest::proptest!(|(rrs in collection::vec(arb::<RemovalRecord>(), 1))| split_prop([1], rrs));
+        proptest::proptest!(|(rrs in collection::vec(arb::<RemovalRecord>(), 0))| split_prop([0], rrs));
+        proptest::proptest!(|(rrs in collection::vec(arb::<RemovalRecord>(), 5))| split_prop([0, 5], rrs));
+        proptest::proptest!(|(rrs in collection::vec(arb::<RemovalRecord>(), 7))| split_prop([3, 4], rrs));
+        proptest::proptest!(|(rrs in collection::vec(arb::<RemovalRecord>(), 19))| split_prop([12, 2, 5], rrs));
     }
 
-    fn split_prop<const N: usize>(split: [usize; N]) {
+    fn split_prop<const N: usize>(split: [usize; N], mut rrs: Vec<RemovalRecord>) {
         let mut original = MsaAndRecords::default();
         let total = split.into_iter().sum::<usize>();
         for _ in 0..total {
-            original.removal_records.push(
-                proptest::prelude::Strategy::new_tree(
-                    &arb::<crate::util_types::mutator_set::removal_record::RemovalRecord>(),
-                    &mut proptest::test_runner::TestRunner::default(),
-                )
-                .unwrap()
-                .current(),
-            );
+            original.removal_records.push(rrs.pop().unwrap());
             original
                 .membership_proofs
                 .push(random_mutator_set_membership_proof());

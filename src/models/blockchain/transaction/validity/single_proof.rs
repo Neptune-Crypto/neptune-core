@@ -1164,16 +1164,11 @@ mod test {
             test_result.unwrap();
         }
 
-        fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
+        fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness, rr: RemovalRecord) {
             let mut bad_witness = good_witness.clone();
 
             let mut new_inputs = bad_witness.new_kernel.inputs.clone();
-            new_inputs.push(
-                arb::<RemovalRecord>()
-                    .new_tree(&mut TestRunner::default())
-                    .unwrap()
-                    .current(),
-            );
+            new_inputs.push(rr);
 
             bad_witness.new_kernel = TransactionKernelModifier::default()
                 .inputs(new_inputs)
@@ -1204,7 +1199,7 @@ mod test {
             bad_old_aocl(&good_witness);
             bad_absolute_index_set_value(&good_witness);
             bad_absolute_index_set_length_too_short(&good_witness);
-            bad_absolute_index_set_length_too_long(&good_witness);
+            proptest::proptest!(|(rr in arb::<RemovalRecord>())| bad_absolute_index_set_length_too_long(&good_witness, rr));
         }
 
         #[tokio::test]
