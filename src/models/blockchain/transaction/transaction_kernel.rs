@@ -13,6 +13,7 @@ use twenty_first::prelude::Digest;
 
 use super::primitive_witness::PrimitiveWitness;
 use super::PublicAnnouncement;
+use crate::api::export::TransactionDetails;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -99,6 +100,38 @@ impl Eq for TransactionKernel {}
 impl From<PrimitiveWitness> for TransactionKernel {
     fn from(transaction_primitive_witness: PrimitiveWitness) -> Self {
         transaction_primitive_witness.kernel
+    }
+}
+
+impl From<&TransactionDetails> for TransactionKernel {
+    fn from(transaction_details: &TransactionDetails) -> Self {
+
+        let TransactionDetails {
+            tx_inputs,
+            tx_outputs,
+            fee,
+            coinbase,
+            timestamp,
+            mutator_set_accumulator,
+            ..
+        } = transaction_details;
+
+        // complete transaction kernel
+        let removal_records = tx_inputs
+            .iter()
+            .map(|txi| txi.removal_record(mutator_set_accumulator))
+            .collect_vec();
+        TransactionKernelProxy {
+            inputs: removal_records,
+            outputs: tx_outputs.addition_records(),
+            public_announcements: tx_outputs.public_announcements(),
+            fee: *fee,
+            timestamp: *timestamp,
+            coinbase: *coinbase,
+            mutator_set_hash: mutator_set_accumulator.hash(),
+            merge_bit: false,
+        }
+        .into_kernel()
     }
 }
 

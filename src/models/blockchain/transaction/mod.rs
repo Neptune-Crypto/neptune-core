@@ -105,6 +105,14 @@ impl Transaction {
         self.kernel.txid()
     }
 
+    /// Create a new [`Transaction`], backed by a [`SingleProof`].
+    pub(crate) fn new_single_proof(kernel: TransactionKernel, proof: Proof) -> Self {
+        Self {
+            kernel,
+            proof: TransactionProof::SingleProof(proof),
+        }
+    }
+
     /// Create a new `Transaction` by updating the given one with the mutator
     /// set update. If `new_timestamp` is `None`, the timestamp from the old
     /// transaction kernel will be used.
@@ -232,34 +240,8 @@ impl Transaction {
             "Cannot merge two coinbase transactions"
         );
 
-        let self_single_proof = self.proof.into_single_proof();
-        let other_single_proof = other.proof.into_single_proof();
-
-        let merge_witness = MergeWitness::from_transactions(
-            self.kernel,
-            self_single_proof,
-            other.kernel,
-            other_single_proof,
-            shuffle_seed,
-        );
-        let new_kernel = merge_witness.new_kernel.clone();
-        let new_single_proof_witness = SingleProofWitness::from_merge(merge_witness);
-
-        info!("Start: creating new single proof through merge");
-
-        let proof = TransactionProofBuilder::new()
-            .single_proof_witness(&new_single_proof_witness)
-            .job_queue(triton_vm_job_queue)
-            .proof_job_options(proof_job_options)
-            .build()
-            .await?;
-
-        info!("Done: creating new single proof through merge");
-
-        Ok(Transaction {
-            kernel: new_kernel,
-            proof,
-        })
+        let merge_witness = MergeWitness::from_transactions(self, other, shuffle_seed);
+        MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await
     }
 
     /// Calculates a fraction representing the fee-density, defined as:

@@ -19,7 +19,6 @@ use super::lock_script::LockScript;
 use super::lock_script::LockScriptAndWitness;
 use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelModifier;
-use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::TransactionDetails;
 use crate::api::export::TxInputList;
@@ -242,32 +241,14 @@ impl PrimitiveWitness {
 
     /// Create a [`PrimitiveWitness`] from [`TransactionDetails`].
     pub(crate) fn from_transaction_details(transaction_details: &TransactionDetails) -> Self {
+        let kernel = TransactionKernel::from(transaction_details);
+
         let TransactionDetails {
             tx_inputs,
             tx_outputs,
-            fee,
-            coinbase,
-            timestamp,
             mutator_set_accumulator,
             ..
         } = transaction_details;
-
-        // complete transaction kernel
-        let removal_records = tx_inputs
-            .iter()
-            .map(|txi| txi.removal_record(mutator_set_accumulator))
-            .collect_vec();
-        let kernel = TransactionKernelProxy {
-            inputs: removal_records,
-            outputs: tx_outputs.addition_records(),
-            public_announcements: tx_outputs.public_announcements(),
-            fee: *fee,
-            timestamp: *timestamp,
-            coinbase: *coinbase,
-            mutator_set_hash: mutator_set_accumulator.hash(),
-            merge_bit: false,
-        }
-        .into_kernel();
 
         // populate witness
         let output_utxos = tx_outputs.utxos();
@@ -586,6 +567,7 @@ pub mod neptune_arbitrary {
     use super::super::PublicAnnouncement;
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
@@ -1111,6 +1093,7 @@ mod tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;

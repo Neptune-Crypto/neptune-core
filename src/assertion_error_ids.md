@@ -13,7 +13,7 @@ often.
 > ℹ️ Neptune Core's error IDs start at 1_000_000.
 > For brevity, that offset is omitted below.
 
-| Error IDs | Snippet                                                                                                                  |
+| Error IDs | Snippet(s)                                                                                                               |
 |----------:|:-------------------------------------------------------------------------------------------------------------------------|
 |     0..10 | [`RemovalRecordsIntegrity`](models/blockchain/transaction/validity/removal_records_integrity.rs)                         |
 |    10..20 | [`AuditVmEndState`](models/proof_abstractions/tasm/audit_vm_end_state.rs)                                                |
@@ -29,3 +29,4 @@ often.
 |  260..270 | [`CollectLockScripts`](models/blockchain/transaction/validity/collect_lock_scripts.rs)                                   |
 |  270..280 | [`KernelToOutputs`](models/blockchain/transaction/validity/kernel_to_outputs.rs)                                         |
 |  300..400 | [`LockScript`](models/blockchain/transaction/lock_script.rs)                                                             |
+|  400..500 | [`amount`](models/blockchain/type_scripts/amount/mod.rs)                                                                 |

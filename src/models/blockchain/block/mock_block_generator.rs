@@ -106,13 +106,9 @@ impl MockBlockGenerator {
         let TransactionProof::SingleProof(rhs_proof) = rhs.proof else {
             bail!("merge error: arguments must be singleproof transactions")
         };
-        let merge_witness = MergeWitness::from_transactions(
-            lhs.kernel,
-            lhs_proof,
-            rhs.kernel,
-            rhs_proof,
-            shuffle_seed,
-        );
+        let left_tx = Transaction::new_single_proof(lhs.kernel, lhs_proof);
+        let right_tx = Transaction::new_single_proof(rhs.kernel, rhs_proof);
+        let merge_witness = MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed);
         let new_kernel = merge_witness.new_kernel.clone();
         let claim = SingleProof::claim(new_kernel.mast_hash());
 

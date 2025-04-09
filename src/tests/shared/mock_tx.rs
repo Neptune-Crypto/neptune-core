@@ -1,4 +1,3 @@
-use anyhow::bail;
 use bytesize::ByteSize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -135,14 +134,7 @@ pub(super) async fn fake_merge_transactions_for_tests(
     rhs: Transaction,
     shuffle_seed: [u8; 32],
 ) -> anyhow::Result<Transaction> {
-    let TransactionProof::SingleProof(lhs_proof) = lhs.proof else {
-        bail!("arguments must be bogus singleproof transactions")
-    };
-    let TransactionProof::SingleProof(rhs_proof) = rhs.proof else {
-        bail!("arguments must be bogus singleproof transactions")
-    };
-    let merge_witness =
-        MergeWitness::from_transactions(lhs.kernel, lhs_proof, rhs.kernel, rhs_proof, shuffle_seed);
+    let merge_witness = MergeWitness::from_transactions(lhs, rhs, shuffle_seed);
     let new_kernel = merge_witness.new_kernel.clone();
 
     let claim = SingleProof::claim(new_kernel.mast_hash());
