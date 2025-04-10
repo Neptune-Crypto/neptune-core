@@ -3691,7 +3691,7 @@ mod rpc_server_tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
@@ -4366,7 +4366,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio")]
     async fn public_announcements_in_block_test(
-        #[strategy(pseudorandom_transaction_kernel(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
+        #[strategy(propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;

@@ -451,12 +451,12 @@ pub mod transaction_kernel_tests {
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
-    use crate::tests::shared::random_transaction_kernel;
+    use crate::tests::shared::propcompose_transaction_kernel;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
     proptest::prop_compose! {
-        pub fn pseudorandom_transaction_kernel(
+        pub fn propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(
             num_inputs: usize,
             num_outputs: usize,
             num_public_announcements: usize,
@@ -574,7 +574,7 @@ pub mod transaction_kernel_tests {
 
     #[proptest]
     fn test_decode_transaction_kernel(
-        #[strategy(random_transaction_kernel())] kernel: TransactionKernel,
+        #[strategy(propcompose_transaction_kernel())] kernel: TransactionKernel,
     ) {
         let encoded = kernel.encode();
         let decoded = *TransactionKernel::decode(&encoded).unwrap();

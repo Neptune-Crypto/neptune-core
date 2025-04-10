@@ -22,6 +22,7 @@ use pin_project_lite::pin_project;
 use proptest::collection::vec;
 use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
+use proptest::prop_compose;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
 use proptest_arbitrary_interop::arb;
@@ -70,7 +71,7 @@ use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel;
-use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -453,12 +454,11 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
         .into()
 }
 
-pub fn random_transaction_kernel() -> BoxedStrategy<TransactionKernel> {
-    (1usize..=5, 1usize..=6, 0usize..5)
-        .prop_flat_map(|(num_inputs, num_outputs, num_public_announcements)| {
-            pseudorandom_transaction_kernel(num_inputs, num_outputs, num_public_announcements)
-        })
-        .boxed()
+prop_compose! {
+    pub fn propcompose_transaction_kernel() (num_inputs in 1usize..=5, num_outputs in 1usize..=6, num_public_announcements in 0usize..5)
+    (the in propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(num_inputs, num_outputs, num_public_announcements)) -> TransactionKernel {
+        the
+    }
 }
 
 pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(

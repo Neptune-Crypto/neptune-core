@@ -999,7 +999,7 @@ pub(crate) mod mine_loop_tests {
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::random_transaction_kernel;
+    use crate::tests::shared::propcompose_transaction_kernel;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
@@ -1888,9 +1888,9 @@ pub(crate) mod mine_loop_tests {
 
     #[test_strategy::proptest]
     fn block_hash_relates_to_predecessor_difficulty(
-        #[strategy(random_transaction_kernel())]
+        #[strategy(propcompose_transaction_kernel())]
         tx_kernel_predecessor: transaction_kernel::TransactionKernel,
-        #[strategy(random_transaction_kernel())]
+        #[strategy(propcompose_transaction_kernel())]
         tx_kernel_successor: transaction_kernel::TransactionKernel,
     ) {
         let difficulty = 100u32;

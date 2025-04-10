@@ -4046,7 +4046,7 @@ pub(crate) mod tests {
         use crate::job_queue::JobQueue;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
-        use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+        use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
@@ -4242,7 +4242,8 @@ pub(crate) mod tests {
         #[traced_test]
         #[test_strategy::proptest(async = "tokio")]
         async fn scan_for_utxos_announced_to_future_keys_behaves(
-            #[strategy(pseudorandom_transaction_kernel(10, 10, 10))] kernel: TransactionKernel,
+            #[strategy(propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(10, 10, 10))]
+            kernel: TransactionKernel,
         ) {
             let network = Network::Main;
             let seed: [u8; 32] = random();
