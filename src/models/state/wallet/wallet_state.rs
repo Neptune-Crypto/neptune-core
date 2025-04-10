@@ -4114,7 +4114,7 @@ pub(crate) mod tests {
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
-        use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+        use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
@@ -4308,8 +4308,11 @@ pub(crate) mod tests {
         ///     b) the relative index is smaller than num_future_keys.
         ///
         #[traced_test]
-        #[tokio::test]
-        async fn scan_for_utxos_announced_to_future_keys_behaves() {
+        #[test_strategy::proptest(async = "tokio")]
+        async fn scan_for_utxos_announced_to_future_keys_behaves(
+            #[strategy(propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(10, 10, 10))]
+            kernel: TransactionKernel,
+        ) {
             let network = Network::Main;
             let seed: [u8; 32] = random();
             dbg!(seed);
@@ -4362,8 +4365,6 @@ pub(crate) mod tests {
                     )
                 })
                 .collect_vec();
-
-            let kernel = pseudorandom_transaction_kernel(rng.random(), 10, 10, 10);
 
             // create master list of UTXOs with context
             struct UtxoContext {

@@ -378,6 +378,8 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 mod removal_record_tests {
     use itertools::Itertools;
+    use proptest::prop_compose;
+    use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
     use rand::RngCore;
@@ -822,35 +824,39 @@ mod removal_record_tests {
         assert_eq!(original_indexset, reconstructed_indexset);
     }
 
-    #[test]
-    fn test_removal_record_decode() {
-        for _ in 0..10 {
-            let removal_record = random_removal_record();
-            let encoded = removal_record.encode();
-            let decoded = *RemovalRecord::decode(&encoded).unwrap();
-            assert_eq!(removal_record, decoded);
-        }
+    prop_compose! {
+        fn removal_record_vec() (length in 0..10usize)
+        (the in proptest::collection::vec(arb::<RemovalRecord>(), length)) -> Vec<RemovalRecord> {the}
     }
-
-    #[test]
-    fn test_removal_record_vec_decode() {
-        let mut rng = rand::rng();
-        for _ in 0..10 {
-            let length = rng.random_range(0..10);
-            let removal_records = vec![random_removal_record(); length];
-            let encoded = removal_records.encode();
-            let decoded = *Vec::<RemovalRecord>::decode(&encoded).unwrap();
-            assert_eq!(removal_records, decoded);
+    proptest::proptest! {
+        #[test]
+        fn test_removal_record_decode(removal_record in arb::<RemovalRecord>()) {
+            for _ in 0..10 {
+                let encoded = &removal_record.encode();
+                let decoded = *RemovalRecord::decode(encoded).unwrap();
+                assert_eq!(removal_record, decoded);
+            }
         }
-    }
 
-    #[test]
-    fn test_absindexset_record_decode() {
-        for _ in 0..100 {
-            let removal_record = random_removal_record();
-            let encoded_absindexset = removal_record.absolute_indices.encode();
-            let decoded_absindexset = *AbsoluteIndexSet::decode(&encoded_absindexset).unwrap();
-            assert_eq!(removal_record.absolute_indices, decoded_absindexset);
+        #[test]
+        fn test_removal_record_vec_decode(removal_records in removal_record_vec()) {
+            for _ in 0..10 {
+                let encoded = removal_records.encode();
+                let decoded = *Vec::<RemovalRecord>::decode(&encoded).unwrap();
+                assert_eq!(removal_records, decoded);
+            }
+        }
+
+        #[test]
+        fn test_absindexset_record_decode(removal_record_absolute_indices in arb::<AbsoluteIndexSet>()) {
+            for _ in 0..100 {
+                let encoded_absindexset = removal_record_absolute_indices.encode();
+                let decoded_absindexset = *AbsoluteIndexSet::decode(&encoded_absindexset).unwrap();
+                assert_eq!(
+                    removal_record_absolute_indices,
+                    decoded_absindexset
+                );
+            }
         }
     }
 }

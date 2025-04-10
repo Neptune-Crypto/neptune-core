@@ -8,9 +8,6 @@ use std::ops::IndexMut;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -23,7 +20,7 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-use super::chunk_dictionary::pseudorandom_chunk_dictionary;
+// use super::chunk_dictionary::pseudorandom_chunk_dictionary;
 use super::chunk_dictionary::ChunkDictionary;
 use super::commit;
 use super::get_swbf_indices;
@@ -556,44 +553,17 @@ impl MsMembershipProof {
     }
 }
 
-/// Generate a pseudorandom mutator set membership proof from the given seed, for testing
-/// purposes.
-pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembershipProof {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let sender_randomness: Digest = rng.random();
-    let receiver_preimage: Digest = rng.random();
-    let (auth_path_aocl, aocl_leaf_index) =
-        pseudorandom_mmr_membership_proof_with_index(rng.random());
-    let target_chunks: ChunkDictionary = pseudorandom_chunk_dictionary(rng.random());
-    MsMembershipProof {
-        sender_randomness,
-        receiver_preimage,
-        aocl_leaf_index,
-        auth_path_aocl,
-        target_chunks,
-    }
-}
-
-/// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
-/// for testing purposes.
-pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembershipProof, u64) {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let leaf_index: u64 = rng.random();
-    let authentication_path: Vec<Digest> = (0..rng.random_range(0..15))
-        .map(|_| rng.random())
-        .collect_vec();
-    (
-        MmrMembershipProof {
-            authentication_path,
-        },
-        leaf_index,
-    )
-}
-
 #[cfg(test)]
-mod ms_proof_tests {
+pub mod ms_proof_tests {
     use itertools::Either;
     use itertools::Itertools;
+    use proptest::collection;
+    use proptest::prelude::any;
+
+    use proptest::prelude::Just;
+
+    use proptest::prop_compose;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -608,7 +578,36 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::commit;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
-    use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
+
+    prop_compose! {
+        /// Generate a pseudorandom mutator set membership proof from the given seed, for testing
+        /// purposes.
+        pub fn propcompose_mutator_set_membership_proof() (
+            sender_randomness in arb::<Digest>(),
+            receiver_preimage in arb::<Digest>(),
+            (auth_path_aocl, aocl_leaf_index) in propcompose_mmr_membership_proof_with_index(),
+            target_chunks in arb::<ChunkDictionary>()
+        ) -> MsMembershipProof {
+            MsMembershipProof {
+                    sender_randomness,
+                    receiver_preimage,
+                    aocl_leaf_index,
+                    auth_path_aocl,
+                    target_chunks,
+                }
+        }
+    }
+
+    prop_compose! {
+        /// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
+        /// for testing purposes.
+        pub fn propcompose_mmr_membership_proof_with_index() (len in 0..15usize, leaf_index in any::<u64>()) (
+            authentication_path in collection::vec(arb::<Digest>(), len),
+            leaf_index in Just(leaf_index),
+        ) -> (MmrMembershipProof, u64) {
+            (MmrMembershipProof {authentication_path}, leaf_index)
+        }
+    }
 
     #[test]
     fn mp_equality_test() {
@@ -1394,10 +1393,11 @@ mod ms_proof_tests {
     #[test]
     fn test_decode_mutator_set_membership_proof() {
         for _ in 0..100 {
-            let msmp = random_mutator_set_membership_proof();
-            let encoded = msmp.encode();
-            let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
-            assert_eq!(msmp, decoded);
+            proptest::proptest!(|(msmp in propcompose_mutator_set_membership_proof())| {
+                let encoded = msmp.encode();
+                let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
+                assert_eq!(msmp, decoded);
+            })
         }
     }
 

@@ -92,7 +92,6 @@ mod test {
     use test::removal_record::RemovalRecord;
 
     use super::*;
-    use crate::tests::shared::mock_item_and_randomnesses;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::test_shared::mutator_set::*;
 

@@ -796,6 +796,7 @@ pub(super) fn get_upgrade_task_from_mempool(
 
 #[cfg(test)]
 mod test {
+    use proptest::test_runner::TestRunner;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
@@ -1101,7 +1102,18 @@ mod test {
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
-        let mut alice = state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;
+        let mut alice = state_with_premine_and_self_mined_blocks(
+            cli_args,
+            proptest::strategy::ValueTree::current(
+                &proptest::prelude::Strategy::new_tree(
+                    &proptest::array::uniform32(proptest::prelude::any::<u8>()),
+                    &mut TestRunner::deterministic(),
+                )
+                .unwrap(),
+            ),
+            1,
+        )
+        .await;
 
         let mut transactions = vec![];
         for _ in 0..=1 {

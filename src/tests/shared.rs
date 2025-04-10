@@ -20,16 +20,16 @@ use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use proptest::collection::vec;
+use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
+use proptest::prop_compose;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
 use proptest_arbitrary_interop::arb;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
-use rand::random;
 use rand::rngs::StdRng;
 use rand::Rng;
-use rand::RngCore;
 use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Proof;
@@ -70,13 +70,13 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -267,9 +267,9 @@ pub(crate) async fn mock_genesis_global_state(
 /// A state with a premine UTXO and self-mined blocks. Both composing and
 /// guessing was done by the returned entity. Tip has height of
 /// `num_blocks_mined`.
-pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
+pub(crate) async fn state_with_premine_and_self_mined_blocks(
     cli_args: cli_args::Args,
-    rng: &mut T,
+    seed: [u8; 32],
     num_blocks_mined: usize,
 ) -> GlobalStateLock {
     let wallet = WalletEntropy::devnet_wallet();
@@ -285,7 +285,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
             &previous_block,
             None,
             own_key,
-            rng.random(),
+            seed,
             0.5,
             guesser_preimage,
             network,
@@ -456,63 +456,21 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
-pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    if rng.next_u32() % 2 == 0 {
-        None
-    } else {
-        Some(thing)
+prop_compose! {
+    pub fn propcompose_utxo() (lock_script_hash in arb::<Digest>(), num_whole_coins in 0..42000000u32) -> Utxo {
+        (
+            lock_script_hash,
+            NativeCurrencyAmount::coins(num_whole_coins).to_native_coins(),
+        )
+            .into()
     }
 }
 
-pub fn pseudorandom_amount(seed: [u8; 32]) -> NativeCurrencyAmount {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let number: u128 = rng.random::<u128>() >> 10;
-    NativeCurrencyAmount::from_nau(number.try_into().unwrap())
-}
-
-pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    (
-        rng.random(),
-        NativeCurrencyAmount::coins(rng.random_range(0..42000000)).to_native_coins(),
-    )
-        .into()
-}
-
-pub fn random_transaction_kernel() -> TransactionKernel {
-    let mut rng = rand::rng();
-    let num_inputs = 1 + (rng.next_u32() % 5) as usize;
-    let num_outputs = 1 + (rng.next_u32() % 6) as usize;
-    let num_public_announcements = (rng.next_u32() % 5) as usize;
-    pseudorandom_transaction_kernel(
-        rng.random(),
-        num_inputs,
-        num_outputs,
-        num_public_announcements,
-    )
-}
-
-pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let len = 10 + (rng.next_u32() % 50) as usize;
-    let message = (0..len).map(|_| rng.random()).collect_vec();
-    PublicAnnouncement { message }
-}
-
-pub fn random_public_announcement() -> PublicAnnouncement {
-    let mut rng = rand::rng();
-    pseudorandom_public_announcement(rng.random::<[u8; 32]>())
-}
-
-pub fn random_amount() -> NativeCurrencyAmount {
-    let mut rng = rand::rng();
-    pseudorandom_amount(rng.random::<[u8; 32]>())
-}
-
-pub fn random_option<T>(thing: T) -> Option<T> {
-    let mut rng = rand::rng();
-    pseudorandom_option(rng.random::<[u8; 32]>(), thing)
+prop_compose! {
+    pub fn propcompose_transaction_kernel() (num_inputs in 1usize..=5, num_outputs in 1usize..=6, num_public_announcements in 0usize..5)
+    (the in propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(num_inputs, num_outputs, num_public_announcements)) -> TransactionKernel {
+        the
+    }
 }
 
 pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
@@ -640,14 +598,6 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     }
 }
 
-pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
-    let mut rng = rand::rng();
-    let item: Digest = rng.random();
-    let sender_randomness: Digest = rng.random();
-    let receiver_preimage: Digest = rng.random();
-    (item, sender_randomness, receiver_preimage)
-}
-
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord>,
@@ -655,27 +605,17 @@ pub fn make_mock_transaction_with_wallet(
     fee: NativeCurrencyAmount,
     _wallet_state: &WalletState,
     timestamp: Option<Timestamp>,
-) -> Transaction {
+) -> BoxedStrategy<Transaction> {
     let timestamp = match timestamp {
         Some(ts) => ts,
         None => Timestamp::now(),
     };
-    let kernel = TransactionKernelProxy {
-        inputs,
-        outputs,
-        public_announcements: vec![],
-        fee,
-        timestamp,
-        coinbase: None,
-        mutator_set_hash: random(),
-        merge_bit: false,
-    }
-    .into_kernel();
-
-    Transaction {
-        kernel,
-        proof: TransactionProof::invalid(),
-    }
+    transaction_kernel::propcompose_of_mutator(inputs, outputs, fee, timestamp)
+        .prop_map(|kernel| Transaction {
+            kernel,
+            proof: TransactionProof::invalid(),
+        })
+        .boxed()
 }
 
 /// Create a block containing the supplied transaction kernel, starting from

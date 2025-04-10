@@ -46,6 +46,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, Default, BFieldCodec)]
+// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct NativeCurrencyAmount(i128);
 
 impl TasmObject for NativeCurrencyAmount {

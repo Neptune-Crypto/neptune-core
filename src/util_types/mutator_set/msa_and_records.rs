@@ -284,15 +284,15 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use proptest::collection::vec;
+    use proptest::collection::{self, vec};
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
-    use test_strategy::proptest;
 
     use super::MsaAndRecords;
-    use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
-    use crate::util_types::test_shared::mutator_set::random_removal_record;
+    use crate::util_types::mutator_set::ms_membership_proof::ms_proof_tests::propcompose_mutator_set_membership_proof;
+    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MsaAndRecords {
         /// Split an [MsaAndRecords] into multiple instances of the same type.
@@ -328,7 +328,7 @@ mod test {
         }
     }
 
-    #[proptest(cases = 1)]
+    #[test_strategy::proptest(cases = 1)]
     fn msa_and_records_is_valid(
         #[strategy(0usize..10)] _num_removals: usize,
         #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
@@ -347,21 +347,23 @@ mod test {
 
     #[test]
     fn split_msa_and_records() {
-        split_prop([1]);
-        split_prop([0]);
-        split_prop([0, 5]);
-        split_prop([3, 4]);
-        split_prop([12, 2, 5]);
+        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 1))| split_prop([1], data));
+        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 0))| split_prop([0], data));
+        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 5))| split_prop([0, 5], data));
+        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 7))| split_prop([3, 4], data));
+        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 19))| split_prop([12, 2, 5], data));
     }
 
-    fn split_prop<const N: usize>(split: [usize; N]) {
+    fn split_prop<const N: usize>(
+        split: [usize; N],
+        mut data: Vec<(RemovalRecord, MsMembershipProof)>,
+    ) {
         let mut original = MsaAndRecords::default();
         let total = split.into_iter().sum::<usize>();
         for _ in 0..total {
-            original.removal_records.push(random_removal_record());
-            original
-                .membership_proofs
-                .push(random_mutator_set_membership_proof());
+            let datum = data.pop().unwrap();
+            original.removal_records.push(datum.0);
+            original.membership_proofs.push(datum.1);
         }
 
         let split_msa_and_records = original.split_by(split);
