@@ -796,6 +796,8 @@ pub(super) fn get_upgrade_task_from_mempool(
 #[cfg(test)]
 mod test {
     use proptest::test_runner::TestRunner;
+    use proptest::{prelude::Strategy, strategy::ValueTree};
+    use proptest_arbitrary_interop::arb;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
@@ -1095,6 +1097,7 @@ mod test {
         // Alice is premine recipient and has mined on block, so she can make
         // (at least) two transaction.
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
+        let mut test_runner = TestRunner::deterministic();
         let cli_args = cli_args::Args {
             network,
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
@@ -1151,9 +1154,17 @@ mod test {
         let block1 = alice.lock_guard().await.chain.light_state().to_owned();
 
         let now = block1.header().timestamp + Timestamp::hours(1);
-        let block2 =
-            fake_block_successor_with_merged_tx(&block1, now, rng.random(), false, vec![mined_tx])
-                .await;
+        let block2 = fake_block_successor_with_merged_tx(
+            &block1,
+            now,
+            false,
+            vec![mined_tx],
+            arb::<crate::tests::shared::Seeds<2, 2>>()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current(),
+        )
+        .await;
         alice.set_new_tip(block2).await.unwrap();
 
         let (main_to_peer_tx, mut main_to_peer_rx) =

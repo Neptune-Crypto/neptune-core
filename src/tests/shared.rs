@@ -981,10 +981,9 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         selected_mempool_txs = vec![nop_transaction];
     }
 
-    let mut rng = StdRng::from_seed(shuffle_seed);
     for tx_to_include in selected_mempool_txs {
         block_transaction =
-            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
+            fake_merge_transactions_for_tests(block_transaction, tx_to_include, shuffle_seed)
                 .await
                 .expect("Must be able to merge transactions in mining context");
     }
@@ -992,27 +991,55 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     Ok((block_transaction, composer_txos))
 }
 
+#[derive(arbitrary::Arbitrary, Debug, Clone, PartialEq, Eq)]
+pub struct Seeds<const A: usize, const D: usize> {
+    bytes: [[u8; 32]; A],
+    digests: [Digest; D],
+}
+impl<const A: usize, const D: usize> rand::distr::Distribution<Seeds<A, D>>
+    for rand::distr::StandardUniform
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Seeds<A, D> {
+        let mut bytes = [[Default::default(); 32]; A];
+        let mut digests = [Default::default(); D];
+        bytes.iter_mut().for_each(|b| rng.fill_bytes(b));
+        digests.iter_mut().for_each(|d| *d = rng.random());
+        Seeds { bytes, digests }
+    }
+}
+impl<const A: usize, const D: usize> Default for Seeds<A, D> {
+    fn default() -> Self {
+        Self {
+            bytes: [[Default::default(); 32]; A],
+            digests: [Default::default(); D],
+        }
+    }
+}
+
 async fn fake_block_successor(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
     with_valid_pow: bool,
+    // seed_address: Digest,
+    // sender_randomness: Digest,
+    // shuffle_seed: [u8; 32],
+    // seed_block: [u8; 32],
+    seeds: Seeds<2, 2>,
 ) -> Block {
-    fake_block_successor_with_merged_tx(predecessor, timestamp, seed, with_valid_pow, vec![]).await
+    fake_block_successor_with_merged_tx(predecessor, timestamp, with_valid_pow, vec![], seeds).await
 }
 
 pub async fn fake_block_successor_with_merged_tx(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
     with_valid_pow: bool,
     txs: Vec<Transaction>,
+    seeds: Seeds<2, 2>,
 ) -> Block {
-    let mut rng = StdRng::from_seed(seed);
-
+    let (mut seed_bytes, mut seed_digests) = (seeds.bytes.to_vec(), seeds.digests.to_vec());
     let composer_parameters = ComposerParameters::new(
-        GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
-        rng.random(),
+        GenerationReceivingAddress::derive_from_seed(seed_digests.pop().unwrap()).into(),
+        seed_digests.pop().unwrap(),
         None,
         0.5f64,
         FeeNotificationPolicy::OffChain,
@@ -1021,14 +1048,14 @@ pub async fn fake_block_successor_with_merged_tx(
         predecessor,
         composer_parameters,
         timestamp,
-        rng.random(),
+        seed_bytes.pop().unwrap(),
         txs,
     )
     .await
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.random()).await
+        fake_valid_block_from_tx_for_tests(predecessor, block_tx, seed_bytes.pop().unwrap()).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }
@@ -1037,17 +1064,17 @@ pub async fn fake_block_successor_with_merged_tx(
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
+    seeds: Seeds<2, 2>,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, false).await
+    fake_block_successor(predecessor, timestamp, false, seeds).await
 }
 
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
+    seeds: Seeds<2, 2>,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, true).await
+    fake_block_successor(predecessor, timestamp, true, seeds).await
 }
 
 /// Create a block with coinbase going to self. For testing purposes.
@@ -1057,13 +1084,13 @@ pub(crate) async fn fake_valid_successor_for_tests(
 /// will not pass `triton_vm::verify`, as its validity is only mocked.
 pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
-    seed: [u8; 32],
+    seeds: Seeds<2, 2>,
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
-        seed,
+        seeds,
     )
     .await
 }

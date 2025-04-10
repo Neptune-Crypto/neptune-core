@@ -1058,6 +1058,10 @@ impl Block {
 
 #[cfg(test)]
 pub(crate) mod block_tests {
+
+    use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1300,9 +1304,18 @@ pub(crate) mod block_tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
-        let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+        // let rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+        let mut test_runner = proptest::test_runner::TestRunner::deterministic();
 
-        let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
+        let mut block1 = fake_valid_successor_for_tests(
+            &genesis_block,
+            now,
+            arb::<crate::tests::shared::Seeds<2, 2>>()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current(),
+        )
+        .await;
 
         let timestamp = block1.kernel.header.timestamp;
         assert!(block1.is_valid(&genesis_block, timestamp).await);
@@ -1405,6 +1418,9 @@ pub(crate) mod block_tests {
     }
 
     mod block_is_valid {
+
+        use proptest::test_runner::TestRunner;
+        use proptest_arbitrary_interop::arb;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
@@ -1430,9 +1446,16 @@ pub(crate) mod block_tests {
             let genesis_block = Block::genesis(network);
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-            let block1 =
-                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
-                    .await;
+            let mut test_runner = TestRunner::deterministic();
+            let block1 = fake_valid_successor_for_tests(
+                &genesis_block,
+                plus_seven_months,
+                arb::<crate::tests::shared::Seeds<2, 2>>()
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current(),
+            )
+            .await;
 
             let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice = mock_genesis_global_state(
@@ -1591,10 +1614,17 @@ pub(crate) mod block_tests {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
-            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+            let mut test_runner = TestRunner::deterministic();
 
-            let mut block1 =
-                fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
+            let mut block1 = fake_valid_successor_for_tests(
+                &genesis_block,
+                now,
+                arb::<crate::tests::shared::Seeds<2, 2>>()
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current(),
+            )
+            .await;
 
             // Set block timestamp 4 minutes in the future.  (is valid)
             let future_time1 = now + Timestamp::minutes(4);

@@ -2820,6 +2820,7 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use futures::channel::oneshot;
         use guesser_fee_utxos::composer_parameters::ComposerParameters;
+
         use rand::rng;
 
         use super::*;
@@ -2834,6 +2835,7 @@ pub(crate) mod tests {
         use crate::tests::shared::fake_valid_block_proposal_successor_for_test;
 
         #[traced_test]
+        // this doesn't make a lot of sense to make a `proptest`
         #[tokio::test]
         async fn registers_guesser_fee_utxos_correctly() {
             let network = Network::Main;
