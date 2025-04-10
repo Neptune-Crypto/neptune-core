@@ -445,13 +445,14 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
-pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    (
-        rng.random(),
-        NativeCurrencyAmount::coins(rng.random_range(0..42000000)).to_native_coins(),
-    )
-        .into()
+prop_compose! {
+    pub fn propcompose_utxo() (lock_script_hash in arb::<Digest>(), num_whole_coins in 0..42000000u32) -> Utxo {
+        (
+            lock_script_hash,
+            NativeCurrencyAmount::coins(num_whole_coins).to_native_coins(),
+        )
+            .into()
+    }
 }
 
 prop_compose! {
