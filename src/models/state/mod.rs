@@ -1994,7 +1994,7 @@ mod global_state_tests {
         let network = Network::Main;
         let cli_args = cli_args::Args::default_with_network(network);
         let mut state =
-            state_with_premine_and_self_mined_blocks(cli_args, [(&mut rand::rng()).random()]).await;
+            state_with_premine_and_self_mined_blocks(cli_args, [rand::rng().random()]).await;
         let mut state = state.lock_guard_mut().await;
         let orignal_mutxos = state
             .wallet_state
@@ -2091,7 +2091,7 @@ mod global_state_tests {
         let network = Network::Main;
         let cli_args = cli_args::Args::default_with_network(network);
         let mut global_state_lock =
-            state_with_premine_and_self_mined_blocks(cli_args, [(&mut rand::rng()).random()]).await;
+            state_with_premine_and_self_mined_blocks(cli_args, [rand::rng().random()]).await;
 
         // Delete everything from monitored UTXO and from raw-hash keys.
         let mut global_state = global_state_lock.lock_guard_mut().await;

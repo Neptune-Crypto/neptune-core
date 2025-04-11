@@ -1104,9 +1104,9 @@ pub(crate) async fn fake_valid_block_for_tests(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     predecessor: &Block,
     block_interval: Timestamp,
-    seed: [u8; 32],
+    rness: [Randomness<2, 2>; N],
 ) -> [Block; N] {
-    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, seed, N)
+    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, rness.to_vec())
         .await
         .try_into()
         .unwrap()
@@ -1121,16 +1121,15 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     mut predecessor: &Block,
     block_interval: Timestamp,
-    seed: [u8; 32],
-    n: usize,
+    mut rness_vec: Vec<Randomness<2, 2>>,
+    // n: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    for _ in 0..n {
+    while let Some(rness) = rness_vec.pop() {
         let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
-            rng.random(),
+            rness,
         )
         .await;
         blocks.push(block);
