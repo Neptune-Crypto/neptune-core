@@ -28,9 +28,7 @@ use proptest::test_runner::TestRunner;
 use proptest_arbitrary_interop::arb;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
-use rand::rngs::StdRng;
 use rand::Rng;
-use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::bfe;
@@ -897,13 +895,12 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 pub(crate) async fn fake_valid_block_from_tx_for_tests(
     predecessor: &Block,
     tx: Transaction,
-    seed: [u8; 32],
+    nonce: Digest,
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx).await;
 
-    let mut rng = StdRng::from_seed(seed);
     while !block.has_proof_of_work(predecessor.header()) {
-        mine_iteration_for_tests(&mut block, &mut rng);
+        mine_iteration_for_tests(&mut block, nonce);
     }
 
     block
@@ -1024,7 +1021,7 @@ async fn fake_block_successor(
     // sender_randomness: Digest,
     // shuffle_seed: [u8; 32],
     // seed_block: [u8; 32],
-    rness: Randomness<2, 2>,
+    rness: Randomness<1, 3>,
 ) -> Block {
     fake_block_successor_with_merged_tx(predecessor, timestamp, with_valid_pow, vec![], rness).await
 }
@@ -1034,7 +1031,7 @@ pub async fn fake_block_successor_with_merged_tx(
     timestamp: Timestamp,
     with_valid_pow: bool,
     txs: Vec<Transaction>,
-    rness: Randomness<2, 2>,
+    rness: Randomness<1, 3>,
 ) -> Block {
     let (mut seed_bytes, mut seed_digests) = (rness.bytes_arr.to_vec(), rness.digests.to_vec());
     let composer_parameters = ComposerParameters::new(
@@ -1055,7 +1052,7 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(predecessor, block_tx, seed_bytes.pop().unwrap()).await
+        fake_valid_block_from_tx_for_tests(predecessor, block_tx, seed_digests.pop().unwrap()).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }
@@ -1064,7 +1061,7 @@ pub async fn fake_block_successor_with_merged_tx(
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
-    rness: Randomness<2, 2>,
+    rness: Randomness<1, 3>,
 ) -> Block {
     fake_block_successor(predecessor, timestamp, false, rness).await
 }
@@ -1072,7 +1069,7 @@ pub(crate) async fn fake_valid_block_proposal_successor_for_test(
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
-    rness: Randomness<2, 2>,
+    rness: Randomness<1, 3>,
 ) -> Block {
     fake_block_successor(predecessor, timestamp, true, rness).await
 }
@@ -1084,7 +1081,7 @@ pub(crate) async fn fake_valid_successor_for_tests(
 /// will not pass `triton_vm::verify`, as its validity is only mocked.
 pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
-    rness: Randomness<2, 2>,
+    rness: Randomness<1, 3>,
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     fake_valid_successor_for_tests(
@@ -1104,7 +1101,7 @@ pub(crate) async fn fake_valid_block_for_tests(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     predecessor: &Block,
     block_interval: Timestamp,
-    rness: [Randomness<2, 2>; N],
+    rness: [Randomness<1, 3>; N],
 ) -> [Block; N] {
     fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, rness.to_vec())
         .await
@@ -1121,7 +1118,7 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     mut predecessor: &Block,
     block_interval: Timestamp,
-    mut rness_vec: Vec<Randomness<2, 2>>,
+    mut rness_vec: Vec<Randomness<1, 3>>,
     // n: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
