@@ -20,10 +20,10 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Coin;
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::Hash;
@@ -114,14 +114,15 @@ impl TypeScriptAndWitness {
             .flat_map(|d| d.reversed().values())
             .collect_vec();
         let claim = Claim::new(self.program.hash()).with_input(input);
-        prove_consensus_program(
-            self.program.clone(),
-            claim,
-            self.nondeterminism(),
-            triton_vm_job_queue,
-            proof_job_options,
-        )
-        .await
+
+        Ok(ProofBuilder::new()
+            .program(self.program.clone())
+            .claim(claim)
+            .nondeterminism(self.nondeterminism())
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?)
     }
 }
 

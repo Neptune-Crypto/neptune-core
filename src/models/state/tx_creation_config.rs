@@ -16,7 +16,6 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]
 pub(crate) struct TxCreationConfig {
-    prover_capability: TxProvingCapability,
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
     change_policy: ChangePolicy,
@@ -32,7 +31,6 @@ impl TxCreationConfig {
     pub fn new() -> Self {
         Self {
             triton_vm_job_queue: vm_job_queue(),
-            prover_capability: Default::default(),
             proof_job_options: Default::default(),
             change_policy: Default::default(),
         }
@@ -49,7 +47,9 @@ impl TxCreationConfig {
 
     /// Configure the proving capacity.
     pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {
-        self.prover_capability = prover_capability;
+        // note: legacy tests consider prover_capability and target proof_type to be the same thing
+        self.proof_job_options.job_settings.tx_proving_capability = prover_capability;
+        self.proof_job_options.job_settings.proof_type = prover_capability.into();
         self
     }
 
@@ -62,11 +62,6 @@ impl TxCreationConfig {
     /// Get the change key and notification medium, if any.
     pub(crate) fn change_policy(&self) -> ChangePolicy {
         self.change_policy.clone()
-    }
-
-    /// Get the transaction proving capability.
-    pub(crate) fn prover_capability(&self) -> TxProvingCapability {
-        self.prover_capability
     }
 
     /// Get (a smart pointer to) the job queue

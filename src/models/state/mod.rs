@@ -2590,7 +2590,6 @@ mod global_state_tests {
             &genesis_block,
             &premine_receiver,
             in_seven_months,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -2914,7 +2913,6 @@ mod global_state_tests {
                 .clone(),
             &premine_receiver,
             in_seven_months,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -3015,8 +3013,9 @@ mod global_state_tests {
                 &genesis_block,
                 global_state_lock,
                 timestamp,
-                TxProvingCapability::PrimitiveWitness,
-                (TritonVmJobPriority::Normal, None).into(),
+                global_state_lock
+                    .cli()
+                    .proof_job_options_primitive_witness(),
             )
             .await
             .unwrap();

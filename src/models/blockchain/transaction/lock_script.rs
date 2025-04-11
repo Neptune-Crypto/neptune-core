@@ -13,9 +13,9 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
 use super::utxo::Utxo;
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::Proof;
-use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::prelude::twenty_first;
 
@@ -163,14 +163,14 @@ impl LockScriptAndWitness {
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
-        prove_consensus_program(
-            self.program.clone(),
-            claim,
-            self.nondeterminism(),
-            triton_vm_job_queue,
-            proof_job_options,
-        )
-        .await
+        Ok(ProofBuilder::new()
+            .program(self.program.clone())
+            .claim(claim)
+            .nondeterminism(self.nondeterminism())
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?)
     }
 }
 

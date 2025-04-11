@@ -89,8 +89,6 @@ impl TransactionInitiatorInternal {
             .primitive_witness(witness)
             .job_queue(tx_creation_config.job_queue())
             .proof_job_options(tx_creation_config.proof_job_options())
-            .tx_proving_capability(tx_creation_config.prover_capability())
-            .network(self.global_state_lock.cli().network)
             .build()
             .await?;
 

@@ -17,8 +17,8 @@ use crate::models::blockchain::transaction::transaction_proof::TransactionProofT
 /// * [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof)
 #[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TxProvingCapability {
-    #[default]
     LockScript,
+    #[default]
     PrimitiveWitness,
     ProofCollection,
     SingleProof,

@@ -135,8 +135,7 @@ impl RegTestPrivate {
             rand::random(), // seed.
             txs_from_mempool,
             gsl.cli().network,
-        )
-        .await?;
+        )?;
 
         // obtain utxos destined for our wallet from composer rewards.
         let expected_utxos = composer_parameters.extract_expected_utxos(composer_tx_outputs);

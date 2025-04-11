@@ -239,7 +239,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     }
     info!("Made outgoing connections to peers");
 
-
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);

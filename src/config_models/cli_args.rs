@@ -476,14 +476,6 @@ fn parse_range(unparsed_range: &str) -> Result<RangeInclusive<u64>, String> {
 }
 
 impl Args {
-    #[cfg(test)]
-    pub(crate) fn default_with_network(network: Network) -> Self {
-        Self {
-            network,
-            ..Default::default()
-        }
-    }
-
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
         self.max_num_peers.is_zero()
@@ -521,6 +513,8 @@ impl Args {
             job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
                 network: self.network,
+                tx_proving_capability: self.proving_capability(),
+                proof_type: self.proving_capability().into(),
             },
             cancel_job_rx: None,
         }
@@ -569,12 +563,51 @@ impl Args {
     }
 }
 
+impl From<&Args> for TritonVmProofJobOptions {
+    fn from(cli: &Args) -> Self {
+        Self {
+            job_priority: Default::default(),
+            job_settings: ProverJobSettings {
+                max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
+                network: cli.network,
+                tx_proving_capability: cli.proving_capability(),
+                proof_type: cli.proving_capability().into(),
+            },
+            cancel_job_rx: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod cli_args_tests {
     use std::net::Ipv6Addr;
     use std::ops::RangeBounds;
 
     use super::*;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+
+    // extra methods for tests.
+    impl Args {
+        pub(crate) fn default_with_network(network: Network) -> Self {
+            Self {
+                network,
+                ..Default::default()
+            }
+        }
+
+        pub(crate) fn proof_job_options_prooftype(
+            &self,
+            proof_type: TransactionProofType,
+        ) -> TritonVmProofJobOptions {
+            let mut options: TritonVmProofJobOptions = self.into();
+            options.job_settings.proof_type = proof_type;
+            options
+        }
+
+        pub(crate) fn proof_job_options_primitive_witness(&self) -> TritonVmProofJobOptions {
+            self.proof_job_options_prooftype(TransactionProofType::PrimitiveWitness)
+        }
+    }
 
     #[test]
     fn default_args_test() {

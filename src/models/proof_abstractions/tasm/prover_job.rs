@@ -23,12 +23,14 @@ use crate::job_queue::traits::JobCompletion;
 use crate::job_queue::traits::JobResult;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::vm::VMState;
 
 /// represents an error running a [ProverJob]
@@ -39,6 +41,12 @@ pub enum ProverJobError {
 
     #[error("external proving process failed")]
     TritonVmProverFailed(#[from] VmProcessError),
+
+    #[error("machine's capability {capability} is not sufficient to produce proof: {proof_type}")]
+    TooWeak {
+        capability: TxProvingCapability,
+        proof_type: TransactionProofType,
+    },
 }
 
 /// represents an error invoking external prover process
@@ -127,10 +135,24 @@ impl From<ProverJobError> for ProverJobResult {
     }
 }
 
-#[derive(Debug, Clone, Default, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProverJobSettings {
     pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
     pub(crate) network: Network,
+    pub(crate) tx_proving_capability: TxProvingCapability,
+    pub(crate) proof_type: TransactionProofType,
+}
+
+#[cfg(test)]
+impl Default for ProverJobSettings {
+    fn default() -> Self {
+        Self {
+            max_log2_padded_height_for_proofs: None,
+            network: Network::default(),
+            tx_proving_capability: TxProvingCapability::SingleProof,
+            proof_type: TxProvingCapability::SingleProof.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -164,8 +186,18 @@ impl ProverJob {
     // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
     // error is returned.
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
-        tracing::debug!("executing VM program to determine complexity (padded-height)");
         tracing::debug!("job settings: {:?}", self.job_settings);
+
+        let capability = self.job_settings.tx_proving_capability;
+        let proof_type = self.job_settings.proof_type;
+        if !capability.can_prove(proof_type) {
+            return Err(ProverJobError::TooWeak {
+                capability,
+                proof_type,
+            });
+        }
+
+        tracing::debug!("executing VM program to determine complexity (padded-height)");
 
         assert_eq!(self.program.hash(), self.claim.program_digest);
 

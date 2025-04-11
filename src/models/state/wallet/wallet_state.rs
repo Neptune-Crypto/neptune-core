@@ -2517,7 +2517,6 @@ pub(crate) mod tests {
                 mock_block_seed,
                 guesser_fraction,
                 guesser_preimage_1a,
-                network,
             )
             .await;
 
@@ -2552,7 +2551,6 @@ pub(crate) mod tests {
                 mock_block_seed,
                 guesser_fraction,
                 guesser_preimage_1b,
-                network,
             )
             .await;
 
@@ -3435,7 +3433,6 @@ pub(crate) mod tests {
                     rng.random(),
                     guesser_fraction,
                     guesser_preimage,
-                    network,
                 )
                 .await;
 
@@ -4070,7 +4067,6 @@ pub(crate) mod tests {
                     rng.random(),
                     guesser_fraction,
                     guesser_preimage,
-                    network,
                 )
                 .await;
 
@@ -4120,7 +4116,6 @@ pub(crate) mod tests {
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
-        use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
 
@@ -4491,10 +4486,8 @@ pub(crate) mod tests {
                 &previous_block,
                 composer_parameters.clone(),
                 now,
-                TxProvingCapability::PrimitiveWitness,
                 TritonVmJobQueue::dummy(),
-                TritonVmProofJobOptions::default(),
-                network,
+                rando.cli().proof_job_options_primitive_witness(),
             )
             .await
             .unwrap();
@@ -4624,10 +4617,10 @@ pub(crate) mod tests {
                 &genesis_block,
                 composer_parameters.clone(),
                 now,
-                TxProvingCapability::PrimitiveWitness,
                 TritonVmJobQueue::dummy(),
-                TritonVmProofJobOptions::default(),
-                network,
+                global_state_lock
+                    .cli()
+                    .proof_job_options_primitive_witness(),
             )
             .await
             .unwrap();

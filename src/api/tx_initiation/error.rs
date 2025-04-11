@@ -7,6 +7,8 @@ use tasm_lib::prelude::Digest;
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::WitnessValidationError;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
@@ -55,8 +57,16 @@ pub enum CreateProofError {
     #[error("missing required data to build proof")]
     MissingRequirement,
 
-    #[error("machine too weak to generate transaction proofs")]
-    TooWeak,
+    #[error(
+        "machine capability {capability} is insufficient to generate proof of type: {proof_type}"
+    )]
+    TooWeak {
+        proof_type: TransactionProofType,
+        capability: TxProvingCapability,
+    },
+
+    #[error("target proof type {0} is not a triton-vm proof.")]
+    NotVmProof(TransactionProofType),
 
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]
