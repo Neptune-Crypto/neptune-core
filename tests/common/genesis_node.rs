@@ -157,7 +157,7 @@ impl GenesisNode {
     ///
     /// note: no dummy components are used.
     pub async fn start_node(args: Args) -> anyhow::Result<Self> {
-        let _ = Network::set_singleton(args.network.clone());
+        let _ = Network::set_singleton(args.network);
 
         let mut main_loop_handler = neptune_cash::initialize(args).await?;
         let gsl = main_loop_handler.global_state_lock();
@@ -266,7 +266,10 @@ impl GenesisNode {
                 }
             }
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
-                anyhow::bail!("tx not in mempool with single-proof after {} seconds", timeout_secs);
+                anyhow::bail!(
+                    "tx not in mempool with single-proof after {} seconds",
+                    timeout_secs
+                );
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }

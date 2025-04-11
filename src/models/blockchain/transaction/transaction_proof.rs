@@ -36,6 +36,17 @@ impl From<&TransactionProof> for TransactionProofType {
     }
 }
 
+impl TransactionProofType {
+    /// indicates if the proof is a triton-vm program.
+    pub fn is_vm_proof(&self) -> bool {
+        matches!(self, Self::ProofCollection | Self::SingleProof)
+    }
+
+    pub fn is_single_proof(&self) -> bool {
+        *self == TransactionProofType::SingleProof
+    }
+}
+
 /// represents a transaction proof, which can be of different types.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum TransactionProof {
@@ -48,7 +59,6 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
-
     pub fn is_witness(&self) -> bool {
         matches!(self, Self::Witness(_))
     }

@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::prelude::twenty_first;
@@ -172,22 +171,19 @@ impl Transaction {
         // info!("done.");
 
         let new_single_proof_witness = SingleProofWitness::from_update(update_witness);
-        let new_single_proof_claim = new_single_proof_witness.claim();
 
         info!("starting single proof via update ...");
-        let new_single_proof = SingleProof
-            .prove(
-                new_single_proof_claim,
-                new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+        let proof = TransactionProofBuilder::new()
+            .single_proof_witness(&new_single_proof_witness)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
             .await?;
         info!("done.");
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(new_single_proof),
+            proof,
         })
     }
 
@@ -238,21 +234,21 @@ impl Transaction {
         );
         let new_kernel = merge_witness.new_kernel.clone();
         let new_single_proof_witness = SingleProofWitness::from_merge(merge_witness);
-        let new_single_proof_claim = new_single_proof_witness.claim();
+
         info!("Start: creating new single proof through merge");
-        let new_single_proof = SingleProof
-            .prove(
-                new_single_proof_claim,
-                new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+
+        let proof = TransactionProofBuilder::new()
+            .single_proof_witness(&new_single_proof_witness)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
             .await?;
+
         info!("Done: creating new single proof through merge");
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(new_single_proof),
+            proof,
         })
     }
 

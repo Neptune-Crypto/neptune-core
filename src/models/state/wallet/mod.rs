@@ -843,7 +843,6 @@ mod wallet_tests {
                 .clone(),
             &alice,
             block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -1020,7 +1019,6 @@ mod wallet_tests {
                 .clone(),
             &bob,
             in_seven_months,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await

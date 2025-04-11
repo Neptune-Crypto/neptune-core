@@ -209,6 +209,66 @@ impl ProofCollection {
         })
     }
 
+    // produce ProofCollection with mock proofs
+    pub(crate) fn produce_mock(primitive_witness: &PrimitiveWitness, valid_mock: bool) -> Self {
+        let txk_mast_hash = primitive_witness.kernel.mast_hash();
+        let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
+        let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
+        debug!("proving, txk hash: {}", txk_mast_hash);
+        debug!("proving, salted inputs hash: {}", salted_inputs_hash);
+        debug!("proving, salted outputs hash: {}", salted_outputs_hash);
+
+        let claim = Claim::new(Digest::default());
+        let mock_proof = if valid_mock {
+            Proof::valid_mock(claim)
+        } else {
+            Proof::invalid_mock(claim)
+        };
+
+        let merge_bit_mast_path = primitive_witness
+            .kernel
+            .mast_path(TransactionKernelField::MergeBit);
+
+        let lock_scripts_halt = primitive_witness
+            .lock_scripts_and_witnesses
+            .iter()
+            .map(|_| mock_proof.clone())
+            .collect_vec();
+
+        let type_scripts_halt = primitive_witness
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|_| mock_proof.clone())
+            .collect_vec();
+
+        // collect hashes
+        let lock_script_hashes = primitive_witness
+            .lock_scripts_and_witnesses
+            .iter()
+            .map(|lsaw| lsaw.program.hash())
+            .collect_vec();
+        let type_script_hashes = primitive_witness
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|tsaw| tsaw.program.hash())
+            .collect_vec();
+
+        ProofCollection {
+            removal_records_integrity: mock_proof.clone(),
+            collect_lock_scripts: mock_proof.clone(),
+            lock_scripts_halt,
+            kernel_to_outputs: mock_proof.clone(),
+            collect_type_scripts: mock_proof.clone(),
+            type_scripts_halt,
+            lock_script_hashes,
+            type_script_hashes,
+            kernel_mast_hash: txk_mast_hash,
+            salted_inputs_hash,
+            salted_outputs_hash,
+            merge_bit_mast_path,
+        }
+    }
+
     pub(crate) async fn verify(&self, txk_mast_hash: Digest) -> bool {
         debug!("verifying, txk hash: {}", txk_mast_hash);
         debug!("verifying, salted inputs hash: {}", self.salted_inputs_hash);

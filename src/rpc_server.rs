@@ -4796,6 +4796,7 @@ mod rpc_server_tests {
             use cli_args::Args;
 
             use super::*;
+            use crate::models::state::tx_proving_capability::TxProvingCapability;
             use crate::tests::shared::invalid_block_with_transaction;
             use crate::tests::shared::invalid_empty_block;
 
@@ -5252,7 +5253,7 @@ mod rpc_server_tests {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;
             let cli_args = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 ..Default::default()
             };
             let mut rpc_server =

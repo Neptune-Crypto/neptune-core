@@ -172,7 +172,7 @@ impl MockBlockGenerator {
     ///
     /// The associated (claim, proof) pair will pass `triton_vm::verify`,
     /// only if the network is regtest.  (The proof is mocked).
-    pub async fn mock_successor_with_pow(
+    pub fn mock_successor_with_pow(
         predecessor: Arc<Block>,
         composer_parameters: ComposerParameters,
         guesser_key: HashLockKey,

@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
+use crate::triton_vm::prelude::*;
 use itertools::Itertools;
 use tasm_lib::field;
 use tasm_lib::memory::encode_to_memory;
@@ -13,8 +16,6 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
-use crate::triton_vm::prelude::*;
-use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
@@ -48,7 +49,7 @@ const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
 const MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR: i128 = 1_000_052;
 
 #[derive(Debug, Clone, BFieldCodec)]
-pub(crate) enum SingleProofWitness {
+pub enum SingleProofWitness {
     Collection(Box<ProofCollection>),
     Update(UpdateWitness),
     Merger(MergeWitness),
@@ -240,20 +241,30 @@ impl SingleProof {
         .await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
+
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
-        let single_proof = SingleProof
-            .prove(
-                claim,
-                nondeterminism,
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+        let proof = ProofBuilder::new()
+            .program(SingleProof.program())
+            .claim(claim)
+            .nondeterminism(nondeterminism)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
             .await?;
         info!("Done");
 
-        Ok(single_proof)
+        Ok(proof)
+    }
+
+    pub(crate) fn produce_mock(valid_mock: bool) -> Proof {
+        let claim = Claim::new(Digest::default());
+        if valid_mock {
+            Proof::valid_mock(claim)
+        } else {
+            Proof::invalid_mock(claim)
+        }
     }
 }
 

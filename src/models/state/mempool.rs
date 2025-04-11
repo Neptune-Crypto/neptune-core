@@ -1415,7 +1415,6 @@ mod tests {
                 .clone(),
             &bob,
             in_eight_months,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -1494,7 +1493,6 @@ mod tests {
                 .clone(),
             &alice,
             block_5_timestamp,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await

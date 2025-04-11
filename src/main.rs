@@ -18,7 +18,7 @@ pub fn main() -> Result<()> {
         // Fetch the CLI arguments
         let args = cli_args::Args::parse();
 
-        let _ = Network::set_singleton(args.network.clone());
+        let _ = Network::set_singleton(args.network);
 
         #[cfg(not(feature = "tokio-console"))]
         {

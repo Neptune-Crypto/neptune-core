@@ -49,6 +49,7 @@ use super::transaction::utxo::Utxo;
 use super::transaction::Transaction;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
@@ -239,14 +240,17 @@ impl Block {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
-            let proof = BlockProgram
-                .prove(
-                    claim,
-                    block_proof_witness.nondeterminism(),
-                    triton_vm_job_queue,
-                    proof_job_options,
-                )
+            let nondeterminism = block_proof_witness.nondeterminism();
+
+            let proof = ProofBuilder::new()
+                .program(BlockProgram.program())
+                .claim(claim)
+                .nondeterminism(nondeterminism)
+                .job_queue(triton_vm_job_queue)
+                .proof_job_options(proof_job_options)
+                .build()
                 .await?;
+
             (appendix, BlockProof::SingleProof(proof))
         };
 
@@ -1490,7 +1494,6 @@ pub(crate) mod block_tests {
                 &block1,
                 &alice,
                 plus_eight_months,
-                TxProvingCapability::SingleProof,
                 (TritonVmJobPriority::Normal, None).into(),
             )
             .await
@@ -1554,7 +1557,6 @@ pub(crate) mod block_tests {
                     &block2_without_valid_pow,
                     &alice,
                     plus_nine_months,
-                    TxProvingCapability::SingleProof,
                     (TritonVmJobPriority::Normal, None).into(),
                 )
                 .await
@@ -1764,7 +1766,6 @@ pub(crate) mod block_tests {
                 rng.random(),
                 0.4,
                 guesser_preimage,
-                Network::Main,
             )
             .await;
             let ars = block1.guesser_fee_addition_records();
@@ -1942,7 +1943,6 @@ pub(crate) mod block_tests {
                 &blocks[i - 1],
                 &alice,
                 launch_date,
-                TxProvingCapability::SingleProof,
                 TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
             )
             .await

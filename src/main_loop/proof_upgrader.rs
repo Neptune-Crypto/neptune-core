@@ -12,6 +12,7 @@ use tracing::info;
 use tracing::warn;
 
 use super::TransactionOrigin;
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -19,17 +20,15 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -549,6 +548,8 @@ impl UpgradeJob {
                 proof_job_options.job_settings.network,
             );
 
+            let gobbler_witness = gobbler.primitive_witness();
+
             let expected_utxos = if fee_notification_policy == FeeNotificationPolicy::OffChain {
                 gobbler
                     .tx_outputs
@@ -556,19 +557,20 @@ impl UpgradeJob {
             } else {
                 vec![]
             };
-            let gobbler = PrimitiveWitness::from_transaction_details(&gobbler);
-            let gobbler_proof = SingleProof::produce(
-                &gobbler,
-                triton_vm_job_queue.clone(),
-                proof_job_options.clone(),
-            )
-            .await?;
+            let proof = TransactionProofBuilder::new()
+                .primitive_witness_ref(&gobbler_witness)
+                .job_queue(triton_vm_job_queue.clone())
+                .proof_job_options(proof_job_options.clone())
+                .proof_type(TransactionProofType::SingleProof)
+                .build()
+                .await?;
+
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
-            let gobbler = Transaction {
-                kernel: gobbler.kernel,
-                proof: TransactionProof::SingleProof(gobbler_proof),
+            let gobbler_tx = Transaction {
+                kernel: gobbler_witness.kernel,
+                proof,
             };
-            (Some(gobbler), expected_utxos)
+            (Some(gobbler_tx), expected_utxos)
         } else {
             (None, vec![])
         };
@@ -580,22 +582,18 @@ impl UpgradeJob {
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
                 let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());
-                let claim = single_proof_witness.claim();
-                let nondeterminism = single_proof_witness.nondeterminism();
-                info!("Proof-upgrader: Start generate single proof");
-                let single_proof = SingleProof
-                    .prove(
-                        claim,
-                        nondeterminism,
-                        triton_vm_job_queue.clone(),
-                        proof_job_options.clone(),
-                    )
+
+                let single_proof = TransactionProofBuilder::new()
+                    .single_proof_witness(&single_proof_witness)
+                    .job_queue(triton_vm_job_queue.clone())
+                    .proof_job_options(proof_job_options.clone())
+                    .build()
                     .await?;
                 info!("Proof-upgrader, to single proof: Done");
 
                 let upgraded_tx = Transaction {
                     kernel,
-                    proof: TransactionProof::SingleProof(single_proof),
+                    proof: single_proof,
                 };
 
                 let tx = if let Some(gobbler) = maybe_gobbler {
@@ -663,14 +661,19 @@ impl UpgradeJob {
                 primitive_witness: witness,
             } => {
                 info!("Proof-upgrader: Start producing proof collection");
-                let proof_collection =
-                    ProofCollection::produce(&witness, triton_vm_job_queue, proof_job_options)
-                        .await?;
+                let proof_collection = TransactionProofBuilder::new()
+                    .primitive_witness_ref(&witness)
+                    .job_queue(triton_vm_job_queue.clone())
+                    .proof_job_options(proof_job_options.clone())
+                    .proof_type(TransactionProofType::ProofCollection)
+                    .build()
+                    .await?;
                 info!("Proof-upgrader, proof collection: Done");
+
                 Ok((
                     Transaction {
                         kernel: witness.kernel,
-                        proof: TransactionProof::ProofCollection(proof_collection),
+                        proof: proof_collection,
                     },
                     vec![],
                 ))
@@ -679,13 +682,19 @@ impl UpgradeJob {
                 primitive_witness: witness,
             } => {
                 info!("Proof-upgrader: Start producing single proof");
-                let proof =
-                    SingleProof::produce(&witness, triton_vm_job_queue, proof_job_options).await?;
+                let proof = TransactionProofBuilder::new()
+                    .primitive_witness_ref(&witness)
+                    .job_queue(triton_vm_job_queue.clone())
+                    .proof_job_options(proof_job_options.clone())
+                    .proof_type(TransactionProofType::SingleProof)
+                    .build()
+                    .await?;
+
                 info!("Proof-upgrader, single proof: Done");
                 Ok((
                     Transaction {
                         kernel: witness.kernel,
-                        proof: TransactionProof::SingleProof(proof),
+                        proof,
                     },
                     vec![],
                 ))

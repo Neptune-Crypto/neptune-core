@@ -2,9 +2,9 @@
 use std::sync::Arc;
 
 use super::error;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 
@@ -55,14 +55,17 @@ impl TransactionInitiatorPrivate {
             return Err(error::CreateTxError::NegativeFee.into());
         }
 
-        if matches!(
-            self.global_state_lock.cli().proving_capability(),
-            TxProvingCapability::LockScript | TxProvingCapability::PrimitiveWitness
-        ) {
+        let capability = self.global_state_lock.cli().proving_capability();
+        let proof_type = TransactionProofType::ProofCollection;
+        if !capability.can_prove(proof_type) {
             tracing::warn!(
                 "Cannot initiate transaction because transaction proving capability is too weak."
             );
-            return Err(error::CreateProofError::TooWeak.into());
+            return Err(error::CreateProofError::TooWeak {
+                proof_type,
+                capability,
+            }
+            .into());
         }
 
         self.check_rate_limit().await

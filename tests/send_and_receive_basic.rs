@@ -174,10 +174,12 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
     // bob waits until he has an unconfirmed balance discrepancy
     // indicating the tx has arrived in his mempool.
     bob.wait_until_unconfirmed_balance(timeout_secs).await?;
-    
+
     // alice waits until tx has been upgraded to single-proof in mempool
     // which is necessary before it can be included in a block.
-    alice.wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs).await?;
+    alice
+        .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
+        .await?;
 
     // bob checks balances are correct.
     let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
@@ -301,7 +303,9 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
     // before it can be included in a block.
     //
     // another option would be to provide the single proof ourselves.
-    alice.wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs).await?;
+    alice
+        .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
+        .await?;
 
     // alice mines another block to her wallet.
     alice
