@@ -207,6 +207,7 @@ mod test {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::catch_change_in_program;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
 
@@ -277,4 +278,10 @@ mod test {
             prop(primitive_witness).expect("");
         }
     }
+
+    catch_change_in_program!(
+        CollectLockScripts,
+        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
+        "482c8f63c12a5be600f82376d3631b591cb949c99a8416c77e7d6391322b8fca9399fa35bcaa0891"
+    );
 }

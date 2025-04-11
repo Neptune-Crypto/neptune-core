@@ -719,6 +719,7 @@ mod test {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::catch_change_in_program;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -1248,4 +1249,10 @@ mod test {
             }
         }
     }
+
+    catch_change_in_program!(
+        SingleProof,
+        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
+        "c0f8cbc73a844ab6c3586d8891e29b677a3aa08f25f9aec0f854a72bf2e2f84c2a48c9dd1bbe0a66"
+    );
 }

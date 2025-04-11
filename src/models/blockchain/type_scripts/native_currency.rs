@@ -1052,6 +1052,7 @@ pub mod test {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::catch_change_in_program;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::shared::Hash;
@@ -1742,4 +1743,10 @@ pub mod test {
         // It is actually impossible to trigger this assert error id -- or is it?
         // I'm not convinced.
     }
+
+    catch_change_in_program!(
+        NativeCurrency,
+        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
+        "f1d74e829aa26ab4ca51bd237e3da0e7f459c2a2eed8b3f7fe0e35e21a4f12a7a2e193fff80dc524"
+    );
 }

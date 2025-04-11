@@ -659,4 +659,18 @@ pub mod test {
             .write_all(&proof_data)
             .expect("cannot write to file");
     }
+
+    #[macro_export]
+    macro_rules! catch_change_in_program {
+        ($consensus_program: expr, $hash_hex: literal) => {
+            #[test]
+            fn program_hash_has_not_changed() {
+                let old_hash = $hash_hex.to_string();
+                let new_hash = $consensus_program.program().hash().to_hex();
+                println!("old hash: {old_hash}");
+                println!("new hash: {new_hash}");
+                assert_eq!(old_hash, new_hash);
+            }
+        };
+    }
 }

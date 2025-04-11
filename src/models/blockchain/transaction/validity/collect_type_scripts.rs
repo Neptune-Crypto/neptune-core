@@ -330,6 +330,7 @@ mod test {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::catch_change_in_program;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
@@ -511,4 +512,10 @@ mod test {
             "proof fails"
         );
     }
+
+    catch_change_in_program!(
+        CollectTypeScripts,
+        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
+        "bd0d05812596ed09f0f8d55cff43545f2f97adb378314b2ed3eeb74586d41329ea51ea6fb25f06df"
+    );
 }
