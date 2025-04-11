@@ -1059,14 +1059,14 @@ impl Block {
 #[cfg(test)]
 pub(crate) mod block_tests {
 
-    use proptest::prelude::Strategy;
-    use proptest::strategy::ValueTree;
+    use proptest::collection;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use test_strategy::proptest;
     use tracing_test::traced_test;
     use twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 
@@ -1092,6 +1092,7 @@ pub(crate) mod block_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
+
     use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
@@ -1236,6 +1237,9 @@ pub(crate) mod block_tests {
         assert_eq!(NativeCurrencyAmount::coins(128), total_amount);
     }
 
+    /* #[proptest(async = "tokio")]
+    async fn test_difficulty_control_matches(
+        #[strategy(proptest::collection::vec(arb::<Digest>(), 30))] mut sender_randomness_vec: Vec<Digest>, */
     #[tokio::test]
     async fn test_difficulty_control_matches() {
         let network = Network::Main;
@@ -1304,18 +1308,13 @@ pub(crate) mod block_tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
-        // let rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-        let mut test_runner = proptest::test_runner::TestRunner::deterministic();
+        let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-        let mut block1 = fake_valid_successor_for_tests(
-            &genesis_block,
-            now,
-            arb::<crate::tests::shared::Seeds<2, 2>>()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current(),
-        )
-        .await;
+        /* arb::<Seeds<2, 2>>()
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current(), */
+        let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
 
         let timestamp = block1.kernel.header.timestamp;
         assert!(block1.is_valid(&genesis_block, timestamp).await);
@@ -1339,9 +1338,11 @@ pub(crate) mod block_tests {
         }
     }
 
-    #[tokio::test]
-    async fn can_prove_block_ancestry() {
-        let mut rng = rand::rng();
+    #[proptest(async = "tokio")]
+    async fn can_prove_block_ancestry(
+        #[strategy(collection::vec(arb::<Digest>(), 55))] mut sender_randomness_vec: Vec<Digest>,
+        #[strategy(0..55usize)] index: usize,
+    ) {
         let network = Network::RegTest;
         let genesis_block = Block::genesis(network);
         let mut blocks = vec![];
@@ -1358,8 +1359,13 @@ pub(crate) mod block_tests {
         for i in 0..55 {
             let wallet_secret = WalletEntropy::new_random();
             let key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let (new_block, _) =
-                make_mock_block(blocks.last().unwrap(), None, key, rng.random()).await;
+            let (new_block, _) = make_mock_block(
+                blocks.last().unwrap(),
+                None,
+                key,
+                sender_randomness_vec.pop().unwrap(),
+            )
+            .await;
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
@@ -1374,7 +1380,6 @@ pub(crate) mod block_tests {
         let last_block_mmra = blocks.last().unwrap().body().block_mmr_accumulator.clone();
         assert_eq!(mmra, last_block_mmra);
 
-        let index = rand::rng().random_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
 
         let leaf_index = index as u64;
@@ -1419,8 +1424,6 @@ pub(crate) mod block_tests {
 
     mod block_is_valid {
 
-        use proptest::test_runner::TestRunner;
-        use proptest_arbitrary_interop::arb;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
@@ -1446,16 +1449,13 @@ pub(crate) mod block_tests {
             let genesis_block = Block::genesis(network);
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-            let mut test_runner = TestRunner::deterministic();
-            let block1 = fake_valid_successor_for_tests(
-                &genesis_block,
-                plus_seven_months,
-                arb::<crate::tests::shared::Seeds<2, 2>>()
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current(),
-            )
-            .await;
+            /* arb::<crate::tests::shared::Seeds<2, 2>>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current(), */
+            let block1 =
+                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
+                    .await;
 
             let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice = mock_genesis_global_state(
@@ -1614,17 +1614,14 @@ pub(crate) mod block_tests {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
-            let mut test_runner = TestRunner::deterministic();
+            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-            let mut block1 = fake_valid_successor_for_tests(
-                &genesis_block,
-                now,
-                arb::<crate::tests::shared::Seeds<2, 2>>()
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current(),
-            )
-            .await;
+            /* arb::<crate::tests::shared::Seeds<2, 2>>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current(), */
+            let mut block1 =
+                fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
 
             // Set block timestamp 4 minutes in the future.  (is valid)
             let future_time1 = now + Timestamp::minutes(4);
@@ -1750,10 +1747,15 @@ pub(crate) mod block_tests {
     }
 
     mod guesser_fee_utxos {
+
         use super::*;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
 
+        /* #[test_strategy::proptest(async = "tokio")]
+        async fn guesser_fee_addition_records_are_consistent(
+            #[strategy(arb::<Digest>())] seed_key: Digest,
+            #[strategy(arb::<Seeds<0, 2>>())] seeds: Seeds<0, 2>, */
         #[tokio::test]
         async fn guesser_fee_addition_records_are_consistent() {
             // Ensure that multiple ways of deriving guesser-fee addition

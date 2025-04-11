@@ -795,9 +795,6 @@ pub(super) fn get_upgrade_task_from_mempool(
 
 #[cfg(test)]
 mod test {
-    use proptest::test_runner::TestRunner;
-    use proptest::{prelude::Strategy, strategy::ValueTree};
-    use proptest_arbitrary_interop::arb;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
@@ -1097,7 +1094,7 @@ mod test {
         // Alice is premine recipient and has mined on block, so she can make
         // (at least) two transaction.
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
-        let mut test_runner = TestRunner::deterministic();
+        // let mut test_runner = TestRunner::deterministic();
         let cli_args = cli_args::Args {
             network,
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
@@ -1105,14 +1102,10 @@ mod test {
         };
         let mut alice = state_with_premine_and_self_mined_blocks(
             cli_args,
-            proptest::strategy::ValueTree::current(
-                &proptest::prelude::Strategy::new_tree(
-                    &proptest::array::uniform32(proptest::prelude::any::<u8>()),
-                    &mut TestRunner::deterministic(),
-                )
-                .unwrap(),
-            ),
-            1,
+            // proptest::array::uniform32(proptest::prelude::any::<u8>()).new_tree(&mut test_runner).unwrap().current(),
+            // proptest_arbitrary_interop::arb::<Seeds<0, 2>>().new_tree(&mut test_runner).unwrap().current(),
+            [rng.random()],
+            // proptest_arbitrary_interop::arb::<Digest>().new_tree(&mut test_runner).unwrap().current(),
         )
         .await;
 
@@ -1159,10 +1152,11 @@ mod test {
             now,
             false,
             vec![mined_tx],
-            arb::<crate::tests::shared::Seeds<2, 2>>()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current(),
+            rng.random(),
+            // arb::<crate::tests::shared::Seeds<2, 2>>()
+            //     .new_tree(&mut test_runner)
+            //     .unwrap()
+            //     .current(),
         )
         .await;
         alice.set_new_tip(block2).await.unwrap();

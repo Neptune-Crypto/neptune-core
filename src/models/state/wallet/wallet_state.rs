@@ -1875,9 +1875,11 @@ impl WalletState {
 #[cfg(test)]
 pub(crate) mod tests {
     use generation_address::GenerationSpendingKey;
+
     use rand::prelude::*;
     use rand::random;
     use rand::rng;
+
     use tokio::sync::broadcast;
     use tracing_test::traced_test;
 
@@ -2405,6 +2407,10 @@ pub(crate) mod tests {
         );
     }
 
+    /* #[proptest(async = "tokio")]
+    async fn never_store_same_utxo_twice_different_blocks(
+        #[strategy((arb::<Seeds<0, 2>>(), arb::<Seeds<0, 2>>()))] seeds: (Seeds<0, 2>, Seeds<0, 2>),
+    ) { */
     #[tokio::test]
     #[traced_test]
     async fn never_store_same_utxo_twice_different_blocks() {
@@ -2421,7 +2427,6 @@ pub(crate) mod tests {
         .await;
 
         let genesis_block = Block::genesis(network);
-        let guesser_preimage_1a: Digest = bob_wallet_secret.guesser_preimage(genesis_block.hash());
         let mock_block_seed = rng.random();
         let guesser_fraction = 0.5f64;
 
@@ -2433,7 +2438,7 @@ pub(crate) mod tests {
                 bob_key,
                 mock_block_seed,
                 guesser_fraction,
-                guesser_preimage_1a,
+                bob_wallet_secret.guesser_preimage(genesis_block.hash()),
             )
             .await;
 
@@ -2459,7 +2464,6 @@ pub(crate) mod tests {
 
         // Add a new block to state as tip, which *only* differs in its PoW
         // solution. `bob` did *not* find the PoW-solution for this block.
-        let guesser_preimage_1b: Digest = rng.random();
         let (block_1b, expected_utxos_block_1b) =
             make_mock_block_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
@@ -2467,7 +2471,7 @@ pub(crate) mod tests {
                 bob_key,
                 mock_block_seed,
                 guesser_fraction,
-                guesser_preimage_1b,
+                rng.random(),
             )
             .await;
 
@@ -3305,6 +3309,10 @@ pub(crate) mod tests {
             Ok(())
         }
 
+        /* #[proptest(async = "tokio")]
+        async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs(
+            #[strategy((array::uniform4(Seeds<0, 2>)))] seeds_preimage_and_guesser: [Seeds<0, 2>; 4],
+            #[any] seed_wallet: [u8; 32] */
         #[traced_test]
         #[tokio::test]
         async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs() {
@@ -3969,6 +3977,10 @@ pub(crate) mod tests {
                 .is_zero());
         }
 
+        /* #[proptest(async = "tokio")]
+        async fn abandoned_utxo_is_unsynced(
+            #[strategy(arb::<Seeds<0, 2>>())] seeds: Seeds<0, 2>,
+            #[any] seed_wallet: [u8; 32], */
         #[tokio::test]
         async fn abandoned_utxo_is_unsynced() {
             // 1. create a genesis state for Alice

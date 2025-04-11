@@ -1134,12 +1134,14 @@ impl ArchivalState {
 mod archival_state_tests {
 
     use itertools::Itertools;
+
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+
     use tracing_test::traced_test;
 
     use super::*;
@@ -1170,6 +1172,7 @@ mod archival_state_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
+
     // use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
@@ -1186,6 +1189,10 @@ mod archival_state_tests {
         ArchivalState::new(data_dir, block_index_db, ams, archival_block_mmr, network).await
     }
 
+    /* #[proptest(async = "tokio")]
+    async fn initialize_archival_state_test(
+        #[strategy(arb::<Digest>())] sender_randomness: Digest,
+    ) { */
     #[traced_test]
     #[tokio::test]
     async fn initialize_archival_state_test() -> Result<()> {
@@ -1264,6 +1271,10 @@ mod archival_state_tests {
         Ok(())
     }
 
+    /* #[proptest(async = "tokio")]
+    async fn archival_state_restore_test(
+        #[strategy(arb::<Digest>())] sender_randomness: Digest,
+    ) { */
     #[traced_test]
     #[tokio::test]
     async fn archival_state_restore_test() -> Result<()> {

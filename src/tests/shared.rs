@@ -257,11 +257,12 @@ pub(crate) async fn mock_genesis_global_state(
 /// A state with a premine UTXO and self-mined blocks. Both composing and
 /// guessing was done by the returned entity. Tip has height of
 /// `num_blocks_mined`.
-pub(crate) async fn state_with_premine_and_self_mined_blocks(
+pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MINED: usize>(
     cli_args: cli_args::Args,
-    seed: [u8; 32],
-    num_blocks_mined: usize,
+    coinbase_sender_randomness_coll: [Digest; NUM_BLOCKS_MINED],
+    // num_blocks_mined: usize,
 ) -> GlobalStateLock {
+    let mut coinbase_sender_randomness_coll = coinbase_sender_randomness_coll.to_vec();
     let wallet = WalletEntropy::devnet_wallet();
     let own_key = wallet.nth_generation_spending_key_for_tests(0);
     let network = cli_args.network;
@@ -269,15 +270,14 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks(
         mock_genesis_global_state(network, 2, wallet.clone(), cli_args).await;
     let mut previous_block = Block::genesis(network);
 
-    for _ in 0..num_blocks_mined {
-        let guesser_preimage = wallet.guesser_preimage(previous_block.hash());
+    for _ in 0..NUM_BLOCKS_MINED {
         let (next_block, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
             &previous_block,
             None,
             own_key,
-            seed,
+            coinbase_sender_randomness_coll.pop().unwrap(),
             0.5,
-            guesser_preimage,
+            wallet.guesser_preimage(previous_block.hash()),
         )
         .await;
 
@@ -692,19 +692,16 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
-    seed: [u8; 32],
+    coinbase_sender_randomness: Digest,
     guesser_fraction: f64,
     guesser_preimage: Digest,
 ) -> (Block, Vec<ExpectedUtxo>) {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-
     // Build coinbase UTXO and associated data
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
         None => previous_block.kernel.header.timestamp + TARGET_BLOCK_INTERVAL,
     };
 
-    let coinbase_sender_randomness: Digest = rng.random();
     let composer_parameters = ComposerParameters::new(
         composer_key.to_address().into(),
         coinbase_sender_randomness,
@@ -750,13 +747,13 @@ pub(crate) async fn make_mock_block(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
-    seed: [u8; 32],
+    coinbase_sender_randomness: Digest,
 ) -> (Block, Vec<ExpectedUtxo>) {
     make_mock_block_guesser_preimage_and_guesser_fraction(
         previous_block,
         block_timestamp,
         composer_key,
-        seed,
+        coinbase_sender_randomness,
         0f64,
         Digest::default(),
     )
@@ -992,25 +989,28 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
 }
 
 #[derive(arbitrary::Arbitrary, Debug, Clone, PartialEq, Eq)]
-pub struct Seeds<const A: usize, const D: usize> {
-    bytes: [[u8; 32]; A],
-    digests: [Digest; D],
+pub struct Randomness<const BA: usize, const D: usize> {
+    pub bytes_arr: [[u8; 32]; BA],
+    pub digests: [Digest; D],
 }
-impl<const A: usize, const D: usize> rand::distr::Distribution<Seeds<A, D>>
+impl<const BA: usize, const D: usize> rand::distr::Distribution<Randomness<BA, D>>
     for rand::distr::StandardUniform
 {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Seeds<A, D> {
-        let mut bytes = [[Default::default(); 32]; A];
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Randomness<BA, D> {
+        let mut bytes = [[Default::default(); 32]; BA];
         let mut digests = [Default::default(); D];
         bytes.iter_mut().for_each(|b| rng.fill_bytes(b));
         digests.iter_mut().for_each(|d| *d = rng.random());
-        Seeds { bytes, digests }
+        Randomness {
+            bytes_arr: bytes,
+            digests,
+        }
     }
 }
-impl<const A: usize, const D: usize> Default for Seeds<A, D> {
+impl<const BA: usize, const D: usize> Default for Randomness<BA, D> {
     fn default() -> Self {
         Self {
-            bytes: [[Default::default(); 32]; A],
+            bytes_arr: [[Default::default(); 32]; BA],
             digests: [Default::default(); D],
         }
     }
@@ -1024,9 +1024,9 @@ async fn fake_block_successor(
     // sender_randomness: Digest,
     // shuffle_seed: [u8; 32],
     // seed_block: [u8; 32],
-    seeds: Seeds<2, 2>,
+    rness: Randomness<2, 2>,
 ) -> Block {
-    fake_block_successor_with_merged_tx(predecessor, timestamp, with_valid_pow, vec![], seeds).await
+    fake_block_successor_with_merged_tx(predecessor, timestamp, with_valid_pow, vec![], rness).await
 }
 
 pub async fn fake_block_successor_with_merged_tx(
@@ -1034,9 +1034,9 @@ pub async fn fake_block_successor_with_merged_tx(
     timestamp: Timestamp,
     with_valid_pow: bool,
     txs: Vec<Transaction>,
-    seeds: Seeds<2, 2>,
+    rness: Randomness<2, 2>,
 ) -> Block {
-    let (mut seed_bytes, mut seed_digests) = (seeds.bytes.to_vec(), seeds.digests.to_vec());
+    let (mut seed_bytes, mut seed_digests) = (rness.bytes_arr.to_vec(), rness.digests.to_vec());
     let composer_parameters = ComposerParameters::new(
         GenerationReceivingAddress::derive_from_seed(seed_digests.pop().unwrap()).into(),
         seed_digests.pop().unwrap(),
@@ -1064,17 +1064,17 @@ pub async fn fake_block_successor_with_merged_tx(
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
-    seeds: Seeds<2, 2>,
+    rness: Randomness<2, 2>,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, false, seeds).await
+    fake_block_successor(predecessor, timestamp, false, rness).await
 }
 
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
-    seeds: Seeds<2, 2>,
+    rness: Randomness<2, 2>,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, true, seeds).await
+    fake_block_successor(predecessor, timestamp, true, rness).await
 }
 
 /// Create a block with coinbase going to self. For testing purposes.
@@ -1084,13 +1084,13 @@ pub(crate) async fn fake_valid_successor_for_tests(
 /// will not pass `triton_vm::verify`, as its validity is only mocked.
 pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
-    seeds: Seeds<2, 2>,
+    rness: Randomness<2, 2>,
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
-        seeds,
+        rness,
     )
     .await
 }

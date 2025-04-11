@@ -1741,7 +1741,7 @@ mod global_state_tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use test_strategy::proptest;
+
     use tracing_test::traced_test;
     use wallet::address::generation_address::GenerationSpendingKey;
     use wallet::address::KeyType;
@@ -1982,14 +1982,19 @@ mod global_state_tests {
         );
     }
 
+    /* #[proptest(async = "tokio")]
+    async fn restore_monitored_utxos_from_recovery_data_duplicated_entries(
+        #[strategy(proptest_arbitrary_interop::arb::<Seeds<0, 2> >())] seeds: Seeds<0, 2>
+    ) { */
     #[traced_test]
-    #[proptest(async = "tokio")]
-    async fn restore_monitored_utxos_from_recovery_data_duplicated_entries(#[any] seed: [u8; 32]) {
+    #[tokio::test]
+    async fn restore_monitored_utxos_from_recovery_data_duplicated_entries() {
         // Verify that duplicated entries in `incoming_randomness.dat` are
         // handled correctly.
         let network = Network::Main;
         let cli_args = cli_args::Args::default_with_network(network);
-        let mut state = state_with_premine_and_self_mined_blocks(cli_args, seed, 1).await;
+        let mut state =
+            state_with_premine_and_self_mined_blocks(cli_args, [(&mut rand::rng()).random()]).await;
         let mut state = state.lock_guard_mut().await;
         let orignal_mutxos = state
             .wallet_state
@@ -2078,13 +2083,15 @@ mod global_state_tests {
         }
     }
 
+    /* #[proptest(async = "tokio")]
+    async fn restore_monitored_utxos_from_recovery_data_test(#[strategy(proptest_arbitrary_interop::arb::<Seeds<0, 2> >())] seeds: Seeds<0, 2>) { */
     #[traced_test]
-    #[proptest(async = "tokio")]
-    async fn restore_monitored_utxos_from_recovery_data_test(#[any] seed: [u8; 32]) {
+    #[tokio::test]
+    async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Main;
         let cli_args = cli_args::Args::default_with_network(network);
         let mut global_state_lock =
-            state_with_premine_and_self_mined_blocks(cli_args, seed, 1).await;
+            state_with_premine_and_self_mined_blocks(cli_args, [(&mut rand::rng()).random()]).await;
 
         // Delete everything from monitored UTXO and from raw-hash keys.
         let mut global_state = global_state_lock.lock_guard_mut().await;
