@@ -406,11 +406,19 @@ impl UpgradeJob {
                     drop(global_state); // sooner is better.
 
                     // Inform all peers about our hard work
-                    main_to_peer_channel
-                        .send(MainToPeerTask::TransactionNotification(
+                    let peer_msg = MainToPeerTask::TransactionNotification(
                             (&upgraded).try_into().unwrap(),
-                        ))
-                        .unwrap();
+                        );
+
+                    if let Err(e) = main_to_peer_channel.send(peer_msg) {
+                        // panic only if receiver_count is non-zero.
+                        let receiver_count = main_to_peer_channel.receiver_count();
+                        assert_eq!(
+                            receiver_count, 0,
+                            "failed to broadcast message from main to {} peers: {:?}",
+                            receiver_count, e
+                        );
+                    }
 
                     info!("Successfully handled proof upgrade.");
                     return;
