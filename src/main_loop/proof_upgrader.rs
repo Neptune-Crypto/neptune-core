@@ -406,9 +406,8 @@ impl UpgradeJob {
                     drop(global_state); // sooner is better.
 
                     // Inform all peers about our hard work
-                    let peer_msg = MainToPeerTask::TransactionNotification(
-                            (&upgraded).try_into().unwrap(),
-                        );
+                    let peer_msg =
+                        MainToPeerTask::TransactionNotification((&upgraded).try_into().unwrap());
 
                     if let Err(e) = main_to_peer_channel.send(peer_msg) {
                         // panic only if receiver_count is non-zero.

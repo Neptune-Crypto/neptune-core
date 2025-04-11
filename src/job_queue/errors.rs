@@ -49,19 +49,20 @@ impl From<JobHandleError> for JobHandleErrorSync {
             JobHandleError::JobPanicked(panic_info) => {
                 // we have to convert panic payload to a string because panics can
                 // contain any type, and they are Send but not Sync.
-                let panic_message = panic_info
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        if let Some(s) = panic_info.downcast_ref::<&'static str>() {
-                            (*s).to_string()
-                        } else {
-                            format!(
-                                "Panic occurred with an unsupported payload type: {}",
-                                std::any::type_name_of_val(&*panic_info)
-                            )
-                        }
-                    });
+                let panic_message =
+                    panic_info
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            if let Some(s) = panic_info.downcast_ref::<&'static str>() {
+                                (*s).to_string()
+                            } else {
+                                format!(
+                                    "Panic occurred with an unsupported payload type: {}",
+                                    std::any::type_name_of_val(&*panic_info)
+                                )
+                            }
+                        });
                 Self::JobPanicked(panic_message)
             }
             JobHandleError::JobCancelled => Self::JobCancelled,
