@@ -48,6 +48,19 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
+
+    pub fn is_witness(&self) -> bool {
+        matches!(self, Self::Witness(_))
+    }
+
+    pub fn is_proof_collection(&self) -> bool {
+        matches!(self, Self::ProofCollection(_))
+    }
+
+    pub fn is_single_proof(&self) -> bool {
+        matches!(self, Self::SingleProof(_))
+    }
+
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
