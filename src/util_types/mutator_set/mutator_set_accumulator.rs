@@ -504,6 +504,7 @@ impl MutatorSetAccumulator {
 mod ms_accumulator_tests {
     use itertools::izip;
     use itertools::Itertools;
+    use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use rand::Rng;
     use test_strategy::proptest;
@@ -861,13 +862,17 @@ mod ms_accumulator_tests {
         }
     }
 
-    #[test]
-    fn test_mutator_set_accumulator_decode() {
-        for _ in 0..100 {
-            let msa = random_mutator_set_accumulator();
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 100, .. ProptestConfig::default()
+          })]
+        #[test]
+        fn test_mutator_set_accumulator_decode(
+            msa in proptest_arbitrary_interop::arb::<MutatorSetAccumulator>()
+        ) {
             let encoded = msa.encode();
             let decoded: MutatorSetAccumulator = *MutatorSetAccumulator::decode(&encoded).unwrap();
-            assert_eq!(msa, decoded);
+            prop_assert_eq!(msa, decoded);
         }
     }
 

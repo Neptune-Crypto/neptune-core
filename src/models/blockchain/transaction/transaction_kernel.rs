@@ -283,6 +283,7 @@ pub mod neptune_arbitrary {
 ///
 /// It is also useful for destructuring kernel fields without cloning.
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct TransactionKernelProxy {
     /// contains the transaction inputs.
     pub inputs: Vec<RemovalRecord>,
@@ -441,10 +442,7 @@ pub mod transaction_kernel_tests {
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
-    use rand::random;
 
-    use rand::Rng;
-    use rand::RngCore;
     use test_strategy::proptest;
 
     use super::*;
@@ -453,7 +451,6 @@ pub mod transaction_kernel_tests {
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::tests::shared::propcompose_transaction_kernel;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
     proptest::prop_compose! {
         pub fn propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(
@@ -581,39 +578,37 @@ pub mod transaction_kernel_tests {
         assert_eq!(kernel, decoded);
     }
 
-    #[test]
-    pub fn test_decode_transaction_kernel_small() {
-        let mut rng = rand::rng();
-        let absolute_indices = AbsoluteIndexSet::new(
-            &(0..NUM_TRIALS as usize)
-                .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        );
-        let removal_record = RemovalRecord {
-            absolute_indices,
-            target_chunks: Default::default(),
-        };
-        let kernel = TransactionKernelProxy {
-            inputs: vec![removal_record],
-            outputs: vec![AdditionRecord {
-                canonical_commitment: random(),
-            }],
-            public_announcements: Default::default(),
-            fee: NativeCurrencyAmount::one(),
-            coinbase: None,
-            timestamp: Default::default(),
-            mutator_set_hash: rng.random::<Digest>(),
-            merge_bit: true,
+    proptest::proptest! {
+        #[test]
+        fn test_decode_transaction_kernel_small(
+            absolute_indices in arb::<AbsoluteIndexSet>(),
+            canonical_commitment in arb::<Digest>(),
+            mutator_set_hash in arb::<Digest>(),
+        ) {
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: Default::default(),
+            };
+            let kernel = TransactionKernelProxy {
+                inputs: vec![removal_record],
+                outputs: vec![AdditionRecord {
+                    canonical_commitment
+                }],
+                public_announcements: Default::default(),
+                fee: NativeCurrencyAmount::one(),
+                coinbase: None,
+                timestamp: Default::default(),
+                mutator_set_hash,
+                merge_bit: true,
+            }
+            .into_kernel();
+            let encoded = kernel.encode();
+            println!(
+                "encoded: {}",
+                encoded.iter().map(|x| x.to_string()).join(", ")
+            );
+            let decoded = *TransactionKernel::decode(&encoded).unwrap();
+            assert_eq!(kernel, decoded);
         }
-        .into_kernel();
-        let encoded = kernel.encode();
-        println!(
-            "encoded: {}",
-            encoded.iter().map(|x| x.to_string()).join(", ")
-        );
-        let decoded = *TransactionKernel::decode(&encoded).unwrap();
-        assert_eq!(kernel, decoded);
     }
 }

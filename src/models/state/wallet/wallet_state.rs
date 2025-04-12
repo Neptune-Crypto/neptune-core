@@ -4055,6 +4055,10 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
+        use proptest::collection;
+        use proptest::prelude::any;
+        use proptest_arbitrary_interop::arb;
+
         use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::job_queue::JobQueue;
@@ -4064,6 +4068,8 @@ pub(crate) mod tests {
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
+
+        const NUM_FUTURE_KEYS: usize = 20;
 
         /// Test scan mode.
         ///
@@ -4258,12 +4264,27 @@ pub(crate) mod tests {
         async fn scan_for_utxos_announced_to_future_keys_behaves(
             #[strategy(propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(10, 10, 10))]
             kernel: TransactionKernel,
+            #[strategy(arb())] seed: [u8; 32],
+            #[strategy(arb())] wallet_secret: WalletEntropy,
+            #[strategy(collection::vec(
+                0_usize..100,
+                NUM_FUTURE_KEYS,
+            ))]
+            mut future_generation_relative_indices: Vec<usize>,
+            #[strategy(collection::vec(
+                0_usize..100,
+                NUM_FUTURE_KEYS,
+            ))]
+            mut future_symmetric_relative_indices: Vec<usize>,
+            // #[strategy(collection::vec(any::<u32>(), NUM_FUTURE_KEYS))] mut coin_u32_vec: Vec<u32>,
+            #[strategy(collection::vec(arb(), NUM_FUTURE_KEYS))] mut utxo_vec: Vec<Utxo>,
+            #[strategy(collection::vec(arb(), NUM_FUTURE_KEYS))] mut sender_randomness_vec: Vec<
+                Digest,
+            >,
+            #[strategy(collection::vec(any::<bool>(), NUM_FUTURE_KEYS))] mut select_vec: Vec<bool>,
         ) {
             let network = Network::Main;
-            let seed: [u8; 32] = random();
             dbg!(seed);
-            let mut rng = StdRng::from_seed(seed);
-            let wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
             let data_dir = unit_test_data_directory(network).unwrap();
             let wallet_state = WalletState::new_from_wallet_entropy(
                 &data_dir,
@@ -4276,10 +4297,6 @@ pub(crate) mod tests {
             let generation_counter = wallet_state.wallet_db.get_generation_key_counter();
             let symmetric_counter = wallet_state.wallet_db.get_symmetric_key_counter();
 
-            let num_future_keys = 20;
-            let mut future_generation_relative_indices = (0..num_future_keys)
-                .map(|_| rng.random_range(0_usize..100))
-                .collect_vec();
             future_generation_relative_indices.sort();
             let future_generation_keys = future_generation_relative_indices
                 .into_iter()
@@ -4294,9 +4311,6 @@ pub(crate) mod tests {
                         ),
                     )
                 })
-                .collect_vec();
-            let mut future_symmetric_relative_indices = (0..num_future_keys)
-                .map(|_| rng.random_range(0_usize..100))
                 .collect_vec();
             future_symmetric_relative_indices.sort();
             let future_symmetric_keys = future_symmetric_relative_indices
@@ -4327,11 +4341,11 @@ pub(crate) mod tests {
                 .into_iter()
                 .chain(future_symmetric_keys)
             {
-                let coin = Coin::new_native_currency(NativeCurrencyAmount::coins(
-                    rng.random::<u32>() >> 15,
-                ));
-                let utxo = Utxo::from((rng.random::<Digest>(), vec![coin]));
-                let sender_randomness = rng.random::<Digest>();
+                // let coin = Coin::new_native_currency(NativeCurrencyAmount::coins(
+                //     coin_u32_vec.pop().unwrap() >> 15,
+                // ));
+                let utxo = utxo_vec.pop().unwrap();
+                let sender_randomness = sender_randomness_vec.pop().unwrap();
 
                 let receiver_preimage = key.privacy_preimage().unwrap();
                 let utxo_notification_payload =
@@ -4349,7 +4363,7 @@ pub(crate) mod tests {
                 };
 
                 let addition_record = incoming_utxo.addition_record();
-                let select = rng.random::<bool>();
+                let select = select_vec.pop().unwrap();
                 if select {
                     addition_records.push(addition_record);
                 }
@@ -4372,7 +4386,7 @@ pub(crate) mod tests {
 
             // scan
             let caught_utxos = wallet_state
-                .scan_for_utxos_announced_to_future_keys(num_future_keys, &new_kernel)
+                .scan_for_utxos_announced_to_future_keys(NUM_FUTURE_KEYS, &new_kernel)
                 .collect_vec();
 
             // filter master list according to expectation
@@ -4383,11 +4397,11 @@ pub(crate) mod tests {
                     continue;
                 }
 
-                let index_in_range = uc.relative_index < num_future_keys;
+                let index_in_range = uc.relative_index < NUM_FUTURE_KEYS;
                 if !index_in_range {
                     println!(
                         "rejecting UTXO because index {} >= {}",
-                        uc.relative_index, num_future_keys
+                        uc.relative_index, NUM_FUTURE_KEYS
                     );
                     continue;
                 }

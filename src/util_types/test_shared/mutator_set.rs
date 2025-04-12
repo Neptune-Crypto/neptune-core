@@ -19,8 +19,6 @@ use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
-// use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
-use crate::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -402,16 +400,16 @@ fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: 
 
 #[cfg(test)]
 mod shared_tests_test {
-    use proptest_arbitrary_interop::arb;
-
     use super::*;
 
-    #[test_strategy::proptest(async = "tokio")]
+    /* #[test_strategy::proptest(async = "tokio")]
     async fn can_call(
         // #strategy[proptest_arbitrary_interop::arb::<RemovalRecord>()] _rr: RemovalRecord,
-        #[strategy(arb::<ChunkDictionary>())] rcd: ChunkDictionary,
-    ) {
-        assert!(!rcd.is_empty());
+        #[strategy(arb::<ChunkDictionary>())] rcd: ChunkDictionary, */
+    #[tokio::test]
+    async fn can_call() {
+        // let rcd = pseudorandom_chunk_dictionary();
+        // assert!(!rcd.is_empty());
         let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;

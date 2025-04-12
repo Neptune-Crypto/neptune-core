@@ -197,15 +197,19 @@ mod test {
 
         use super::*;
 
-        #[test]
-        fn phrase_conversion_works() {
-            let wallet_secret = SecretKeyMaterial(rng().random());
-            let phrase = wallet_secret.to_phrase();
-            let wallet_again = SecretKeyMaterial::from_phrase(&phrase).unwrap();
-            let phrase_again = wallet_again.to_phrase();
+        proptest::proptest! {
+            #[test]
+            fn phrase_conversion_works(
+                secret in proptest_arbitrary_interop::arb::<XFieldElement>()
+            ) {
+                let wallet_secret = SecretKeyMaterial(secret);
+                let phrase = wallet_secret.to_phrase();
+                let wallet_again = SecretKeyMaterial::from_phrase(&phrase).unwrap();
+                let phrase_again = wallet_again.to_phrase();
 
-            assert_eq!(wallet_secret, wallet_again);
-            assert_eq!(phrase, phrase_again);
+                assert_eq!(wallet_secret, wallet_again);
+                assert_eq!(phrase, phrase_again);
+            }
         }
 
         #[test]
@@ -221,8 +225,10 @@ mod test {
     }
 
     mod shamir {
+        use std::collections::HashSet;
+
         use proptest::prelude::Just;
-        use proptest::prop_assert_eq;
+        use proptest::{prop_assert_eq, prop_assume};
         use proptest_arbitrary_interop::arb;
         use test_strategy::proptest;
 
@@ -245,21 +251,25 @@ mod test {
             prop_assert_eq!(secret_key, recombination);
         }
 
+        // fn indices_strategy(n: usize, t: usize, oneshorter: bool) -> BoxedStrategy<Vec<usize>> {
+        //     let mut indices = (0..n).collect_vec();
+        //     indices.shuffle(&mut rng());
+        //     indices.truncate(t);
+        //     indices
+        // }
         #[proptest]
         fn happy_path_t_shares(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
+            #[strategy(proptest::collection::hash_set(2usize..=#n, #t))] indices: HashSet<usize>,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
-            let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
-            let mut shares = secret_key
-                .share_shamir(t, n, rng.random())
+            let shares = secret_key
+                .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let selected_shares = (0..t)
-                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
-                .collect_vec();
+            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
             let recombination = SecretKeyMaterial::combine_shamir(t, selected_shares)
                 .expect("recombining on happy path should succeed");
 
@@ -312,17 +322,17 @@ mod test {
         fn catch_too_few_shares_to_recombine(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
+            #[strategy(proptest::collection::hash_set(2usize..=#n, #t - 1))] indices: HashSet<
+                usize,
+            >,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
-            let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
-            let mut shares = secret_key
-                .share_shamir(t, n, rng.random())
+            let shares = secret_key
+                .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let selected_shares = (0..t - 1)
-                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
-                .collect_vec();
+            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
             prop_assert_eq!(
                 SecretKeyMaterial::combine_shamir(t, selected_shares),
                 Err(ShamirSecretSharingError::TooFewSharesToRecombine)
@@ -333,17 +343,17 @@ mod test {
         fn catch_invalid_share(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
+            #[strategy(proptest::collection::hash_set(2usize..=#n, #t - 1))] indices: HashSet<
+                usize,
+            >,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
-            let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
-            let mut shares = secret_key
-                .share_shamir(t, n, rng.random())
+            let shares = secret_key
+                .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let mut selected_shares = (0..t - 1)
-                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
-                .collect_vec();
+            let mut selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
             let invalid_share = (0, secret_key);
             selected_shares.push(invalid_share);
             prop_assert_eq!(
@@ -356,18 +366,19 @@ mod test {
         fn catch_duplicate_index(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
+            #[strategy(proptest::collection::hash_set(2usize..=#n, #t - 1))] indices: HashSet<
+                usize,
+            >,
+            #[strategy(2usize..#t - 1)] dup_ind: usize,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
-            let mut rng = StdRng::from_seed(seed);
             let secret_key = SecretKeyMaterial(s);
-            let mut shares = secret_key
-                .share_shamir(t, n, rng.random())
+            let shares = secret_key
+                .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let mut selected_shares = (0..t - 1)
-                .map(|_| shares.swap_remove(rng.random_range(0..shares.len())))
-                .collect_vec();
-            let duplicate_share = selected_shares[rng.random_range(0..selected_shares.len())];
+            let mut selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
+            let duplicate_share = selected_shares[dup_ind];
             selected_shares.push(duplicate_share);
             println!("selected shares: {:?}", selected_shares);
             prop_assert_eq!(
@@ -381,56 +392,31 @@ mod test {
             #[strategy(3usize..20)] n: usize,
             #[strategy(2usize..#n)] t: usize,
             #[strategy(arb())] s: XFieldElement,
-            #[strategy([arb(); 32])] seed: [u8; 32],
+            #[strategy([arb(); 32])] seed_a: [u8; 32],
+            #[strategy([arb(); 32])] seed_b: [u8; 32],
+            #[strategy(proptest::collection::hash_map(2usize..=#n, proptest::prelude::any::<bool>(), #t))]
+            indices: std::collections::HashMap<usize, bool>,
         ) {
-            let mut rng = StdRng::from_seed(seed);
+            prop_assume!(seed_a != seed_b);
+
             let secret_key = SecretKeyMaterial(s);
-            let mut shares_a = secret_key
-                .share_shamir(t, n, rng.random())
+            let shares_a = secret_key
+                .share_shamir(t, n, seed_a)
                 .expect("sharing on happy path should succeed");
-            let mut shares_b = secret_key
-                .share_shamir(t, n, rng.random())
+            let shares_b = secret_key
+                .share_shamir(t, n, seed_b)
                 .expect("sharing on happy path should succeed");
 
-            // Make a random selection of t+1 shares such that both sharings are
-            // represented. There can be no duplicate indices so n > t.
-            let insert_unique_index = |collection: &mut Vec<_>, share: (_, _)| {
-                let is_share_in_collection = collection.iter().any(|(i, _)| *i == share.0);
-                if !is_share_in_collection {
-                    collection.push(share);
-                }
-                is_share_in_collection
-            };
-
-            // add one share a, randomly selected
-            let mut selected_shares = vec![];
-            insert_unique_index(
-                &mut selected_shares,
-                shares_a.swap_remove(rng.random_range(0..shares_a.len())),
-            );
-
-            // add one from b, randomly selected, and make sure it gets added
-            // even if we get an index collision on the first guess
-            while insert_unique_index(
-                &mut selected_shares,
-                shares_b.swap_remove(rng.random_range(0..shares_b.len())),
-            ) {}
-
-            // complete the collection by drawing randomly from a or b when
-            // possible
-            while selected_shares.len() < t + 1 {
-                let next_share = if shares_a.is_empty() && shares_b.is_empty() {
-                    panic!("cannot happen: both were populated with more than 2 elements");
-                } else if !shares_a.is_empty() && shares_b.is_empty() {
-                    shares_a.swap_remove(rng.random_range(0..shares_a.len()))
-                } else if shares_a.is_empty() && !shares_b.is_empty() {
-                    shares_b.swap_remove(rng.random_range(0..shares_b.len()))
-                } else if rng.random() {
-                    shares_a.swap_remove(rng.random_range(0..shares_a.len()))
+            let mut selected_shares = Vec::with_capacity(t + 1);
+            let mut indices = indices.into_iter();
+            selected_shares.push(shares_a[indices.next().unwrap().0]);
+            selected_shares.push(shares_b[indices.next().unwrap().0]);
+            for i in indices {
+                if i.1 {
+                    selected_shares.push(shares_b[i.0]);
                 } else {
-                    shares_b.swap_remove(rng.random_range(0..shares_b.len()))
-                };
-                insert_unique_index(&mut selected_shares, next_share);
+                    selected_shares.push(shares_a[i.0]);
+                }
             }
 
             prop_assert_eq!(

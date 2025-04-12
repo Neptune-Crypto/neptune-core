@@ -382,7 +382,7 @@ mod removal_record_tests {
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
-    use rand::RngCore;
+
     use test_strategy::proptest;
 
     use super::*;
@@ -589,6 +589,7 @@ mod removal_record_tests {
     fn removal_record_missing_chunk_element_is_invalid_pbt(
         #[strategy(1u64..20*u64::from(BATCH_SIZE))] initial_additions: u64,
         #[strategy(0u64..(#initial_additions as u64))] index_to_drop: u64,
+        #[any] to_remove_i: u64,
     ) {
         // Construct a valid removal record, verify that it is considered
         // valid, then remove one element from its chunk dictionary and verify
@@ -622,18 +623,14 @@ mod removal_record_tests {
         let mut rr = accumulator.drop(item, &msmp);
         assert!(rr.validate(&accumulator));
 
-        // If the removal record has no indices in the inactive part of the
-        // Bloom filter, then continue to next test case.
         let (inactive, _) = rr.absolute_indices.split_by_activity(&accumulator).unwrap();
-        if inactive.is_empty() {
+        let l = inactive.len() as u64;
+        if l == 0 {
+            // If the removal record has no indices in the inactive part of the
+            // Bloom filter, then continue to next test case.
             return Ok(());
         }
-
-        let to_remove = **inactive
-            .keys()
-            .collect_vec()
-            .choose(&mut rand::rng())
-            .unwrap();
+        let to_remove = to_remove_i % (l - 1);
         rr.target_chunks.remove(&to_remove);
         assert!(!rr.validate(&accumulator));
     }
@@ -807,28 +804,23 @@ mod removal_record_tests {
         }
     }
 
-    #[test]
-    fn test_index_set_serialization() {
-        let mut rng = rand::rng();
-        let original_indexset = AbsoluteIndexSet::new(
-            &(0..NUM_TRIALS)
-                .map(|_| (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64()))
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        );
-        let serialized_indexset = serde_json::to_string(&original_indexset).unwrap();
-        let reconstructed_indexset: AbsoluteIndexSet =
-            serde_json::from_str(&serialized_indexset).unwrap();
-
-        assert_eq!(original_indexset, reconstructed_indexset);
-    }
-
     prop_compose! {
         fn removal_record_vec() (length in 0..10usize)
         (the in proptest::collection::vec(arb::<RemovalRecord>(), length)) -> Vec<RemovalRecord> {the}
     }
     proptest::proptest! {
+        #[test]
+        fn test_index_set_serialization(
+            indices in proptest::collection::vec(proptest::prelude::any::<u128>(), NUM_TRIALS as usize)
+        ) {
+            let original_indexset = AbsoluteIndexSet::new(&indices.try_into().unwrap());
+            let serialized_indexset = serde_json::to_string(&original_indexset).unwrap();
+            let reconstructed_indexset: AbsoluteIndexSet =
+                serde_json::from_str(&serialized_indexset).unwrap();
+
+            assert_eq!(original_indexset, reconstructed_indexset);
+        }
+
         #[test]
         fn test_removal_record_decode(removal_record in arb::<RemovalRecord>()) {
             for _ in 0..10 {

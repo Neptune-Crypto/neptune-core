@@ -695,12 +695,17 @@ pub mod ms_proof_tests {
         }
     }
 
-    #[tokio::test]
-    async fn revert_update_from_remove_test() {
-        let n = 100;
-        let mut rng = rand::rng();
-
-        let own_index = rng.next_u32() as usize % n;
+    const N: usize = 100;
+    #[test_strategy::proptest(async = "tokio")]
+    async fn revert_update_from_remove_test(
+        #[strategy(0..N)] own_index: usize,
+        #[strategy(collection::vec(arb::<Digest>(), N))] mut item_vec: Vec<Digest>,
+        #[strategy(collection::vec(arb::<Digest>(), N))] mut sender_randomness_vec: Vec<Digest>,
+        #[strategy(collection::vec(arb::<Digest>(), N))] mut receiver_preimage_vec: Vec<Digest>,
+        #[strategy(collection::vec(any::<bool>(), N))] mut condition: Vec<bool>,
+        // #[strategy(1usize..#condition.iter().map(|x| *x as usize).sum())] cutoff_point: usize,
+        #[strategy(0..N)] rand_offdistr: usize,
+    ) {
         let mut own_membership_proof = None;
         let mut own_item = None;
 
@@ -710,10 +715,10 @@ pub mod ms_proof_tests {
         let mut membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
 
         // add items
-        for i in 0..n {
-            let item: Digest = random();
-            let sender_randomness: Digest = random();
-            let receiver_preimage: Digest = random();
+        for i in 0..N {
+            let item: Digest = item_vec.pop().unwrap();
+            let sender_randomness: Digest = sender_randomness_vec.pop().unwrap();
+            let receiver_preimage: Digest = receiver_preimage_vec.pop().unwrap();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
 
             for (oi, mp) in &mut membership_proofs {
@@ -764,12 +769,12 @@ pub mod ms_proof_tests {
         // generate some removal records
         let mut removal_records = vec![];
         for (item, membership_proof) in membership_proofs {
-            if rng.next_u32() % 2 == 1 {
+            if condition.pop().unwrap() {
                 let removal_record = archival_mutator_set.drop(item, &membership_proof).await;
                 removal_records.push(removal_record);
             }
         }
-        let cutoff_point = 1 + (rng.next_u32() as usize % (removal_records.len() - 1));
+        let cutoff_point = 1 + (rand_offdistr % (removal_records.len() - 1));
         let mut membership_proof_snapshot = None;
 
         // apply removal records

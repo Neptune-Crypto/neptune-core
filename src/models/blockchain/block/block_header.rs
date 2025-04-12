@@ -285,12 +285,14 @@ pub(crate) mod block_header_tests {
             guesser_digest: rng.random(),
         }
     }
-    #[test]
-    pub fn test_block_header_decode() {
-        let block_header = random_block_header();
-        let encoded = block_header.encode();
-        let decoded = *BlockHeader::decode(&encoded).unwrap();
-        assert_eq!(block_header, decoded);
+
+    proptest::proptest! {
+        #[test]
+        fn test_block_header_decode(block_header in proptest_arbitrary_interop::arb::<BlockHeader>()) {
+            let encoded = block_header.encode();
+            let decoded = *BlockHeader::decode(&encoded).unwrap();
+            assert_eq!(block_header, decoded);
+        }
     }
 
     #[test]
