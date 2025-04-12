@@ -249,6 +249,30 @@ impl GenesisNode {
         Ok(())
     }
 
+    /// wait until tx exists in mempool with a single proof
+    ///
+    /// useful for waiting until a transaction has been upgraded and is
+    /// ready to include in a block.
+    pub async fn wait_until_tx_in_mempool_has_single_proof(
+        &self,
+        txid: TransactionKernelId,
+        timeout_secs: u16,
+    ) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(tx) = self.gsl.lock_guard().await.mempool.get(txid) {
+                if tx.proof.is_single_proof() {
+                    break;
+                }
+            }
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!("tx not in mempool with single-proof after {} seconds", timeout_secs);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
     /// wait until wallet unconfirmed balance does not match confirmed balance
     ///
     /// when a transaction is accepted by neptune-core it may take a short
