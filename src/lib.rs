@@ -95,7 +95,21 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         tokio::spawn(fut);
     }
 
-    info!("Starting client on {}.", cli_args.network);
+    if cli_args.mine() && cli_args.network.is_regtest() {
+        // note: disable auto-mining in regtest mode because it doesn't work
+        // (yet) once it is working, we can remove the bail!() and uncomment the
+        // warning below.
+        anyhow::bail!("Automatic mining in regtest mode is not supported.  Try again without --compose or --guess flags.");
+
+        //        tracing::warn!(
+        //            "Automatic mining in regtest mode is generally not recommended.
+        //This mode provides APIs for generating blocks programmatically in a controlled fashion.
+        //Automatic mining adds randomly generated blocks which makes the blockchain non-deterministic.
+        //"
+        //        );
+    }
+
+    info!("Starting neptune-core node on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists
     let data_directory = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
@@ -225,14 +239,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     }
     info!("Made outgoing connections to peers");
 
-    if global_state_lock.cli().mine() && global_state_lock.cli().network.is_regtest() {
-        tracing::warn!(
-            "Automatic mining in regtest mode is generally not recommended.
-This mode provides APIs for generating blocks programmatically in a controlled fashion.
-Automatic mining adds randomly generated blocks which makes the blockchain non-deterministic.
-"
-        );
-    }
 
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
