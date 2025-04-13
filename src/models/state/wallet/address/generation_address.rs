@@ -27,10 +27,10 @@ use bech32::ToBase32;
 use bech32::Variant;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::lattice;
-use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::lattice;
+use tasm_lib::twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
@@ -44,7 +44,6 @@ use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
-use crate::prelude::twenty_first;
 
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);

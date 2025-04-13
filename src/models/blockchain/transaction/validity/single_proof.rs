@@ -1008,7 +1008,7 @@ mod tests {
         use proptest::prelude::*;
         use rand::random;
         use tasm_lib::hashing::merkle_verify::MerkleVerify;
-        use twenty_first::prelude::Mmr;
+        use tasm_lib::twenty_first::prelude::Mmr;
 
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::tests::deterministic_update_witness_additions_and_removals;

@@ -5,23 +5,22 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
-use twenty_first::prelude::Digest;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
-use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::chunk::Chunk;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
@@ -113,7 +112,7 @@ pub fn random_mmra() -> MmrAccumulator {
 proptest::prop_compose! {
     pub fn propcompose_rr_with_independent_absindset_chunkdict() (
         absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
-        target_chunks in crate::util_types::mutator_set::chunk_dictionary::tests::propcompose_chunkdict()
+        target_chunks in crate::util_types::mutator_set::removal_record::chunk_dictionary::tests::propcompose_chunkdict()
     ) -> RemovalRecord {RemovalRecord {absolute_indices, target_chunks}}
 }
 

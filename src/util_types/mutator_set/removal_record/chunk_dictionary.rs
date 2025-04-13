@@ -2,6 +2,7 @@ use std::slice::Iter;
 use std::slice::IterMut;
 use std::vec::IntoIter;
 
+use crate::prelude::twenty_first;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
@@ -9,14 +10,13 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use triton_vm::prelude::Digest;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use super::chunk::Chunk;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::triton_vm;
-use crate::prelude::twenty_first;
 
 type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type ChunkIndex = u64;
@@ -30,7 +30,7 @@ pub struct ChunkDictionary {
     // This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
     // don't care about the cost of reallocation when `insert`ing or
     // `remove`ing.
-    dictionary: Vec<(u64, (MmrMembershipProof, Chunk))>,
+    pub(crate) dictionary: Vec<(u64, (MmrMembershipProof, Chunk))>,
 }
 
 impl ChunkDictionary {
@@ -182,9 +182,7 @@ pub mod tests {
     use proptest::collection;
     use proptest::prelude::any;
     use proptest::prop_compose;
-    use twenty_first::math::other::random_elements;
-    use twenty_first::prelude::Digest;
-    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+    use tasm_lib::twenty_first::math::other::random_elements;
 
     use super::*;
     use crate::tests::shared_tokio_runtime;

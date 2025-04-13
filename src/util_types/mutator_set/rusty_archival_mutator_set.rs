@@ -1,8 +1,8 @@
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::active_window::ActiveWindow;
 use super::archival_mutator_set::ArchivalMutatorSet;
-use super::chunk::Chunk;
+use super::removal_record::chunk::Chunk;
 use crate::database::storage::storage_schema::traits::*;
 use crate::database::storage::storage_schema::DbtSingleton;
 use crate::database::storage::storage_schema::DbtVec;
@@ -10,7 +10,6 @@ use crate::database::storage::storage_schema::RustyKey;
 use crate::database::storage::storage_schema::RustyValue;
 use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
-use crate::prelude::twenty_first;
 use crate::util_types::archival_mmr::ArchivalMmr;
 
 type AmsMmrStorage = DbtVec<Digest>;

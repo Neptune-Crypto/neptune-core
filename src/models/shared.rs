@@ -1,10 +1,9 @@
 use serde::Deserialize;
 use serde::Serialize;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
-use crate::prelude::twenty_first;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LatestBlockInfo {

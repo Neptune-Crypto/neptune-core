@@ -1,8 +1,8 @@
+use tasm_lib::twenty_first::prelude::Digest;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::mmr::bag_peaks::BagPeaks;
 use tasm_lib::prelude::*;
-use twenty_first::prelude::Digest;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::TransactionKernel;
@@ -148,6 +148,9 @@ mod tests {
     use std::collections::HashMap;
     use std::collections::VecDeque;
 
+    use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
+    use tasm_lib::twenty_first::prelude::Mmr;
+    use tasm_lib::twenty_first::prelude::Sponge;
     use itertools::Itertools;
     use prop::test_runner::RngAlgorithm;
     use prop::test_runner::TestRng;
@@ -164,9 +167,6 @@ mod tests {
     use tasm_lib::traits::mem_preserver::ShadowedMemPreserver;
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-    use twenty_first::prelude::MerkleTreeInclusionProof;
-    use twenty_first::prelude::Mmr;
-    use twenty_first::prelude::Sponge;
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;

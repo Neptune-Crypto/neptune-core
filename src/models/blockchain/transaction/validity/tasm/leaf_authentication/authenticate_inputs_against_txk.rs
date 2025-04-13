@@ -71,6 +71,7 @@ impl BasicSnippet for AuthenticateInputsAgainstTxk {
 mod tests {
     use std::collections::HashMap;
 
+    use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
     use itertools::Itertools;
     use prop::test_runner::RngAlgorithm;
     use prop::test_runner::TestRng;
@@ -86,7 +87,6 @@ mod tests {
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
-    use twenty_first::prelude::MerkleTreeInclusionProof;
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;

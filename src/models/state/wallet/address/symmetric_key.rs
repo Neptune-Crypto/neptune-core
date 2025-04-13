@@ -15,8 +15,8 @@ use bech32::FromBase32;
 use bech32::ToBase32;
 use serde::Deserialize;
 use serde::Serialize;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
@@ -29,7 +29,6 @@ use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
-use crate::prelude::twenty_first;
 
 /// represents a symmetric key decryption error
 #[derive(Debug, thiserror::Error)]

@@ -10,25 +10,24 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
-use super::chunk::Chunk;
-use super::chunk_dictionary::ChunkDictionary;
 use super::get_swbf_indices;
 use super::ms_membership_proof::MsMembershipProof;
-use super::removal_record::AbsoluteIndexSet;
+use super::removal_record::absolute_index_set::AbsoluteIndexSet;
+use super::removal_record::chunk::Chunk;
+use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
 use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 #[cfg_attr(test, derive(Arbitrary))]

@@ -11,27 +11,27 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tasm_lib::twenty_first::util_types::mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
-use twenty_first::util_types::mmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-use super::chunk_dictionary::ChunkDictionary;
 use super::commit;
 use super::get_swbf_indices;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
-use super::removal_record::AbsoluteIndexSet;
+use super::removal_record::absolute_index_set::AbsoluteIndexSet;
+use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::get_batch_mutation_argument_for_removal_record;
 use super::shared::prepare_authenticated_batch_modification_for_removal_record_reversion;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
+
 impl Error for MembershipProofError {}
 
 impl fmt::Display for MembershipProofError {
@@ -569,14 +569,14 @@ pub mod tests {
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
-    use twenty_first::math::other::random_elements;
-    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+    use tasm_lib::twenty_first::math::other::random_elements;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::active_window::ActiveWindow;
-    use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::commit;
+    use crate::util_types::mutator_set::removal_record::chunk::Chunk;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
 
@@ -588,7 +588,7 @@ pub mod tests {
             sender_randomness in arb::<Digest>(),
             receiver_preimage in arb::<Digest>(),
             (auth_path_aocl, aocl_leaf_index) in propcompose_mmrmembershipproof_with_index(),
-            target_chunks in crate::util_types::mutator_set::chunk_dictionary::tests::propcompose_chunkdict(),
+            target_chunks in crate::util_types::mutator_set::removal_record::chunk_dictionary::tests::propcompose_chunkdict(),
         ) -> MsMembershipProof {
             MsMembershipProof {
                 sender_randomness,

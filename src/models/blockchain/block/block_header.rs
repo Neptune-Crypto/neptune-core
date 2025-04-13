@@ -9,10 +9,10 @@ use serde::Serialize;
 use strum::EnumCount;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe_array;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MerkleTree;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::block_height::BlockHeight;
 use super::difficulty_control::difficulty_control;
@@ -23,7 +23,6 @@ use crate::config_models::network::Network;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
 
 /// Controls how long to wait before the difficulty for the *next* block is
 /// reduced.

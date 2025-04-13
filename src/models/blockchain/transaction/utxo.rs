@@ -14,9 +14,9 @@ use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::lock_script::LockScript;
 use crate::models::blockchain::type_scripts::known_type_scripts::is_known_type_script_with_valid_state;
@@ -26,7 +26,6 @@ use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
-use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]

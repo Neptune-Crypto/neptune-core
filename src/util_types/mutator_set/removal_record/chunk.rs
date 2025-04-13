@@ -8,7 +8,7 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use thiserror::Error;
 
-use super::shared::CHUNK_SIZE;
+use super::super::shared::CHUNK_SIZE;
 
 /// "Hard" max on the number of elements in a packed [`Chunk`].
 /// Based on the Chernoff bound, the probability of finding a [`Chunk`] with
@@ -189,7 +189,7 @@ impl Chunk {
     }
 
     /// Inverse of [`Self::pack`].
-    pub(crate) fn unpack(&self) -> Result<Self, ChunkUnpackError> {
+    pub(crate) fn try_unpack(&self) -> Result<Self, ChunkUnpackError> {
         if self.relative_indices.is_empty() {
             return Ok(Self {
                 relative_indices: vec![],
@@ -478,32 +478,37 @@ mod tests {
         assert!(s_back.relative_indices.is_empty());
     }
 
-    proptest::proptest! {
-        #[test]
-        fn test_indices(indices in proptest::collection::vec(0u32..CHUNK_SIZE, 100)) {
-            let mut chunk = Chunk::empty_chunk();
-            for index in indices {
-                chunk.insert(index);
-            }
-
-            let chunk_indices = chunk.to_indices();
-            let reconstructed_chunk = Chunk::from_indices(&chunk_indices);
-
-            proptest::prop_assert_eq!(chunk, reconstructed_chunk);
+    #[test]
+    fn test_indices() {
+        let mut chunk = Chunk::empty_chunk();
+        let mut rng = rand::rng();
+        let num_insertions = 100;
+        for _ in 0..num_insertions {
+            let index = rng.next_u32() % (CHUNK_SIZE);
+            chunk.insert(index);
         }
 
-        #[test]
-        fn test_chunk_decode(indices in proptest::collection::vec(0u32..CHUNK_SIZE, 100)) {
-            let mut chunk = Chunk::empty_chunk();
-            for index in indices {
-                chunk.insert(index);
-            }
+        let indices = chunk.to_indices();
 
-            let encoded = chunk.encode();
-            let decoded = *Chunk::decode(&encoded).unwrap();
+        let reconstructed_chunk = Chunk::from_indices(&indices);
 
-            proptest::prop_assert_eq!(chunk, decoded);
+        assert_eq!(chunk, reconstructed_chunk);
+    }
+
+    #[test]
+    fn test_chunk_decode() {
+        let mut chunk = Chunk::empty_chunk();
+        let mut rng = rand::rng();
+        let num_insertions = 100;
+        for _ in 0..num_insertions {
+            let index = rng.next_u32() % (CHUNK_SIZE);
+            chunk.insert(index);
         }
+
+        let encoded = chunk.encode();
+        let decoded = *Chunk::decode(&encoded).unwrap();
+
+        assert_eq!(chunk, decoded);
     }
 
     /// Collect statistics about the typical number of elements in a `Chunk`.
@@ -601,22 +606,8 @@ mod tests {
         // to 0e0.
     }
 
-    #[test]
-    fn pack_unpack_unit0() {
-        let chunk = Chunk {
-            relative_indices: vec![0; 6],
-        };
-        println!("chunk: {chunk:?}");
-        let packed = chunk.pack();
-        println!("packed: {packed:?}");
-        let unpacked = packed.unpack().unwrap();
-        println!("unpacked: {unpacked:?}");
-        assert_eq!(chunk, unpacked);
-    }
-
     mod packing {
         use rand::Rng;
-        use twenty_first::math::other::random_elements;
 
         use super::*;
 
@@ -624,7 +615,12 @@ mod tests {
         fn packing_empty_chunk() {
             let chunk = Chunk::empty_chunk();
             assert!(chunk.pack().relative_indices.is_empty());
-            assert!(chunk.pack().unpack().unwrap().relative_indices.is_empty());
+            assert!(chunk
+                .pack()
+                .try_unpack()
+                .unwrap()
+                .relative_indices
+                .is_empty());
         }
 
         #[test]
@@ -633,7 +629,7 @@ mod tests {
                 relative_indices: vec![0; 6],
             };
             let packed = chunk.pack();
-            let unpacked = packed.unpack().unwrap();
+            let unpacked = packed.try_unpack().unwrap();
             assert_eq!(chunk, unpacked);
         }
 
@@ -643,7 +639,7 @@ mod tests {
                 relative_indices: vec![0; 7],
             };
             let packed = chunk.pack();
-            let unpacked = packed.unpack().unwrap();
+            let unpacked = packed.try_unpack().unwrap();
             assert_eq!(chunk, unpacked);
         }
         #[test]
@@ -652,7 +648,7 @@ mod tests {
                 relative_indices: vec![392, 1192, 2453, 527, 2430, 2423, 257, 290, 2807, 122],
             };
             let packed = chunk.pack();
-            let unpacked = packed.unpack().unwrap();
+            let unpacked = packed.try_unpack().unwrap();
             assert_eq!(chunk, unpacked);
         }
 
@@ -664,7 +660,7 @@ mod tests {
                     relative_indices: vec![rng.random_range(0..CHUNK_SIZE); i],
                 };
                 let packed = chunk.pack();
-                let unpacked = packed.unpack().unwrap();
+                let unpacked = packed.try_unpack().unwrap();
                 assert_eq!(chunk, unpacked);
             }
         }
@@ -676,7 +672,7 @@ mod tests {
             };
             assert_eq!(
                 ChunkUnpackError::PayloadTooBig,
-                packed_chunk.unpack().unwrap_err()
+                packed_chunk.try_unpack().unwrap_err()
             );
         }
 
@@ -689,7 +685,7 @@ mod tests {
             packed.relative_indices.push(0);
             assert_eq!(
                 ChunkUnpackError::InconsistentLength,
-                packed.unpack().unwrap_err()
+                packed.try_unpack().unwrap_err()
             );
         }
 
@@ -702,14 +698,14 @@ mod tests {
             *packed.relative_indices.last_mut().unwrap() |= 1;
             assert_eq!(
                 ChunkUnpackError::NonzeroTrailingPadding,
-                packed.unpack().unwrap_err()
+                packed.try_unpack().unwrap_err()
             );
         }
 
         #[proptest]
         fn pack_unpack_happy(#[strategy(arb::<Chunk>())] chunk: Chunk) {
             let packed = chunk.pack();
-            let unpacked = packed.unpack().unwrap();
+            let unpacked = packed.try_unpack().unwrap();
             prop_assert_eq!(chunk, unpacked);
         }
 
@@ -719,7 +715,7 @@ mod tests {
             packed.relative_indices.push(0);
             prop_assert_eq!(
                 ChunkUnpackError::InconsistentLength,
-                packed.unpack().unwrap_err()
+                packed.try_unpack().unwrap_err()
             );
         }
 
@@ -728,7 +724,7 @@ mod tests {
             let mut packed = chunk.pack();
             // Indicated length must be off by at least 3 to guarantee failure
             packed.relative_indices[0] ^= 0x00_30_00_00;
-            prop_assert!(packed.unpack().is_err());
+            prop_assert!(packed.try_unpack().is_err());
         }
     }
 }

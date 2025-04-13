@@ -12,10 +12,8 @@ use num_traits::One;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-
-use crate::prelude::twenty_first;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 /// The distance, in number of blocks, to the genesis block.
 ///
