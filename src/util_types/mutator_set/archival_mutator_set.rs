@@ -2,22 +2,21 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use itertools::Itertools;
-use twenty_first::prelude::Digest;
-use twenty_first::util_types::mmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tasm_lib::twenty_first::util_types::mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
-use super::chunk::Chunk;
-use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
+use super::removal_record::chunk::Chunk;
+use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use crate::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
 use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::MutatorSetError;
@@ -468,7 +467,7 @@ mod tests {
     use super::*;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;

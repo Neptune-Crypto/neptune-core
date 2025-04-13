@@ -45,10 +45,10 @@ use num_traits::Zero;
 use priority_queue::priority_queue::iterators::IntoSortedIter as SingleEndedIterator;
 use priority_queue::DoublePriorityQueue;
 use priority_queue::PriorityQueue;
+use tasm_lib::prelude::Digest;
 use tracing::debug;
 use tracing::error;
 use tracing::warn;
-use twenty_first::prelude::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;

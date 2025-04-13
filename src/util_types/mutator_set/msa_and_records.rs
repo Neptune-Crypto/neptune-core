@@ -48,11 +48,11 @@ pub mod neptune_arbitrary {
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::super::active_window::ActiveWindow;
-    use super::super::chunk::Chunk;
-    use super::super::chunk_dictionary::ChunkDictionary;
     use super::super::get_swbf_indices;
     use super::super::mmra_and_membership_proofs::MmraAndMembershipProofs;
-    use super::super::removal_record::AbsoluteIndexSet;
+    use super::super::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use super::super::removal_record::chunk::Chunk;
+    use super::super::removal_record::chunk_dictionary::ChunkDictionary;
     use super::super::shared::BATCH_SIZE;
     use super::super::shared::CHUNK_SIZE;
     use super::*;

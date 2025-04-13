@@ -6,12 +6,12 @@ use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
 use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::debug;
 use tracing::warn;
-use twenty_first::prelude::Digest;
 
 pub(crate) mod bootstrap_from_block_files;
 
@@ -35,10 +35,9 @@ use crate::models::database::BlockIndexValue;
 use crate::models::database::BlockRecord;
 use crate::models::database::FileRecord;
 use crate::models::database::LastFileRecord;
-use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::rusty_archival_block_mmr::RustyArchivalBlockMmr;

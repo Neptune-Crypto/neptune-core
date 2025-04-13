@@ -43,12 +43,12 @@ use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::Zero;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tracing::debug;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use transaction_kernel_id::TransactionKernelId;
-use twenty_first::prelude::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
 use tx_creation_artifacts::TxCreationArtifactsError;
 use tx_proving_capability::TxProvingCapability;
@@ -89,7 +89,6 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
-use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -3698,7 +3697,7 @@ mod tests {
     }
 
     mod state_update_on_reorganizations {
-        use twenty_first::prelude::Mmr;
+        use tasm_lib::twenty_first::prelude::Mmr;
 
         use super::*;
 

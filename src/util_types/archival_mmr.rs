@@ -1,21 +1,20 @@
 use itertools::Itertools;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_authentication_path_node_indices;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::leaf_index_to_node_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
-use twenty_first::prelude::Digest;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::util_types::mmr::shared_advanced;
 
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///
@@ -360,11 +359,11 @@ pub(crate) mod tests {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use rand::random;
+    use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+    use tasm_lib::twenty_first::math::other::*;
+    use tasm_lib::twenty_first::tip5::Tip5;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use test_strategy::proptest;
-    use twenty_first::math::b_field_element::BFieldElement;
-    use twenty_first::math::other::*;
-    use twenty_first::prelude::Tip5;
-    use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
     use super::*;
     use crate::database::storage::storage_schema::traits::*;

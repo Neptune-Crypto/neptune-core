@@ -29,7 +29,7 @@ use tarpc::context;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::prelude::Digest;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;

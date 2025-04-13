@@ -32,12 +32,12 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tracing::warn;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 use validity::block_proof_witness::BlockProofWitness;
@@ -1120,9 +1120,9 @@ pub(crate) mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
     use test_strategy::proptest;
     use tracing_test::traced_test;
-    use twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 
     use super::super::transaction::transaction_kernel::TransactionKernelModifier;
     use super::*;

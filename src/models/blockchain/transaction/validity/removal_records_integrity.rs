@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use field_count::FieldCount;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -27,10 +31,6 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
@@ -943,7 +943,7 @@ pub mod neptune_arbitrary {
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::get_swbf_indices;
-    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
@@ -1074,7 +1074,7 @@ mod tests {
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::get_swbf_indices;
-    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     impl ConsensusProgramSpecification for RemovalRecordsIntegrity {
         fn source(&self) {

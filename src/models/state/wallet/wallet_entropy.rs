@@ -3,11 +3,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe_vec;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::math::x_field_element::XFieldElement;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::xfe;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::x_field_element::XFieldElement;
-use twenty_first::prelude::Digest;
 use zeroize::ZeroizeOnDrop;
 
 use super::address::ReceivingAddress;
@@ -17,7 +17,6 @@ use crate::models::state::wallet::address::hash_lock_key;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::symmetric_key;
 use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
-use crate::prelude::twenty_first;
 
 /// The wallet's one source of randomness, from which all keys are derived.
 ///

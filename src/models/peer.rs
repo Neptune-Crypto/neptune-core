@@ -23,13 +23,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
-use twenty_first::prelude::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
@@ -43,7 +43,6 @@ use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
 use crate::models::peer::transfer_block::TransferBlock;
-use crate::prelude::twenty_first;
 
 pub(crate) type InstanceId = u128;
 

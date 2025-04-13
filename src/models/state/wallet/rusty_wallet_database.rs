@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::expected_utxo::ExpectedUtxo;
 use super::migrate_db;
@@ -14,7 +14,6 @@ use crate::database::storage::storage_schema::RustyKey;
 use crate::database::storage::storage_schema::RustyValue;
 use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
-use crate::prelude::twenty_first;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {

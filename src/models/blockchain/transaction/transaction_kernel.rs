@@ -7,9 +7,9 @@ use serde::Serialize;
 use strum::EnumCount;
 use strum::VariantArray;
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::primitive_witness::PrimitiveWitness;
 use super::PublicAnnouncement;
@@ -18,7 +18,6 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -105,7 +104,6 @@ impl From<PrimitiveWitness> for TransactionKernel {
 
 impl From<&TransactionDetails> for TransactionKernel {
     fn from(transaction_details: &TransactionDetails) -> Self {
-
         let TransactionDetails {
             tx_inputs,
             tx_outputs,
