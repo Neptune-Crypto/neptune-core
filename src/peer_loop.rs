@@ -3984,15 +3984,14 @@ mod peer_loop_tests {
 
             // produce enough blocks to ensure alice needs to go into sync mode
             // with this block notification.
-            let blocks =
-                fake_valid_sequence_of_blocks_for_tests_dyn(&block_1, TARGET_BLOCK_INTERVAL, {
-                    let mut v = Vec::new();
-                    for _ in 0..rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20) {
-                        v.push(rng.random());
-                    }
-                    v
-                })
-                .await;
+            let blocks = fake_valid_sequence_of_blocks_for_tests_dyn(
+                &block_1,
+                TARGET_BLOCK_INTERVAL,
+                (0..rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20))
+                    .map(|_| rng.random())
+                    .collect_vec(),
+            )
+            .await;
             for block in &blocks {
                 bob.set_new_tip(block.clone()).await?;
             }
