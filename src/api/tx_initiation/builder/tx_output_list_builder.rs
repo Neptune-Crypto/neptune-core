@@ -132,7 +132,7 @@ impl TxOutputListBuilder {
     ///
     /// this is applied for [OutputFormat] variants that do not specify a medium.
     ///
-    /// if not set, it defaults to [UtxoNotificationMedium::default()]
+    /// if not set, it defaults to [UtxoNotificationMedium::OffChain]
     pub fn owned_utxo_notification_medium(mut self, medium: UtxoNotificationMedium) -> Self {
         self.owned_utxo_notification_medium = medium;
         self
@@ -142,7 +142,7 @@ impl TxOutputListBuilder {
     ///
     /// this is applied for [OutputFormat] variants that do not specify a medium.
     ///
-    /// if not set, it defaults to [UtxoNotificationMedium::default()]
+    /// if not set, it defaults to [UtxoNotificationMedium::OnChain]
     pub fn unowned_utxo_notification_medium(mut self, medium: UtxoNotificationMedium) -> Self {
         self.unowned_utxo_notification_medium = medium;
         self
