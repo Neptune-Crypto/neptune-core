@@ -178,8 +178,9 @@ impl IntoIterator for ChunkDictionary {
 #[cfg(test)]
 pub mod chunk_dict_tests {
 
+    use proptest::collection;
     use proptest::prelude::any;
-    use proptest::{collection, prop_compose};
+    use proptest::prop_compose;
     use twenty_first::math::other::random_elements;
     use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
