@@ -230,6 +230,7 @@ mod test {
         use proptest::prelude::Just;
         use proptest::prop_assert_eq;
         use proptest::prop_assume;
+        use proptest::sample;
         use proptest_arbitrary_interop::arb;
         use test_strategy::proptest;
 
@@ -258,13 +259,8 @@ mod test {
             #[strategy(2usize..=#n)] t: usize,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
+            #[strategy(sample::subsequence((0..#n).collect_vec(), #t))] indices: Vec<usize>,
         ) {
-            let indices: HashSet<usize> = (0..n)
-                .collect::<HashSet<usize>>()
-                .into_iter()
-                .take(t)
-                .collect(); // #arbitraryHashSetIterator
-
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
