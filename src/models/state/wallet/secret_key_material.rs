@@ -318,17 +318,10 @@ mod test {
         fn catch_too_few_shares_to_recombine(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
-            #[strategy(0..#t - 1)] fromindices_take: usize,
+            #[strategy(sample::subsequence((0..#n).collect_vec(), #t - 1))] indices: Vec<usize>,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
-            // TODO is it ok to rely on the arbitrary nature of `.iter()` for `HashSet`? #arbitraryHashSetIterator
-            let indices: HashSet<usize> = (0..n)
-                .collect::<HashSet<usize>>()
-                .into_iter()
-                .take(fromindices_take)
-                .collect();
-
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
