@@ -251,25 +251,24 @@ mod test {
             prop_assert_eq!(secret_key, recombination);
         }
 
-        // fn indices_strategy(n: usize, t: usize, oneshorter: bool) -> BoxedStrategy<Vec<usize>> {
-        //     let mut indices = (0..n).collect_vec();
-        //     indices.shuffle(&mut rng());
-        //     indices.truncate(t);
-        //     indices
-        // }
         #[proptest]
         fn happy_path_t_shares(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
-            #[strategy(proptest::collection::hash_set(2usize..=#n, #t))] indices: HashSet<usize>,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
+            let indices: HashSet<usize> = (0..n)
+                .collect::<HashSet<usize>>()
+                .into_iter()
+                .take(t)
+                .collect(); // #arbitraryHashSetIterator
+
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
+            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec(); // #arbitraryHashSetIterator
             let recombination = SecretKeyMaterial::combine_shamir(t, selected_shares)
                 .expect("recombining on happy path should succeed");
 
@@ -322,17 +321,22 @@ mod test {
         fn catch_too_few_shares_to_recombine(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
-            #[strategy(proptest::collection::hash_set(2usize..=#n, #t - 1))] indices: HashSet<
-                usize,
-            >,
+            #[strategy(0..#t - 1)] fromindices_take: usize,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
+            // TODO is it ok to rely on the arbitrary nature of `.iter()` for `HashSet`? #arbitraryHashSetIterator
+            let indices: HashSet<usize> = (0..n)
+                .collect::<HashSet<usize>>()
+                .into_iter()
+                .take(fromindices_take)
+                .collect();
+
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
+            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec(); // #arbitraryHashSetIterator
             prop_assert_eq!(
                 SecretKeyMaterial::combine_shamir(t, selected_shares),
                 Err(ShamirSecretSharingError::TooFewSharesToRecombine)
@@ -343,17 +347,20 @@ mod test {
         fn catch_invalid_share(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
-            #[strategy(proptest::collection::hash_set(2usize..=#n, #t - 1))] indices: HashSet<
-                usize,
-            >,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
+            let indices: HashSet<usize> = (0..n)
+                .collect::<HashSet<usize>>()
+                .into_iter()
+                .take(t - 1)
+                .collect(); // #arbitraryHashSetIterator
+
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let mut selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
+            let mut selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec(); // #arbitraryHashSetIterator
             let invalid_share = (0, secret_key);
             selected_shares.push(invalid_share);
             prop_assert_eq!(
@@ -366,13 +373,12 @@ mod test {
         fn catch_duplicate_index(
             #[strategy(2usize..20)] n: usize,
             #[strategy(2usize..=#n)] t: usize,
-            #[strategy(proptest::collection::hash_set(2usize..=#n, #t - 1))] indices: HashSet<
-                usize,
-            >,
-            #[strategy(2usize..#t - 1)] dup_ind: usize,
+            #[strategy(0usize..#t - 1)] dup_ind: usize,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
         ) {
+            let indices = (0..n).collect::<HashSet<usize>>();
+
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
@@ -394,7 +400,7 @@ mod test {
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed_a: [u8; 32],
             #[strategy([arb(); 32])] seed_b: [u8; 32],
-            #[strategy(proptest::collection::hash_map(2usize..=#n, proptest::prelude::any::<bool>(), #t))]
+            #[strategy(proptest::collection::hash_map(0usize..#n, proptest::prelude::any::<bool>(), #t))]
             indices: std::collections::HashMap<usize, bool>,
         ) {
             prop_assume!(seed_a != seed_b);
@@ -407,7 +413,7 @@ mod test {
                 .share_shamir(t, n, seed_b)
                 .expect("sharing on happy path should succeed");
 
-            let mut selected_shares = Vec::with_capacity(t + 1);
+            let mut selected_shares = Vec::with_capacity(t);
             let mut indices = indices.into_iter();
             selected_shares.push(shares_a[indices.next().unwrap().0]);
             selected_shares.push(shares_b[indices.next().unwrap().0]);

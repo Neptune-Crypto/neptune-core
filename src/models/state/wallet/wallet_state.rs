@@ -1875,11 +1875,9 @@ impl WalletState {
 #[cfg(test)]
 pub(crate) mod tests {
     use generation_address::GenerationSpendingKey;
-
     use rand::prelude::*;
     use rand::random;
     use rand::rng;
-
     use tokio::sync::broadcast;
     use tracing_test::traced_test;
 
@@ -2407,10 +2405,6 @@ pub(crate) mod tests {
         );
     }
 
-    /* #[proptest(async = "tokio")]
-    async fn never_store_same_utxo_twice_different_blocks(
-        #[strategy((arb::<Seeds<0, 2>>(), arb::<Seeds<0, 2>>()))] seeds: (Seeds<0, 2>, Seeds<0, 2>),
-    ) { */
     #[tokio::test]
     #[traced_test]
     async fn never_store_same_utxo_twice_different_blocks() {
@@ -2824,7 +2818,6 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use futures::channel::oneshot;
         use guesser_fee_utxos::composer_parameters::ComposerParameters;
-
         use rand::rng;
 
         use super::*;
@@ -2839,7 +2832,6 @@ pub(crate) mod tests {
         use crate::tests::shared::fake_valid_block_proposal_successor_for_test;
 
         #[traced_test]
-        // this doesn't make a lot of sense to make a `proptest`
         #[tokio::test]
         async fn registers_guesser_fee_utxos_correctly() {
             let network = Network::Main;
@@ -3309,10 +3301,6 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        /* #[proptest(async = "tokio")]
-        async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs(
-            #[strategy((array::uniform4(Seeds<0, 2>)))] seeds_preimage_and_guesser: [Seeds<0, 2>; 4],
-            #[any] seed_wallet: [u8; 32] */
         #[traced_test]
         #[tokio::test]
         async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs() {
@@ -3977,10 +3965,6 @@ pub(crate) mod tests {
                 .is_zero());
         }
 
-        /* #[proptest(async = "tokio")]
-        async fn abandoned_utxo_is_unsynced(
-            #[strategy(arb::<Seeds<0, 2>>())] seeds: Seeds<0, 2>,
-            #[any] seed_wallet: [u8; 32], */
         #[tokio::test]
         async fn abandoned_utxo_is_unsynced() {
             // 1. create a genesis state for Alice
@@ -4053,11 +4037,10 @@ pub(crate) mod tests {
     }
 
     pub(crate) mod scan_mode {
-        use std::hint::black_box;
-
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
+        use std::hint::black_box;
 
         use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -4264,7 +4247,6 @@ pub(crate) mod tests {
         async fn scan_for_utxos_announced_to_future_keys_behaves(
             #[strategy(propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(10, 10, 10))]
             kernel: TransactionKernel,
-            #[strategy(arb())] seed: [u8; 32],
             #[strategy(arb())] wallet_secret: WalletEntropy,
             #[strategy(collection::vec(
                 0_usize..100,
@@ -4276,15 +4258,15 @@ pub(crate) mod tests {
                 NUM_FUTURE_KEYS,
             ))]
             mut future_symmetric_relative_indices: Vec<usize>,
-            // #[strategy(collection::vec(any::<u32>(), NUM_FUTURE_KEYS))] mut coin_u32_vec: Vec<u32>,
-            #[strategy(collection::vec(arb(), NUM_FUTURE_KEYS))] mut utxo_vec: Vec<Utxo>,
-            #[strategy(collection::vec(arb(), NUM_FUTURE_KEYS))] mut sender_randomness_vec: Vec<
+            #[strategy(collection::vec(arb(), 2 * NUM_FUTURE_KEYS))] mut utxo_vec: Vec<Utxo>,
+            #[strategy(collection::vec(arb(), 2 * NUM_FUTURE_KEYS))] mut sender_randomness_vec: Vec<
                 Digest,
             >,
-            #[strategy(collection::vec(any::<bool>(), NUM_FUTURE_KEYS))] mut select_vec: Vec<bool>,
+            #[strategy(collection::vec(any::<bool>(), 2 * NUM_FUTURE_KEYS))] mut select_vec: Vec<
+                bool,
+            >,
         ) {
             let network = Network::Main;
-            dbg!(seed);
             let data_dir = unit_test_data_directory(network).unwrap();
             let wallet_state = WalletState::new_from_wallet_entropy(
                 &data_dir,
@@ -4341,9 +4323,6 @@ pub(crate) mod tests {
                 .into_iter()
                 .chain(future_symmetric_keys)
             {
-                // let coin = Coin::new_native_currency(NativeCurrencyAmount::coins(
-                //     coin_u32_vec.pop().unwrap() >> 15,
-                // ));
                 let utxo = utxo_vec.pop().unwrap();
                 let sender_randomness = sender_randomness_vec.pop().unwrap();
 

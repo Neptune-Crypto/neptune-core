@@ -20,7 +20,6 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-// use super::chunk_dictionary::pseudorandom_chunk_dictionary;
 use super::chunk_dictionary::ChunkDictionary;
 use super::commit;
 use super::get_swbf_indices;
@@ -559,8 +558,7 @@ pub mod ms_proof_tests {
     use itertools::Itertools;
     use proptest::collection;
     use proptest::prelude::any;
-
-    use proptest::prelude::Just;
+    use proptest::prelude::*;
 
     use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
@@ -579,6 +577,8 @@ pub mod ms_proof_tests {
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
 
+    const N: usize = 100;
+
     prop_compose! {
         /// Generate a pseudorandom mutator set membership proof from the given seed, for testing
         /// purposes.
@@ -586,7 +586,7 @@ pub mod ms_proof_tests {
             sender_randomness in arb::<Digest>(),
             receiver_preimage in arb::<Digest>(),
             (auth_path_aocl, aocl_leaf_index) in propcompose_mmr_membership_proof_with_index(),
-            target_chunks in arb::<ChunkDictionary>()
+            target_chunks in crate::util_types::mutator_set::chunk_dictionary::chunk_dict_tests::propcompose_chunk_dictionary(),
         ) -> MsMembershipProof {
             MsMembershipProof {
                     sender_randomness,
@@ -601,9 +601,9 @@ pub mod ms_proof_tests {
     prop_compose! {
         /// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
         /// for testing purposes.
-        pub fn propcompose_mmr_membership_proof_with_index() (len in 0..15usize, leaf_index in any::<u64>()) (
+        pub fn propcompose_mmr_membership_proof_with_index() (len in 0..15usize) (
             authentication_path in collection::vec(arb::<Digest>(), len),
-            leaf_index in Just(leaf_index),
+            leaf_index in any::<u64>()
         ) -> (MmrMembershipProof, u64) {
             (MmrMembershipProof {authentication_path}, leaf_index)
         }
@@ -695,7 +695,6 @@ pub mod ms_proof_tests {
         }
     }
 
-    const N: usize = 100;
     #[test_strategy::proptest(async = "tokio")]
     async fn revert_update_from_remove_test(
         #[strategy(0..N)] own_index: usize,
@@ -703,8 +702,7 @@ pub mod ms_proof_tests {
         #[strategy(collection::vec(arb::<Digest>(), N))] mut sender_randomness_vec: Vec<Digest>,
         #[strategy(collection::vec(arb::<Digest>(), N))] mut receiver_preimage_vec: Vec<Digest>,
         #[strategy(collection::vec(any::<bool>(), N))] mut condition: Vec<bool>,
-        // #[strategy(1usize..#condition.iter().map(|x| *x as usize).sum())] cutoff_point: usize,
-        #[strategy(0..N)] rand_offdistr: usize,
+        #[any] cutoff_rand: usize,
     ) {
         let mut own_membership_proof = None;
         let mut own_item = None;
@@ -774,7 +772,7 @@ pub mod ms_proof_tests {
                 removal_records.push(removal_record);
             }
         }
-        let cutoff_point = 1 + (rand_offdistr % (removal_records.len() - 1));
+        let cutoff_point = 1 + (cutoff_rand % (removal_records.len() - 1));
         let mut membership_proof_snapshot = None;
 
         // apply removal records
@@ -1395,14 +1393,15 @@ pub mod ms_proof_tests {
         }
     }
 
-    #[test]
-    fn test_decode_mutator_set_membership_proof() {
-        for _ in 0..100 {
-            proptest::proptest!(|(msmp in propcompose_mutator_set_membership_proof())| {
-                let encoded = msmp.encode();
-                let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
-                assert_eq!(msmp, decoded);
-            })
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 100, .. ProptestConfig::default()
+          })]
+        #[test]
+        fn test_decode_mutator_set_membership_proof(msmp in propcompose_mutator_set_membership_proof()) {
+            let encoded = msmp.encode();
+            let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
+            assert_eq!(msmp, decoded);
         }
     }
 

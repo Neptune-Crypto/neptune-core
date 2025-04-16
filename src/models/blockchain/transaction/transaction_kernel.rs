@@ -48,29 +48,6 @@ pub struct TransactionKernel {
     #[get_size(ignore)]
     mast_sequences: OnceLock<Vec<Vec<BFieldElement>>>,
 }
-#[cfg(test)]
-use proptest_arbitrary_interop::arb;
-#[cfg(test)]
-proptest::prop_compose! {
-    pub fn propcompose_of_mutator(
-        inputs: Vec<RemovalRecord>,
-        outputs: Vec<AdditionRecord>,
-        fee: NativeCurrencyAmount,
-        timestamp: Timestamp,
-    ) (mutator_set_hash in arb::<Digest>()) -> TransactionKernel {
-        TransactionKernelProxy {
-            inputs: inputs.clone(),
-            outputs: outputs.clone(),
-            public_announcements: vec![],
-            fee,
-            timestamp,
-            coinbase: None,
-            mutator_set_hash,
-            merge_bit: false,
-        }
-        .into_kernel()
-    }
-}
 
 impl std::fmt::Display for TransactionKernel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -438,11 +415,12 @@ impl TransactionKernelModifier {
 #[cfg(test)]
 pub mod transaction_kernel_tests {
     use itertools::Itertools;
+    use proptest::collection;
     use proptest::prelude::any;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
-
+    use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
     use super::*;
@@ -450,7 +428,27 @@ pub mod transaction_kernel_tests {
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::tests::shared::propcompose_transaction_kernel;
-    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+
+    proptest::prop_compose! {
+        pub fn propcompose_of_mutator(
+            inputs: Vec<RemovalRecord>,
+            outputs: Vec<AdditionRecord>,
+            fee: NativeCurrencyAmount,
+            timestamp: Timestamp,
+        ) (mutator_set_hash in arb::<Digest>()) -> TransactionKernel {
+            TransactionKernelProxy {
+                inputs: inputs.clone(),
+                outputs: outputs.clone(),
+                public_announcements: vec![],
+                fee,
+                timestamp,
+                coinbase: None,
+                mutator_set_hash,
+                merge_bit: false,
+            }
+            .into_kernel()
+        }
+    }
 
     proptest::prop_compose! {
         pub fn propcompose_transaction_kernel_with_nums_of_inputs_outputs_pa(
@@ -458,9 +456,13 @@ pub mod transaction_kernel_tests {
             num_outputs: usize,
             num_public_announcements: usize,
         ) (
-            inputs in proptest::collection::vec(arb::<RemovalRecord>(), num_inputs),
-            outputs in proptest::collection::vec(arb::<AdditionRecord>(), num_outputs),
-            public_announcements in proptest::collection::vec(arb::<PublicAnnouncement>(), num_public_announcements),
+            inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_removal_record(), num_inputs),
+            outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
+            public_announcements in collection::vec(collection::vec(arb::<BFieldElement>(), 10..59)
+                // let mut rng: StdRng = SeedableRng::from_seed(seed);
+                // let len = 10 + (rng.next_u32() % 50) as usize;
+                // let message = (0..len).map(|_| rng.random()).collect_vec();
+            , num_public_announcements).prop_map(|vecvec| vecvec.into_iter().map(|message| PublicAnnouncement { message }).collect_vec()),
             fee in arb::<NativeCurrencyAmount>(),
             coinbase in arb::<Option<NativeCurrencyAmount>>(),
             timestamp in arb::<Timestamp>(),
@@ -560,8 +562,7 @@ pub mod transaction_kernel_tests {
 
     #[proptest]
     fn decode_public_announcements(
-        #[strategy([arb::<PublicAnnouncement>(), arb::<PublicAnnouncement>()])] pubscripts: [PublicAnnouncement;
-            2],
+        #[strategy([arb(), arb()])] pubscripts: [PublicAnnouncement; 2],
     ) {
         let pubscripts = pubscripts.to_vec();
         let encoded = pubscripts.encode();
@@ -581,7 +582,7 @@ pub mod transaction_kernel_tests {
     proptest::proptest! {
         #[test]
         fn test_decode_transaction_kernel_small(
-            absolute_indices in arb::<AbsoluteIndexSet>(),
+            absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
             canonical_commitment in arb::<Digest>(),
             mutator_set_hash in arb::<Digest>(),
         ) {

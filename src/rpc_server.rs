@@ -3704,6 +3704,8 @@ mod rpc_server_tests {
     use crate::Block;
     use crate::RPC_CHANNEL_CAPACITY;
 
+    const NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1: usize = 7;
+
     async fn test_rpc_server(
         network: Network,
         wallet_entropy: WalletEntropy,
@@ -4360,8 +4362,6 @@ mod rpc_server_tests {
             .unwrap()
             .is_none());
     }
-
-    const NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1: usize = 7;
 
     #[traced_test]
     #[test_strategy::proptest(async = "tokio")]

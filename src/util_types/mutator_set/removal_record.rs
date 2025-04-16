@@ -30,6 +30,8 @@ use super::shared::NUM_TRIALS;
 use super::MutatorSetError;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
+#[cfg(test)]
+pub use removal_record_tests::propcompose_absindset;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Hash)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
@@ -378,12 +380,11 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 mod removal_record_tests {
     use itertools::Itertools;
+    use proptest::prelude::*;
     use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
-
-    use test_strategy::proptest;
 
     use super::*;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -403,6 +404,12 @@ mod removal_record_tests {
         /// Test-function used for negative tests of removal records
         pub(crate) fn decrement_bloom_filter_index(&mut self, index: usize) {
             self.0[index] = self.0[index].wrapping_sub(1);
+        }
+    }
+
+    prop_compose! {
+        pub fn propcompose_absindset() (inner in [proptest::prelude::any::<u128>(); NUM_TRIALS as usize]) -> AbsoluteIndexSet {
+            AbsoluteIndexSet::new(&inner)
         }
     }
 
@@ -585,11 +592,10 @@ mod removal_record_tests {
         assert!(!rr_for_aocl0.validate(&MutatorSetAccumulator::default()));
     }
 
-    #[proptest(cases = 10)]
+    #[test_strategy::proptest(cases = 10)]
     fn removal_record_missing_chunk_element_is_invalid_pbt(
         #[strategy(1u64..20*u64::from(BATCH_SIZE))] initial_additions: u64,
         #[strategy(0u64..(#initial_additions as u64))] index_to_drop: u64,
-        #[any] to_remove_i: u64,
     ) {
         // Construct a valid removal record, verify that it is considered
         // valid, then remove one element from its chunk dictionary and verify
@@ -624,15 +630,15 @@ mod removal_record_tests {
         assert!(rr.validate(&accumulator));
 
         let (inactive, _) = rr.absolute_indices.split_by_activity(&accumulator).unwrap();
-        let l = inactive.len() as u64;
-        if l == 0 {
+        // #arbitraryHashSetIterator
+        if let Some(index) = inactive.keys().next() {
+            rr.target_chunks.remove(index).unwrap();
+            assert!(!rr.validate(&accumulator));
+        } else {
             // If the removal record has no indices in the inactive part of the
             // Bloom filter, then continue to next test case.
             return Ok(());
         }
-        let to_remove = to_remove_i % (l - 1);
-        rr.target_chunks.remove(&to_remove);
-        assert!(!rr.validate(&accumulator));
     }
 
     #[test]
@@ -804,51 +810,50 @@ mod removal_record_tests {
         }
     }
 
-    prop_compose! {
-        fn removal_record_vec() (length in 0..10usize)
-        (the in proptest::collection::vec(arb::<RemovalRecord>(), length)) -> Vec<RemovalRecord> {the}
-    }
     proptest::proptest! {
         #[test]
         fn test_index_set_serialization(
-            indices in proptest::collection::vec(proptest::prelude::any::<u128>(), NUM_TRIALS as usize)
+            original_indexset in propcompose_absindset()
         ) {
-            let original_indexset = AbsoluteIndexSet::new(&indices.try_into().unwrap());
             let serialized_indexset = serde_json::to_string(&original_indexset).unwrap();
             let reconstructed_indexset: AbsoluteIndexSet =
                 serde_json::from_str(&serialized_indexset).unwrap();
 
             assert_eq!(original_indexset, reconstructed_indexset);
         }
+    }
 
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 10, .. ProptestConfig::default()
+          })]
         #[test]
         fn test_removal_record_decode(removal_record in arb::<RemovalRecord>()) {
-            for _ in 0..10 {
                 let encoded = &removal_record.encode();
                 let decoded = *RemovalRecord::decode(encoded).unwrap();
                 assert_eq!(removal_record, decoded);
-            }
         }
 
         #[test]
-        fn test_removal_record_vec_decode(removal_records in removal_record_vec()) {
-            for _ in 0..10 {
+        fn test_removal_record_vec_decode(removal_records in proptest::collection::vec(arb::<RemovalRecord>(), 0..10)) {
                 let encoded = removal_records.encode();
                 let decoded = *Vec::<RemovalRecord>::decode(&encoded).unwrap();
                 assert_eq!(removal_records, decoded);
-            }
         }
+    }
 
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 100, .. ProptestConfig::default()
+          })]
         #[test]
-        fn test_absindexset_record_decode(removal_record_absolute_indices in arb::<AbsoluteIndexSet>()) {
-            for _ in 0..100 {
-                let encoded_absindexset = removal_record_absolute_indices.encode();
+        fn test_absindexset_record_decode(removal_record in arb::<RemovalRecord>()) {
+                let encoded_absindexset = removal_record.absolute_indices.encode();
                 let decoded_absindexset = *AbsoluteIndexSet::decode(&encoded_absindexset).unwrap();
                 assert_eq!(
-                    removal_record_absolute_indices,
+                    removal_record.absolute_indices,
                     decoded_absindexset
                 );
-            }
         }
     }
 }

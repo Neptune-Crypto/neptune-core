@@ -175,36 +175,11 @@ impl IntoIterator for ChunkDictionary {
     }
 }
 
-// /// Generate pseudorandom chunk dictionary from the given seed, for testing purposes.
-// pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
-//     let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-//     let mut dictionary = vec![];
-//     for _ in 0..37 {
-//         let key = rng.next_u64();
-//         let authpath: Vec<Digest> = (0..rng.random_range(0..6))
-//             .map(|_| rng.random())
-//             .collect_vec();
-//         let chunk: Vec<u32> = (0..rng.random_range(0..17))
-//             .map(|_| rng.random())
-//             .collect_vec();
-
-//         dictionary.push((
-//             key,
-//             (
-//                 MmrMembershipProof::new(authpath),
-//                 Chunk {
-//                     relative_indices: chunk,
-//                 },
-//             ),
-//         ));
-//     }
-//     ChunkDictionary::new(dictionary)
-// }
-
 #[cfg(test)]
-mod chunk_dict_tests {
+pub mod chunk_dict_tests {
 
+    use proptest::prelude::any;
+    use proptest::{collection, prop_compose};
     use twenty_first::math::other::random_elements;
     use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -212,7 +187,22 @@ mod chunk_dict_tests {
     use super::*;
     use crate::util_types::archival_mmr::mmr_test::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    // use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
+
+    prop_compose! {
+        pub fn propcompose_chunk_dictionary() (dictionary in collection::vec((
+            any::<u64>(), collection::vec(proptest_arbitrary_interop::arb::<Digest>(), 0..6), collection::vec(any::<u32>(), 0..17),
+        ), 37)) -> ChunkDictionary {
+            ChunkDictionary::new(dictionary.into_iter().map(|(key, authpath, chunk)| (
+                key,
+                (
+                    MmrMembershipProof::new(authpath),
+                    Chunk {
+                        relative_indices: chunk,
+                    },
+                )
+            )).collect_vec())
+        }
+    }
 
     #[tokio::test]
     async fn hash_test() {
@@ -307,7 +297,7 @@ mod chunk_dict_tests {
 
     #[test_strategy::proptest]
     fn test_chunk_dictionary_decode(
-        #[strategy(proptest_arbitrary_interop::arb:: <ChunkDictionary>())]
+        #[strategy(proptest_arbitrary_interop::arb::<ChunkDictionary>())]
         chunk_dictionary: ChunkDictionary,
     ) {
         let encoded = chunk_dictionary.encode();

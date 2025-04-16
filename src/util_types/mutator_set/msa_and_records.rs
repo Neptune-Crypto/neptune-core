@@ -284,7 +284,7 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use proptest::collection::{self, vec};
+    use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
@@ -293,6 +293,7 @@ mod test {
     use crate::util_types::mutator_set::ms_membership_proof::ms_proof_tests::propcompose_mutator_set_membership_proof;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
+    use crate::util_types::test_shared::mutator_set::propcompose_removal_record;
 
     impl MsaAndRecords {
         /// Split an [MsaAndRecords] into multiple instances of the same type.
@@ -347,11 +348,11 @@ mod test {
 
     #[test]
     fn split_msa_and_records() {
-        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 1))| split_prop([1], data));
-        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 0))| split_prop([0], data));
-        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 5))| split_prop([0, 5], data));
-        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 7))| split_prop([3, 4], data));
-        proptest::proptest!(|(data in collection::vec((arb::<RemovalRecord>(), propcompose_mutator_set_membership_proof()), 19))| split_prop([12, 2, 5], data));
+        proptest::proptest!(|(data in vec((propcompose_removal_record(), propcompose_mutator_set_membership_proof()), 1))| split_prop([1], data));
+        proptest::proptest!(|(data in vec((propcompose_removal_record(), propcompose_mutator_set_membership_proof()), 0))| split_prop([0], data));
+        proptest::proptest!(|(data in vec((propcompose_removal_record(), propcompose_mutator_set_membership_proof()), 5))| split_prop([0, 5], data));
+        proptest::proptest!(|(data in vec((propcompose_removal_record(), propcompose_mutator_set_membership_proof()), 7))| split_prop([3, 4], data));
+        proptest::proptest!(|(data in vec((propcompose_removal_record(), propcompose_mutator_set_membership_proof()), 19))| split_prop([12, 2, 5], data));
     }
 
     fn split_prop<const N: usize>(

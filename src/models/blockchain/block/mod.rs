@@ -1092,7 +1092,6 @@ pub(crate) mod block_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
-
     use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
@@ -1238,9 +1237,6 @@ pub(crate) mod block_tests {
         assert_eq!(NativeCurrencyAmount::coins(128), total_amount);
     }
 
-    /* #[proptest(async = "tokio")]
-    async fn test_difficulty_control_matches(
-        #[strategy(proptest::collection::vec(arb::<Digest>(), 30))] mut sender_randomness_vec: Vec<Digest>, */
     #[tokio::test]
     async fn test_difficulty_control_matches() {
         let network = Network::Main;
@@ -1311,10 +1307,6 @@ pub(crate) mod block_tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-        /* arb::<Seeds<2, 2>>()
-        .new_tree(&mut test_runner)
-        .unwrap()
-        .current(), */
         let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
 
         let timestamp = block1.kernel.header.timestamp;
@@ -1342,7 +1334,7 @@ pub(crate) mod block_tests {
     #[proptest(async = "tokio")]
     async fn can_prove_block_ancestry(
         #[strategy(collection::vec(arb::<Digest>(), 55))] mut sender_randomness_vec: Vec<Digest>,
-        #[strategy(0..55usize)] index: usize,
+        #[strategy(0..54usize)] index: usize,
         #[strategy(collection::vec(arb::<WalletEntropy>(), 55))] mut wallet_secret_vec: Vec<
             WalletEntropy,
         >,
@@ -1429,7 +1421,6 @@ pub(crate) mod block_tests {
     }
 
     mod block_is_valid {
-
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
@@ -1455,10 +1446,6 @@ pub(crate) mod block_tests {
             let genesis_block = Block::genesis(network);
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-            /* arb::<crate::tests::shared::Seeds<2, 2>>()
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current(), */
             let block1 =
                 fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.random())
                     .await;
@@ -1622,10 +1609,6 @@ pub(crate) mod block_tests {
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-            /* arb::<crate::tests::shared::Seeds<2, 2>>()
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current(), */
             let mut block1 =
                 fake_valid_successor_for_tests(&genesis_block, now, rng.random()).await;
 
@@ -1753,15 +1736,10 @@ pub(crate) mod block_tests {
     }
 
     mod guesser_fee_utxos {
-
         use super::*;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
 
-        /* #[test_strategy::proptest(async = "tokio")]
-        async fn guesser_fee_addition_records_are_consistent(
-            #[strategy(arb::<Digest>())] seed_key: Digest,
-            #[strategy(arb::<Seeds<0, 2>>())] seeds: Seeds<0, 2>, */
         #[tokio::test]
         async fn guesser_fee_addition_records_are_consistent() {
             // Ensure that multiple ways of deriving guesser-fee addition

@@ -1736,12 +1736,10 @@ impl GlobalState {
 mod global_state_tests {
     use itertools::Itertools;
     use num_traits::Zero;
-
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-
     use tracing_test::traced_test;
     use wallet::address::generation_address::GenerationSpendingKey;
     use wallet::address::KeyType;
@@ -1982,10 +1980,6 @@ mod global_state_tests {
         );
     }
 
-    /* #[proptest(async = "tokio")]
-    async fn restore_monitored_utxos_from_recovery_data_duplicated_entries(
-        #[strategy(proptest_arbitrary_interop::arb::<Seeds<0, 2> >())] seeds: Seeds<0, 2>
-    ) { */
     #[traced_test]
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_duplicated_entries() {
@@ -2083,8 +2077,6 @@ mod global_state_tests {
         }
     }
 
-    /* #[proptest(async = "tokio")]
-    async fn restore_monitored_utxos_from_recovery_data_test(#[strategy(proptest_arbitrary_interop::arb::<Seeds<0, 2> >())] seeds: Seeds<0, 2>) { */
     #[traced_test]
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {

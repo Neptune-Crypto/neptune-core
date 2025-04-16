@@ -46,7 +46,6 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, Default, BFieldCodec)]
-// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct NativeCurrencyAmount(i128);
 
 impl TasmObject for NativeCurrencyAmount {
@@ -545,6 +544,7 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 pub(crate) mod test {
     use std::cmp::max;
+    use std::panic::catch_unwind;
 
     use get_size2::GetSize;
     use itertools::Itertools;
@@ -644,14 +644,15 @@ pub(crate) mod test {
 
         #[test]
         fn amount_scalar_mul_pbt(
-            (a, b) in ((0..42000000u32), (0..42000000u32)).prop_filter(
-                "the product should be $\\leq 42000000$", |(a, b)| u64::from(*a) * u64::from(*b) <= 42000000
-            ),
+            a in 0..42000000u32,
+            b in 0..42000000u32
         ) {
-            let prod_checked: NativeCurrencyAmount = NativeCurrencyAmount::coins(a * b);
-            let mut prod_calculated: NativeCurrencyAmount = NativeCurrencyAmount::coins(a);
-            prod_calculated = prod_calculated.scalar_mul(b);
-            assert_eq!(prod_checked, prod_calculated);
+            if u64::from(a) * u64::from(b) <= 42000000 {
+                let prod_checked: NativeCurrencyAmount = NativeCurrencyAmount::coins(a * b);
+                let mut prod_calculated: NativeCurrencyAmount = NativeCurrencyAmount::coins(a);
+                prod_calculated = prod_calculated.scalar_mul(b);
+                assert_eq!(prod_checked, prod_calculated);
+            } else {assert![catch_unwind(|| NativeCurrencyAmount::coins(a).scalar_mul(b)).is_err()]}
         }
     }
 

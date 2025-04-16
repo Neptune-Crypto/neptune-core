@@ -110,23 +110,13 @@ pub fn random_mmra() -> MmrAccumulator {
     pseudorandom_mmra(rand::rng().random())
 }
 
-// /// Generate a pseudorandom removal record from the given seed, for testing purposes.
-// pub(crate) fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
-//     let mut rng: StdRng = SeedableRng::from_seed(seed);
-//     let absolute_indices = AbsoluteIndexSet::new(
-//         &(0..NUM_TRIALS as usize)
-//             .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
-//             .collect_vec()
-//             .try_into()
-//             .unwrap(),
-//     );
-//     let target_chunks = pseudorandom_chunk_dictionary(rng.random::<[u8; 32]>());
-
-//     RemovalRecord {
-//         absolute_indices,
-//         target_chunks,
-//     }
-// }
+proptest::prop_compose! {
+    /// Generate a pseudorandom removal record from the given seed, for testing purposes.
+    pub fn propcompose_removal_record() (
+        absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
+        target_chunks in crate::util_types::mutator_set::chunk_dictionary::chunk_dict_tests::propcompose_chunk_dictionary()
+    ) -> RemovalRecord {RemovalRecord {absolute_indices, target_chunks}}
+}
 
 pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -376,16 +366,6 @@ pub fn random_swbf_active() -> ActiveWindow {
     aw
 }
 
-// /// Generate a random MsMembershipProof. For serialization testing. Might not be a consistent or valid object.
-// pub fn random_mutator_set_membership_proof() -> MsMembershipProof {
-//     propcompose_mutator_set_membership_proof(rand::rng().random())
-// }
-
-// pub fn random_removal_record() -> RemovalRecord {
-//     let mut rng = rand::rng();
-//     pseudorandom_removal_record(rng.random::<[u8; 32]>())
-// }
-
 fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: Digest) -> bool {
     let mut acc = leaf;
     for (shift, &p) in path.iter().enumerate() {
@@ -398,18 +378,11 @@ fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: 
     acc == root
 }
 
-#[cfg(test)]
 mod shared_tests_test {
     use super::*;
 
-    /* #[test_strategy::proptest(async = "tokio")]
-    async fn can_call(
-        // #strategy[proptest_arbitrary_interop::arb::<RemovalRecord>()] _rr: RemovalRecord,
-        #[strategy(arb::<ChunkDictionary>())] rcd: ChunkDictionary, */
     #[tokio::test]
     async fn can_call() {
-        // let rcd = pseudorandom_chunk_dictionary();
-        // assert!(!rcd.is_empty());
         let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;

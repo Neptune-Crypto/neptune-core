@@ -2243,8 +2243,8 @@ mod peer_loop_tests {
         let genesis_block: Block = Block::genesis(network);
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let mut rng = StdRng::seed_from_u64(5550001);
-        let block_1 = fake_valid_block_for_tests(&alice, rng.random()).await;
+        let block_1 =
+            fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).random()).await;
         assert!(
             block_1.is_valid(&genesis_block, now).await,
             "Block must be valid for this test to make sense"
