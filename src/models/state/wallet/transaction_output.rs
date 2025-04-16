@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 
 use super::utxo_notification::UtxoNotifyMethod;
@@ -24,12 +25,16 @@ use crate::prelude::twenty_first::math::digest::Digest;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 
+// note: TxOutput gets stored in the wallet database due to inclusion
+// in SentTransaction.  Thus, database migration must be kept in mind
+// when adding/removing or changing any field.
+
 /// represents a transaction output, as used by
 /// [TransactionDetailsBuilder](crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder)
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
 /// and claim a given UTXO.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TxOutput {
     utxo: Utxo,
     sender_randomness: Digest,
@@ -38,7 +43,47 @@ pub struct TxOutput {
 
     /// Indicates if this client can unlock the UTXO
     owned: bool,
+
+    // this field is new after neptune-core 0.2.2
     is_change: bool,
+}
+
+// fix for issue #552.
+//
+// We manually implement Deserialize in order to default the is_change field to
+// the owned field.
+//
+// This provides DB migration/compat for DBs created with commits prior to
+// 69e2867106fe727665fd74e21a0b3e309d160d5d and/or version 0.2.2.
+//
+// See: https://github.com/Neptune-Crypto/neptune-core/issues/552
+impl<'de> Deserialize<'de> for TxOutput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            utxo: Utxo,
+            sender_randomness: Digest,
+            receiver_digest: Digest,
+            notification_method: UtxoNotifyMethod,
+            owned: bool,
+            is_change: Option<bool>,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+
+        Ok(TxOutput {
+            utxo: helper.utxo,
+            sender_randomness: helper.sender_randomness,
+            receiver_digest: helper.receiver_digest,
+            notification_method: helper.notification_method,
+            owned: helper.owned,
+            // default is_change to owned.
+            is_change: helper.is_change.unwrap_or(helper.owned),
+        })
+    }
 }
 
 impl From<&TxOutput> for AdditionRecord {
