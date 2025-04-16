@@ -404,6 +404,7 @@ mod test {
             #[strategy(proptest::collection::hash_map(0usize..#n, proptest::prelude::any::<bool>(), #t))]
             indices: std::collections::HashMap<usize, bool>,
         ) {
+            // nothing to test here if the sharings are identical
             prop_assume!(seed_a != seed_b);
 
             let secret_key = SecretKeyMaterial(s);
