@@ -228,7 +228,8 @@ mod test {
         use std::collections::HashSet;
 
         use proptest::prelude::Just;
-        use proptest::{prop_assert_eq, prop_assume};
+        use proptest::prop_assert_eq;
+        use proptest::prop_assume;
         use proptest_arbitrary_interop::arb;
         use test_strategy::proptest;
 
