@@ -1099,12 +1099,8 @@ mod test {
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
-        let mut alice = state_with_premine_and_self_mined_blocks(
-            cli_args,
-            // #proofs_presaved_compat
-            [StdRng::from_seed(rng.random::<[u8; 32]>()).random()],
-        )
-        .await;
+        let mut alice =
+            state_with_premine_and_self_mined_blocks(cli_args, rng.random::<[Digest; 1]>()).await;
 
         let mut transactions = vec![];
         for _ in 0..=1 {
@@ -1144,17 +1140,9 @@ mod test {
         let block1 = alice.lock_guard().await.chain.light_state().to_owned();
 
         let now = block1.header().timestamp + Timestamp::hours(1);
-        let block2 = fake_block_successor_with_merged_tx(&block1, now, false, vec![mined_tx], {
-            // compatibility to presaved proofs #proofs_presaved_compat
-            let mut r = StdRng::from_seed(dbg!(rng.random::<[u8; 32]>()));
-            let mut rness: crate::tests::shared::Randomness<1, 3> = Default::default();
-            rness.digests[0] = r.random();
-            rness.digests[1] = r.random();
-            rness.bytes_arr[0] = dbg!(StdRng::from_seed(r.random::<[u8; 32]>()).random());
-            rness.digests[2] = StdRng::from_seed(r.random::<[u8; 32]>()).random();
-            rness
-        })
-        .await;
+        let block2 =
+            fake_block_successor_with_merged_tx(&block1, now, false, vec![mined_tx], rng.random())
+                .await;
         alice.set_new_tip(block2).await.unwrap();
 
         let (main_to_peer_tx, mut main_to_peer_rx) =
