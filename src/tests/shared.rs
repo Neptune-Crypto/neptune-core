@@ -234,10 +234,10 @@ pub(crate) async fn mock_genesis_global_state(
         "Genesis light state MSA hash: {}",
         light_state.mutator_set_accumulator_after().hash()
     );
-    let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
+    let blockchain_state = BlockchainState::Archival(Box::new(BlockchainArchivalState {
         light_state,
         archival_state,
-    });
+    }));
     let mempool = Mempool::new(
         cli.max_mempool_size,
         cli.max_mempool_num_tx,

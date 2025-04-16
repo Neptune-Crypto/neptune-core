@@ -17,7 +17,7 @@ use crate::Block;
 #[derive(Debug)]
 pub enum BlockchainState {
     /// represents a Archival blockchain state
-    Archival(BlockchainArchivalState),
+    Archival(Box<BlockchainArchivalState>),
     /// represents Light node blockchain state (ie the current tip)
     Light(LightState),
 }

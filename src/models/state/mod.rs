@@ -421,20 +421,20 @@ impl DerefMut for GlobalStateLock {
 #[derive(Debug)]
 pub enum StateLock<'a> {
     /// holds an instance GlobalStateLock. can be used to
-    Lock(GlobalStateLock),
+    Lock(Box<GlobalStateLock>),
     ReadGuard(AtomicRwReadGuard<'a, GlobalState>),
     WriteGuard(AtomicRwWriteGuard<'a, GlobalState>),
 }
 
 impl From<GlobalStateLock> for StateLock<'_> {
     fn from(g: GlobalStateLock) -> Self {
-        Self::Lock(g)
+        Self::Lock(Box::new(g))
     }
 }
 
 impl From<&GlobalStateLock> for StateLock<'_> {
     fn from(g: &GlobalStateLock) -> Self {
-        Self::Lock(g.clone()) // cheap Arc clone.
+        Self::Lock(Box::new(g.clone())) // cheap Arc clone.
     }
 }
 
@@ -479,7 +479,7 @@ impl<'a> StateLock<'a> {
     /// variant other than `Lock`. A panic will occur if this happens.
     pub fn into_lock(self) -> GlobalStateLock {
         match self {
-            Self::Lock(g) => g,
+            Self::Lock(g) => *g,
             _ => panic!("wrong usage: not a lock"),
         }
     }
