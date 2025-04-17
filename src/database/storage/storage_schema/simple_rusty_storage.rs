@@ -74,4 +74,29 @@ impl SimpleRustyStorage {
         );
         Self { schema, db }
     }
+
+    // reset the schema to a new, empty schema.
+    //
+    // this causes the schema to forget about any logical tables
+    // that were created with new_vec() or new_singleton() and
+    // resets the table_count to 0.
+    //
+    // This fn should not be used in normal operation, but is
+    // useful for migrating between different schema versions
+    // where the newer version has an altered datatype.
+    pub(crate) fn reset_schema(&mut self) {
+        self.schema = DbtSchema::new(
+            SimpleRustyReader {
+                db: self.db.clone(),
+            },
+            None,
+            None,
+        );
+    }
+
+    // obtain reference to the underlying db.  for tests only.
+    #[cfg(test)]
+    pub(crate) fn db(&self) -> &NeptuneLevelDb<RustyKey, RustyValue> {
+        &self.db
+    }
 }

@@ -153,6 +153,27 @@ where
             .write(&WriteBatch::new(), true)
             .expect("Database flushing to disk must succeed");
     }
+
+    // dumps entire database to stdout, with keys and values in hex.
+    fn dump_database(&self) {
+        use std::io::Write;
+        for (key, val) in self.database.iter(&ReadOptions::new()) {
+            print!("Key (hex): ");
+            for byte in &key {
+                print!("{:02x} ", byte);
+            }
+            println!(); // Newline after key
+
+            print!("Value (hex): ");
+            for byte in &val {
+                print!("{:02x} ", byte);
+            }
+            println!(); // Newline after value
+
+            println!(); // Extra newline between value and the next key
+            std::io::stdout().flush().unwrap(); // Force immediate output
+        }
+    }
 }
 
 /// `NeptuneLevelDb` provides an async-friendly and clone-friendly wrapper
@@ -351,6 +372,14 @@ where
         .await??;
 
         Ok(Self(NeptuneLevelDbInternal::from(db)))
+    }
+
+    /// dumps entire database to stdout, with keys and values in hex.
+    pub async fn dump_database(&self) {
+        let inner = self.0.clone();
+        task::spawn_blocking(move || inner.dump_database())
+            .await
+            .unwrap()
     }
 }
 
