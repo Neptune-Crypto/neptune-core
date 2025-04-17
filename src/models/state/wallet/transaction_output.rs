@@ -29,7 +29,8 @@ use crate::util_types::mutator_set::commit;
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
 /// and claim a given UTXO.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "fix_552::TxOutputVersioned")]
 pub struct TxOutput {
     utxo: Utxo,
     sender_randomness: Digest,
@@ -39,6 +40,55 @@ pub struct TxOutput {
     /// Indicates if this client can unlock the UTXO
     owned: bool,
     is_change: bool,
+}
+
+// fix for issue #552.
+//
+// The TxOutput struct gets stored in the wallet database. (via
+// SpentTransaction)  As such, any field changes must be versioned somehow.
+//
+// Going from v1 to v2 (of the struct), we want the new is_changed field to
+// use the value of the owned field from v1.
+//
+// We create a TxOutputVersioned struct to represent the structs fields in
+// different logical versions and instruct serde how to convert between the
+// two.
+//
+// This provides DB migration/compat for DBs created with commits prior to
+// 69e2867106fe727665fd74e21a0b3e309d160d5d and/or version 0.2.2.
+//
+// See:
+//   https://github.com/Neptune-Crypto/neptune-core/issues/552
+mod fix_552 {
+    use super::*;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub(super) struct TxOutputVersioned {
+        // these fields were in "v1".
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_digest: Digest,
+        notification_method: UtxoNotifyMethod,
+        owned: bool,
+
+        // this field is new in "v2".
+        // skip field if non-existing and default to None.
+        #[serde(skip, default)]
+        is_change: Option<bool>,
+    }
+
+    impl From<TxOutputVersioned> for TxOutput {
+        fn from(v1: TxOutputVersioned) -> Self {
+            Self {
+                utxo: v1.utxo,
+                sender_randomness: v1.sender_randomness,
+                receiver_digest: v1.receiver_digest,
+                notification_method: v1.notification_method,
+                owned: v1.owned,
+                is_change: v1.is_change.unwrap_or(v1.owned), // default is_changed to owned (v1)
+            }
+        }
+    }
 }
 
 impl From<&TxOutput> for AdditionRecord {
