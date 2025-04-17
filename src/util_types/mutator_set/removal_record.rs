@@ -590,7 +590,7 @@ mod removal_record_tests {
     fn removal_record_missing_chunk_element_is_invalid_pbt(
         #[strategy(1u64..20*u64::from(BATCH_SIZE))] initial_additions: u64,
         #[strategy(0u64..(#initial_additions as u64))] index_to_drop: u64,
-        #[any] to_remove_i: u64,
+        #[any] to_remove_i: usize,
         #[strategy(collection::vec(arb(), #initial_additions as usize))] mut item_vec: Vec<Digest>,
         #[strategy(collection::vec(arb(), #initial_additions as usize))] mut sender_randomness_vec: Vec<Digest>,
         #[strategy(collection::vec(arb(), #initial_additions as usize))] mut receiver_preimage_vec: Vec<Digest>,
@@ -632,14 +632,15 @@ mod removal_record_tests {
         assert!(rr.validate(&accumulator));
 
         let (inactive, _) = rr.absolute_indices.split_by_activity(&accumulator).unwrap();
-        let l = inactive.len() as u64;
+        let l = inactive.len();
         if l == 0 {
             // If the removal record has no indices in the inactive part of the
             // Bloom filter, then continue to next test case.
             return Ok(());
         }
         let to_remove = to_remove_i % l;
-        dbg!(rr.target_chunks.remove(&to_remove));
+        rr.target_chunks
+            .remove(inactive.keys().nth(to_remove).unwrap());
         assert!(!rr.validate(&accumulator));
     }
 
