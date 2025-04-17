@@ -629,16 +629,20 @@ mod removal_record_tests {
         let mut rr = accumulator.drop(item, &msmp);
         assert!(rr.validate(&accumulator));
 
+        // If the removal record has no indices in the inactive part of the
+        // Bloom filter, then continue to next test case.
         let (inactive, _) = rr.absolute_indices.split_by_activity(&accumulator).unwrap();
-        // #arbitraryHashSetIterator
-        if let Some(index) = inactive.keys().next() {
-            rr.target_chunks.remove(index).unwrap();
-            assert!(!rr.validate(&accumulator));
-        } else {
-            // If the removal record has no indices in the inactive part of the
-            // Bloom filter, then continue to next test case.
+        if inactive.is_empty() {
             return Ok(());
         }
+
+        let to_remove = **inactive
+            .keys()
+            .collect_vec()
+            .choose(&mut rand::rng())
+            .unwrap();
+        rr.target_chunks.remove(&to_remove);
+        assert!(!rr.validate(&accumulator));
     }
 
     #[test]
