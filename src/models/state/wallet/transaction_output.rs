@@ -3,6 +3,8 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use serde::de::MapAccess;
+use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -63,26 +65,92 @@ impl<'de> Deserialize<'de> for TxOutput {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        struct Helper {
-            utxo: Utxo,
-            sender_randomness: Digest,
-            receiver_digest: Digest,
-            notification_method: UtxoNotifyMethod,
-            owned: bool,
-            is_change: Option<bool>,
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Utxo,
+            SenderRandomness,
+            ReceiverDigest,
+            NotificationMethod,
+            Owned,
+            IsChange,
         }
 
-        let helper = Helper::deserialize(deserializer)?;
+        struct TxOutputVisitor;
 
-        Ok(TxOutput {
-            utxo: helper.utxo,
-            sender_randomness: helper.sender_randomness,
-            receiver_digest: helper.receiver_digest,
-            notification_method: helper.notification_method,
-            owned: helper.owned,
-            // default is_change to owned.
-            is_change: helper.is_change.unwrap_or(helper.owned),
-        })
+        impl<'de> Visitor<'de> for TxOutputVisitor {
+            type Value = TxOutput;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct TxOutput")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut utxo = None;
+                let mut sender_randomness = None;
+                let mut receiver_digest = None;
+                let mut notification_method = None;
+                let mut owned = None;
+                let mut is_change = None;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Utxo => {
+                            utxo = Some(map.next_value()?);
+                        }
+                        Field::SenderRandomness => {
+                            sender_randomness = Some(map.next_value()?);
+                        }
+                        Field::ReceiverDigest => {
+                            receiver_digest = Some(map.next_value()?);
+                        }
+                        Field::NotificationMethod => {
+                            notification_method = Some(map.next_value()?);
+                        }
+                        Field::Owned => {
+                            owned = Some(map.next_value()?);
+                        }
+                        Field::IsChange => {
+                            is_change = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let utxo = utxo.ok_or_else(|| serde::de::Error::missing_field("utxo"))?;
+                let sender_randomness = sender_randomness
+                    .ok_or_else(|| serde::de::Error::missing_field("sender_randomness"))?;
+                let receiver_digest = receiver_digest
+                    .ok_or_else(|| serde::de::Error::missing_field("receiver_digest"))?;
+                let notification_method = notification_method
+                    .ok_or_else(|| serde::de::Error::missing_field("notification_method"))?;
+                let owned = owned.ok_or_else(|| serde::de::Error::missing_field("owned"))?;
+                let is_change = is_change.unwrap_or(owned);
+
+                Ok(TxOutput {
+                    utxo,
+                    sender_randomness,
+                    receiver_digest,
+                    notification_method,
+                    owned,
+                    is_change,
+                })
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "TxOutput",
+            &[
+                "utxo",
+                "sender_randomness",
+                "receiver_digest",
+                "notification_method",
+                "owned",
+                "is_change",
+            ],
+            TxOutputVisitor,
+        )
     }
 }
 
