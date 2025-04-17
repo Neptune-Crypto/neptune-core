@@ -128,8 +128,7 @@ impl MutatorSetAccumulator {
 
         // insert all indices
         let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
-        let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
-            removal_record.get_chunkidx_to_indices_dict();
+        let chunkindices_to_indices_dict = removal_record.get_chunkidx_to_indices_dict();
 
         for (chunk_index, indices) in chunkindices_to_indices_dict {
             if chunk_index >= batch_index {

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::marker::PhantomData;
@@ -23,7 +24,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use super::chunk_dictionary::ChunkDictionary;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::shared::get_batch_mutation_argument_for_removal_record;
-use super::shared::indices_to_hash_map;
+use super::shared::indices_to_map;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::NUM_TRIALS;
@@ -80,9 +81,9 @@ impl AbsoluteIndexSet {
     pub fn split_by_activity(
         &self,
         mutator_set: &MutatorSetAccumulator,
-    ) -> Result<(HashMap<u64, Vec<u128>>, Vec<u128>), MutatorSetError> {
+    ) -> Result<(BTreeMap<u64, Vec<u128>>, Vec<u128>), MutatorSetError> {
         let (aw_chunk_index_min, aw_chunk_index_max) = mutator_set.active_window_chunk_interval();
-        let (inactive, active): (HashMap<_, _>, HashMap<_, _>) = indices_to_hash_map(&self.0)
+        let (inactive, active): (BTreeMap<_, _>, BTreeMap<_, _>) = indices_to_map(&self.0)
             .into_iter()
             .partition(|&(chunk_index, _)| chunk_index < aw_chunk_index_min);
 
@@ -364,8 +365,8 @@ impl RemovalRecord {
     }
 
     /// Returns a hashmap from chunk index to chunk.
-    pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u64, Vec<u128>> {
-        indices_to_hash_map(&self.absolute_indices.to_array())
+    pub fn get_chunkidx_to_indices_dict(&self) -> BTreeMap<u64, Vec<u128>> {
+        indices_to_map(&self.absolute_indices.to_array())
     }
 }
 
@@ -378,6 +379,8 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 mod removal_record_tests {
     use itertools::Itertools;
+    use proptest::collection;
+    use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
     use rand::RngCore;
@@ -587,6 +590,10 @@ mod removal_record_tests {
     fn removal_record_missing_chunk_element_is_invalid_pbt(
         #[strategy(1u64..20*u64::from(BATCH_SIZE))] initial_additions: u64,
         #[strategy(0u64..(#initial_additions as u64))] index_to_drop: u64,
+        #[any] to_remove_i: u64,
+        #[strategy(collection::vec(arb(), #initial_additions as usize))] mut item_vec: Vec<Digest>,
+        #[strategy(collection::vec(arb(), #initial_additions as usize))] mut sender_randomness_vec: Vec<Digest>,
+        #[strategy(collection::vec(arb(), #initial_additions as usize))] mut receiver_preimage_vec: Vec<Digest>,
     ) {
         // Construct a valid removal record, verify that it is considered
         // valid, then remove one element from its chunk dictionary and verify
@@ -595,7 +602,11 @@ mod removal_record_tests {
         let mut mps = vec![];
         let mut items = vec![];
         for j in 0..initial_additions {
-            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = (
+                item_vec.pop().unwrap(),
+                sender_randomness_vec.pop().unwrap(),
+                receiver_preimage_vec.pop().unwrap(),
+            );
             let addition_record: AdditionRecord =
                 commit(item, sender_randomness, receiver_preimage.hash());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
@@ -620,19 +631,15 @@ mod removal_record_tests {
         let mut rr = accumulator.drop(item, &msmp);
         assert!(rr.validate(&accumulator));
 
-        // If the removal record has no indices in the inactive part of the
-        // Bloom filter, then continue to next test case.
         let (inactive, _) = rr.absolute_indices.split_by_activity(&accumulator).unwrap();
-        if inactive.is_empty() {
+        let l = inactive.len() as u64;
+        if l == 0 {
+            // If the removal record has no indices in the inactive part of the
+            // Bloom filter, then continue to next test case.
             return Ok(());
         }
-
-        let to_remove = **inactive
-            .keys()
-            .collect_vec()
-            .choose(&mut rand::rng())
-            .unwrap();
-        rr.target_chunks.remove(&to_remove);
+        let to_remove = to_remove_i % l;
+        dbg!(rr.target_chunks.remove(&to_remove));
         assert!(!rr.validate(&accumulator));
     }
 

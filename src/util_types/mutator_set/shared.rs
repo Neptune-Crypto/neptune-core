@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -19,11 +20,11 @@ pub const NUM_TRIALS: u32 = 45;
 /// {chunk_index => absolute_indices}
 /// where the values are sorted after chunk index, i.e. put in the correct
 /// chunk bucket.
-pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap<u64, Vec<u128>> {
+pub fn indices_to_map(all_indices: &[u128; NUM_TRIALS as usize]) -> BTreeMap<u64, Vec<u128>> {
     all_indices
         .iter()
         .map(|bi| ((bi / u128::from(CHUNK_SIZE)) as u64, *bi))
-        .fold(HashMap::new(), |mut acc, (chunk_index, index)| {
+        .fold(BTreeMap::new(), |mut acc, (chunk_index, index)| {
             acc.entry(chunk_index).or_default().push(index);
             acc
         })
