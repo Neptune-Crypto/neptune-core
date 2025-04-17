@@ -8,7 +8,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 
-type AoclLeafIndex = u64;
+pub(crate) type AoclLeafIndex = u64;
 
 /// represents a user-level tx that has been sent by this wallet.
 ///
