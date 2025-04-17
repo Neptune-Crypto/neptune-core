@@ -451,9 +451,10 @@ pub(crate) fn composer_outputs(
 
     let Some(amount_to_composer) = coinbase_amount.checked_sub(&guesser_fee) else {
         bail!(
-            "Guesser fee may not exceed coinbase amount. coinbase_amount: {}; guesser_fee: {}.",
+            "Guesser fee may not exceed coinbase amount. coinbase_amount: {}; guesser_fee: {}; guesser fee fraction: {}.",
             coinbase_amount.to_nau(),
-            guesser_fee.to_nau()
+            guesser_fee.to_nau(),
+            composer_parameters.guesser_fee_fraction()
         );
     };
 
