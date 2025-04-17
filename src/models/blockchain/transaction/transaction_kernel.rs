@@ -458,11 +458,9 @@ pub mod transaction_kernel_tests {
         ) (
             inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_removal_record(), num_inputs),
             outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
-            public_announcements in collection::vec(collection::vec(arb::<BFieldElement>(), 10..59)
-                // let mut rng: StdRng = SeedableRng::from_seed(seed);
-                // let len = 10 + (rng.next_u32() % 50) as usize;
-                // let message = (0..len).map(|_| rng.random()).collect_vec();
-            , num_public_announcements).prop_map(|vecvec| vecvec.into_iter().map(|message| PublicAnnouncement { message }).collect_vec()),
+            public_announcements in collection::vec(collection::vec(arb::<BFieldElement>(), 10..59), num_public_announcements).prop_map(
+                |vecvec| vecvec.into_iter().map(|message| PublicAnnouncement { message }).collect_vec()
+            ),
             fee in arb::<NativeCurrencyAmount>(),
             coinbase in arb::<Option<NativeCurrencyAmount>>(),
             timestamp in arb::<Timestamp>(),
