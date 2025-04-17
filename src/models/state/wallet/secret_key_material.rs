@@ -225,8 +225,6 @@ mod test {
     }
 
     mod shamir {
-        use std::collections::HashSet;
-
         use proptest::prelude::Just;
         use proptest::prop_assert_eq;
         use proptest::prop_assume;
@@ -326,7 +324,7 @@ mod test {
             let shares = secret_key
                 .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec(); // #arbitraryHashSetIterator
+            let selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
             prop_assert_eq!(
                 SecretKeyMaterial::combine_shamir(t, selected_shares),
                 Err(ShamirSecretSharingError::TooFewSharesToRecombine)
@@ -339,18 +337,13 @@ mod test {
             #[strategy(2usize..=#n)] t: usize,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
+            #[strategy(sample::subsequence((0..#n).collect_vec(), #t - 1))] indices: Vec<usize>,
         ) {
-            let indices: HashSet<usize> = (0..n)
-                .collect::<HashSet<usize>>()
-                .into_iter()
-                .take(t - 1)
-                .collect(); // #arbitraryHashSetIterator
-
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
                 .expect("sharing on happy path should succeed");
-            let mut selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec(); // #arbitraryHashSetIterator
+            let mut selected_shares = indices.into_iter().map(|i| shares[i]).collect_vec();
             let invalid_share = (0, secret_key);
             selected_shares.push(invalid_share);
             prop_assert_eq!(
@@ -366,9 +359,8 @@ mod test {
             #[strategy(0usize..#t - 1)] dup_ind: usize,
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed: [u8; 32],
+            #[strategy(sample::subsequence((0..#t).collect_vec(), #t - 1))] indices: Vec<usize>,
         ) {
-            let indices = (0..n).collect::<HashSet<usize>>();
-
             let secret_key = SecretKeyMaterial(s);
             let shares = secret_key
                 .share_shamir(t, n, seed)
@@ -390,9 +382,12 @@ mod test {
             #[strategy(arb())] s: XFieldElement,
             #[strategy([arb(); 32])] seed_a: [u8; 32],
             #[strategy([arb(); 32])] seed_b: [u8; 32],
-            #[strategy(proptest::collection::hash_map(0usize..#n, proptest::prelude::any::<bool>(), #t))]
-            indices: std::collections::HashMap<usize, bool>,
+            #[strategy(sample::subsequence((0..#n).collect_vec(), #t + 1))] indices: Vec<usize>,
+            #[strategy(proptest::collection::vec(proptest::prelude::any::<bool>(), #t + 1))]
+            choices: Vec<bool>,
         ) {
+            // Make a random selection of t+1 shares such that both sharings are represented. There can be no duplicate indices.
+            prop_assume!(choices.iter().any(|x| x != &choices[0]));
             // nothing to test here if the sharings are identical
             prop_assume!(seed_a != seed_b);
 
@@ -404,15 +399,12 @@ mod test {
                 .share_shamir(t, n, seed_b)
                 .expect("sharing on happy path should succeed");
 
-            let mut selected_shares = Vec::with_capacity(t);
-            let mut indices = indices.into_iter();
-            selected_shares.push(shares_a[indices.next().unwrap().0]);
-            selected_shares.push(shares_b[indices.next().unwrap().0]);
-            for i in indices {
-                if i.1 {
-                    selected_shares.push(shares_b[i.0]);
+            let mut selected_shares = Vec::with_capacity(t + 1);
+            for (index, choice) in std::iter::zip(indices, choices) {
+                if choice {
+                    selected_shares.push(shares_b[index]);
                 } else {
-                    selected_shares.push(shares_a[i.0]);
+                    selected_shares.push(shares_a[index]);
                 }
             }
 
