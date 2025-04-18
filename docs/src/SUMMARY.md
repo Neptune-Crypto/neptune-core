@@ -28,3 +28,4 @@
   - [Sharing Proofs](./contributing/proof-sharing.md)
   - [Releasing](./contributing/releasing.md)
   - [Documentation](./contributing/documentation.md)
+  - [Donating](./contributing/donating.md)
