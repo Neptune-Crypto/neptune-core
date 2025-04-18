@@ -1,11 +1,11 @@
-use crate::models::{
+use crate::{models::{
     blockchain::{
         block::{block_header::BlockHeader, Block},
         transaction::primitive_witness::PrimitiveWitness,
     },
     peer::SyncChallenge,
     proof_abstractions::timestamp::Timestamp,
-};
+}, tests::shared::Randomness};
 use proptest::prelude::*;
 use proptest_arbitrary_interop::arb;
 use tasm_lib::{prelude::Digest, twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator};
@@ -14,13 +14,13 @@ use tokio::runtime::Runtime;
 prop_compose! {
     pub fn blocks_new(predecessor: Block) (
         timestamp in arb::<Timestamp>(),
-        seed in any::<[u8;32]>()
-    ) -> ([Block; 10], [u8; 32]) {
+        rness in arb::<[Randomness<1,3>; 10]>()
+    ) -> ([Block; 10], [Randomness<1,3>; 10]) {
         (
             Runtime::new().unwrap().block_on(
-                crate::tests::shared::fake_valid_sequence_of_blocks_for_tests::<10>(&predecessor, timestamp, seed)
+                crate::tests::shared::fake_valid_sequence_of_blocks_for_tests::<10>(&predecessor, timestamp, rness.clone())
             ),
-            seed
+            rness
         )
     }
 }
@@ -28,12 +28,12 @@ prop_compose! {
 prop_compose! {
     // adaptation of `fake_valid_block_for_tests`
     pub fn block_new(current_tip: Block)
-    (seed in prop::array::uniform32(any::<u8>())) -> Block {
+    (rness in arb::<Randomness<1,3>>()) -> Block {
         tokio::runtime::Runtime::new().unwrap().block_on(
             crate::tests::shared::fake_valid_successor_for_tests(
                 &current_tip,
                 current_tip.header().timestamp + crate::models::proof_abstractions::timestamp::Timestamp::hours(1),
-                seed,
+                rness,
             )
         )
     }

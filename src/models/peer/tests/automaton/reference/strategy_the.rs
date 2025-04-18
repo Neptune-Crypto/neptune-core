@@ -5,7 +5,6 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::peer::peer_block_notifications::PeerBlockNotification;
 use crate::models::peer::tests::automaton::reference::AssosiatedData;
-use crate::models::peer::tests::automaton::BLOCKS_NEW_LEN;
 use crate::models::peer::{BlockProposalRequest, SyncChallenge};
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use proptest::prelude::*;
@@ -218,7 +217,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
 
     fn apply(mut state: Self::State, transition: &Self::Transition) -> Self::State {
         match transition {
-            Transition(variant, Some(AssosiatedData::MakeNewBlocks(_ts, seed_the))) => {
+            Transition(variant, Some(AssosiatedData::MakeNewBlocks(_ts, seed, digests))) => {
                 let tip_at_request = state.blocks.last().unwrap().clone();
                 // state.blocks.append(&mut Runtime::new().unwrap().block_on(
                 //     crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn(
@@ -229,9 +228,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                 //     ),
                 // ));
                 let rt = Runtime::new().unwrap();
-                for i in 0..BLOCKS_NEW_LEN as u8 {
-                    let mut seed = *seed_the;
-                    seed[0] = seed[0].wrapping_add(i);
+                for digest_a in digests {
                     state.blocks.push(
                         rt.block_on(crate::tests::shared::make_mock_block(
                             // previous_block: &Block,
@@ -239,10 +236,9 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                             // block_timestamp: Option<Timestamp>,
                             None,
                             // composer_key: generation_address::GenerationSpendingKey,
-                            WalletEntropy::new_pseudorandom(seed)
+                            WalletEntropy::new_pseudorandom(seed.to_owned())
                                 .nth_generation_spending_key_for_tests(0),
-                            // seed: [u8; 32], // #seedReuse
-                            seed,
+                            digest_a.to_owned(),
                         ))
                         .0,
                     );
