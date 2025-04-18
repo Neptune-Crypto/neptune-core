@@ -1,6 +1,6 @@
 use proptest::{prelude::any, prop_compose};
 use proptest_arbitrary_interop::arb;
-use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::{prelude::Digest, triton_vm::prelude::BFieldElement};
 use tokio::runtime::Runtime;
 
 use crate::models::{
@@ -32,12 +32,15 @@ prop_compose! {
 prop_compose! {
     pub fn block_notif_req() (
         ts in arb::<crate::models::proof_abstractions::timestamp::Timestamp>(),
-        seed_an in any::<[u8; 32]>()
+        // TODO change for the w itself?
+        wallet_seed in any::<[u8; 32]>(),
+        coinbase_vec in proptest::collection::vec(arb::<tasm_lib::prelude::Digest>(), crate::models::peer::tests::automaton::BLOCKS_NEW_LEN),
     ) -> Transition {
         Transition(
             PeerMessage::BlockNotificationRequest,
             Some(AssosiatedData::MakeNewBlocks(
-                ts, seed_an
+                ts, wallet_seed,
+                coinbase_vec.try_into().unwrap()
             ))
         )
     }
@@ -69,8 +72,8 @@ prop_compose! {
 
 prop_compose! {
     pub fn block_response(current_tip: Block) (
-        seed in proptest::array::uniform32(any::<u8>()),
-        k in arb::<tasm_lib::prelude::Digest>()
+        coinbase_sender_randomness in arb::<Digest>(),
+        k in arb::<Digest>()
     ) -> Transition {
         /* S Kaunov, [11.02.2025 15:06]
         So, there's few PeerMessage variants which seems to be relevant.
@@ -84,10 +87,8 @@ prop_compose! {
         let the = Runtime::new().unwrap().block_on(crate::tests::shared::make_mock_block(
             &current_tip,
             None,
-            // crate::models::state::wallet::WalletSecret::new_pseudorandom(seed) // #seedReused
-            // .nth_generation_spending_key_for_tests(0),
             GenerationSpendingKey::derive_from_seed(k),
-            seed
+            coinbase_sender_randomness
         )).0;
         let content = Box::new(crate::models::peer::transfer_block::TransferBlock::from_random(&the));
         Transition(PeerMessage::Block(content), None)

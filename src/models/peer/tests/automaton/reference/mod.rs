@@ -49,7 +49,7 @@ pub enum AssosiatedData {
     /// feels like randomness is not interesting, but flagging validity could be
     // Randomness([u8; 32]),
     Valid,
-    MakeNewBlocks(Timestamp, [u8; 32]),
+    MakeNewBlocks(Timestamp, [u8; 32], [tasm_lib::prelude::Digest; crate::models::peer::tests::automaton::BLOCKS_NEW_LEN]),
 }
 impl From<SyncChallengeResponse> for Transition {
     fn from(v: SyncChallengeResponse) -> Self {
