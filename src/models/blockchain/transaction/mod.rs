@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::prelude::twenty_first;
@@ -44,8 +44,8 @@ use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
 use self::transaction_kernel::TransactionKernelModifier;
 use self::transaction_kernel::TransactionKernelProxy;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::proof::Claim;
-use crate::triton_vm::proof::Proof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// represents arbitrary data that can be stored in a transaction on the public blockchain
@@ -172,31 +172,28 @@ impl Transaction {
         // info!("done.");
 
         let new_single_proof_witness = SingleProofWitness::from_update(update_witness);
-        let new_single_proof_claim = new_single_proof_witness.claim();
 
         info!("starting single proof via update ...");
-        let new_single_proof = SingleProof
-            .prove(
-                new_single_proof_claim,
-                new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+        let proof = TransactionProofBuilder::new()
+            .single_proof_witness(&new_single_proof_witness)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
             .await?;
         info!("done.");
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(new_single_proof),
+            proof,
         })
     }
 
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
-    pub async fn is_valid(&self) -> bool {
+    pub async fn is_valid(&self, network: Network) -> bool {
         let kernel_hash = self.kernel.mast_hash();
-        self.proof.verify(kernel_hash).await
+        self.proof.verify(kernel_hash, network).await
     }
 
     /// Merge two transactions. Both input transactions must have a valid
@@ -238,21 +235,21 @@ impl Transaction {
         );
         let new_kernel = merge_witness.new_kernel.clone();
         let new_single_proof_witness = SingleProofWitness::from_merge(merge_witness);
-        let new_single_proof_claim = new_single_proof_witness.claim();
+
         info!("Start: creating new single proof through merge");
-        let new_single_proof = SingleProof
-            .prove(
-                new_single_proof_claim,
-                new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+
+        let proof = TransactionProofBuilder::new()
+            .single_proof_witness(&new_single_proof_witness)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
             .await?;
+
         info!("Done: creating new single proof through merge");
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(new_single_proof),
+            proof,
         })
     }
 
@@ -287,8 +284,8 @@ impl Transaction {
     ///
     /// ... which also means the transaction is valid.
     // maybe this should just be called verify()  or validate()?
-    pub async fn verify_proof(&self) -> bool {
-        self.proof.verify(self.kernel.mast_hash()).await
+    pub async fn verify_proof(&self, network: Network) -> bool {
+        self.proof.verify(self.kernel.mast_hash(), network).await
     }
 }
 
@@ -396,6 +393,7 @@ mod transaction_tests {
     #[tokio::test]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
+            let network = Network::Main;
             let as_single_proof = SingleProof::produce(
                 &to_be_updated,
                 TritonVmJobQueue::dummy(),
@@ -407,7 +405,7 @@ mod transaction_tests {
                 kernel: to_be_updated.kernel,
                 proof: TransactionProof::SingleProof(as_single_proof),
             };
-            assert!(original_tx.is_valid().await);
+            assert!(original_tx.is_valid(network).await);
 
             let mutator_set_update =
                 MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone());
@@ -423,7 +421,7 @@ mod transaction_tests {
             .await
             .unwrap();
 
-            assert!(updated_tx.is_valid().await)
+            assert!(updated_tx.is_valid(network).await)
         }
 
         for (to_be_updated_params, mined_params) in [

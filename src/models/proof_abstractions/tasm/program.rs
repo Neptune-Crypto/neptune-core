@@ -11,8 +11,10 @@ use super::prover_job::ProverJob;
 use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -67,19 +69,22 @@ where
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        prove_consensus_program(
-            self.program(),
-            claim,
-            nondeterminism,
-            triton_vm_job_queue,
-            proof_job_options,
-        )
-        .await
+        Ok(ProofBuilder::new()
+            .program(self.program())
+            .claim(claim)
+            .nondeterminism(nondeterminism)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?)
     }
 }
 
 /// Run the program and generate a proof for it, assuming the Triton VM run
 /// halts gracefully.
+///
+/// Please do not call this directly.  Use TransactionProofBuilder instead
+/// which includes logic for building mock proofs if necessary.
 ///
 /// If we are in a test environment, try reading it from disk. If it is not
 /// there, generate it and store it to disk.
@@ -97,8 +102,8 @@ pub(crate) async fn prove_consensus_program(
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // regtest mode: just return a mock (empty) Proof
-    if proof_job_options.job_settings.network.is_regtest() {
-        return Ok(Proof(vec![]));
+    if proof_job_options.job_settings.network.use_mock_proof() {
+        return Ok(Proof::valid_mock(claim));
     }
 
     // create a triton-vm-job-queue job for generating this proof.
@@ -150,10 +155,29 @@ pub(crate) async fn prove_consensus_program(
     Ok(result?)
 }
 
-#[derive(Clone, Debug, Default)]
+/// Options for executing the triton-vm proving job
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct TritonVmProofJobOptions {
+    /// priority of this job in the job-queue
+    ///
+    /// used when selecting the next job to run.
+    ///
+    /// note that if a lower priority job is already running then a higher
+    /// priority job still must wait for it to complete.
     pub job_priority: TritonVmJobPriority,
+
+    /// job-specific settings
     pub job_settings: ProverJobSettings,
+
+    /// Cancellation:
+    ///
+    /// It is possible to cancel a proving-job by:
+    ///
+    /// 1. create a [tokio::sync::watch] channel and set the receiver in the
+    ///    `cancel_job_rx` field.
+    ///
+    /// 2. call send() on the channel sender to cancel the job.
     pub cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,
 }
 
@@ -178,7 +202,9 @@ pub mod test {
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::triton_vm::stark::Stark;
 
     const TEST_DATA_DIR: &str = "test_data";
@@ -186,9 +212,14 @@ pub mod test {
 
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         fn from(job_priority: TritonVmJobPriority) -> Self {
+            let job_settings = ProverJobSettings {
+                tx_proving_capability: TxProvingCapability::SingleProof,
+                proof_type: TransactionProofType::SingleProof,
+                ..Default::default()
+            };
             Self {
                 job_priority,
-                job_settings: Default::default(),
+                job_settings,
                 cancel_job_rx: None,
             }
         }
@@ -202,6 +233,8 @@ pub mod test {
                 job_settings: ProverJobSettings {
                     max_log2_padded_height_for_proofs,
                     network: Default::default(),
+                    tx_proving_capability: TxProvingCapability::SingleProof,
+                    proof_type: TransactionProofType::SingleProof,
                 },
                 cancel_job_rx: None,
             }
@@ -391,7 +424,7 @@ pub mod test {
                 return None;
             }
         }
-        let proof = Proof(proof_data);
+        let proof = Proof::from(proof_data);
         Some(proof)
     }
 
@@ -554,7 +587,7 @@ pub mod test {
                 }
             }
 
-            let proof = Proof(proof_data);
+            let proof = Proof::from(proof_data);
             println!("got proof.");
 
             return Some((proof, server));
@@ -603,8 +636,9 @@ pub mod test {
             .unwrap_or_else(|_| panic!("cannot create '{TEST_DATA_DIR}' directory"));
         path.push(Path::new(&name));
 
-        let proof = triton_vm::prove(Stark::default(), claim, program, nondeterminism)
-            .expect("cannot produce proof");
+        let proof: Proof = triton_vm::prove(Stark::default(), claim, program, nondeterminism)
+            .expect("cannot produce proof")
+            .into();
 
         save_proof(&path, &proof);
         proof

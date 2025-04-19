@@ -94,7 +94,7 @@ impl BlockPrimitiveWitness {
             );
 
             // Due to tests, we don't verify that the removal records can be applied. That is
-            // the caller's responsibility to ensure by e.g. calling block.is_valid() after
+            // the caller's responsibility to ensure by e.g. calling block.is_valid(network) after
             // constructing a block.
             mutator_set_update.apply_to_accumulator_unsafe(&mut mutator_set);
 

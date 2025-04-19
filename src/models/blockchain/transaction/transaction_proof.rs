@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
+use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::Proof;
@@ -36,6 +37,17 @@ impl From<&TransactionProof> for TransactionProofType {
     }
 }
 
+impl TransactionProofType {
+    /// indicates if the proof is a triton-vm program.
+    pub fn is_vm_proof(&self) -> bool {
+        matches!(self, Self::ProofCollection | Self::SingleProof)
+    }
+
+    pub fn is_single_proof(&self) -> bool {
+        *self == TransactionProofType::SingleProof
+    }
+}
+
 /// represents a transaction proof, which can be of different types.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum TransactionProof {
@@ -48,6 +60,18 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
+    pub fn is_witness(&self) -> bool {
+        matches!(self, Self::Witness(_))
+    }
+
+    pub fn is_proof_collection(&self) -> bool {
+        matches!(self, Self::ProofCollection(_))
+    }
+
+    pub fn is_single_proof(&self) -> bool {
+        matches!(self, Self::SingleProof(_))
+    }
+
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
@@ -71,7 +95,7 @@ impl TransactionProof {
     }
 
     /// verify this proof is valid for a provided transaction id
-    pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
+    pub async fn verify(&self, kernel_mast_hash: Digest, network: Network) -> bool {
         match self {
             TransactionProof::Witness(primitive_witness) => {
                 !primitive_witness.kernel.merge_bit
@@ -80,10 +104,10 @@ impl TransactionProof {
             }
             TransactionProof::SingleProof(single_proof) => {
                 let claim = SingleProof::claim(kernel_mast_hash);
-                verify(claim, single_proof.clone()).await
+                verify(claim, single_proof.clone(), network).await
             }
             TransactionProof::ProofCollection(proof_collection) => {
-                proof_collection.verify(kernel_mast_hash).await
+                proof_collection.verify(kernel_mast_hash, network).await
             }
         }
     }
@@ -107,13 +131,13 @@ mod test {
     impl TransactionProof {
         /// A proof that will always be invalid
         pub(crate) fn invalid() -> Self {
-            Self::SingleProof(Proof(vec![]))
+            Self::SingleProof(Proof::from(vec![]))
         }
 
         /// A proof that will always be invalid, with a specified size measured in
         /// number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s.
         pub(crate) fn invalid_single_proof_of_size(size: usize) -> Self {
-            Self::SingleProof(Proof(bfe_vec![0; size]))
+            Self::SingleProof(Proof::from(bfe_vec![0; size]))
         }
 
         pub(crate) fn into_proof_collection(self) -> ProofCollection {

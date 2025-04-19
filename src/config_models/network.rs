@@ -86,6 +86,18 @@ impl Network {
     pub fn is_regtest(&self) -> bool {
         matches!(self, Self::RegTest)
     }
+
+    /// indicates if the network uses mock proofs
+    ///
+    /// mock proofs enable transactions and blocks to be created quickly
+    /// but must only be used for testing purposes.
+    ///
+    /// note: for now only the RegTest network uses mock proofs, but that could
+    /// change in the future so it is best use this method rather than checking
+    /// for is_regtest().
+    pub fn use_mock_proof(&self) -> bool {
+        matches!(self, Self::RegTest)
+    }
 }
 
 impl fmt::Display for Network {

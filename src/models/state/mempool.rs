@@ -41,7 +41,6 @@ use priority_queue::double_priority_queue::iterators::IntoSortedIter;
 use priority_queue::DoublePriorityQueue;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::triton_vm::proof::Proof;
 use tracing::debug;
 use tracing::error;
 use tracing::warn;
@@ -52,6 +51,7 @@ use super::tx_proving_capability::TxProvingCapability;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -1415,7 +1415,6 @@ mod tests {
                 .clone(),
             &bob,
             in_eight_months,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -1494,7 +1493,6 @@ mod tests {
                 .clone(),
             &alice,
             block_5_timestamp,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -1687,7 +1685,7 @@ mod tests {
             .await
             .unwrap()
             .transaction;
-        assert!(unmined_tx.is_valid().await);
+        assert!(unmined_tx.is_valid(network).await);
         assert!(
             unmined_tx.is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after())
         );
@@ -1733,7 +1731,10 @@ mod tests {
                 "Mempool tx must stay confirmable after new block of height {} has been applied",
                 next_block.header().height
             );
-            assert!(mempool_txs[0].is_valid().await, "Tx should be valid.");
+            assert!(
+                mempool_txs[0].is_valid(network).await,
+                "Tx should be valid."
+            );
             assert_eq!(
                 next_block.hash(),
                 alice.lock_guard().await.mempool.tip_digest,

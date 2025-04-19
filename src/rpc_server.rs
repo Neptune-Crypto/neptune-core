@@ -1853,7 +1853,10 @@ pub trait RPC {
     /// ```
     async fn restart_miner(token: rpc_auth::Token) -> RpcResult<()>;
 
-    /// mine a series of blocks to the node's wallet. (regtest network only)
+    /// mine a series of blocks to the node's wallet.
+    ///
+    /// Can be used only if the network uses mock blocks.
+    /// (presently only the regtest network)
     ///
     /// these blocks can be generated quickly because they do not have
     /// a real ZK proof.  they have a witness "proof" and will validate correctly.
@@ -1863,8 +1866,8 @@ pub trait RPC {
     /// The timestamp of each block will be the current system time, meaning
     /// that they will be temporally very close to eachother.
     ///
-    /// see [api::regtest::RegTest::mine_regtest_blocks_to_wallet()]
-    async fn mine_regtest_blocks_to_wallet(token: rpc_auth::Token, n_blocks: u32) -> RpcResult<()>;
+    /// see [api::regtest::RegTest::mine_blocks_to_wallet()]
+    async fn mine_blocks_to_wallet(token: rpc_auth::Token, n_blocks: u32) -> RpcResult<()>;
 
     /// Provide a PoW-solution to the current block proposal.
     ///
@@ -3174,7 +3177,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn mine_regtest_blocks_to_wallet(
+    async fn mine_blocks_to_wallet(
         mut self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
@@ -3187,7 +3190,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api_mut()
             .regtest_mut()
-            .mine_regtest_blocks_to_wallet(n_blocks)
+            .mine_blocks_to_wallet(n_blocks)
             .await?)
     }
 
@@ -4793,6 +4796,7 @@ mod rpc_server_tests {
             use cli_args::Args;
 
             use super::*;
+            use crate::models::state::tx_proving_capability::TxProvingCapability;
             use crate::tests::shared::invalid_block_with_transaction;
             use crate::tests::shared::invalid_empty_block;
 
@@ -5249,7 +5253,7 @@ mod rpc_server_tests {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;
             let cli_args = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 ..Default::default()
             };
             let mut rpc_server =

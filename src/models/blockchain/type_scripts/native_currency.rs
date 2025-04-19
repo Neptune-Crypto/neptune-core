@@ -1050,6 +1050,7 @@ pub mod test {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::shared::Hash;
@@ -1467,6 +1468,7 @@ pub mod test {
 
     #[tokio::test]
     async fn native_currency_failing_proof() {
+        let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
@@ -1501,7 +1503,7 @@ pub mod test {
             )
             .await
             .unwrap();
-        assert!(verify(claim, proof).await, "proof fails");
+        assert!(verify(claim, proof, network).await, "proof fails");
     }
 
     #[proptest]

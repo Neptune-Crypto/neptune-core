@@ -7,7 +7,6 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::triton_vm::proof::Claim;
 use tracing::debug;
 use tracing::info;
 use tracing::trace;
@@ -15,6 +14,7 @@ use tracing::trace;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -23,6 +23,7 @@ use crate::models::blockchain::transaction::validity::collect_lock_scripts::Coll
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
 use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
 use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -30,7 +31,6 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::triton_vm::proof::Proof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {
@@ -210,7 +210,67 @@ impl ProofCollection {
         })
     }
 
-    pub(crate) async fn verify(&self, txk_mast_hash: Digest) -> bool {
+    // produce ProofCollection with mock proofs
+    pub(crate) fn produce_mock(primitive_witness: &PrimitiveWitness, valid_mock: bool) -> Self {
+        let txk_mast_hash = primitive_witness.kernel.mast_hash();
+        let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
+        let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
+        debug!("proving, txk hash: {}", txk_mast_hash);
+        debug!("proving, salted inputs hash: {}", salted_inputs_hash);
+        debug!("proving, salted outputs hash: {}", salted_outputs_hash);
+
+        let claim = Claim::new(Digest::default());
+        let mock_proof = if valid_mock {
+            Proof::valid_mock(claim)
+        } else {
+            Proof::invalid_mock(claim)
+        };
+
+        let merge_bit_mast_path = primitive_witness
+            .kernel
+            .mast_path(TransactionKernelField::MergeBit);
+
+        let lock_scripts_halt = primitive_witness
+            .lock_scripts_and_witnesses
+            .iter()
+            .map(|_| mock_proof.clone())
+            .collect_vec();
+
+        let type_scripts_halt = primitive_witness
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|_| mock_proof.clone())
+            .collect_vec();
+
+        // collect hashes
+        let lock_script_hashes = primitive_witness
+            .lock_scripts_and_witnesses
+            .iter()
+            .map(|lsaw| lsaw.program.hash())
+            .collect_vec();
+        let type_script_hashes = primitive_witness
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|tsaw| tsaw.program.hash())
+            .collect_vec();
+
+        ProofCollection {
+            removal_records_integrity: mock_proof.clone(),
+            collect_lock_scripts: mock_proof.clone(),
+            lock_scripts_halt,
+            kernel_to_outputs: mock_proof.clone(),
+            collect_type_scripts: mock_proof.clone(),
+            type_scripts_halt,
+            lock_script_hashes,
+            type_script_hashes,
+            kernel_mast_hash: txk_mast_hash,
+            salted_inputs_hash,
+            salted_outputs_hash,
+            merge_bit_mast_path,
+        }
+    }
+
+    pub(crate) async fn verify(&self, txk_mast_hash: Digest, network: Network) -> bool {
         debug!("verifying, txk hash: {}", txk_mast_hash);
         debug!("verifying, salted inputs hash: {}", self.salted_inputs_hash);
         debug!(
@@ -283,6 +343,7 @@ impl ProofCollection {
         let rri = verify(
             removal_records_integrity_claim.clone(),
             self.removal_records_integrity.clone(),
+            network,
         )
         .await;
         debug!("{rri}");
@@ -290,6 +351,7 @@ impl ProofCollection {
         let k2o = verify(
             kernel_to_outputs_claim.clone(),
             self.kernel_to_outputs.clone(),
+            network,
         )
         .await;
         debug!("{k2o}");
@@ -297,6 +359,7 @@ impl ProofCollection {
         let cls = verify(
             collect_lock_scripts_claim.clone(),
             self.collect_lock_scripts.clone(),
+            network,
         )
         .await;
         debug!("{cls}");
@@ -304,19 +367,20 @@ impl ProofCollection {
         let cts = verify(
             collect_type_scripts_claim.clone(),
             self.collect_type_scripts.clone(),
+            network,
         )
         .await;
         debug!("{cts}");
         debug!("verifying that all lock scripts halt ...");
         let mut lsh = true;
         for (cl, pr) in lock_script_claims.iter().zip(self.lock_scripts_halt.iter()) {
-            lsh &= verify(cl.clone(), pr.clone()).await;
+            lsh &= verify(cl.clone(), pr.clone(), network).await;
         }
         debug!("{lsh}");
         debug!("verifying that all type scripts halt ...");
         let mut tsh = true;
         for (cl, pr) in type_script_claims.iter().zip(self.type_scripts_halt.iter()) {
-            tsh &= verify(cl.clone(), pr.clone()).await;
+            tsh &= verify(cl.clone(), pr.clone(), network).await;
         }
         debug!("{tsh}");
 

@@ -1833,7 +1833,6 @@ mod archival_state_tests {
                 .clone(),
             &premine_rec,
             in_seven_months,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -2088,7 +2087,6 @@ mod archival_state_tests {
                 .clone(),
             &premine_rec,
             in_seven_months,
-            TxProvingCapability::SingleProof,
             TritonVmJobPriority::Normal.into(),
         )
         .await

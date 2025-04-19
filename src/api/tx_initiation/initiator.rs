@@ -223,6 +223,7 @@ impl TransactionInitiator {
         transaction_id: TransactionKernelId,
         transaction_proof: TransactionProof,
     ) -> Result<(), error::UpgradeProofError> {
+        let network = self.global_state_lock.cli().network;
         let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
         let Some(tx) = gsm.mempool.get_mut(transaction_id) else {
@@ -239,7 +240,10 @@ impl TransactionInitiator {
         // tbd: how long does this verify take?   If too slow,
         // we could obtain tx with a read-lock first, verify,
         // then obtain again with write-lock to mutate it.
-        if !transaction_proof.verify(tx.kernel.mast_hash()).await {
+        if !transaction_proof
+            .verify(tx.kernel.mast_hash(), network)
+            .await
+        {
             return Err(error::UpgradeProofError::InvalidProof);
         }
 

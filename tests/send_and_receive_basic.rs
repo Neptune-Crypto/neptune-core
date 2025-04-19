@@ -37,7 +37,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_regtest_blocks_to_wallet(3)
+        .mine_blocks_to_wallet(3)
         .await?;
 
     tracing::info!("alice mined 3 blocks!");
@@ -55,7 +55,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
     );
 
     // alice sends a payment to herself
-    let tx_creation_artifacts = alice
+    let tx_artifacts = alice
         .gsl
         .api_mut()
         .tx_sender_mut()
@@ -67,7 +67,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
         )
         .await?;
 
-    tracing::info!("tx sent! {}", tx_creation_artifacts);
+    tracing::info!("tx sent! {}", tx_artifacts);
 
     Ok(())
 }
@@ -111,7 +111,7 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_regtest_blocks_to_wallet(3)
+        .mine_blocks_to_wallet(3)
         .await?;
 
     tracing::info!("alice mined 3 blocks!");
@@ -139,7 +139,7 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
     let payment_amount = NativeCurrencyAmount::coins_from_str("2.45")?;
     let fee_amount = NativeCurrencyAmount::coins_from_str("0.01")?;
     let alice_spend_amount = payment_amount + fee_amount;
-    let tx_creation_artifacts = alice
+    let tx_artifacts = alice
         .gsl
         .api_mut()
         .tx_sender_mut()
@@ -151,7 +151,7 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
         )
         .await?;
 
-    tracing::info!("tx sent! {}", tx_creation_artifacts);
+    tracing::info!("tx sent! {}", tx_artifacts);
 
     // alice checks that payment is reflected in her unconfirmed wallet balance (only)
     let alice_balances_after_send = alice.gsl.api().wallet().balances(Timestamp::now()).await;
@@ -175,6 +175,18 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
     // indicating the tx has arrived in his mempool.
     bob.wait_until_unconfirmed_balance(timeout_secs).await?;
 
+    // alice waits until tx has been upgraded to single-proof in mempool
+    // which is necessary before it can be included in a block.
+    alice
+        .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
+        .await?;
+
+    // alice waits until tx has been upgraded to single-proof in mempool
+    // which is necessary before it can be included in a block.
+    alice
+        .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
+        .await?;
+
     // bob checks balances are correct.
     let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
     assert_eq!(bob_balances.unconfirmed_available, payment_amount);
@@ -185,7 +197,7 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_regtest_blocks_to_wallet(1)
+        .mine_blocks_to_wallet(1)
         .await?;
 
     // alice checks that confirmed and unconfirmed balances are equal.
@@ -232,7 +244,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_regtest_blocks_to_wallet(3)
+        .mine_blocks_to_wallet(3)
         .await?;
 
     tracing::info!("alice mined 3 blocks!");
@@ -260,7 +272,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
     let payment_amount = NativeCurrencyAmount::coins_from_str("2.45")?;
     let fee_amount = NativeCurrencyAmount::coins_from_str("0.01")?;
     let alice_spend_amount = payment_amount + fee_amount;
-    let tx_creation_artifacts = alice
+    let tx_artifacts = alice
         .gsl
         .api_mut()
         .tx_sender_mut()
@@ -272,7 +284,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
         )
         .await?;
 
-    tracing::info!("tx sent! {}", tx_creation_artifacts);
+    tracing::info!("tx sent! {}", tx_artifacts);
 
     // alice checks that payment is reflected in her unconfirmed wallet balance (only)
     let alice_balances_after_send = alice.gsl.api().wallet().balances(Timestamp::now()).await;
@@ -292,12 +304,21 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
             .unwrap()
     );
 
-    // alice mines another block her wallet.
+    // after send() the tx in mempool initially has PrimitiveWitness proof
+    // so we must wait until it has been upgraded to SingleProof
+    // before it can be included in a block.
+    //
+    // another option would be to provide the single proof ourselves.
+    alice
+        .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
+        .await?;
+
+    // alice mines another block to her wallet.
     alice
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_regtest_blocks_to_wallet(1)
+        .mine_blocks_to_wallet(1)
         .await?;
 
     // alice checks that confirmed and unconfirmed balances are now equal.
@@ -306,6 +327,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
         "alice balances after confirmed:\n{}",
         alice_balances_after_confirmed
     );
+
     assert_eq!(
         alice_balances_after_confirmed.confirmed_total.to_string(),
         alice_balances_after_confirmed.unconfirmed_total.to_string()

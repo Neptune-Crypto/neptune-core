@@ -79,9 +79,8 @@
 //!    let proof = TransactionProofBuilder::new()
 //!        .transaction_details(&tx_details)
 //!        .job_queue(vm_job_queue())
-//!        .tx_proving_capability(gsl.cli().proving_capability())
+//!        .proof_job_options(gsl.cli().into())
 //!        .proof_type(TransactionProofType::PrimitiveWitness)
-//!        .network(gsl.cli().network)
 //!        .build()
 //!        .await?;
 //!
@@ -126,14 +125,14 @@
 //! let proof = TransactionProofBuilder::new()
 //!     .transaction_details(&tx_details)
 //!     .job_queue(vm_job_queue())
-//!     .tx_proving_capability(gsl.cli().proving_capability())
+//!     .proof_job_options(gsl.cli().into())
 //!     .proof_type(TransactionProofType::SingleProof)
-//!     .network(gsl.cli().network)
 //!     .build()
 //!     .await?;
 //! # Ok(proof)
 //! # }
 //! ```
+pub mod proof_builder;
 pub mod transaction_builder;
 pub mod transaction_details_builder;
 pub mod transaction_proof_builder;

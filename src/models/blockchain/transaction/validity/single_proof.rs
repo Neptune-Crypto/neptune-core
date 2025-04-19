@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
+use crate::triton_vm::prelude::*;
 use itertools::Itertools;
 use tasm_lib::field;
 use tasm_lib::memory::encode_to_memory;
@@ -10,7 +13,6 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
-use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
@@ -47,7 +49,7 @@ const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
 const MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR: i128 = 1_000_052;
 
 #[derive(Debug, Clone, BFieldCodec)]
-pub(crate) enum SingleProofWitness {
+pub enum SingleProofWitness {
     Collection(Box<ProofCollection>),
     Update(UpdateWitness),
     Merger(MergeWitness),
@@ -239,20 +241,30 @@ impl SingleProof {
         .await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
+
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
-        let single_proof = SingleProof
-            .prove(
-                claim,
-                nondeterminism,
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+        let proof = ProofBuilder::new()
+            .program(SingleProof.program())
+            .claim(claim)
+            .nondeterminism(nondeterminism)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
             .await?;
         info!("Done");
 
-        Ok(single_proof)
+        Ok(proof)
+    }
+
+    pub(crate) fn produce_mock(valid_mock: bool) -> Proof {
+        let claim = Claim::new(Digest::default());
+        if valid_mock {
+            Proof::valid_mock(claim)
+        } else {
+            Proof::invalid_mock(claim)
+        }
     }
 }
 
@@ -705,6 +717,7 @@ mod test {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -888,6 +901,7 @@ mod test {
 
         #[tokio::test]
         async fn can_verify_via_valid_proof_collection() {
+            let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
             let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
                 .new_tree(&mut test_runner)
@@ -902,7 +916,7 @@ mod test {
             )
             .await
             .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash).await);
+            assert!(proof_collection.verify(txk_mast_hash, network).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
             let claim = witness.claim();
@@ -922,6 +936,7 @@ mod test {
         #[traced_test]
         #[tokio::test]
         async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
+            let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
             let deterministic_now = arb::<Timestamp>()
                 .new_tree(&mut test_runner)
@@ -941,7 +956,7 @@ mod test {
             )
             .await
             .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash).await);
+            assert!(proof_collection.verify(txk_mast_hash, network).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
             let claim = witness.claim();

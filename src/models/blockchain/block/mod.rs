@@ -49,11 +49,13 @@ use super::transaction::utxo::Utxo;
 use super::transaction::Transaction;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -238,14 +240,17 @@ impl Block {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
-            let proof = BlockProgram
-                .prove(
-                    claim,
-                    block_proof_witness.nondeterminism(),
-                    triton_vm_job_queue,
-                    proof_job_options,
-                )
+            let nondeterminism = block_proof_witness.nondeterminism();
+
+            let proof = ProofBuilder::new()
+                .program(BlockProgram.program())
+                .claim(claim)
+                .nondeterminism(nondeterminism)
+                .job_queue(triton_vm_job_queue)
+                .proof_job_options(proof_job_options)
+                .build()
                 .await?;
+
             (appendix, BlockProof::SingleProof(proof))
         };
 
@@ -264,7 +269,8 @@ impl Block {
         assert!(
             verify(
                 tx_claim.clone(),
-                transaction.proof.clone().into_single_proof().clone()
+                transaction.proof.clone().into_single_proof().clone(),
+                proof_job_options.job_settings.network,
             )
             .await,
             "Transaction proof must be valid to generate a block"
@@ -707,6 +713,7 @@ impl Block {
                 now,
                 Some(network.target_block_interval()),
                 Some(network.minimum_block_time()),
+                network,
             )
             .await
         {
@@ -733,6 +740,7 @@ impl Block {
         now: Timestamp,
         target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
+        network: Network,
     ) -> Result<(), BlockValidationError> {
         const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
 
@@ -809,7 +817,7 @@ impl Block {
         };
 
         // 1.d)
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof).await {
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
             return Err(BlockValidationError::ProofValidity);
         }
 
@@ -1489,7 +1497,6 @@ pub(crate) mod block_tests {
                 &block1,
                 &alice,
                 plus_eight_months,
-                TxProvingCapability::SingleProof,
                 (TritonVmJobPriority::Normal, None).into(),
             )
             .await
@@ -1553,7 +1560,6 @@ pub(crate) mod block_tests {
                     &block2_without_valid_pow,
                     &alice,
                     plus_nine_months,
-                    TxProvingCapability::SingleProof,
                     (TritonVmJobPriority::Normal, None).into(),
                 )
                 .await
@@ -1763,7 +1769,6 @@ pub(crate) mod block_tests {
                 rng.random(),
                 0.4,
                 guesser_preimage,
-                Network::Main,
             )
             .await;
             let ars = block1.guesser_fee_addition_records();
@@ -1941,7 +1946,6 @@ pub(crate) mod block_tests {
                 &blocks[i - 1],
                 &alice,
                 launch_date,
-                TxProvingCapability::SingleProof,
                 TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
             )
             .await
@@ -2013,7 +2017,7 @@ pub(crate) mod block_tests {
             .unwrap();
 
             let block_is_valid = block
-                .is_valid_internal(blocks.last().unwrap(), now, None, None)
+                .is_valid_internal(blocks.last().unwrap(), now, None, None, network)
                 .await;
             println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));
             println!();
