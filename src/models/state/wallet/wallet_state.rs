@@ -279,9 +279,14 @@ impl WalletState {
         wallet_file_context: WalletFileContext,
         cli_args: &Args,
     ) -> Self {
-        let database_is_new = tokio::fs::try_exists(&data_dir.wallet_database_dir_path())
+        let database_is_new = !tokio::fs::try_exists(&data_dir.wallet_database_dir_path())
             .await
             .unwrap();
+        info!(
+            "wallet DB directory path is {}. Exists: {}",
+            data_dir.wallet_database_dir_path().display(),
+            if database_is_new { "no" } else { "yes" }
+        );
         let mut configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
 
         let wallet_entropy = wallet_file_context.entropy();
