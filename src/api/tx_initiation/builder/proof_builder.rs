@@ -17,7 +17,37 @@ use crate::triton_vm::vm::NonDeterminism;
 
 /// a builder for [Proof]
 ///
-/// see [module docs](self) for details.
+/// Facilitates building a proof directly from a triton-vm program, a claim, and
+/// nondeterminism.
+///
+/// This is a lower level builder than `TransactionProofBuilder` which should
+/// typically be used when initiating transactions.
+///
+/// Example:
+///
+/// ```
+/// use neptune_cash::api::export::NeptuneProof;
+/// use neptune_cash::api::export::GlobalStateLock;
+/// use neptune_cash::api::export::Program;
+/// use neptune_cash::api::export::Claim;
+/// use neptune_cash::api::export::NonDeterminism;
+/// use neptune_cash::api::tx_initiation::builder::proof_builder::ProofBuilder;
+/// use neptune_cash::api::tx_initiation::error::CreateProofError;
+/// use neptune_cash::job_queue::triton_vm::vm_job_queue;
+///
+/// async fn prove_claim(program: Program, claim: Claim, nondeterminism: NonDeterminism, gsl: &GlobalStateLock) -> Result<NeptuneProof, CreateProofError> {
+///
+///     // generate a proof
+///     ProofBuilder::new()
+///         .program(program)
+///         .claim(claim)
+///         .nondeterminism(nondeterminism)
+///         .job_queue(vm_job_queue())
+///         .proof_job_options(gsl.cli().into())
+///         .build()
+///         .await
+/// }
+/// ```
 #[derive(Debug, Default)]
 pub struct ProofBuilder {
     program: Option<Program>,

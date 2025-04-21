@@ -8,6 +8,7 @@ pub use crate::api::wallet::WalletBalances;
 pub use crate::config_models::cli_args::Args;
 pub use crate::config_models::network::Network;
 pub use crate::models::blockchain::block::block_height::BlockHeight;
+pub use crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof;
 pub use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProof;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
@@ -28,3 +29,7 @@ pub use crate::models::state::wallet::transaction_input::TxInputList;
 pub use crate::models::state::wallet::transaction_output::TxOutputList;
 pub use crate::models::state::GlobalStateLock;
 pub use crate::models::state::StateLock;
+pub use crate::triton_vm::prelude::Program;
+pub use crate::triton_vm::proof::Claim;
+pub use crate::triton_vm::vm::NonDeterminism;
+
