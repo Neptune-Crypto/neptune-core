@@ -284,7 +284,7 @@ pub struct Args {
     ///
     /// no limit is applied if unset.
     #[structopt(long, short, value_parser = clap::value_parser!(u8).range(10..32))]
-    pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
+    pub max_log2_padded_height_for_proofs: Option<u8>,
 
     /// Sets the maximum number of proofs in a `ProofCollection` that can be
     /// recursively combined into a `SingleProof` by this machine. I.e. how big
@@ -560,6 +560,11 @@ impl Args {
         } else {
             TxProvingCapability::LockScript
         }
+    }
+
+    /// creates a `TritonVmProofJobOptions` from cli args.
+    pub fn as_proof_job_options(&self) -> TritonVmProofJobOptions {
+        self.into()
     }
 }
 

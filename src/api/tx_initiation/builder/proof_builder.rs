@@ -6,11 +6,9 @@ use std::sync::Arc;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
@@ -55,8 +53,6 @@ pub struct ProofBuilder {
     nondeterminism: Option<NonDeterminism>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: Option<TritonVmProofJobOptions>,
-    tx_proving_capability: Option<TxProvingCapability>,
-    proof_type: Option<TransactionProofType>,
     valid_mock: Option<bool>,
 }
 
@@ -95,29 +91,10 @@ impl ProofBuilder {
     /// add job options. (required)
     ///
     /// note: can be obtained via `TritonVmProofJobOptions::from(Args)`
+    ///
+    /// There is also `TritonVmProofJobOptionsBuilder`
     pub fn proof_job_options(mut self, proof_job_options: TritonVmProofJobOptions) -> Self {
         self.proof_job_options = Some(proof_job_options);
-        self
-    }
-
-    /// specify the machine's proving capability.  (optional)
-    ///
-    /// if present, this will override the value in `ProverJobSettings` which is
-    /// part of [TritonVmProofJobOptions]
-    pub fn proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
-        self.tx_proving_capability = Some(tx_proving_capability);
-        self
-    }
-
-    /// specify the target proof type.  (optional)
-    ///
-    /// if present, this will override the value in `ProverJobSettings` which is
-    /// part of [TritonVmProofJobOptions]
-    ///
-    /// if the type is not single-proof or proof-collection an error will result
-    /// when building.
-    pub fn proof_type(mut self, proof_type: TransactionProofType) -> Self {
-        self.proof_type = Some(proof_type);
         self
     }
 
@@ -180,36 +157,18 @@ impl ProofBuilder {
             job_queue,
             proof_job_options,
             valid_mock,
-            tx_proving_capability,
-            proof_type,
         } = self;
 
-        let (Some(program), Some(claim), Some(nondeterminism)) = (program, claim, nondeterminism)
-        else {
-            return Err(CreateProofError::MissingRequirement);
-        };
-
-        let proof_job_options = match proof_job_options {
-            Some(mut pjo) => {
-                // if tx_proving_capability is provided, it overrides value in job_settings
-                if let Some(tx_proving_capability) = tx_proving_capability {
-                    pjo.job_settings.tx_proving_capability = tx_proving_capability;
-                }
-                // if proof_type is provided, it overrides value in job_settings
-                if let Some(proof_type) = proof_type {
-                    pjo.job_settings.proof_type = proof_type;
-                }
-                pjo
-            }
-            None => return Err(CreateProofError::MissingRequirement),
-        };
+        let program = program.ok_or(CreateProofError::MissingRequirement)?;
+        let claim = claim.ok_or(CreateProofError::MissingRequirement)?;
+        let nondeterminism = nondeterminism.ok_or(CreateProofError::MissingRequirement)?;
+        let proof_job_options = proof_job_options.ok_or(CreateProofError::MissingRequirement)?;
 
         if proof_job_options.job_settings.network.use_mock_proof() {
             let proof = Proof::mock(valid_mock.unwrap_or(true));
             return Ok(proof);
         }
 
-        #[allow(clippy::shadow_unrelated)]
         let proof_type = proof_job_options.job_settings.proof_type;
         let capability = proof_job_options.job_settings.tx_proving_capability;
         if !capability.can_prove(proof_type) {

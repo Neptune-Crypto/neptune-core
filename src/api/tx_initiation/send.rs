@@ -36,6 +36,7 @@ use crate::api::export::TransactionProofType;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
@@ -126,13 +127,18 @@ impl TransactionSender {
         let witness = tx_details.primitive_witness();
         let kernel = witness.kernel.clone();
 
+        // use cli options for building proof, but override proof-type
+        let options = TritonVmProofJobOptionsBuilder::new()
+            .template(&gsl.cli().as_proof_job_options())
+            .proof_type(target_proof_type)
+            .build();
+
         // generate proof
         let proof = TransactionProofBuilder::new()
             .transaction_details(&tx_details)
             .primitive_witness(witness)
             .job_queue(vm_job_queue())
-            .proof_job_options(gsl.cli().into())
-            .proof_type(target_proof_type)
+            .proof_job_options(options)
             .build()
             .await?;
 

@@ -13,6 +13,7 @@ use tracing::warn;
 
 use super::TransactionOrigin;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -557,11 +558,17 @@ impl UpgradeJob {
             } else {
                 vec![]
             };
+
+            // ensure that proof-type is SingleProof
+            let options = TritonVmProofJobOptionsBuilder::new()
+                .template(&proof_job_options)
+                .proof_type(TransactionProofType::SingleProof)
+                .build();
+
             let proof = TransactionProofBuilder::new()
                 .primitive_witness_ref(&gobbler_witness)
                 .job_queue(triton_vm_job_queue.clone())
-                .proof_job_options(proof_job_options.clone())
-                .proof_type(TransactionProofType::SingleProof)
+                .proof_job_options(options)
                 .build()
                 .await?;
 
@@ -660,12 +667,17 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToProofCollection {
                 primitive_witness: witness,
             } => {
+                // ensure that proof-type is ProofCollection
+                let options = TritonVmProofJobOptionsBuilder::new()
+                    .template(&proof_job_options)
+                    .proof_type(TransactionProofType::ProofCollection)
+                    .build();
+
                 info!("Proof-upgrader: Start producing proof collection");
                 let proof_collection = TransactionProofBuilder::new()
                     .primitive_witness_ref(&witness)
                     .job_queue(triton_vm_job_queue.clone())
-                    .proof_job_options(proof_job_options.clone())
-                    .proof_type(TransactionProofType::ProofCollection)
+                    .proof_job_options(options)
                     .build()
                     .await?;
                 info!("Proof-upgrader, proof collection: Done");
@@ -681,12 +693,17 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToSingleProof {
                 primitive_witness: witness,
             } => {
+                // ensure that proof-type is SingleProof
+                let options = TritonVmProofJobOptionsBuilder::new()
+                    .template(&proof_job_options)
+                    .proof_type(TransactionProofType::SingleProof)
+                    .build();
+
                 info!("Proof-upgrader: Start producing single proof");
                 let proof = TransactionProofBuilder::new()
                     .primitive_witness_ref(&witness)
                     .job_queue(triton_vm_job_queue.clone())
-                    .proof_job_options(proof_job_options.clone())
-                    .proof_type(TransactionProofType::SingleProof)
+                    .proof_job_options(options)
                     .build()
                     .await?;
 
