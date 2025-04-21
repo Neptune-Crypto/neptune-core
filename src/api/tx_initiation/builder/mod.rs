@@ -17,6 +17,7 @@
 //! # use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
@@ -73,14 +74,19 @@
 //!        .await?;
 //!    drop(state_lock); // release lock asap.
 //!
+//!    // use cli options for building proof, but override proof-type
+//!    let options = TritonVmProofJobOptionsBuilder::new()
+//!        .template(&gsl.cli().into())
+//!        .proof_type(TransactionProofType::PrimitiveWitness)
+//!        .build();
+//!
 //!    // generate simplistic PrimitiveWitness "proof"
 //!    // This exposes secrets, so tx cannot be broadcast until
-//!    // proof is upgraded.
+//!    // proof is upgraded to ProofCollection.
 //!    let proof = TransactionProofBuilder::new()
 //!        .transaction_details(&tx_details)
 //!        .job_queue(vm_job_queue())
 //!        .proof_job_options(gsl.cli().into())
-//!        .proof_type(TransactionProofType::PrimitiveWitness)
 //!        .build()
 //!        .await?;
 //!
@@ -112,6 +118,7 @@
 //! ```
 //! # use std::sync::Arc;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+//! # use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 //! # use neptune_cash::api::export::TransactionProofType;
 //! # use neptune_cash::api::export::TransactionProof;
 //! # use neptune_cash::api::export::TransactionDetails;
@@ -120,13 +127,17 @@
 //!
 //! # async fn example(tx_details: TransactionDetails, gsl: GlobalStateLock) -> anyhow::Result<TransactionProof> {
 //!
-//! // generate SingleProof
+//! // specify target proof-type = SingleProof
+//! let options = TritonVmProofJobOptionsBuilder::new()
+//!     .template(&gsl.cli().into())
+//!     .proof_type(TransactionProofType::SingleProof)
+//!     .build();
+//!
 //! // This will take minutes even on a very powerful machine.
 //! let proof = TransactionProofBuilder::new()
 //!     .transaction_details(&tx_details)
 //!     .job_queue(vm_job_queue())
-//!     .proof_job_options(gsl.cli().into())
-//!     .proof_type(TransactionProofType::SingleProof)
+//!     .proof_job_options(options)
 //!     .build()
 //!     .await?;
 //! # Ok(proof)
@@ -136,6 +147,7 @@ pub mod proof_builder;
 pub mod transaction_builder;
 pub mod transaction_details_builder;
 pub mod transaction_proof_builder;
+pub mod triton_vm_proof_job_options_builder;
 pub mod tx_artifacts_builder;
 pub mod tx_input_list_builder;
 pub mod tx_output_list_builder;

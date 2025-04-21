@@ -31,6 +31,7 @@ use twenty_first::math::digest::Digest;
 use crate::api::export::TxInputList;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -617,11 +618,17 @@ pub(crate) async fn create_block_transaction_from(
             global_state_lock.cli().network,
         );
         let nop = PrimitiveWitness::from_transaction_details(&nop);
+
+        // ensure that proof-type is SingleProof
+        let options = TritonVmProofJobOptionsBuilder::new()
+            .template(&job_options)
+            .proof_type(TransactionProofType::SingleProof)
+            .build();
+
         let proof = TransactionProofBuilder::new()
             .primitive_witness_ref(&nop)
             .job_queue(vm_job_queue.clone())
-            .proof_job_options(job_options.clone())
-            .proof_type(TransactionProofType::SingleProof)
+            .proof_job_options(options)
             .build()
             .await?;
         let nop = Transaction {

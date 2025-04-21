@@ -8,9 +8,6 @@
 //! hardware requirements.  Also the complexity is affected by the type and size
 //! of transaction.
 //!
-//! It is necessary to inform the builder of the device's [TxProvingCapability]
-//! so that weak devices will not attempt to build proofs they are not capable of.
-//!
 //! Before a transaction can be confirmed in a block it must have a SingleProof
 //! which is the hardest proof to generate.
 //!
@@ -43,7 +40,6 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 
@@ -64,8 +60,6 @@ pub struct TransactionProofBuilder<'a> {
 
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: Option<TritonVmProofJobOptions>,
-    tx_proving_capability: Option<TxProvingCapability>,
-    proof_type: Option<TransactionProofType>,
     valid_mock: Option<bool>,
 }
 
@@ -144,26 +138,10 @@ impl<'a> TransactionProofBuilder<'a> {
     /// add job options. (required)
     ///
     /// note: can be obtained via `TritonVmProofJobOptions::from(Args)`
+    ///
+    /// There is also `TritonVmProofJobOptionsBuilder`
     pub fn proof_job_options(mut self, proof_job_options: TritonVmProofJobOptions) -> Self {
         self.proof_job_options = Some(proof_job_options);
-        self
-    }
-
-    /// specify the machine's proving capability.  (optional)
-    ///
-    /// if present, this will override the value in `ProverJobSettings` which is
-    /// part of [TritonVmProofJobOptions]
-    pub fn proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
-        self.tx_proving_capability = Some(tx_proving_capability);
-        self
-    }
-
-    /// specify the target proof type.  (optional)
-    ///
-    /// if present, this will override the value in `ProverJobSettings` which is
-    /// part of [TritonVmProofJobOptions]
-    pub fn proof_type(mut self, proof_type: TransactionProofType) -> Self {
-        self.proof_type = Some(proof_type);
         self
     }
 
@@ -259,24 +237,9 @@ impl<'a> TransactionProofBuilder<'a> {
             job_queue,
             proof_job_options,
             valid_mock,
-            tx_proving_capability,
-            proof_type,
         } = self;
 
-        let proof_job_options = match proof_job_options {
-            Some(mut pjo) => {
-                // if tx_proving_capability is provided, it overrides value in job_settings
-                if let Some(tx_proving_capability) = tx_proving_capability {
-                    pjo.job_settings.tx_proving_capability = tx_proving_capability;
-                }
-                // if proof_type is provided, it overrides value in job_settings
-                if let Some(proof_type) = proof_type {
-                    pjo.job_settings.proof_type = proof_type;
-                }
-                pjo
-            }
-            None => return Err(CreateProofError::MissingRequirement),
-        };
+        let proof_job_options = proof_job_options.ok_or(CreateProofError::MissingRequirement)?;
 
         let valid_mock = valid_mock.unwrap_or(true);
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
