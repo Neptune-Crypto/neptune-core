@@ -34,11 +34,11 @@ enum MockProofBehavior {
 /// 2. valid-mock.    a mock proof that passes validation (if mock proofs are allowed)
 /// 3. invalid-mock.  a mock proof that fails validation (if mock proofs are allowed, or not)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
-pub struct MockableProof {
+pub struct NeptuneProof {
     proof: VmProof,
 }
 
-impl BFieldCodec for MockableProof {
+impl BFieldCodec for NeptuneProof {
     type Error = <VmProof as BFieldCodec>::Error;
 
     fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
@@ -56,7 +56,7 @@ impl BFieldCodec for MockableProof {
     }
 }
 
-impl TasmObject for MockableProof {
+impl TasmObject for NeptuneProof {
     fn label_friendly_name() -> String {
         VmProof::label_friendly_name()
     }
@@ -76,7 +76,7 @@ impl TasmObject for MockableProof {
     }
 }
 
-impl Deref for MockableProof {
+impl Deref for NeptuneProof {
     type Target = VmProof;
 
     fn deref(&self) -> &Self::Target {
@@ -84,31 +84,31 @@ impl Deref for MockableProof {
     }
 }
 
-impl DerefMut for MockableProof {
+impl DerefMut for NeptuneProof {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.proof
     }
 }
 
-impl From<MockableProof> for VmProof {
-    fn from(mp: MockableProof) -> VmProof {
+impl From<NeptuneProof> for VmProof {
+    fn from(mp: NeptuneProof) -> VmProof {
         mp.proof
     }
 }
 
-impl From<Vec<BFieldElement>> for MockableProof {
+impl From<Vec<BFieldElement>> for NeptuneProof {
     fn from(v: Vec<BFieldElement>) -> Self {
         Self { proof: VmProof(v) }
     }
 }
 
-impl From<VmProof> for MockableProof {
+impl From<VmProof> for NeptuneProof {
     fn from(proof: VmProof) -> Self {
         Self { proof }
     }
 }
 
-impl MockableProof {
+impl NeptuneProof {
     /// creates an invalid standard proof (not a mock proof)
     pub fn invalid() -> Self {
         Self {
@@ -171,7 +171,7 @@ impl MockableProof {
     }
 }
 
-// Proof is aliased to MockableProof this is done to avoid lots of diffs
+// Proof is aliased to NeptuneProof this is done to avoid lots of diffs
 // wherever Proof is used.  we can remove this alias if/when code is updated to
-// use MockableProof directly (maybe with a different name?)
-pub type Proof = MockableProof;
+// use NeptuneProof directly
+pub type Proof = NeptuneProof;
