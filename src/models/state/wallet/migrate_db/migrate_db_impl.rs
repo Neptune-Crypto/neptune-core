@@ -68,7 +68,9 @@ pub(crate) async fn migrate_range(
             }
             _ => panic!("schema version {} is unknown", i),
         }
+
         storage.persist().await;
+        tracing::debug!("persisted wallet db after migration to v{}", apply_version);
     }
     Ok(())
 }

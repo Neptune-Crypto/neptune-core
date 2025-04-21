@@ -59,6 +59,9 @@ pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<
         sent_transactions_v1.set(index, tx_v0.into()).await;
     }
 
+    // set schema version to v1
+    tables.schema_version.set(1).await;
+
     // success!
     Ok(())
 }
@@ -150,9 +153,14 @@ mod test {
     use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
     use crate::models::state::Timestamp;
+    use crate::tests::shared;
     use crate::tests::shared::unit_test_data_directory;
     use crate::DataDirectory;
 
+    /// tests migrating a simulated v0 wallet db to v1.
+    ///
+    /// This test uses mock types from v0 wallet to create a v0
+    /// database and then migrates it.
     #[tracing_test::traced_test]
     #[tokio::test]
     async fn migrate() -> anyhow::Result<()> {
@@ -231,6 +239,61 @@ mod test {
         Ok(())
     }
 
+    /// tests migrating a "real" v0 wallet db to v1.
+    ///
+    /// This test uses a copy of a small v0 testnet database that is stored
+    /// inside the test_data directory.
+    ///
+    /// The DB was created by running v0.2.2 of neptune-core in testnet mode and
+    /// sending a transaction to a peer.  Thus the DB contains a single
+    /// SentTransaction.
+    #[tracing_test::traced_test]
+    #[tokio::test]
+    async fn migrate_real_v0_db() -> anyhow::Result<()> {
+        // basics
+        let network = Network::Testnet;
+        let data_dir = unit_test_data_directory(network)?;
+
+        // obtain source db path and target path
+        let test_data_wallet_db_dir = worker::crate_root()
+            .join("test_data/migrations/wallet_db/v0_to_v1/wallet_db.v0-with-sent-tx");
+        let wallet_database_path = data_dir.wallet_database_dir_path();
+
+        // copy DB in test_data to wallet_database_path
+        shared::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
+
+        // open v0 DB file
+        tracing::info!("opening existing v0 DB for migration to v1");
+        let db_v0 =
+            NeptuneLevelDb::new(&wallet_database_path, &leveldb::options::Options::new()).await?;
+
+        println!("dump of v0 database");
+        db_v0.dump_database().await;
+
+        // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
+        // migration occurs.
+        let wallet_db_v1 = RustyWalletDatabase::connect(db_v0).await;
+
+        // dump the (migrated) v1 database to stdout
+        println!("dump of v1 (upgraded) database");
+        wallet_db_v1.storage().db().dump_database().await;
+
+        // obtain v1 sent-transactions and verify len is 1.
+        let sent_transactions = wallet_db_v1.sent_transactions();
+        assert_eq!(sent_transactions.len().await, 1);
+
+        // obtain first transaction
+        let tx = sent_transactions.get(0).await;
+
+        // verify that for each tx-output is_change == is_owned
+        for output in tx.tx_outputs.iter() {
+            assert_eq!(output.is_change(), output.is_owned());
+        }
+
+        // success!
+        Ok(())
+    }
+
     // contains schema version 0 types for test(s)
     mod test_schema_v0 {
         use super::*;
@@ -238,8 +301,8 @@ mod test {
         // represents a subset of RustyWalletDatabase as it was in v0
         pub(super) struct RustyWalletDatabase {
             pub storage: SimpleRustyStorage,
-            pub sync_label: DbtSingleton<Digest>, // table 0
-            pub sent_transactions: DbtVec<migration::schema_v0::SentTransaction>, // table 3
+            pub sent_transactions: DbtVec<migration::schema_v0::SentTransaction>, // table 2
+            pub sync_label: DbtSingleton<Digest>,                                 // table 3
         }
         impl RustyWalletDatabase {
             // simulates connecting to DB with v0 schema
@@ -250,17 +313,17 @@ mod test {
                     "RustyWalletDatabase-Schema",
                     crate::LOG_TOKIO_LOCK_EVENT_CB,
                 );
-                let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
                 storage.schema.table_count = WalletDbTables::sent_transactions_table_count();
                 let sent_transactions = storage
                     .schema
                     .new_vec::<migration::schema_v0::SentTransaction>("sent_transactions")
                     .await;
+                let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
 
                 Self {
                     storage,
-                    sync_label,
                     sent_transactions,
+                    sync_label,
                 }
             }
         }
@@ -268,6 +331,11 @@ mod test {
 
     mod worker {
         use super::*;
+        use std::path::PathBuf;
+
+        pub(super) fn crate_root() -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        }
 
         // opens wallet db
         pub(super) async fn open_db(

@@ -31,38 +31,41 @@ impl RustyWalletDatabase {
         );
 
         let mut tables = WalletDbTables::load_schema_in_order(&mut storage).await;
-        let schema_version = &mut tables.schema_version;
+        let schema_version = tables.schema_version.get();
 
         // if the DB is brand-new then we set the schema version.
         // note that schema-version was not present in DB until version 1.
 
-        let is_new_db = schema_version.get() == 0 && tables.sync_label.get() == Digest::default();
+        let is_new_db = schema_version == 0 && tables.sync_label.get() == Digest::default();
         if is_new_db {
-            schema_version.set(WALLET_DB_SCHEMA_VERSION).await;
+            tables.schema_version.set(WALLET_DB_SCHEMA_VERSION).await;
             tracing::info!(
                 "set new wallet database to schema version: v{}",
                 WALLET_DB_SCHEMA_VERSION
             );
         } else {
-            match schema_version.get().cmp(&WALLET_DB_SCHEMA_VERSION) {
+            tracing::debug!("Wallet DB schema version is {}", schema_version);
+
+            match schema_version.cmp(&WALLET_DB_SCHEMA_VERSION) {
                 // happy path. db schema version matches code schema version.
-                Ordering::Equal => {}
+                Ordering::Equal => {
+                    tracing::info!("Wallet DB schema version {} is correct.  proceeding", schema_version);
+                }
 
                 // database has old schema version and needs to be migrated.
                 Ordering::Less => {
                     migrate_db::migrate_range(
                         &mut storage,
-                        schema_version.get(),
+                        schema_version,
                         WALLET_DB_SCHEMA_VERSION,
                     )
                     .await
                     .unwrap();
-                    schema_version.set(WALLET_DB_SCHEMA_VERSION).await;
                 }
 
                 // database is too new, probably from a newer neptune-core binary.
                 Ordering::Greater =>
-                    panic!("Wallet database schema version is higher than expected.  It appears to come from a newer release of neptune-core.  expected schema version: {}, found: {}", WALLET_DB_SCHEMA_VERSION, schema_version.get())
+                    panic!("Wallet database schema version is higher than expected.  It appears to come from a newer release of neptune-core.  expected schema version: {}, found: {}", WALLET_DB_SCHEMA_VERSION, schema_version)
             }
         }
 
