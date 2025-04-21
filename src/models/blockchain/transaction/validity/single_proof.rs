@@ -823,6 +823,11 @@ mod test {
         }
     }
 
+    #[test]
+    fn single_proof_program_digest_is_unchanged() {
+        insta::assert_snapshot!(SingleProof.hash().to_hex());
+    }
+
     fn positive_prop(witness: SingleProofWitness) {
         let claim = witness.claim();
         let public_input = PublicInput::new(claim.input);

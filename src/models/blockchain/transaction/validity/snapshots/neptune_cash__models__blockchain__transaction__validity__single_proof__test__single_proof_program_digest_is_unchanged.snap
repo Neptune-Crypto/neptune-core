@@ -1,0 +1,5 @@
+---
+source: src/models/blockchain/transaction/validity/single_proof.rs
+expression: SingleProof.hash().to_hex()
+---
+c0f8cbc73a844ab6c3586d8891e29b677a3aa08f25f9aec0f854a72bf2e2f84c2a48c9dd1bbe0a66
