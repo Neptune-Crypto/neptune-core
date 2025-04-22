@@ -558,7 +558,7 @@ impl Args {
         {
             TxProvingCapability::ProofCollection
         } else {
-            TxProvingCapability::LockScript
+            TxProvingCapability::PrimitiveWitness
         }
     }
 
