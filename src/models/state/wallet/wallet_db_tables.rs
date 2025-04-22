@@ -17,7 +17,7 @@ use crate::prelude::twenty_first;
 /// because it is used by `SentTransaction` which is used in `WalletDbTables`
 ///
 ///  When such a change occurs, then a db-migration becomes necessary.  See
-///  [migrate_db].
+///  [migrate_db](super::migrate_db).
 ///
 /// note: the very first schema version was 0, ie u16::default()
 pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 1;
@@ -96,7 +96,7 @@ impl WalletDbTables {
     /// It is critical that this order not be changed.  Any new elements
     /// must be added at the end.
     ///
-    /// See description of [WalletDbSchema].
+    /// See description of [WalletDbTables].
     pub(super) async fn load_schema_in_order(storage: &mut SimpleRustyStorage) -> WalletDbTables {
         let monitored_utxos = storage
             .schema
