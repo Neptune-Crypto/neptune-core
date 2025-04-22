@@ -28,6 +28,7 @@ use std::sync::Arc;
 
 use super::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
+use crate::api::tx_initiation::error::ProofRequirement;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -162,7 +163,7 @@ impl<'a> TransactionProofBuilder<'a> {
     /// ## Required (one-of)
     ///
     /// The following are individually optional, but at least one must be
-    /// provided, else an error will result:
+    /// provided, else an error will result. (ProofRequirement::TransactionProofInput)
     ///
     /// * transaction_details()
     /// * primitive_witness()
@@ -239,7 +240,7 @@ impl<'a> TransactionProofBuilder<'a> {
             valid_mock,
         } = self;
 
-        let proof_job_options = proof_job_options.ok_or(CreateProofError::MissingRequirement)?;
+        let proof_job_options = proof_job_options.ok_or(ProofRequirement::ProofJobOptions)?;
 
         let valid_mock = valid_mock.unwrap_or(true);
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
@@ -280,7 +281,7 @@ impl<'a> TransactionProofBuilder<'a> {
             return from_witness(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
         }
 
-        Err(CreateProofError::MissingRequirement)
+        Err(ProofRequirement::TransactionProofInput.into())
     }
 }
 
@@ -319,6 +320,7 @@ async fn from_witness(
     let capability = proof_job_options.job_settings.tx_proving_capability;
     let proof_type = proof_job_options.job_settings.proof_type;
 
+    // generate mock proof, if network uses mock proofs.
     if proof_job_options.job_settings.network.use_mock_proof() {
         let proof = match proof_type {
             TransactionProofType::PrimitiveWitness => {
@@ -336,6 +338,7 @@ async fn from_witness(
         return Ok(proof);
     }
 
+    // abort early if machine is too weak
     if !capability.can_prove(proof_type) {
         return Err(CreateProofError::TooWeak {
             proof_type,
@@ -343,6 +346,7 @@ async fn from_witness(
         });
     }
 
+    // produce proof of requested type
     let transaction_proof = match proof_type {
         TransactionProofType::PrimitiveWitness => {
             TransactionProof::Witness(witness_cow.into_owned())

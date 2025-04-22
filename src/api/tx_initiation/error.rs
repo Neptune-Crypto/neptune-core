@@ -50,12 +50,22 @@ pub enum CreateTxError {
     Failed(String),
 }
 
+#[derive(Debug, Clone, thiserror::Error, strum::Display, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ProofRequirement {
+    Program,
+    Claim,
+    NonDeterminism,
+    ProofJobOptions,
+    TransactionProofInput,
+}
+
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum CreateProofError {
-    #[error("missing required data to build proof")]
-    MissingRequirement,
+    #[error("missing required data to build proof: {0}")]
+    MissingRequirement(#[from] ProofRequirement),
 
     #[error(
         "machine capability {capability} is insufficient to generate proof of type: {proof_type}"
