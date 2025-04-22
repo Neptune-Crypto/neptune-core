@@ -179,7 +179,7 @@ impl ProofBuilder {
             });
         }
         // this builder only supports proofs that can be executed in triton-vm.
-        if !proof_type.is_vm_proof() {
+        if !proof_type.executes_in_vm() {
             return Err(CreateProofError::NotVmProof(proof_type));
         }
 

@@ -38,8 +38,8 @@ impl From<&TransactionProof> for TransactionProofType {
 }
 
 impl TransactionProofType {
-    /// indicates if the proof is a triton-vm program.
-    pub fn is_vm_proof(&self) -> bool {
+    /// indicates if the proof executes in triton-vm.
+    pub fn executes_in_vm(&self) -> bool {
         matches!(self, Self::ProofCollection | Self::SingleProof)
     }
 
