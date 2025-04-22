@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crate::api::tx_initiation::error::CreateProofError;
+use crate::api::tx_initiation::error::ProofRequirement;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
@@ -159,10 +160,10 @@ impl ProofBuilder {
             valid_mock,
         } = self;
 
-        let program = program.ok_or(CreateProofError::MissingRequirement)?;
-        let claim = claim.ok_or(CreateProofError::MissingRequirement)?;
-        let nondeterminism = nondeterminism.ok_or(CreateProofError::MissingRequirement)?;
-        let proof_job_options = proof_job_options.ok_or(CreateProofError::MissingRequirement)?;
+        let program = program.ok_or(ProofRequirement::Program)?;
+        let claim = claim.ok_or(ProofRequirement::Claim)?;
+        let nondeterminism = nondeterminism.ok_or(ProofRequirement::NonDeterminism)?;
+        let proof_job_options = proof_job_options.ok_or(ProofRequirement::ProofJobOptions)?;
 
         if proof_job_options.job_settings.network.use_mock_proof() {
             let proof = Proof::mock(valid_mock.unwrap_or(true));
