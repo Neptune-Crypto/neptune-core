@@ -13,6 +13,7 @@ use neptune_cash::config_models::cli_args::Args;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
+use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::task::JoinHandle;
@@ -44,24 +45,35 @@ impl GenesisNode {
     }
 
     /// provides default neptune-core cli arguments for typical integration tests.
+    pub fn default_args() -> Args {
+        let mut args = Args::default();
+        args.network = Network::RegTest;
+
+        // we default proving capability to primitive-witness as lowest common
+        // denominator and because otherwise dev machines often miss this case.
+        args.tx_proving_capability = Some(TxProvingCapability::PrimitiveWitness);
+
+        if let Ok(dd) = Self::integration_test_data_directory(args.network) {
+            args.data_dir = Some(dd.root_dir_path());
+        }
+        args
+    }
+
+    /// applies instance specific settings to cli Args: rpc_port and peer_port
     ///
     /// if starting multiple nodes, each should use a unique instance parameter
     /// in order to prevent port conflicts.
     #[track_caller]
-    pub fn default_args(node_instance: u8) -> Args {
-        let mut args = Args::default();
-
-        args.network = Network::RegTest;
-
-        if let Ok(dd) = Self::integration_test_data_directory(Network::Main) {
-            args.data_dir = Some(dd.root_dir_path());
-        }
-
+    pub fn instance_args(node_instance: u8, mut args: Args) -> Args {
         let caller = core::panic::Location::caller();
         args.rpc_port =
             Self::hash_string_to_port_range(&format!("rpc:{}{}", caller, node_instance));
         args.peer_port =
             Self::hash_string_to_port_range(&format!("peer:{}{}", caller, node_instance));
+
+        if let Ok(dd) = Self::integration_test_data_directory(args.network) {
+            args.data_dir = Some(dd.root_dir_path());
+        }
 
         args
     }
@@ -81,9 +93,12 @@ impl GenesisNode {
     /// each in the range of 1024..65000.
     ///
     /// subsequent nodes increment the rpc-port and peer-port from previous node by 1.
-    pub fn default_args_for_cluster(cluster_id: &str, num_nodes: u8) -> Vec<Args> {
+    pub fn instance_args_for_cluster(
+        cluster_id: &str,
+        num_nodes: u8,
+        mut base_args: Args,
+    ) -> Vec<Args> {
         let mut all_args = vec![];
-        let mut base_args = Self::default_args(0);
 
         // fix ports based on the cluster_id
         base_args.rpc_port = Self::hash_string_to_port_range(&format!("rpc:{}{}", cluster_id, 0));
@@ -96,7 +111,7 @@ impl GenesisNode {
             .collect();
 
         for i in 0..num_nodes {
-            let mut args = Self::default_args(i);
+            let mut args = Self::instance_args(i, base_args.clone());
             args.peers = peers
                 .clone()
                 .into_iter()
@@ -112,7 +127,7 @@ impl GenesisNode {
         all_args
     }
 
-    /// starts specified number of nodes running in a cluster with default args
+    /// starts specified number of nodes running in a cluster
     ///
     /// caller should obtain cluster_id via `cluster_id()` method.
     ///
@@ -120,11 +135,16 @@ impl GenesisNode {
     pub async fn start_cluster<const N: usize>(
         cluster_id: &str,
         num_nodes: u8,
+        base_args: Option<Args>,
     ) -> anyhow::Result<[Self; N]> {
-        Self::start_nodes(Self::default_args_for_cluster(cluster_id, num_nodes)).await
+        let base_args = base_args.unwrap_or_else(Self::default_args);
+        Self::start_nodes(Self::instance_args_for_cluster(
+            cluster_id, num_nodes, base_args,
+        ))
+        .await
     }
 
-    /// starts nodes running in a cluster with default args and waits until all connected
+    /// starts nodes running in a cluster and waits until all connected
     ///
     /// caller should obtain cluster_id via `cluster_id()` method.
     ///
@@ -132,10 +152,10 @@ impl GenesisNode {
     pub async fn start_connected_cluster<const N: usize>(
         cluster_id: &str,
         num_nodes: u8,
+        base_args: Option<Args>,
         timeout_secs: u16,
     ) -> anyhow::Result<[Self; N]> {
-        let cluster =
-            Self::start_nodes(Self::default_args_for_cluster(cluster_id, num_nodes)).await?;
+        let cluster = Self::start_cluster(cluster_id, num_nodes, base_args).await?;
         Self::wait_until_all_peers_connected(&cluster, timeout_secs).await?;
         Ok(cluster)
     }
@@ -173,7 +193,7 @@ impl GenesisNode {
     ///
     /// note: no dummy components are used.
     pub async fn start_default_node() -> anyhow::Result<Self> {
-        Self::start_node(Self::default_args(0)).await
+        Self::start_node(Self::default_args()).await
     }
 
     /// waits until node has a peer connected or timeout occurs.

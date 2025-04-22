@@ -6,6 +6,7 @@ use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::SymmetricKey;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::api::export::TxProvingCapability;
 use num_traits::ops::checked::CheckedSub;
 
 /// test: alice sends funds to herself onchain
@@ -72,6 +73,42 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// test: alice sends funds to bob onchain with primitive witness capability
+///
+/// see description of alice_sends_to_bob() for details
+#[tokio::test(flavor = "multi_thread")]
+pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::Result<()> {
+    alice_sends_to_bob(
+        &GenesisNode::cluster_id(),
+        TxProvingCapability::PrimitiveWitness,
+    )
+    .await
+}
+
+/// test: alice sends funds to bob onchain with proof collection capability
+///
+/// see description of alice_sends_to_bob() for details
+#[tokio::test(flavor = "multi_thread")]
+pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Result<()> {
+    alice_sends_to_bob(
+        &GenesisNode::cluster_id(),
+        TxProvingCapability::PrimitiveWitness,
+    )
+    .await
+}
+
+/// test: alice sends funds to bob onchain with single proof capability
+///
+/// see description of alice_sends_to_bob() for details
+#[tokio::test(flavor = "multi_thread")]
+pub async fn alice_sends_to_bob_with_single_proof_capability() -> anyhow::Result<()> {
+    alice_sends_to_bob(
+        &GenesisNode::cluster_id(),
+        TxProvingCapability::PrimitiveWitness,
+    )
+    .await
+}
+
 /// test: alice sends funds to bob onchain
 ///
 /// this is a basic test of:
@@ -89,14 +126,19 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
 /// 4. alice mines 3 blocks to her own wallet.
 /// 5. alice sends a payment to bob.
 /// 6. bob verifies the unconfirmed balance matches payment amount.
-#[tokio::test(flavor = "multi_thread")]
-pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
+pub async fn alice_sends_to_bob(
+    cluster_id: &str,
+    proving_capability: TxProvingCapability,
+) -> anyhow::Result<()> {
     logging::tracing_logger();
     let timeout_secs = 5;
 
+    let mut base_args = GenesisNode::default_args();
+    base_args.tx_proving_capability = Some(proving_capability);
+
     // alice and bob start 2 peer cluster (regtest)
     let [mut alice, mut bob] =
-        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(), 2, timeout_secs).await?;
+        GenesisNode::start_connected_cluster(cluster_id, 2, Some(base_args), timeout_secs).await?;
 
     // bob generates receiving address
     let bob_address = bob
@@ -115,6 +157,13 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
         .await?;
 
     tracing::info!("alice mined 3 blocks!");
+
+    // wait 5 seconds to allow block to propagate to bob's node.
+    // otherwise bob's node might receive the Tx before accepting the latest block
+    // in which case it will reject it.  see issue 560
+    // https://github.com/Neptune-Crypto/neptune-core/issues/560
+    // when that is fixed, this line should be removed.
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     // alice checks that payment is reflected in her unconfirmed wallet balance
     let alice_balances_before_send = alice.gsl.api().wallet().balances(Timestamp::now()).await;
@@ -181,12 +230,6 @@ pub async fn alice_sends_to_bob() -> anyhow::Result<()> {
         .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
         .await?;
 
-    // alice waits until tx has been upgraded to single-proof in mempool
-    // which is necessary before it can be included in a block.
-    alice
-        .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
-        .await?;
-
     // bob checks balances are correct.
     let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
     assert_eq!(bob_balances.unconfirmed_available, payment_amount);
@@ -234,7 +277,8 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
 
     // alice starts a single node cluster
     let [mut alice] =
-        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(), 1, timeout_secs).await?;
+        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(), 1, None, timeout_secs)
+            .await?;
 
     // alice generates a random symmetric key outside her wallet.
     let other_address = SymmetricKey::from_seed(rand::random());
