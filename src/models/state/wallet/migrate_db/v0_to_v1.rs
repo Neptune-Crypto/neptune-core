@@ -330,8 +330,9 @@ mod test {
     }
 
     mod worker {
-        use super::*;
         use std::path::PathBuf;
+
+        use super::*;
 
         pub(super) fn crate_root() -> PathBuf {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))

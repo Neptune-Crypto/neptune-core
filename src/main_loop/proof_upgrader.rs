@@ -957,12 +957,13 @@ mod test {
             TxProvingCapability::ProofCollection,
             TxProvingCapability::SingleProof,
         ] {
+            let mut cli = cli_args::Args::default_with_network(network);
+            cli.tx_proving_capability = Some(proving_capability);
+
             // Alice is premine recipient, so she can make a transaction (after
             // expiry of timelock).
             let (main_to_peer_tx, mut main_to_peer_rx, _, _, mut alice, _) =
-                get_test_genesis_setup(network, 2, cli_args::Args::default_with_network(network))
-                    .await
-                    .unwrap();
+                get_test_genesis_setup(network, 2, cli).await.unwrap();
             let pwtx = transaction_from_state(
                 alice.clone(),
                 512777439428,
