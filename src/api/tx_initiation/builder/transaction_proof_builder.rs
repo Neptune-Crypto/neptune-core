@@ -78,11 +78,10 @@ impl<'a> TransactionProofBuilder<'a> {
 
     /// add primitive witness (optional)
     ///
-    /// Note that a `PrimitiveWitness` contains a `TransactionKernel` which is
-    /// an input to a `Transaction`.  Thus when generating a transaction
-    /// it can avoid duplicate work to generate a witness, clone the kernel,
-    /// provide the witness here, and then provide the kernel to the
-    /// `TransactionBuilder`.
+    /// Note that a `PrimitiveWitness` contains a `TransactionKernel` which is a
+    /// field of `Transaction`.  Thus when generating a transaction it can avoid
+    /// duplicate work to generate a witness, clone the kernel, provide the
+    /// witness here, and then provide the kernel to the `TransactionBuilder`.
     ///
     /// It is also possible and may be more convenient to work only with
     /// `TransactionDetails`.
