@@ -29,6 +29,10 @@ enum MockProofBehavior {
 /// In particular the regtest network (mode) uses mock proofs so that transactions
 /// and blocks can be generated quickly at will.
 ///
+/// As of this writing no other network uses mock proofs and mock proofs are
+/// explicitly disallowed on Mainnet.  See
+/// [Network::use_mock_proof()](crate::config_models::network::Network::use_mock_proof()).
+///
 /// The proof can be of three types:
 /// 1. standard.      not a mock proof
 /// 2. valid-mock.    a mock proof that passes validation (if mock proofs are allowed)
