@@ -1355,13 +1355,15 @@ pub(crate) mod mine_loop_tests {
     async fn block_proposal_for_height_two_is_valid() {
         // Verify that block proposals of both height 1 and 2 are valid.
         let network = Network::Main;
-        let mut alice = mock_genesis_global_state(
-            network,
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+
+        // force SingleProof capability.
+        let cli = cli_args::Args {
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+
+        let mut alice =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli).await;
         let genesis_block = Block::genesis(network);
         let mocked_now = genesis_block.header().timestamp + Timestamp::months(7);
 
