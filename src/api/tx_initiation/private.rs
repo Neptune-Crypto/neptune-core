@@ -57,7 +57,8 @@ impl TransactionInitiatorPrivate {
 
         let capability = self.global_state_lock.cli().proving_capability();
         let proof_type = TransactionProofType::ProofCollection;
-        if !capability.can_prove(proof_type) {
+        let network = self.global_state_lock.cli().network;
+        if !network.use_mock_proof() && !capability.can_prove(proof_type) {
             tracing::warn!(
                 "Cannot initiate transaction because transaction proving capability is too weak."
             );
