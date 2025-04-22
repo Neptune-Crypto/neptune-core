@@ -1719,8 +1719,12 @@ impl MainLoopHandler {
                     let vm_job_queue = vm_job_queue();
 
                     let proving_capability = self.global_state_lock.cli().proving_capability();
-                    let upgrade_job =
-                        UpgradeJob::from_primitive_witness(proving_capability, primitive_witness);
+                    let network = self.global_state_lock.cli().network;
+                    let upgrade_job = UpgradeJob::from_primitive_witness(
+                        network,
+                        proving_capability,
+                        primitive_witness,
+                    );
 
                     // note: handle_upgrade() hands off proving to the
                     //       triton-vm job queue and waits for job completion.

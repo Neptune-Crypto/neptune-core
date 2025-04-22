@@ -15,6 +15,7 @@ use super::TransactionOrigin;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -140,6 +141,7 @@ impl UpgradeJob {
     /// Since [PrimitiveWitness] contains secret data, this upgrade job can only
     /// be used for transactions that originate locally.
     pub(super) fn from_primitive_witness(
+        network: Network,
         tx_proving_capability: TxProvingCapability,
         primitive_witness: PrimitiveWitness,
     ) -> UpgradeJob {
@@ -148,6 +150,9 @@ impl UpgradeJob {
                 UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness }
             }
             TxProvingCapability::SingleProof => {
+                UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness }
+            }
+            TxProvingCapability::PrimitiveWitness if network.use_mock_proof() => {
                 UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness }
             }
             TxProvingCapability::PrimitiveWitness => {
@@ -980,7 +985,7 @@ mod test {
                 panic!("Expected PW-backed tx");
             };
             let pw_to_tx_upgrade_job =
-                UpgradeJob::from_primitive_witness(proving_capability, pw.to_owned());
+                UpgradeJob::from_primitive_witness(network, proving_capability, pw.to_owned());
             pw_to_tx_upgrade_job
                 .handle_upgrade(
                     TritonVmJobQueue::dummy(),
@@ -1058,7 +1063,8 @@ mod test {
                 panic!("Expected PW-backed tx");
             };
 
-            let upgrade_job = UpgradeJob::from_primitive_witness(proving_capability, pw.to_owned());
+            let upgrade_job =
+                UpgradeJob::from_primitive_witness(network, proving_capability, pw.to_owned());
 
             // Before handle upgrade completes, a new block comes in. Making the
             // method have to do more work.
