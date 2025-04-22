@@ -182,7 +182,7 @@ impl<'a> TransactionProofBuilder<'a> {
     ///
     /// The provided inputs are evaluated in the following order, which
     /// generally is in order of most to least efficient. Evaluation ends at the
-    /// first match.
+    /// first match in this list:
     ///
     /// if target proof_type is SingleProof:
     /// * claim_and_nondeterminism()
