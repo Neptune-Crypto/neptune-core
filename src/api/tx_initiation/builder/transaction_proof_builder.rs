@@ -148,6 +148,10 @@ impl<'a> TransactionProofBuilder<'a> {
 
     /// create valid or invalid mock proof. (optional)
     ///
+    /// valid mock proofs pass proof verification; invalid mock proofs do not.
+    ///
+    /// see [NeptuneProof](crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof)
+    ///
     /// default = true
     ///
     /// only applies if the network uses mock proofs, eg regtest.
