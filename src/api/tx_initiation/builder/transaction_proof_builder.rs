@@ -268,16 +268,16 @@ impl<'a> TransactionProofBuilder<'a> {
 
         // owned primitive witness --> proof_type
         if let Some(w) = primitive_witness {
-            return from_pw(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
+            return from_witness(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
         }
         // primitive witness reference --> proof_type
         else if let Some(w) = primitive_witness_ref {
-            return from_pw(Cow::Borrowed(w), job_queue, proof_job_options, valid_mock).await;
+            return from_witness(Cow::Borrowed(w), job_queue, proof_job_options, valid_mock).await;
         }
         // transaction_details --> proof_type
         else if let Some(d) = transaction_details {
             let w = d.primitive_witness();
-            return from_pw(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
+            return from_witness(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
         }
 
         Err(CreateProofError::MissingRequirement)
@@ -310,7 +310,7 @@ async fn gen_single(
 // builds TransactionProof from Cow<PrimitiveWitness>
 //
 // will generate a mock proof if Network::use_mock_proof() is true.
-async fn from_pw(
+async fn from_witness(
     witness_cow: Cow<'_, PrimitiveWitness>,
     job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
