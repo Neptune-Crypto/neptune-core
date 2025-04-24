@@ -19,10 +19,11 @@ install-updater = true
 github-attestations = true
 github-build-setup = "build-workaround"
 
-# Work around the brownout and eventual removal of ubuntu runner image `20.04`
-# until the next upgrade of `dist`.
-# See also:
-# https://github.com/actions/runner-images/issues/11101
-# https://github.com/axodotdev/cargo-dist/issues/1760
+
 [dist.github-custom-runners]
+# The “global” steps include `plan`, `build-global-artifacts`, `host`, and `announce`. None of these
+# actually rely on the specific Linux version.
+global = "ubuntu-latest"
+
+# Don't use `ubuntu-latest` here in order to support somewhat older linux systems.
 x86_64-unknown-linux-gnu = "ubuntu-22.04"
