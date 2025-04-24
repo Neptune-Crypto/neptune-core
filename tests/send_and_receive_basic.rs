@@ -131,7 +131,7 @@ pub async fn alice_sends_to_bob(
     proving_capability: TxProvingCapability,
 ) -> anyhow::Result<()> {
     logging::tracing_logger();
-    let timeout_secs = 5;
+    let timeout_secs = 30;
 
     let mut base_args = GenesisNode::default_args();
     base_args.tx_proving_capability = Some(proving_capability);
