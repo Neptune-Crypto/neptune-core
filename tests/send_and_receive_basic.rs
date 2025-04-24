@@ -383,3 +383,40 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn simple_localhost_connection_test() {
+    use tokio::net::TcpListener;
+    use tokio::net::TcpStream;
+
+    let listener_result = TcpListener::bind("127.0.0.1:8888").await;
+    if let Err(e) = listener_result {
+        eprintln!("Error binding listener: {:?}", e);
+        panic!("Failed to bind listener");
+    }
+    let listener = listener_result.unwrap();
+
+    tokio::spawn(async move {
+        let accept_result = listener.accept().await;
+        if let Err(e) = accept_result {
+            eprintln!("Error accepting connection: {:?}", e);
+        } else {
+            let (_stream, addr) = accept_result.unwrap();
+            println!("Accepted connection from: {:?}", addr);
+            // You might want to read/write to the stream here in a real test
+        }
+    });
+
+    // Give the listener a little time to start
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let connect_result = TcpStream::connect("127.0.0.1:8888").await;
+    if let Err(e) = connect_result {
+        eprintln!("Error connecting: {:?}", e);
+        panic!("Failed to connect");
+    } else {
+        println!("Successfully connected!");
+        let _stream = connect_result.unwrap();
+        // send/receive data here
+    }
+}
