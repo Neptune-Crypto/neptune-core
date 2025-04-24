@@ -25,6 +25,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Necessary for integration tests where p2p nodes connect to each other.
+      # Windows Firewall blocks incoming connections by default, even on localhost.            
+      - name: Allow Incoming TCP Traffic for P2P Ports on Localhost
+        if: runner.os == 'Windows'
+        run: |
+          New-NetFirewallRule -DisplayName "Allow P2P Ports Localhost" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1024-65000 -LocalAddress 127.0.0.1
+
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
