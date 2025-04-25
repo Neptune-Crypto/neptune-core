@@ -39,7 +39,6 @@ impl TritonVmJobQueue {
     /// callers should execute resource intensive triton-vm tasks in this
     /// queue to avoid running simultaneous tasks that could exceed hardware
     /// capabilities.
-    #[cfg(not(test))]
     pub fn get_instance() -> Arc<Self> {
         use std::sync::OnceLock;
         static INSTANCE: OnceLock<Arc<TritonVmJobQueue>> = OnceLock::new();
@@ -48,27 +47,8 @@ impl TritonVmJobQueue {
             .clone()
     }
 
-    // note: this cfg(test) is temporary. It is needed because tests each
-    // run in their own tokio runtime, so they cannot share a single job-queue instance
-    // which spawns its own async tasks.  Because when the test runtime shuts down it
-    // kills the job-queue tasks.
-    //
-    // The temporary solution is that each call returns a new JobQueue instance.
-    // That prevents tests from interfering with eachother at the cost that multiple job-queue
-    // exist concurrently.
-    //
-    // The proper solution is for tests to share a single tokio runtime.
-    // This change will be coming in a followup commit/PR.
-    #[cfg(test)]
-    pub fn get_instance() -> Arc<Self> {
-        Arc::new(Self(JobQueue::<TritonVmJobPriority>::start()))
-    }
-
     /// Wrapper for Self::get_instance()
-    /// here for two reasons:
-    ///  1. backwards compat with existing tests
-    ///  2. if tests call dummy() instead of start(), then it is easier
-    ///     to find where start() is called for real.
+    /// here for backwards compat with existing tests
     #[cfg(test)]
     pub fn dummy() -> Arc<Self> {
         Self::get_instance()

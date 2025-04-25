@@ -193,6 +193,8 @@ pub mod test {
     use std::path::PathBuf;
     use std::time::Duration;
     use std::time::SystemTime;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     use itertools::Itertools;
     use rand::seq::SliceRandom;
@@ -598,7 +600,7 @@ pub mod test {
         None
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_query_proof() {
         // Ensure file exists on machine, in case this machine syncs automatically with proof server
         let program = triton_program!(halt);

@@ -3622,6 +3622,9 @@ mod rpc_server_tests {
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     use super::*;
     use crate::config_models::cli_args;
@@ -3673,7 +3676,7 @@ mod rpc_server_tests {
             .into()
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn network_response_is_consistent() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         for network in Network::iter() {
@@ -3693,7 +3696,7 @@ mod rpc_server_tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn verify_that_all_requests_leave_server_running() -> Result<()> {
         // Got through *all* request types and verify that server does not crash.
         // We don't care about the actual response data in this test, just that the
@@ -3846,7 +3849,7 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         let rpc_server = test_rpc_server(
@@ -3867,7 +3870,7 @@ mod rpc_server_tests {
 
     #[expect(clippy::shadow_unrelated)]
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn clear_ip_standing_test() -> Result<()> {
         let mut rpc_server = test_rpc_server(
             Network::Alpha,
@@ -4025,7 +4028,7 @@ mod rpc_server_tests {
 
     #[expect(clippy::shadow_unrelated)]
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
         let mut rpc_server = test_rpc_server(
@@ -4155,7 +4158,7 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn utxo_digest_test() {
         let rpc_server = test_rpc_server(
             Network::Alpha,
@@ -4194,7 +4197,7 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_info_test() {
         let network = Network::RegTest;
         let rpc_server = test_rpc_server(
@@ -4306,7 +4309,7 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn public_announcements_in_block_test() {
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
@@ -4374,7 +4377,7 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_digest_test() {
         let network = Network::RegTest;
         let rpc_server = test_rpc_server(
@@ -4456,7 +4459,7 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn getting_temperature_doesnt_crash_test() {
         // On your local machine, this should return a temperature but in CI,
         // the RPC call returns `None`, so we only verify that the call doesn't
@@ -4476,7 +4479,7 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn cannot_initiate_transaction_if_notx_flag_is_set() {
         let network = Network::Main;
         let ctx = context::current();
@@ -4540,7 +4543,7 @@ mod rpc_server_tests {
             assert_eq!(block1.hash(), resulting_block_hash);
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn provide_solution_when_no_proposal_known() {
             let network = Network::Main;
             let bob = test_rpc_server(
@@ -4569,7 +4572,7 @@ mod rpc_server_tests {
             );
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn cached_exported_proposals_are_stored_correctly() {
             let network = Network::Main;
             let bob = WalletEntropy::new_random();
@@ -4628,7 +4631,7 @@ mod rpc_server_tests {
             );
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn exported_pow_puzzle_is_consistent_with_block_hash() {
             let network = Network::Main;
             let bob = WalletEntropy::new_random();
@@ -4763,31 +4766,31 @@ mod rpc_server_tests {
         use super::*;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn claim_utxo_owned_before_confirmed() -> Result<()> {
             worker::claim_utxo_owned(false, false).await
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn claim_utxo_owned_after_confirmed() -> Result<()> {
             worker::claim_utxo_owned(true, false).await
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn claim_utxo_owned_after_confirmed_and_after_spent() -> Result<()> {
             worker::claim_utxo_owned(true, true).await
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn claim_utxo_unowned_before_confirmed() -> Result<()> {
             worker::claim_utxo_unowned(false).await
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn claim_utxo_unowned_after_confirmed() -> Result<()> {
             worker::claim_utxo_unowned(true).await
         }
@@ -5173,7 +5176,7 @@ mod rpc_server_tests {
         use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn send_to_many_n_outputs() {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;
@@ -5237,7 +5240,7 @@ mod rpc_server_tests {
         /// sends a tx with two outputs: one self, one external, for each key type
         /// that accepts incoming UTXOs.
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn send_to_many_test() -> Result<()> {
             for recipient_key_type in KeyType::all_types() {
                 worker::send_to_many(recipient_key_type).await?;
@@ -5248,7 +5251,7 @@ mod rpc_server_tests {
         /// checks that the sending rate limit kicks in after 2 tx are sent.
         /// note: rate-limit only applies below block 25000
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn send_rate_limit() -> Result<()> {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;

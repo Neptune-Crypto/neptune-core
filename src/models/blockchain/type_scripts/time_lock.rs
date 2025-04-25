@@ -1009,7 +1009,6 @@ mod test {
     use proptest_arbitrary_interop::arb;
     use tasm_lib::twenty_first::math::tip5::Tip5;
     use test_strategy::proptest;
-    use tokio::runtime::Runtime;
 
     use super::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use super::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
@@ -1256,10 +1255,8 @@ mod test {
     ) {
         // Negative test: Primitive witness spending inputs that are timelocked
         // must fail to validate.
-        prop_assert!(Runtime::new()
-            .unwrap()
-            .block_on(primitive_witness.validate())
-            .is_err());
+        let rt = crate::tests::tokio_runtime();
+        prop_assert!(rt.block_on(primitive_witness.validate()).is_err());
     }
 
     #[proptest(cases = 10)]

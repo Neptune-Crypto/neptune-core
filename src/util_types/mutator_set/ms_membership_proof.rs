@@ -609,6 +609,8 @@ mod ms_proof_tests {
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn mp_equality_test() {
@@ -696,7 +698,7 @@ mod ms_proof_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_update_from_remove_test() {
         let n = 100;
         let mut rng = rand::rng();
@@ -833,7 +835,7 @@ mod ms_proof_tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_update_single_remove_test() {
         let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
@@ -912,7 +914,7 @@ mod ms_proof_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_update_single_addition_test() {
         for j in 2..30 {
             let mut rms = empty_rusty_mutator_set().await;
@@ -960,7 +962,7 @@ mod ms_proof_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_update_from_addition_batches_test() {
         let mut msa: MutatorSetAccumulator = MutatorSetAccumulator::default();
 
@@ -1036,7 +1038,7 @@ mod ms_proof_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_update_from_addition_test() {
         let mut rng = rand::rng();
         let n = rng.next_u32() as usize % 100 + 1;
@@ -1130,7 +1132,7 @@ mod ms_proof_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_updates_mixed_test() {
         let mut rng_seeder = rand::rng();
         // let seed_integer = rng.next_u32();

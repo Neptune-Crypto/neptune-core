@@ -1171,6 +1171,8 @@ mod archival_state_tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
     use crate::util_types::test_shared::mutator_set::random_removal_record;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();
@@ -1187,7 +1189,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn initialize_archival_state_test() -> Result<()> {
         // Ensure that the archival state can be initialized without overflowing the stack
         let seed: [u8; 32] = rand::rng().random();
@@ -1214,7 +1216,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn archival_state_init_test() -> Result<()> {
         // Verify that archival mutator set is populated with outputs from genesis block
         let network = Network::RegTest;
@@ -1265,7 +1267,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn archival_state_restore_test() -> Result<()> {
         let mut rng = rand::rng();
         // Verify that a restored archival mutator set is populated with the right `sync_label`
@@ -1303,7 +1305,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn update_mutator_set_db_write_test() {
         // Verify that `update_mutator_set` writes the active window back to disk.
         // Creates blocks and transaction with invalid proofs.
@@ -1389,7 +1391,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Alpha;
@@ -1431,7 +1433,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn update_mutator_set_rollback_ms_block_sync_multiple_inputs_outputs_in_block_test() {
         // Make a rollback of one block that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
@@ -1524,7 +1526,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn update_mutator_set_rollback_many_blocks_multiple_inputs_outputs_test() {
         // Make a rollback of multiple blocks that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
@@ -1706,7 +1708,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         let network = Network::Main;
@@ -2223,7 +2225,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn get_tip_block_test() -> Result<()> {
         for network in [
             Network::Alpha,
@@ -2312,7 +2314,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn get_block_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Alpha;
@@ -2385,7 +2387,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_genesis() {
         let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
@@ -2427,7 +2429,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_five_blocks() {
         let network = Network::Main;
         let wallet = WalletEntropy::new_random();
@@ -2472,7 +2474,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn find_canonical_block_with_aocl_index_five_blocks() {
         let network = Network::Main;
         let wallet = WalletEntropy::new_random();
@@ -2534,7 +2536,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn find_canonical_block_with_aocl_index_genesis() {
         for network in Network::iter() {
             let archival_state = make_test_archival_state(network).await;
@@ -2566,7 +2568,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn find_canonical_block_with_output_genesis_block_test() {
         let network = Network::Main;
         let archival_state = make_test_archival_state(network).await;
@@ -2588,7 +2590,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn find_canonical_block_with_input_genesis_block_test() {
         let network = Network::Main;
         let archival_state = make_test_archival_state(network).await;
@@ -2601,7 +2603,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_fork_depth_1() {
         let mut rng = rand::rng();
         let network = Network::Main;
@@ -2645,7 +2647,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_fork_depth_2() {
         let mut rng = rand::rng();
         let network = Network::Main;
@@ -2733,7 +2735,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn find_path_simple_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::Alpha;
@@ -2817,7 +2819,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn fork_path_finding_test() -> Result<()> {
         let mut rng = rand::rng();
         // Test behavior of fork-resolution functions such as `find_path` and checking if block
@@ -3217,7 +3219,7 @@ mod archival_state_tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_belongs_to_canonical_chain_doesnt_crash_on_unknown_block() {
         let archival_state = make_test_archival_state(Network::Main).await;
         assert!(
@@ -3229,7 +3231,7 @@ mod archival_state_tests {
 
     #[should_panic]
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn digest_of_ancestors_panic_test() {
         let archival_state = make_test_archival_state(Network::Alpha).await;
 
@@ -3240,7 +3242,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn digest_of_ancestors_test() {
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(Network::Alpha).await;
@@ -3339,7 +3341,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn write_block_db_test() -> Result<()> {
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(Network::Alpha).await;
@@ -3567,7 +3569,7 @@ mod archival_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn can_initialize_mutator_set_database() {
         let args: cli_args::Args = cli_args::Args::default();
         let data_dir = DataDirectory::get(args.data_dir.clone(), args.network).unwrap();
@@ -3582,7 +3584,7 @@ mod archival_state_tests {
         use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn stored_block_hash_witness_agrees_with_block_hash() {
             let network = Network::Main;
             let mut rng = rand::rng();

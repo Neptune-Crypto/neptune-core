@@ -837,6 +837,8 @@ mod test {
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::config_models::cli_args;
@@ -888,7 +890,7 @@ mod test {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn dont_upgrade_foreign_proof_collection_if_fee_too_low() {
         let network = Network::Main;
 
@@ -954,7 +956,7 @@ mod test {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn happy_path() {
         let network = Network::Main;
 
@@ -1033,7 +1035,7 @@ mod test {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn race_condition_with_one_new_block() {
         let network = Network::Main;
 
@@ -1129,7 +1131,7 @@ mod test {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn dont_share_partly_mined_merge_upgrade() {
         let network = Network::Main;
 

@@ -556,12 +556,15 @@ impl<T> Atomic<T> for AtomicMutex<T> {
 mod tests {
     use futures::future::FutureExt;
     use tracing_test::traced_test;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     use super::*;
 
     /// Verify (compile-time) that AtomicMutex:.lock() and :.lock_mut() accept
     /// mutable values. (FnMut)
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mutable_assignment() {
         let name = "Jim".to_string();
         let mut atomic_name = AtomicMutex::from(name);
@@ -572,7 +575,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn try_acquire_no_log() {
         let unit = ();
         let atomic_unit = AtomicMutex::<()>::from(unit);
@@ -589,7 +592,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn try_acquire_with_log() {
         pub fn log_lock_event(lock_event: LockEvent) {
             let (event, info, acquisition) = match lock_event {
@@ -631,7 +634,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn lock_async() {
         struct Car {
             year: u16,

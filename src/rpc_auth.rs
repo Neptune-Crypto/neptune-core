@@ -282,6 +282,9 @@ pub mod error {
 mod test {
     use super::*;
     use crate::tests::shared::unit_test_data_directory;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     mod token {
         use super::*;
@@ -294,7 +297,7 @@ mod test {
             /// tests:
             ///  1. Token::auth() succeeds for valid token
             ///  2. Token::auth() returns AuthError::InvalidCookie for invalid token
-            #[tokio::test]
+            #[apply(shared_tokio_runtime)]
             pub async fn auth() -> anyhow::Result<()> {
                 let data_dir = unit_test_data_directory(Network::Main)?;
 
@@ -325,7 +328,7 @@ mod test {
         ///
         /// tests:
         ///  1. Verify that HashSet contains 50 items.
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         pub async fn try_new_unique() -> anyhow::Result<()> {
             const NUM_COOKIES: usize = 50;
 
@@ -352,7 +355,7 @@ mod test {
         /// tests:
         ///  1. Cookie::auth() succeeds for valid cookie
         ///  2. Cookie::auth() returns AuthError::InvalidCookie for invalid cookie
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         pub async fn auth() -> anyhow::Result<()> {
             let data_dir = unit_test_data_directory(Network::Alpha)?;
 
@@ -398,7 +401,7 @@ mod test {
         //
         // if any error occurs, the test will panic.
         #[cfg(not(target_os = "windows"))]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         pub async fn concurrency() -> anyhow::Result<()> {
             async fn add_cookie(data_dir: &DataDirectory, cookie: &Cookie) {
                 let path = data_dir.root_dir_path().join("tmp").join(cookie.as_hex());

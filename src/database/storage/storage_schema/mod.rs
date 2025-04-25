@@ -61,6 +61,9 @@ mod tests {
     use super::*;
     use crate::database::NeptuneLevelDb;
     use crate::twenty_first::math::other::random_elements;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
     struct S(Vec<u8>);
@@ -87,7 +90,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_simple_singleton() {
         let singleton_value = S([1u8, 3u8, 3u8, 7u8].to_vec());
 
@@ -150,7 +153,7 @@ mod tests {
         assert_eq!(new_singleton.get(), singleton_value);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_simple_vector() {
         // open new NeptuneLevelDb that will not be dropped on close.
         let db = NeptuneLevelDb::open_new_test_database(false, None, None, None)
@@ -399,7 +402,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_dbtcvecs_get_many() {
         const TEST_LIST_LENGTH: u8 = 105;
 
@@ -452,7 +455,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_dbtcvecs_set_many_get_many() {
         const TEST_LIST_LENGTH: u8 = 105;
 
@@ -537,7 +540,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_dbtcvecs_set_all_get_many() {
         const TEST_LIST_LENGTH: u8 = 105;
 
@@ -605,7 +608,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn storage_schema_vector_pbt() {
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
@@ -720,7 +723,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn singleton_vector_key_collision() {
         let db = NeptuneLevelDb::open_new_test_database(false, None, None, None)
             .await
@@ -753,7 +756,7 @@ mod tests {
         assert!(new_vector1.is_empty().await);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_two_vectors_and_singleton() {
         let singleton_value = S([3u8, 3u8, 3u8, 1u8].to_vec());
 
@@ -958,7 +961,7 @@ mod tests {
     #[should_panic(
         expected = "Out-of-bounds. Got 2 but length was 2. persisted vector name: test-vector"
     )]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn out_of_bounds_using_get() {
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
@@ -975,7 +978,7 @@ mod tests {
     #[should_panic(
         expected = "Out-of-bounds. Got index 2 but length was 2. persisted vector name: test-vector"
     )]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn out_of_bounds_using_get_many() {
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
@@ -992,7 +995,7 @@ mod tests {
     #[should_panic(
         expected = "Out-of-bounds. Got 1 but length was 1. persisted vector name: test-vector"
     )]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn out_of_bounds_using_set_many() {
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
@@ -1008,7 +1011,7 @@ mod tests {
     }
 
     #[should_panic(expected = "size-mismatch.  input has 2 elements and target has 1 elements")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn size_mismatch_too_many_using_set_all() {
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
@@ -1024,7 +1027,7 @@ mod tests {
     }
 
     #[should_panic(expected = "size-mismatch.  input has 1 elements and target has 2 elements")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn size_mismatch_too_few_using_set_all() {
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await
@@ -1040,7 +1043,7 @@ mod tests {
         vector.set_all([5]).await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_db_sync_and_send() {
         fn sync_and_send<T: Sync + Send>(_t: T) {}
 

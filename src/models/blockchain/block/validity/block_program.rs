@@ -360,6 +360,8 @@ pub(crate) mod test {
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::GlobalStateLock;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     impl ConsensusProgramSpecification for BlockProgram {
         fn source(&self) {
@@ -459,7 +461,7 @@ pub(crate) mod test {
     //       disallowed.
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn disallow_double_spends_across_blocks() {
         async fn mine_tx(
             state: &GlobalStateLock,

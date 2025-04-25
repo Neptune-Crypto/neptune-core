@@ -1115,6 +1115,8 @@ pub(crate) mod block_tests {
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::archival_mmr::ArchivalMmr;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
@@ -1176,7 +1178,7 @@ pub(crate) mod block_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn total_block_subsidy_is_128_coins_regardless_of_guesser_fraction() {
         let network = Network::Main;
         let a_wallet_secret = WalletEntropy::new_random();
@@ -1260,7 +1262,7 @@ pub(crate) mod block_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_difficulty_control_matches() {
         let network = Network::Main;
 
@@ -1323,7 +1325,7 @@ pub(crate) mod block_tests {
         assert_eq!(bfe_max_elem, some_threshold_actual.values()[3]);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_with_wrong_mmra_is_invalid() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
@@ -1355,7 +1357,7 @@ pub(crate) mod block_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn can_prove_block_ancestry() {
         let mut rng = rand::rng();
         let network = Network::RegTest;
@@ -1445,7 +1447,7 @@ pub(crate) mod block_tests {
         use crate::tests::shared::fake_valid_successor_for_tests;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn blocks_with_0_to_10_inputs_and_successors_are_valid() {
             // Scenario: Build different blocks of height 2, with varying number
             // of inputs. Verify all are valid. The build a block of height 3
@@ -1614,7 +1616,7 @@ pub(crate) mod block_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn block_with_far_future_timestamp_is_invalid() {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
@@ -1753,7 +1755,7 @@ pub(crate) mod block_tests {
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn guesser_fee_addition_records_are_consistent() {
             // Ensure that multiple ways of deriving guesser-fee addition
             // records are consistent.
@@ -1813,7 +1815,7 @@ pub(crate) mod block_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn guesser_fees_are_added_to_mutator_set() {
             // Mine two blocks on top of the genesis block. Verify that the guesser
             // fee for the 1st block was added to the mutator set. The genesis
@@ -1917,7 +1919,7 @@ pub(crate) mod block_tests {
     /// spend the same UTXOs over and over. To avoid doing this, you insert the
     /// transaction into the mempool thus making the wallet aware of this
     /// transaction and avoiding a double-spend of a UTXO.
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn avoid_reselecting_same_input_utxos() {
         let mut rng = StdRng::seed_from_u64(893423984854);
         let network = Network::Main;

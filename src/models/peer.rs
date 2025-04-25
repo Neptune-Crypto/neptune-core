@@ -914,6 +914,8 @@ mod tests {
     use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     impl PeerStanding {
         pub fn init(
@@ -931,7 +933,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
         let network = Network::Main;
         let genesis = Block::genesis(network);

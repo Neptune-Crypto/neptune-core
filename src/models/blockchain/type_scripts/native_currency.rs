@@ -1048,6 +1048,8 @@ pub mod test {
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::proof::Claim;
     use test_strategy::proptest;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -1466,7 +1468,7 @@ pub mod test {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn native_currency_failing_proof() {
         let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();

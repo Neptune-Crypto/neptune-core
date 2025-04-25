@@ -371,6 +371,8 @@ mod transaction_tests {
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_block_from_transaction_and_msa;
     use crate::util_types::mutator_set::commit;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     #[traced_test]
     #[test]
@@ -390,7 +392,7 @@ mod transaction_tests {
     // `traced_test` macro inserts return type that clippy doesn't like.
     // Macro is at fault.
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
             let network = Network::Main;
@@ -447,7 +449,7 @@ mod transaction_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn primitive_witness_update_properties() {
         fn update_with_block(
             to_be_updated: PrimitiveWitness,
@@ -584,7 +586,7 @@ mod transaction_tests {
     // }
 
     // #[traced_test]
-    // #[tokio::test]
+    // #[apply(shared_tokio_runtime)]
     // async fn transaction_is_valid_after_block_update_simple_test() -> Result<()> {
     //     // We need the global state to construct a transaction. This global state
     //     // has a wallet which receives a premine-UTXO.
@@ -645,7 +647,7 @@ mod transaction_tests {
     // }
 
     // #[traced_test]
-    // #[tokio::test]
+    // #[apply(shared_tokio_runtime)]
     // async fn transaction_is_valid_after_block_update_multiple_ios_test() -> Result<()> {
     //     // We need the global state to construct a transaction. This global state
     //     // has a wallet which receives a premine-UTXO.

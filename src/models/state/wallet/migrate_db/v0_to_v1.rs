@@ -156,13 +156,15 @@ mod test {
     use crate::tests::shared;
     use crate::tests::shared::unit_test_data_directory;
     use crate::DataDirectory;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     /// tests migrating a simulated v0 wallet db to v1.
     ///
     /// This test uses mock types from v0 wallet to create a v0
     /// database and then migrates it.
     #[tracing_test::traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn migrate() -> anyhow::Result<()> {
         // basics
         let network = Network::Main;
@@ -259,7 +261,7 @@ mod test {
         ignore = "Test disabled on Windows due to LevelDB cross-platform issues"
     )]
     #[tracing_test::traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn migrate_real_v0_db() -> anyhow::Result<()> {
         // basics
         let network = Network::Testnet;

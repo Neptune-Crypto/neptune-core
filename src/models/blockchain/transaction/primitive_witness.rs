@@ -1104,6 +1104,8 @@ mod test {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
     use tracing_test::traced_test;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -1748,7 +1750,7 @@ mod test {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn arb_is_valid_unit_test_small() {
         let network = Network::Main;
         for num_inputs in 0..=2 {

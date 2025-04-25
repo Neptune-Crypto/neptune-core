@@ -150,9 +150,11 @@ mod test {
     use crate::models::blockchain::block::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn genesis_test() {
         assert!(BlockHeight::genesis().is_genesis());
         assert!(!BlockHeight::genesis().next().is_genesis());

@@ -133,15 +133,18 @@ mod tests {
 
     pub mod streams {
         use trait_tests::streams as stream_tests;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
         use super::*;
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         pub async fn stream() {
             stream_tests::stream(mk_test_vec_u64()).await
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         pub async fn stream_many() {
             stream_tests::stream_many(mk_test_vec_u64()).await
         }

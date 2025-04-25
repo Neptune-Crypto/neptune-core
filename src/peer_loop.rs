@@ -1960,9 +1960,12 @@ mod peer_loop_tests {
     use crate::tests::shared::invalid_empty_single_proof_transaction;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_bye() -> Result<()> {
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
@@ -1987,7 +1990,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_peer_list() {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 2, cli_args::Args::default())
@@ -2041,7 +2044,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn different_genesis_test() -> Result<()> {
         // In this scenario a peer provides another genesis block than what has been
         // hardcoded. This should lead to the closing of the connection to this peer
@@ -2123,7 +2126,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn node_does_not_record_disconnection_time_when_peer_initiates_disconnect() -> Result<()>
     {
         let args = cli_args::Args::default();
@@ -2158,7 +2161,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_without_valid_pow_test() -> Result<()> {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
@@ -2249,7 +2252,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
         // The scenario tested here is that a client receives a block that is already
         // known and stored. The expected behavior is to ignore the block and not send
@@ -2310,7 +2313,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_request_batch_simple() {
         // Scenario: Six blocks (including genesis) are known. Peer requests
         // from all possible starting points, and client responds with the
@@ -2385,7 +2388,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_request_batch_in_order_test() -> Result<()> {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
@@ -2501,7 +2504,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_request_batch_out_of_order_test() -> Result<()> {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a batch of blocks starting from block 1, but the peer supplies their
@@ -2593,7 +2596,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn request_unknown_height_doesnt_crash() {
         // Scenario: Only genesis block is known. Peer requests block of height
         // 2.
@@ -2637,7 +2640,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a block at height 2. Verify that the correct block at height 2 is
@@ -2701,7 +2704,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn receival_of_block_notification_height_1() {
         // Scenario: client only knows genesis block. Then receives block
         // notification of height 1. Must request block 1.
@@ -2738,7 +2741,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn receive_block_request_by_height_block_7() {
         // Scenario: client only knows blocks up to height 7. Then receives block-
         // request-by-height for height 7. Must respond with block 7.
@@ -2789,7 +2792,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
 
@@ -2839,7 +2842,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 2, meaning that block 1 will have to be requested.
@@ -2911,7 +2914,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn prevent_ram_exhaustion_test() -> Result<()> {
         // In this scenario the peer sends more blocks than the client allows to store in the
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
@@ -2995,7 +2998,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
@@ -3069,7 +3072,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 3, meaning that block 2 and 1 will have to be requested.
@@ -3143,7 +3146,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
@@ -3248,7 +3251,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
         // In this scenario, the client knows the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
@@ -3354,7 +3357,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn receive_transaction_request() {
         let network = Network::Main;
         let dummy_tx = invalid_empty_single_proof_transaction();
@@ -3407,7 +3410,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn empty_mempool_request_tx_test() {
         // In this scenario the client receives a transaction notification from
         // a peer of a transaction it doesn't know; the client must then request it.
@@ -3487,7 +3490,7 @@ mod peer_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn populated_mempool_request_tx_test() -> Result<()> {
         // In this scenario the peer is informed of a transaction that it already knows
 
@@ -3618,7 +3621,7 @@ mod peer_loop_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn accept_block_proposal_height_one() {
             // Node knows genesis block, receives a block proposal for block 1
             // and must accept this. Verify that main loop is informed of block
@@ -3659,7 +3662,7 @@ mod peer_loop_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn accept_block_proposal_notification_height_one() {
             // Node knows genesis block, receives a block proposal notification
             // for block 1 and must accept this by requesting the block
@@ -3741,7 +3744,7 @@ mod peer_loop_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn client_favors_higher_proof_quality() {
             // In this scenario the peer is informed of a transaction that it
             // already knows, and it's tested that it checks the proof quality
@@ -3847,7 +3850,7 @@ mod peer_loop_tests {
         use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn bad_sync_challenge_height_greater_than_tip() {
             // Criterium: Challenge height may not exceed that of tip in the
             // request.
@@ -3918,7 +3921,7 @@ mod peer_loop_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn bad_sync_challenge_genesis_block_doesnt_crash_client() {
             // Criterium: Challenge may not point to genesis block, or block 1, as
             // tip.
@@ -3979,7 +3982,7 @@ mod peer_loop_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn sync_challenge_happy_path() -> Result<()> {
             // Bob notifies Alice of a block whose parameters satisfy the sync mode
             // criterion. Alice issues a challenge. Bob responds. Alice enters into

@@ -1862,6 +1862,8 @@ impl MainLoopHandler {
 mod test {
     use std::str::FromStr;
     use std::time::UNIX_EPOCH;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     use tracing_test::traced_test;
 
@@ -1947,7 +1949,7 @@ mod test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn handle_self_guessed_block_new_tip() {
         // A new tip is registered by main_loop. Verify correct state update.
         let TestSetup {
@@ -2040,7 +2042,7 @@ mod test {
             );
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         #[traced_test]
         async fn sync_mode_abandoned_on_global_timeout() {
             let num_outgoing_connections = 0;
@@ -2176,7 +2178,7 @@ mod test {
                 .transaction
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         #[traced_test]
         async fn upgrade_proof_collection_to_single_proof_foreign_tx() {
             let num_outgoing_connections = 0;
@@ -2310,7 +2312,7 @@ mod test {
     mod peer_discovery {
         use super::*;
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         #[traced_test]
         async fn prune_peers_too_many_connections() {
             let num_init_peers_outgoing = 10;
@@ -2339,7 +2341,7 @@ mod test {
             }
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         #[traced_test]
         async fn prune_peers_not_too_many_connections() {
             let num_init_peers_outgoing = 10;
@@ -2364,7 +2366,7 @@ mod test {
             assert!(main_to_peer_rx.is_empty());
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         #[traced_test]
         async fn skip_peer_discovery_if_peer_limit_is_exceeded() {
             let num_init_peers_outgoing = 2;
@@ -2391,7 +2393,7 @@ mod test {
             assert!(logs_contain("Skipping peer discovery."));
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         #[traced_test]
         async fn performs_peer_discovery_on_few_connections() {
             let num_init_peers_outgoing = 2;
@@ -2451,7 +2453,7 @@ mod test {
         use crate::tests::shared::get_dummy_peer_connection_data_genesis;
         use crate::tests::shared::to_bytes;
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         #[traced_test]
         async fn disconnect_from_oldest_peer_upon_connection_request() {
             // Set up a node in bootstrapper mode and connected to a given

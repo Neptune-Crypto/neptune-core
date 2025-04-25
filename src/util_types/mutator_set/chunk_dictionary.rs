@@ -217,8 +217,10 @@ mod chunk_dict_tests {
     use crate::util_types::archival_mmr::mmr_test::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn hash_test() {
         let chunkdict0 = ChunkDictionary::default();
         let chunkdict00 = ChunkDictionary::default();
@@ -280,7 +282,7 @@ mod chunk_dict_tests {
         assert_ne!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_switched));
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn serialization_test() {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy

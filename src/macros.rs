@@ -90,11 +90,11 @@ macro_rules! log_scope_duration {
     };
 }
 
+
 // These allow the macros to be used as
 // use crate::macros::xxxxx;
 //
 // see: https://stackoverflow.com/a/67140319/10087197
-
 pub(crate) use fn_name;
 pub(crate) use fn_name_bare;
 pub(crate) use log_scope_duration;
@@ -103,7 +103,7 @@ pub(crate) use state_lock_call_async;
 pub(crate) use state_lock_call_mut_async;
 
 #[cfg(test)]
-mod test {
+pub mod test {
 
     use super::*;
 

@@ -515,6 +515,8 @@ mod ms_accumulator_tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::mutator_set::shared::WINDOW_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn active_window_chunk_interval_unit_test() {
@@ -556,7 +558,7 @@ mod ms_accumulator_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mutator_set_batch_remove_accumulator_test() {
         // Test the batch-remove function for mutator set accumulator
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
@@ -618,7 +620,7 @@ mod ms_accumulator_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mutator_set_accumulator_pbt() {
         // This tests verifies that items can be added and removed from the mutator set
         // without assuming anything about the order of the adding and removal. It also
