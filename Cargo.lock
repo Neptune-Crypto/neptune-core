@@ -1703,6 +1703,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "macro_rules_attr"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac8e59369155fdc751b1f687fec504eef885545d7f131f4a19741612fc31fdc7"
+
+[[package]]
 name = "manyhow"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1859,6 +1865,7 @@ dependencies = [
  "humantime",
  "itertools 0.11.0",
  "leveldb-sys",
+ "macro_rules_attr",
  "memmap2",
  "num-bigint",
  "num-rational",

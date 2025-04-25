@@ -95,6 +95,8 @@ mod test {
     use crate::tests::shared::mock_item_and_randomnesses;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::test_shared::mutator_set::*;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn get_batch_index_test() {
@@ -129,7 +131,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mutator_set_hash_test() {
         let empty_set = MutatorSetAccumulator::default();
         let empty_hash = empty_set.hash();
@@ -220,7 +222,7 @@ mod test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn init_test() {
         let accumulator = MutatorSetAccumulator::default();
         let mut rms = empty_rusty_mutator_set().await;

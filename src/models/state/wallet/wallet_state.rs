@@ -1975,6 +1975,8 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     impl WalletState {
         /// Delete all guesser-preimage keys from database and cache.
@@ -1994,7 +1996,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn find_monitored_utxo_test() {
         let network = Network::Testnet;
@@ -2040,7 +2042,7 @@ pub(crate) mod tests {
             .is_none());
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn does_not_make_tx_with_timelocked_utxos() {
         // Ensure that timelocked UTXOs are not used when selecting input-UTXOs
@@ -2176,7 +2178,7 @@ pub(crate) mod tests {
         (block1, bob_global_lock, bob_key)
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn test_update_wallet_state_repeated_addition_records() {
         let network = Network::Main;
@@ -2286,7 +2288,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn test_invalid_type_script_states() {
         let network = Network::Main;
@@ -2386,7 +2388,7 @@ pub(crate) mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn test_unrecognized_type_script() {
         let network = Network::Main;
@@ -2488,7 +2490,7 @@ pub(crate) mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn never_store_same_utxo_twice_different_blocks() {
         let mut rng = rand::rng();
@@ -2594,7 +2596,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn never_store_same_utxo_twice_same_block() {
         let mut rng = rand::rng();
@@ -2669,7 +2671,7 @@ pub(crate) mod tests {
         assert!(wallet_state_has_all_valid_mps(&bob.wallet_state, &block1).await);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn wallet_state_prune_abandoned_mutxos() {
         // Get genesis block. Verify wallet is empty
@@ -2860,7 +2862,7 @@ pub(crate) mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mock_wallet_state_is_synchronized_to_genesis_block() {
         let network = Network::RegTest;
         let wallet = WalletEntropy::devnet_wallet();
@@ -2917,7 +2919,7 @@ pub(crate) mod tests {
         use crate::tests::shared::fake_valid_block_proposal_successor_for_test;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn registers_guesser_fee_utxos_correctly() {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
@@ -3190,7 +3192,7 @@ pub(crate) mod tests {
             }
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn guesser_fee_scanner_finds_guesser_fee_iff_present() {
             let network = Network::Main;
             let mut rng = rng();
@@ -3250,7 +3252,7 @@ pub(crate) mod tests {
         ///  5. empties the mempool (removing our unconfirmed tx)
         ///  6. verifies that unconfirmed balance is `coinbase amt`
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn confirmed_and_unconfirmed_balance() -> Result<()> {
             let network = Network::Main;
             let mut rng = StdRng::seed_from_u64(664505904);
@@ -3379,7 +3381,7 @@ pub(crate) mod tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs() {
             async fn outgoing_transaction(
                 alice_global_lock: &mut GlobalStateLock,
@@ -3527,7 +3529,7 @@ pub(crate) mod tests {
 
         /// tests that all known keys are unique, for all key types.
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn known_keys_are_unique() {
             for key_type in KeyType::all_types() {
                 worker::known_keys_are_unique(key_type).await
@@ -3536,7 +3538,7 @@ pub(crate) mod tests {
 
         /// tests that spending key counter persists across restart for all key types.
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn derivation_counter_persists_across_restart() -> Result<()> {
             for key_type in KeyType::all_types() {
                 worker::derivation_counter_persists_across_restart(key_type).await?
@@ -3666,7 +3668,7 @@ pub(crate) mod tests {
         use crate::util_types::mutator_set::commit;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn insert_and_scan() {
             let cli_args = cli_args::Args::default();
             let mut wallet =
@@ -3723,7 +3725,7 @@ pub(crate) mod tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn prune_stale() {
             let cli_args = cli_args::Args::default();
             let mut wallet =
@@ -3788,7 +3790,7 @@ pub(crate) mod tests {
         ///
         /// https://github.com/Neptune-Crypto/neptune-core/issues/172
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn persisted_exists_after_wallet_restored() {
             worker::restore_wallet(true).await
         }
@@ -3797,7 +3799,7 @@ pub(crate) mod tests {
         /// ExpectedUtxo is added, then the ExpectedUtxo will not exist after
         /// wallet is dropped from RAM and re-created from disk.
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn unpersisted_gone_after_wallet_restored() {
             worker::restore_wallet(false).await
         }
@@ -3888,7 +3890,7 @@ pub(crate) mod tests {
         use crate::tests::shared::invalid_empty_block;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn mutxos_spent_in_orphaned_blocks_are_still_spendable() {
             /// Crate an outgoing transaction. Panics on insufficient balance.
             async fn outgoing_transaction(
@@ -4037,7 +4039,7 @@ pub(crate) mod tests {
                 .is_zero());
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn abandoned_utxo_is_unsynced() {
             // 1. create a genesis state for Alice
             // 2. create block_1a where Alice gets a guesser-fee UTXO, set as tip
@@ -4133,7 +4135,7 @@ pub(crate) mod tests {
         ///    catch the UTXO.
         ///  - In the last case, her derivation counter is updated accordingly.
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn test_recovery_on_imported_wallet() {
             let network = Network::Main;
             let alice_secret = WalletEntropy::new_random();
@@ -4245,7 +4247,7 @@ pub(crate) mod tests {
             }
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn get_future_keys_do_not_modify_counters() {
             let network = Network::Main;
             let mut rng = StdRng::from_rng(&mut rng());
@@ -4308,7 +4310,7 @@ pub(crate) mod tests {
         ///     b) the relative index is smaller than num_future_keys.
         ///
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn scan_for_utxos_announced_to_future_keys_behaves() {
             let network = Network::Main;
             let seed: [u8; 32] = random();
@@ -4453,7 +4455,7 @@ pub(crate) mod tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn scan_mode_recovers_unexpected_offchain_composer_utxos() {
             // Set up Rando with scan mode active
             let network = Network::Main;
@@ -4565,19 +4567,19 @@ pub(crate) mod tests {
         use crate::PEER_CHANNEL_CAPACITY;
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn wallet_recovers_unexpected_onchain_symmetric_composer_utxos() {
             wallet_recovers_composer_utxos(FeeNotificationPolicy::OnChainSymmetric).await
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn wallet_recovers_unexpected_onchain_generation_composer_utxos() {
             wallet_recovers_composer_utxos(FeeNotificationPolicy::OnChainGeneration).await
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn wallet_recovers_expected_offchain_composer_utxos() {
             wallet_recovers_composer_utxos(FeeNotificationPolicy::OffChain).await
         }
@@ -4673,7 +4675,7 @@ pub(crate) mod tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn wallet_recovers_expected_offchain_upgrader_fee_utxos() {
             wallet_recovers_upgrader_fee_utxos_given_notification_policy(
                 FeeNotificationPolicy::OffChain,
@@ -4681,7 +4683,7 @@ pub(crate) mod tests {
             .await;
         }
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn wallet_recovers_unexpected_onchain_symmetric_upgrader_fee_utxos() {
             wallet_recovers_upgrader_fee_utxos_given_notification_policy(
                 FeeNotificationPolicy::OnChainSymmetric,
@@ -4689,7 +4691,7 @@ pub(crate) mod tests {
             .await;
         }
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn wallet_recovers_unexpected_onchain_generation_upgrader_fee_utxos() {
             wallet_recovers_upgrader_fee_utxos_given_notification_policy(
                 FeeNotificationPolicy::OnChainGeneration,

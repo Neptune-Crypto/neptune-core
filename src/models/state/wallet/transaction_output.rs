@@ -670,6 +670,8 @@ mod tests {
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::mock_genesis_global_state;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     impl TxOutput {
         pub(crate) fn with_coin(self, coin: Coin) -> Self {
@@ -695,7 +697,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_utxoreceiver_auto_not_owned_output() {
         let global_state_lock = mock_genesis_global_state(
             Network::RegTest,
@@ -744,7 +746,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_utxoreceiver_auto_owned_output() {
         let mut global_state_lock = mock_genesis_global_state(
             Network::RegTest,
@@ -819,7 +821,7 @@ mod tests {
         }
     }
     /*
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn test_tx_output_upgrade_serialization() {
             #[serde(Serialize)]
             struct TxOutputV1 {

@@ -69,13 +69,15 @@ mod wallet_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...
         wallet_state.wallet_db.monitored_utxos().get_all().await
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn wallet_state_constructor_with_genesis_block_test() {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization. For all networks.
@@ -145,7 +147,7 @@ mod wallet_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
         let mut rng = rand::rng();
         let network = Network::RegTest;
@@ -261,7 +263,7 @@ mod wallet_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn allocate_sufficient_input_funds_test() {
         // Scenario:
         // Alice is not coinbase recipient. She mines many blocks. It is tested
@@ -499,7 +501,7 @@ mod wallet_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn wallet_state_maintenence_multiple_inputs_outputs_enough_mps_test() {
         // Bob is premine receiver, Alice is not. They send coins back and forth
         // and the blockchain forks. The fork is shallower than the number of
@@ -994,7 +996,7 @@ mod wallet_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn allow_consumption_of_genesis_output_test() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
@@ -1074,7 +1076,7 @@ mod wallet_tests {
         assert_eq!(4, block_1.body().transaction_kernel.outputs.len());
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn basic_wallet_secret_functionality_test() {
         let random_wallet_secret = WalletEntropy::new_random();
         let spending_key = random_wallet_secret.nth_generation_spending_key_for_tests(0);
@@ -1239,7 +1241,7 @@ mod wallet_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn verify_premine_receipt_works_with_test_addresses() {
             let network = Network::Main;
             let cli = cli_args::Args::default();

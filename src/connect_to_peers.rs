@@ -582,9 +582,12 @@ mod connect_tests {
     use crate::tests::shared::to_bytes;
     use crate::MAGIC_STRING_REQUEST;
     use crate::MAGIC_STRING_RESPONSE;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_outgoing_connection_succeed() -> Result<()> {
         let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
@@ -655,7 +658,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Alpha;
         let (_, _, _, _, mut state_lock, own_handshake) =
@@ -789,7 +792,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn node_refuses_reconnects_within_disconnect_cooldown_period() -> Result<()> {
         let network = Network::Main;
         let reconnect_cooldown = Duration::from_secs(8);
@@ -863,7 +866,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_incoming_connection_succeed() -> Result<()> {
         // This builds a mock object which expects to have a certain
         // sequence of methods called on it: First it expects to have
@@ -912,7 +915,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
         let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
@@ -942,7 +945,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_incoming_connection_fail_bad_network() -> Result<()> {
         let other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet);
         let own_handshake = get_dummy_handshake_data_for_genesis(Network::Alpha);
@@ -975,7 +978,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_incoming_connection_fail_bad_version() {
         let mut other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet);
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
@@ -1041,7 +1044,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
         // In this scenario a node attempts to make an ingoing connection but the max
         // peer count should prevent a new incoming connection from being accepted.
@@ -1090,7 +1093,7 @@ mod connect_tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn allow_capping_number_of_peers_per_ip() {
         let allow_5_connections_from_same_ip = cli_args::Args {
             max_connections_per_ip: Some(5),
@@ -1167,7 +1170,7 @@ mod connect_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn disallow_ingoing_connections_from_banned_peers_test() -> Result<()> {
         // In this scenario a peer has been banned, and is attempting to make an ingoing
         // connection. This should not be possible.

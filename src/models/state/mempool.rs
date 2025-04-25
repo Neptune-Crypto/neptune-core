@@ -892,8 +892,10 @@ mod tests {
     use crate::tests::shared::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
     use crate::tests::shared::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::mock_genesis_global_state;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     pub async fn insert_then_get_then_remove_then_get() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
@@ -985,7 +987,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn get_densest_transactions_no_tx_cap() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
         let num_txs = 10;
@@ -1008,7 +1010,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn get_densest_transactions_with_tx_cap() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
         let num_txs = 12;
@@ -1034,7 +1036,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn most_dense_proof_collection_test() {
         let network = Network::Main;
         let sync_block = Block::genesis(network);
@@ -1089,7 +1091,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn get_sorted_iter() {
         // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
         let network = Network::Main;
@@ -1108,7 +1110,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn max_num_transactions_is_respected() {
         let network = Network::Main;
         let sync_block = Block::genesis(network);
@@ -1227,7 +1229,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn prune_stale_transactions() {
         let network = Network::Alpha;
         let genesis_block = Block::genesis(network);
@@ -1257,7 +1259,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn remove_transactions_with_block_test() {
         // Check that the mempool removes transactions that were incorporated or
         // made unconfirmable by the new block.
@@ -1529,7 +1531,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn merged_tx_kicks_out_merge_inputs() {
         /// Returns three transactions: Two transactions that are input to the
         /// transaction-merge function, and the resulting merged transaction.
@@ -1629,7 +1631,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn reorganization_does_not_crash_mempool() {
         // Verify that reorganizations do not crash the client, and other
         // qualities.
@@ -1770,7 +1772,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn conflicting_txs_preserve_highest_fee() {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let network = Network::Main;
@@ -1873,7 +1875,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn single_proof_flag_is_respected() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
@@ -1889,7 +1891,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn max_len_none() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
@@ -1908,7 +1910,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn max_len_is_respected() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
@@ -1942,7 +1944,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn get_mempool_size() {
         // Verify that the `get_size` method on mempool returns sane results
         let network = Network::Main;
@@ -2024,7 +2026,7 @@ mod tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn single_proof_always_replaces_primitive_witness() {
             let network = Network::Main;
             let pw_high_fee = tx_with_proof_type(
@@ -2055,7 +2057,7 @@ mod tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn single_proof_always_replaces_proof_collection() {
             let network = Network::Main;
             let pc_high_fee = tx_with_proof_type(
@@ -2086,7 +2088,7 @@ mod tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn proof_collection_always_replaces_proof_primitive_witness() {
             let network = Network::Main;
             let pc_high_fee = tx_with_proof_type(

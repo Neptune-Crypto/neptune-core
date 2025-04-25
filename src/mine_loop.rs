@@ -998,6 +998,9 @@ pub(crate) async fn mine(
 pub(crate) mod mine_loop_tests {
     use std::hint::black_box;
 
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
     use block_header::block_header_tests::random_block_header;
@@ -1179,8 +1182,7 @@ pub(crate) mod mine_loop_tests {
         tock
     }
 
-    #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
@@ -1351,7 +1353,7 @@ pub(crate) mod mine_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_proposal_for_height_two_is_valid() {
         // Verify that block proposals of both height 1 and 2 are valid.
         let network = Network::Main;
@@ -1417,7 +1419,7 @@ pub(crate) mod mine_loop_tests {
     /// This test is present and fails in commit
     /// b093631fd0d479e6c2cc252b08f18d920a1ec2e5 which is prior to the fix.
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mined_block_has_proof_of_work() {
         let network = Network::Main;
         let cli_args = cli_args::Args {
@@ -1483,7 +1485,7 @@ pub(crate) mod mine_loop_tests {
     /// note: this test fails in 318b7a20baf11a7a99f249660f1f70484c586012
     ///       and should always pass in later commits.
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn block_timestamp_represents_time_guessing_started() -> Result<()> {
         let network = Network::Main;
         let cli_args = cli_args::Args {
@@ -1776,14 +1778,14 @@ pub(crate) mod mine_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mine_20_blocks_in_40_seconds() -> Result<()> {
         mine_m_blocks_in_n_seconds::<20, 40>().await.unwrap();
         Ok(())
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn hash_rate_independent_of_tx_size() {
         // It's crucial that the hash rate is independent of the size of the
         // block, since miners are otherwise heavily incentivized to mine small
@@ -1803,7 +1805,7 @@ pub(crate) mod mine_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn coinbase_transaction_has_one_timelocked_and_one_liquid_output() {
         for notification_policy in [
             FeeNotificationPolicy::OffChain,

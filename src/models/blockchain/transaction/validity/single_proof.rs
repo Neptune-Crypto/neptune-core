@@ -729,6 +729,8 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     impl ConsensusProgramSpecification for SingleProof {
         fn source(&self) {
@@ -815,7 +817,7 @@ mod test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn invalid_discriminant_crashes_execution() {
         let pub_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
         for illegal_discriminant_value in bfe_array![-1, 3, 4, 1u64 << 40] {
@@ -849,7 +851,7 @@ mod test {
 
         use super::*;
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn disallow_set_merge_bit_in_pc_path() {
             let mut test_runner = TestRunner::deterministic();
             let good_primitive_witness =
@@ -899,7 +901,7 @@ mod test {
                 .unwrap();
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn can_verify_via_valid_proof_collection() {
             let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
@@ -934,7 +936,7 @@ mod test {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
             let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
@@ -972,7 +974,7 @@ mod test {
 
         use super::*;
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn can_verify_transaction_merger_without_coinbase() {
             let merge_witness = deterministic_merge_witness((2, 2, 2), (2, 2, 2)).await;
             let merge_witness = SingleProofWitness::Merger(merge_witness);
@@ -985,7 +987,7 @@ mod test {
             assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn can_verify_transaction_merger_with_coinbase() {
             let merge_witness = deterministic_merge_witness_with_coinbase(3, 3, 3).await;
             let merge_witness = SingleProofWitness::Merger(merge_witness);
@@ -1026,36 +1028,36 @@ mod test {
             assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn only_additions_small() {
             positive_prop(
                 deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await,
             );
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn only_additions_medium() {
             positive_prop(
                 deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await,
             );
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_tiny() {
             positive_prop(deterministic_update_witness_additions_and_removals(1, 1, 1).await);
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_small() {
             positive_prop(deterministic_update_witness_additions_and_removals(2, 2, 2).await);
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_midi() {
             positive_prop(deterministic_update_witness_additions_and_removals(3, 3, 3).await);
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_medium() {
             positive_prop(deterministic_update_witness_additions_and_removals(4, 4, 4).await);
         }
@@ -1205,7 +1207,7 @@ mod test {
             test_result.unwrap();
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn update_witness_negative_tests() {
             // It takes a long time to generate the witness, so we reuse it across
             // multiple tests
@@ -1220,7 +1222,7 @@ mod test {
             bad_absolute_index_set_length_too_long(&good_witness);
         }
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn disallow_update_of_tx_with_zero_inputs() {
             let only_new_additions_0_outputs =
                 deterministic_update_witness_only_additions_to_mutator_set(0, 0, 0).await;

@@ -175,7 +175,7 @@ pub(crate) mod test {
             arb::<[u8; 32]>(),
         )
             .prop_map(move |((primwit_inputs, primwit_coinbase), shuffle_seed)| {
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = crate::tests::tokio_runtime();
                 let _guard = rt.enter();
 
                 let single_proof_inputs = rt

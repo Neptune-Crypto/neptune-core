@@ -1722,11 +1722,13 @@ mod global_state_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     mod handshake {
         use super::*;
 
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn generating_own_handshake_doesnt_crash() {
             mock_genesis_global_state(
                 Network::Main,
@@ -1741,7 +1743,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn handshakes_listen_port_is_some_when_max_peers_is_default() {
             let network = Network::Main;
             let bob = mock_genesis_global_state(
@@ -1761,7 +1763,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn handshakes_listen_port_is_none_when_max_peers_is_zero() {
             let network = Network::Main;
             let mut bob = mock_genesis_global_state(
@@ -1786,7 +1788,7 @@ mod global_state_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn set_new_tip_clears_block_proposal_related_data() {
         let network = Network::Main;
         let mut bob = mock_genesis_global_state(
@@ -1816,7 +1818,7 @@ mod global_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn premine_recipient_cannot_spend_premine_before_and_can_after_release_date() {
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(u64::from_str_radix("3014221", 6).unwrap());
@@ -1942,7 +1944,7 @@ mod global_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn restore_monitored_utxos_from_recovery_data_duplicated_entries() {
         // Verify that duplicated entries in `incoming_randomness.dat` are
         // handled correctly.
@@ -2039,7 +2041,7 @@ mod global_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Main;
         let mut rng = rand::rng();
@@ -2198,7 +2200,7 @@ mod global_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let mut rng = rand::rng();
         let network = Network::RegTest;
@@ -2255,7 +2257,7 @@ mod global_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
         let network = Network::Main;
         let mut rng = rand::rng();
@@ -2348,7 +2350,7 @@ mod global_state_tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn resync_ms_membership_proofs_across_stale_fork() {
         /// Create 3 branches and return them in an array.
         ///
@@ -2548,7 +2550,7 @@ mod global_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn flaky_mutator_set_test() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         // Scenario: Three parties: Alice, Bob, and Premine Receiver, mine blocks and pass coins
@@ -2960,7 +2962,7 @@ mod global_state_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mock_global_state_is_valid() {
         // Verify that the states, not just the blocks, are valid.
 
@@ -3004,7 +3006,7 @@ mod global_state_tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn favor_incoming_block_proposal_test() {
         async fn block1_proposal(global_state_lock: &GlobalStateLock) -> Block {
             let genesis_block = Block::genesis(global_state_lock.cli().network);
@@ -3237,7 +3239,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn can_handle_deep_reorganization() {
             // Mine 60 blocks, then switch to a new chain branching off from
             // genesis block. Verify that state is integral after each block.
@@ -3307,7 +3309,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn can_store_block_without_marking_it_as_tip_1_block() {
             // Verify that [GlobalState::store_block_not_tip] stores block
             // correctly, and that [GlobalState::set_new_tip] can be used to
@@ -3366,7 +3368,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn can_jump_to_new_tip_over_blocks_that_were_never_tips() {
             let network = Network::Main;
             let wallet_secret = WalletEntropy::new_random();
@@ -3429,7 +3431,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn reorganization_with_blocks_that_were_never_tips_n_blocks_deep() {
             // Verify that [GlobalState::store_block_not_tip] stores block
             // correctly, and that [GlobalState::set_new_tip] can be used to
@@ -3476,7 +3478,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn set_new_tip_can_roll_back() {
             // Verify that [GlobalState::set_new_tip] works for rolling back the
             // blockchain to a previous block.
@@ -3587,7 +3589,7 @@ mod global_state_tests {
         }
 
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn setting_same_tip_twice_is_allowed() {
             let mut rng = rand::rng();
             let network = Network::Main;
@@ -3659,7 +3661,7 @@ mod global_state_tests {
         ///
         /// test described in [change_exists()]
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn onchain_symmetric_change_exists() {
             change_exists(UtxoNotificationMedium::OnChain, KeyType::Symmetric).await
         }
@@ -3669,7 +3671,7 @@ mod global_state_tests {
         ///
         /// test described in [change_exists()]
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn onchain_generation_change_exists() {
             change_exists(UtxoNotificationMedium::OnChain, KeyType::Generation).await
         }
@@ -3679,7 +3681,7 @@ mod global_state_tests {
         ///
         /// test described in [change_exists()]
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn offchain_symmetric_change_exists() {
             change_exists(UtxoNotificationMedium::OffChain, KeyType::Symmetric).await
         }
@@ -3689,7 +3691,7 @@ mod global_state_tests {
         ///
         /// test described in [change_exists()]
         #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn offchain_generation_change_exists() {
             change_exists(UtxoNotificationMedium::OffChain, KeyType::Generation).await
         }

@@ -470,8 +470,10 @@ mod archival_mutator_set_tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn archival_set_commitment_test() {
         let mut rms = empty_rusty_mutator_set().await;
         let archival_mutator_set = rms.ams_mut();
@@ -527,7 +529,7 @@ mod archival_mutator_set_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn archival_mutator_set_revert_add_test() {
         let mut rms = empty_rusty_mutator_set().await;
         let archival_mutator_set = rms.ams_mut();
@@ -583,7 +585,7 @@ mod archival_mutator_set_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn bloom_filter_is_reversible() {
         // With the `3086841408u32` seed a collision is generated at i = 1 and i = 38, on index 510714
         let seed_integer = 3086841408u32;
@@ -811,7 +813,7 @@ mod archival_mutator_set_tests {
     }
 
     #[should_panic(expected = "Decremented integer is already zero.")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_remove_from_active_bloom_filter_panic() {
         let mut rms = empty_rusty_mutator_set().await;
         let archival_mutator_set = rms.ams_mut();
@@ -827,7 +829,7 @@ mod archival_mutator_set_tests {
     }
 
     #[should_panic(expected = "Attempted to remove index that was not present in chunk.")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn revert_remove_invalid_panic() {
         let mut rms = empty_rusty_mutator_set().await;
         let archival_mutator_set = rms.ams_mut();
@@ -852,7 +854,7 @@ mod archival_mutator_set_tests {
             .await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn archival_mutator_set_revert_remove_test() {
         let mut rms = empty_rusty_mutator_set().await;
         let archival_mutator_set = rms.ams_mut();
@@ -909,7 +911,7 @@ mod archival_mutator_set_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn archival_set_batch_remove_simple_test() {
         let mut rms = empty_rusty_mutator_set().await;
         let archival_mutator_set = rms.ams_mut();
@@ -957,7 +959,7 @@ mod archival_mutator_set_tests {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn archival_set_batch_remove_dynamic_test() {
         let mut rms = empty_rusty_mutator_set().await;
         let archival_mutator_set = rms.ams_mut();

@@ -83,6 +83,8 @@ mod test {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::invalid_empty_block;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn cannot_transfer_blocks_that_are_not_single_proof_supported() {
@@ -102,7 +104,7 @@ mod test {
 
     // test: verify digest is the same after conversion from
     //       TransferBlock and back.
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn from_transfer_block() {
         let network = Network::Main;

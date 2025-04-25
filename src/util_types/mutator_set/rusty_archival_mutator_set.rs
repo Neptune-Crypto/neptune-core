@@ -116,8 +116,10 @@ mod tests {
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn persist_test() {
         let num_additions = 150 + 2 * BATCH_SIZE as usize;
         let num_removals = 50usize;

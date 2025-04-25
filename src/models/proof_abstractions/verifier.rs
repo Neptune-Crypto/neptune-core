@@ -87,6 +87,8 @@ pub(crate) mod test {
     use rand::Rng;
     use tasm_lib::prelude::Tip5;
     use triton_vm::prelude::BFieldCodec;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     use super::*;
 
@@ -94,7 +96,7 @@ pub(crate) mod test {
         Proof::from(Tip5::hash_varlen(&claim.encode()).values().to_vec())
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_claims_cache() {
         let network = Network::Main;
 

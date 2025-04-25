@@ -678,6 +678,8 @@ pub(crate) mod test {
     use proptest_arbitrary_interop::arb;
     use strum::EnumCount;
     use tasm_lib::triton_vm::prelude::*;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -1011,7 +1013,7 @@ pub(crate) mod test {
 
     /// A test of the simple test generator, that it leaves the expected fields
     /// untouched, or at most permuted.
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_only_additions() {
         let update_witness =
             deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await;
@@ -1024,7 +1026,7 @@ pub(crate) mod test {
 
     /// A test of the simple test generator, that it leaves the expected fields
     /// untouched, or at most permuted.
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_additions_and_removals() {
         let update_witness = deterministic_update_witness_additions_and_removals(4, 4, 4).await;
         assert_eq!(

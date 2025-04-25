@@ -369,6 +369,8 @@ pub(crate) mod mmr_test {
     use crate::database::storage::storage_vec::OrdinaryVec;
     use crate::database::NeptuneLevelDb;
     use crate::Hash;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
 
     type Storage = OrdinaryVec<Digest>;
 
@@ -400,7 +402,7 @@ pub(crate) mod mmr_test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn prune_to_num_leafs_unit_test() {
         let mut archival_mmr: ArchivalMmr<Storage> =
             mock::get_ammr_from_digests(vec![Digest::default(); 7]).await;
@@ -409,7 +411,7 @@ pub(crate) mod mmr_test {
         assert_eq!(2, archival_mmr.num_leafs().await as u64);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn prune_to_num_leafs_empty() {
         for init_size in 0..3 {
             let mut archival_mmr: ArchivalMmr<Storage> =
@@ -435,7 +437,7 @@ pub(crate) mod mmr_test {
         prop_assert_eq!(final_num_leafs, archival_mmr.num_leafs().await as u64);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn empty_mmr_behavior_test() {
         let mut archival_mmr: ArchivalMmr<Storage> = mock::get_empty_ammr().await;
         let mut accumulator_mmr: MmrAccumulator = MmrAccumulator::new_from_leafs(vec![]);
@@ -509,7 +511,7 @@ pub(crate) mod mmr_test {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn verify_against_correct_peak_test() {
         // This test addresses a bug that was discovered late in the development process
         // where it was possible to fake a verification proof by providing a valid leaf
@@ -545,7 +547,7 @@ pub(crate) mod mmr_test {
         ));
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mutate_leaf_archival_test() {
         type H = Tip5;
 
@@ -645,12 +647,12 @@ pub(crate) mod mmr_test {
             .any(|peak| *peak == accumulator_mmr_small.bag_peaks()));
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn bag_peaks_tip5_test() {
         bag_peaks_gen().await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn compare_batch_and_individual_leaf_mutation() {
         use rand::prelude::IndexedRandom;
 
@@ -690,7 +692,7 @@ pub(crate) mod mmr_test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn accumulator_mmr_mutate_leaf_test() {
         // Verify that updating leafs in archival and in accumulator MMR results in the same peaks
         // and verify that updating all leafs in an MMR results in the expected MMR
@@ -738,7 +740,7 @@ pub(crate) mod mmr_test {
         ));
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mmr_prove_verify_leaf_mutation_test() {
         for size in 1u64..150 {
             let new_leaf: Digest = random();
@@ -791,7 +793,7 @@ pub(crate) mod mmr_test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mmr_append_test() {
         // Verify that building an MMR iteratively or in *one* function call results in the same MMR
         for size in 1..260 {
@@ -848,7 +850,7 @@ pub(crate) mod mmr_test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn one_input_mmr_test() {
         type H = Tip5;
 
@@ -933,7 +935,7 @@ pub(crate) mod mmr_test {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn two_input_mmr_test() {
         let num_leaves: u64 = 3;
         let input_digests: Vec<Digest> = random_elements(num_leaves as usize);
@@ -982,7 +984,7 @@ pub(crate) mod mmr_test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn variable_size_tip5_mmr_test() {
         type H = Tip5;
 
@@ -1043,7 +1045,7 @@ pub(crate) mod mmr_test {
         }
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn remove_last_leaf_test() {
         let input_digests: Vec<Digest> = random_elements(12);
         let mut mmr: ArchivalMmr<Storage> =
@@ -1081,7 +1083,7 @@ pub(crate) mod mmr_test {
         assert!(mmr.get_latest_leaf().await.is_none());
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn remove_last_leaf_pbt() {
         let small_size: usize = 100;
         let big_size: usize = 350;
@@ -1103,7 +1105,7 @@ pub(crate) mod mmr_test {
         assert_eq!(mmr_big.count_nodes().await, mmr_small.count_nodes().await);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn variable_size_tip5_mmr_test2() {
         let node_counts: Vec<u64> = vec![
             1, 3, 4, 7, 8, 10, 11, 15, 16, 18, 19, 22, 23, 25, 26, 31, 32, 34, 35, 38, 39, 41, 42,
@@ -1198,7 +1200,7 @@ pub(crate) mod mmr_test {
     }
 
     #[cfg(debug_assertions)] // this tests get_leaf_async() use of debug_assert!()
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     #[should_panic(expected = "Leaf index out-of-bounds. Got leaf index 17 but num_leafs was 17")]
     async fn get_panics_when_out_of_bounds() {
         let digests = vec![Digest::default(); 17];
@@ -1206,7 +1208,7 @@ pub(crate) mod mmr_test {
         ammr.get_leaf_async(17).await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn leveldb_persist_storage_schema_test() {
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await

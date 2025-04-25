@@ -30,6 +30,9 @@ mod tests {
 
     use super::traits::*;
     use super::*;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     /// Return a persisted vector and a regular in-memory vector with the same elements
     async fn get_persisted_vec_with_length(
@@ -133,13 +136,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_simple_prop() {
         let ordinary_vec: OrdinaryVec<[u8; 13]> = Default::default();
         simple_prop(ordinary_vec).await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn multiple_vectors_in_one_db() {
         let mut delegated_db_vec_a: OrdinaryVec<u128> = Default::default();
         let delegated_db_vec_b: OrdinaryVec<u128> = Default::default();
@@ -153,7 +156,7 @@ mod tests {
         assert_eq!(0, delegated_db_vec_b.len().await);
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_set_many() {
         let mut delegated_db_vec_a: OrdinaryVec<u128> = Default::default();
 
@@ -188,7 +191,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn test_set_all() {
         let mut delegated_db_vec_a: OrdinaryVec<u128> = Default::default();
 
@@ -214,7 +217,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn get_many_ordering_of_outputs() {
         let mut delegated_db_vec_a: OrdinaryVec<u128> = Default::default();
 
@@ -249,7 +252,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn delegated_vec_pbt() {
         let (mut persisted_vector, mut normal_vector) =
             get_persisted_vec_with_length(10000, "vec 1").await;
@@ -329,28 +332,28 @@ mod tests {
     }
 
     #[should_panic(expected = "Out-of-bounds. Got index 3 but length was 1.")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn panic_on_out_of_bounds_get() {
         let (delegated_db_vec, _) = get_persisted_vec_with_length(1, "unit test vec 0").await;
         delegated_db_vec.get(3).await;
     }
 
     #[should_panic(expected = "Out-of-bounds. Got index 3 but length was 1.")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn panic_on_out_of_bounds_get_many() {
         let (delegated_db_vec, _) = get_persisted_vec_with_length(1, "unit test vec 0").await;
         delegated_db_vec.get_many(&[3]).await;
     }
 
     #[should_panic(expected = "index out of bounds: the len is 1 but the index is 1")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn panic_on_out_of_bounds_set() {
         let (mut delegated_db_vec, _) = get_persisted_vec_with_length(1, "unit test vec 0").await;
         delegated_db_vec.set(1, 3000).await;
     }
 
     #[should_panic(expected = "index out of bounds: the len is 1 but the index is 1")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn panic_on_out_of_bounds_set_many() {
         let (mut delegated_db_vec, _) = get_persisted_vec_with_length(1, "unit test vec 0").await;
 
@@ -359,7 +362,7 @@ mod tests {
     }
 
     #[should_panic(expected = "size-mismatch.  input has 2 elements and target has 1 elements.")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn panic_on_size_mismatch_set_all() {
         let (mut delegated_db_vec, _) = get_persisted_vec_with_length(1, "unit test vec 0").await;
 
@@ -368,7 +371,7 @@ mod tests {
     }
 
     #[should_panic(expected = "Out-of-bounds. Got index 11 but length was 11.")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn panic_on_out_of_bounds_get_even_though_value_exists_in_persistent_memory() {
         let (mut delegated_db_vec, _) = get_persisted_vec_with_length(12, "unit test vec 0").await;
         delegated_db_vec.pop().await;
@@ -376,7 +379,7 @@ mod tests {
     }
 
     #[should_panic(expected = "index out of bounds: the len is 11 but the index is 11")]
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn panic_on_out_of_bounds_set_even_though_value_exists_in_persistent_memory() {
         let (mut delegated_db_vec, _) = get_persisted_vec_with_length(12, "unit test vec 0").await;
         delegated_db_vec.pop().await;

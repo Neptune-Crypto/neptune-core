@@ -599,12 +599,15 @@ impl<T> Atomic<T> for AtomicRw<T> {
 #[cfg(test)]
 mod tests {
     use futures::future::FutureExt;
+    use macro_rules_attr::apply;
+    use crate::tests::shared_tokio_runtime;
+
 
     use super::*;
 
     /// Verify (compile-time) that AtomicRw::lock() and ::lock_mut() accept
     /// mutable values. (FnMut)
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn mutable_assignment() {
         let name = "Jim".to_string();
         let mut atomic_name = AtomicRw::from(name);
@@ -614,7 +617,7 @@ mod tests {
         atomic_name.lock_mut(|n| new_name = (*n).to_string()).await;
     }
 
-    #[tokio::test]
+    #[apply(shared_tokio_runtime)]
     async fn lock_async() {
         struct Car {
             year: u16,
