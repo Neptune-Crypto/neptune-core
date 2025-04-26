@@ -852,6 +852,7 @@ impl Mempool {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use num_bigint::BigInt;
     use num_traits::One;
     use num_traits::Zero;
@@ -892,7 +893,6 @@ mod tests {
     use crate::tests::shared::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
     use crate::tests::shared::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::mock_genesis_global_state;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]

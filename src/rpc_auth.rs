@@ -280,11 +280,11 @@ pub mod error {
 
 #[cfg(test)]
 mod test {
+    use macro_rules_attr::apply;
+
     use super::*;
     use crate::tests::shared::unit_test_data_directory;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
-
 
     mod token {
         use super::*;

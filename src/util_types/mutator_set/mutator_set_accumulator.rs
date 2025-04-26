@@ -504,19 +504,19 @@ impl MutatorSetAccumulator {
 mod ms_accumulator_tests {
     use itertools::izip;
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use proptest::prop_assert_eq;
     use rand::Rng;
     use test_strategy::proptest;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::mutator_set::shared::WINDOW_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn active_window_chunk_interval_unit_test() {

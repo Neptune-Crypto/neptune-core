@@ -90,7 +90,6 @@ macro_rules! log_scope_duration {
     };
 }
 
-
 // These allow the macros to be used as
 // use crate::macros::xxxxx;
 //

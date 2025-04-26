@@ -1693,6 +1693,7 @@ impl GlobalState {
 #[cfg(test)]
 mod global_state_tests {
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use num_traits::Zero;
     use rand::random;
     use rand::rngs::StdRng;
@@ -1722,7 +1723,6 @@ mod global_state_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     mod handshake {

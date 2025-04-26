@@ -86,6 +86,7 @@ pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) 
 
 #[cfg(test)]
 mod test {
+    use macro_rules_attr::apply;
     use rand::Rng;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use test::ms_membership_proof::MsMembershipProof;
@@ -93,10 +94,9 @@ mod test {
 
     use super::*;
     use crate::tests::shared::mock_item_and_randomnesses;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::test_shared::mutator_set::*;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn get_batch_index_test() {

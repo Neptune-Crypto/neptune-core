@@ -84,13 +84,13 @@ pub(crate) async fn cache_true_claim(claim: Claim) {
 #[cfg(test)]
 pub(crate) mod test {
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::Rng;
     use tasm_lib::prelude::Tip5;
     use triton_vm::prelude::BFieldCodec;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
 
     pub(crate) fn bogus_proof(claim: &Claim) -> Proof {
         Proof::from(Tip5::hash_varlen(&claim.encode()).values().to_vec())

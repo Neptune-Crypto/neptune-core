@@ -140,6 +140,7 @@ impl Display for BlockHeight {
 
 #[cfg(test)]
 mod test {
+    use macro_rules_attr::apply;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
     use tracing_test::traced_test;
@@ -150,7 +151,6 @@ mod test {
     use crate::models::blockchain::block::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     #[traced_test]

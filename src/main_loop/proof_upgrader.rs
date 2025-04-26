@@ -834,11 +834,10 @@ pub(super) fn get_upgrade_task_from_mempool(
 
 #[cfg(test)]
 mod test {
+    use macro_rules_attr::apply;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::config_models::cli_args;
@@ -852,6 +851,7 @@ mod test {
     use crate::tests::shared::invalid_empty_block_with_timestamp;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::state_with_premine_and_self_mined_blocks;
+    use crate::tests::shared_tokio_runtime;
     use crate::PEER_CHANNEL_CAPACITY;
 
     /// Returns a transaction initiated by the global state provided as

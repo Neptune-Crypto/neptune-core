@@ -1950,6 +1950,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use generation_address::GenerationSpendingKey;
+    use macro_rules_attr::apply;
     use rand::prelude::*;
     use rand::random;
     use rand::rng;
@@ -1975,7 +1976,6 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     impl WalletState {

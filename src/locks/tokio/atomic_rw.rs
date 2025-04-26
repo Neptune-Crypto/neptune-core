@@ -600,10 +600,9 @@ impl<T> Atomic<T> for AtomicRw<T> {
 mod tests {
     use futures::future::FutureExt;
     use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
-
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
 
     /// Verify (compile-time) that AtomicRw::lock() and ::lock_mut() accept
     /// mutable values. (FnMut)

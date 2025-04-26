@@ -1862,9 +1862,8 @@ impl MainLoopHandler {
 mod test {
     use std::str::FromStr;
     use std::time::UNIX_EPOCH;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
+    use macro_rules_attr::apply;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1873,6 +1872,7 @@ mod test {
     use crate::tests::shared::get_dummy_peer_incoming;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::invalid_empty_block;
+    use crate::tests::shared_tokio_runtime;
     use crate::MINER_CHANNEL_CAPACITY;
 
     impl MainLoopHandler {

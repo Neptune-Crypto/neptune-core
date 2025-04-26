@@ -356,6 +356,7 @@ pub(crate) mod tests {
 #[cfg(test)]
 mod transaction_tests {
     use lock_script::LockScript;
+    use macro_rules_attr::apply;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::random;
@@ -370,9 +371,8 @@ mod transaction_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_block_from_transaction_and_msa;
-    use crate::util_types::mutator_set::commit;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::mutator_set::commit;
 
     #[traced_test]
     #[test]

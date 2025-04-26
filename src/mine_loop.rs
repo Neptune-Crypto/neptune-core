@@ -998,14 +998,12 @@ pub(crate) async fn mine(
 pub(crate) mod mine_loop_tests {
     use std::hint::black_box;
 
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
-
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
     use block_header::block_header_tests::random_block_header;
     use difficulty_control::Difficulty;
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use num_bigint::BigUint;
     use num_traits::One;
     use num_traits::Pow;
@@ -1033,6 +1031,7 @@ pub(crate) mod mine_loop_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;

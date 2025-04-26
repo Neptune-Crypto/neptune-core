@@ -353,6 +353,7 @@ pub(crate) mod mmr_test {
     use std::cmp;
 
     use itertools::*;
+    use macro_rules_attr::apply;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
@@ -368,9 +369,8 @@ pub(crate) mod mmr_test {
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::storage::storage_vec::OrdinaryVec;
     use crate::database::NeptuneLevelDb;
-    use crate::Hash;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
+    use crate::Hash;
 
     type Storage = OrdinaryVec<Digest>;
 

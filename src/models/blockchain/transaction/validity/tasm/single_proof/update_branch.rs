@@ -671,6 +671,7 @@ impl BasicSnippet for UpdateBranch {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use macro_rules_attr::apply;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -678,8 +679,6 @@ pub(crate) mod test {
     use proptest_arbitrary_interop::arb;
     use strum::EnumCount;
     use tasm_lib::triton_vm::prelude::*;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -690,6 +689,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::TransactionKernelModifier;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
     // The main tests are actually in [`../../single_proof.rs`].

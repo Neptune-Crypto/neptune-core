@@ -49,6 +49,7 @@ mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::random;
     use rand::Rng;
     use rand::RngCore;
@@ -60,10 +61,8 @@ mod tests {
     use super::traits::*;
     use super::*;
     use crate::database::NeptuneLevelDb;
-    use crate::twenty_first::math::other::random_elements;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
-
+    use crate::twenty_first::math::other::random_elements;
 
     #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
     struct S(Vec<u8>);

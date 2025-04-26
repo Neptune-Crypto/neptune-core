@@ -1134,6 +1134,7 @@ impl ArchivalState {
 mod archival_state_tests {
 
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1170,9 +1171,8 @@ mod archival_state_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
-    use crate::util_types::test_shared::mutator_set::random_removal_record;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();

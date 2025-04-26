@@ -1934,6 +1934,7 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
+    use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -1960,9 +1961,7 @@ mod peer_loop_tests {
     use crate::tests::shared::invalid_empty_single_proof_transaction;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
-
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]

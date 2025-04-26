@@ -24,6 +24,7 @@ pub mod wallet_status;
 mod wallet_tests {
     use expected_utxo::ExpectedUtxo;
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
@@ -69,7 +70,6 @@ mod wallet_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
