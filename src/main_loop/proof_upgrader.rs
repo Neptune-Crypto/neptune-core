@@ -874,7 +874,7 @@ mod test {
         let mut gsm = state.lock_guard_mut().await;
         let change_key = gsm.wallet_state.next_unused_symmetric_key().await;
         drop(gsm);
-        let dummy = TritonVmJobQueue::dummy();
+        let dummy = TritonVmJobQueue::get_instance();
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key.into())
@@ -990,7 +990,7 @@ mod test {
                 UpgradeJob::from_primitive_witness(network, proving_capability, pw.to_owned());
             pw_to_tx_upgrade_job
                 .handle_upgrade(
-                    TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::get_instance(),
                     TransactionOrigin::Own,
                     true,
                     alice.clone(),
@@ -1077,7 +1077,7 @@ mod test {
 
             upgrade_job
                 .handle_upgrade(
-                    TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::get_instance(),
                     TransactionOrigin::Own,
                     true,
                     alice.clone(),
@@ -1198,7 +1198,7 @@ mod test {
             broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
         merge_upgrade_job
             .handle_upgrade(
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TransactionOrigin::Own,
                 true,
                 alice.clone(),

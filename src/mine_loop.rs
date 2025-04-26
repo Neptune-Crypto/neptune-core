@@ -1292,7 +1292,7 @@ pub(crate) mod mine_loop_tests {
                 transaction_empty_mempool,
                 now,
                 None,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::High.into(),
             )
             .await
@@ -1336,7 +1336,7 @@ pub(crate) mod mine_loop_tests {
                 transaction_non_empty_mempool,
                 now,
                 None,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await

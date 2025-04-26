@@ -855,7 +855,7 @@ mod wallet_tests {
             .merge_with(
                 tx_from_bob,
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -866,7 +866,7 @@ mod wallet_tests {
             merged_tx,
             timestamp,
             None,
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -1048,7 +1048,7 @@ mod wallet_tests {
             .merge_with(
                 cbtx,
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1058,7 +1058,7 @@ mod wallet_tests {
             tx_for_block,
             in_seven_months,
             None,
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
         .await

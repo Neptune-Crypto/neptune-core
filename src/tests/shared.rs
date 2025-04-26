@@ -787,7 +787,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         previous_block,
         composer_parameters,
         block_timestamp,
-        TritonVmJobQueue::dummy(),
+        TritonVmJobQueue::get_instance(),
         cli.proof_job_options_primitive_witness(),
     )
     .await

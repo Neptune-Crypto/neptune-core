@@ -398,7 +398,7 @@ mod transaction_tests {
             let network = Network::Main;
             let as_single_proof = SingleProof::produce(
                 &to_be_updated,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -416,7 +416,7 @@ mod transaction_tests {
                 &to_be_updated.mutator_set_accumulator,
                 &mutator_set_update,
                 original_tx.proof.into_single_proof(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
                 None,
             )

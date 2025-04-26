@@ -1844,7 +1844,7 @@ mod archival_state_tests {
             .merge_with(
                 tx_to_alice_and_bob.into(),
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1856,7 +1856,7 @@ mod archival_state_tests {
             block_tx,
             in_seven_months,
             None,
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -2097,7 +2097,7 @@ mod archival_state_tests {
             .merge_with(
                 tx_from_alice.into(),
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2105,7 +2105,7 @@ mod archival_state_tests {
             .merge_with(
                 tx_from_bob.into(),
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2115,7 +2115,7 @@ mod archival_state_tests {
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
             None,
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
         .await

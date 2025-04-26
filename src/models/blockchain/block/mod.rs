@@ -1531,7 +1531,7 @@ pub(crate) mod block_tests {
                     .merge_with(
                         (*tx2).clone(),
                         rng.random(),
-                        TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::get_instance(),
                         TritonVmProofJobOptions::default(),
                     )
                     .await
@@ -1541,7 +1541,7 @@ pub(crate) mod block_tests {
                     block2_tx,
                     plus_eight_months,
                     None,
-                    TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1586,7 +1586,7 @@ pub(crate) mod block_tests {
                     .merge_with(
                         (*tx3).clone(),
                         rng.random(),
-                        TritonVmJobQueue::dummy(),
+                        TritonVmJobQueue::get_instance(),
                         TritonVmProofJobOptions::default(),
                     )
                     .await
@@ -1600,7 +1600,7 @@ pub(crate) mod block_tests {
                     block3_tx,
                     plus_nine_months,
                     None,
-                    TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default(),
                 )
                 .await
@@ -1927,7 +1927,7 @@ pub(crate) mod block_tests {
         let mut alice =
             mock_genesis_global_state(network, 0, devnet_wallet, cli_args::Args::default()).await;
 
-        let job_queue = TritonVmJobQueue::dummy();
+        let job_queue = TritonVmJobQueue::get_instance();
 
         let genesis_block = Block::genesis(network);
 

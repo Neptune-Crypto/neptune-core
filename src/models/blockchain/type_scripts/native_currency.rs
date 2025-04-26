@@ -1500,7 +1500,7 @@ pub mod test {
                 txk_mast_hash,
                 salted_input_utxos_hash,
                 salted_output_utxos_hash,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await

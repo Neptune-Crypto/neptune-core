@@ -2690,7 +2690,7 @@ mod global_state_tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2704,7 +2704,7 @@ mod global_state_tests {
             block_transaction,
             in_seven_months,
             None,
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -2927,7 +2927,7 @@ mod global_state_tests {
             .merge_with(
                 tx_from_alice.into(),
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2935,7 +2935,7 @@ mod global_state_tests {
             .merge_with(
                 tx_from_bob.into(),
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -2950,7 +2950,7 @@ mod global_state_tests {
             block_transaction2,
             in_eight_months,
             None,
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
         .await
@@ -3880,7 +3880,7 @@ mod global_state_tests {
                     block_1_tx,
                     seven_months_post_launch,
                     None,
-                    TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::get_instance(),
                     TritonVmJobPriority::default().into(),
                 )
                 .await

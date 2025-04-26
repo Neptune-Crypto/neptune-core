@@ -484,7 +484,7 @@ pub(crate) mod test {
                 block_tx,
                 timestamp,
                 None,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default(),
             )
             .await
@@ -534,7 +534,7 @@ pub(crate) mod test {
             &genesis_block.mutator_set_accumulator_after(),
             &block1.mutator_set_update(),
             tx.proof.into_single_proof(),
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
             Some(later),
         )

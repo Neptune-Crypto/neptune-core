@@ -46,13 +46,6 @@ impl TritonVmJobQueue {
             .get_or_init(|| Arc::new(Self(JobQueue::<TritonVmJobPriority>::start())))
             .clone()
     }
-
-    /// Wrapper for Self::get_instance()
-    /// here for backwards compat with existing tests
-    #[cfg(test)]
-    pub fn dummy() -> Arc<Self> {
-        Self::get_instance()
-    }
 }
 
 /// returns a clonable reference to the single (per process) VM job queue.

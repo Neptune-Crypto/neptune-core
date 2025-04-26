@@ -4488,7 +4488,7 @@ pub(crate) mod tests {
                 &previous_block,
                 composer_parameters.clone(),
                 now,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 rando.cli().proof_job_options_primitive_witness(),
             )
             .await
@@ -4619,7 +4619,7 @@ pub(crate) mod tests {
                 &genesis_block,
                 composer_parameters.clone(),
                 now,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 global_state_lock
                     .cli()
                     .proof_job_options_primitive_witness(),
@@ -4761,7 +4761,7 @@ pub(crate) mod tests {
                 .next_unused_symmetric_key()
                 .await;
             let now = network.launch_date() + Timestamp::months(7);
-            let dummy_queue = TritonVmJobQueue::dummy();
+            let dummy_queue = TritonVmJobQueue::get_instance();
 
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(change_key.into())

@@ -862,7 +862,7 @@ mod test {
 
             let good_proof_collection = ProofCollection::produce(
                 &good_primitive_witness,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -881,7 +881,7 @@ mod test {
 
             let bad_proof_collection = ProofCollection::produce(
                 &bad_primitive_witness,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -913,7 +913,7 @@ mod test {
 
             let proof_collection = ProofCollection::produce(
                 &primitive_witness,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -953,7 +953,7 @@ mod test {
 
             let proof_collection = ProofCollection::produce(
                 &primitive_witness,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
