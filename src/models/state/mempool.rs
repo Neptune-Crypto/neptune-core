@@ -967,7 +967,7 @@ mod tests {
         for job in update_jobs {
             let updated = job
                 .upgrade(
-                    TritonVmJobQueue::dummy(),
+                    TritonVmJobQueue::get_instance(),
                     TritonVmJobPriority::Highest.into(),
                 )
                 .await
@@ -1425,7 +1425,7 @@ mod tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1503,7 +1503,7 @@ mod tests {
             .merge_with(
                 tx_by_alice_updated,
                 Default::default(),
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1547,14 +1547,14 @@ mod tests {
 
             let left_single_proof = SingleProof::produce(
                 &left,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
             let right_single_proof = SingleProof::produce(
                 &right,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await
@@ -1577,7 +1577,7 @@ mod tests {
                 left.clone(),
                 right.clone(),
                 shuffle_seed,
-                TritonVmJobQueue::dummy(),
+                TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
             .await

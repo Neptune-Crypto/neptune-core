@@ -609,7 +609,7 @@ pub mod test {
             program,
             claim.clone(),
             NonDeterminism::default(),
-            TritonVmJobQueue::dummy(),
+            TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default(),
         )
         .await
