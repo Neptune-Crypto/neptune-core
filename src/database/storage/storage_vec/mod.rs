@@ -25,14 +25,13 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::Rng;
     use rand::RngCore;
 
     use super::traits::*;
     use super::*;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
-
 
     /// Return a persisted vector and a regular in-memory vector with the same elements
     async fn get_persisted_vec_with_length(

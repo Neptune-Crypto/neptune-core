@@ -209,16 +209,16 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
 #[cfg(test)]
 mod chunk_dict_tests {
 
+    use macro_rules_attr::apply;
     use twenty_first::math::other::random_elements;
     use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::archival_mmr::mmr_test::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn hash_test() {

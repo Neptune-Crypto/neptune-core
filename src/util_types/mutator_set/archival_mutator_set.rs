@@ -459,19 +459,19 @@ where
 #[cfg(test)]
 mod archival_mutator_set_tests {
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn archival_set_commitment_test() {

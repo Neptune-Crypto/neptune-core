@@ -1092,6 +1092,7 @@ pub mod neptune_arbitrary {
 mod test {
     use itertools::izip;
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
     use num_traits::Zero;
@@ -1104,8 +1105,6 @@ mod test {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
     use tracing_test::traced_test;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -1120,6 +1119,7 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;

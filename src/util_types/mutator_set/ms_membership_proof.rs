@@ -594,6 +594,7 @@ pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembe
 mod ms_proof_tests {
     use itertools::Either;
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -603,14 +604,13 @@ mod ms_proof_tests {
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::active_window::ActiveWindow;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     #[test]
     fn mp_equality_test() {

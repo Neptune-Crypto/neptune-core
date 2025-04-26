@@ -560,6 +560,7 @@ mod connect_tests {
 
     use anyhow::bail;
     use anyhow::Result;
+    use macro_rules_attr::apply;
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
     use twenty_first::math::digest::Digest;
@@ -580,11 +581,9 @@ mod connect_tests {
     use crate::tests::shared::get_dummy_socket_address;
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::to_bytes;
+    use crate::tests::shared_tokio_runtime;
     use crate::MAGIC_STRING_REQUEST;
     use crate::MAGIC_STRING_RESPONSE;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
-
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]

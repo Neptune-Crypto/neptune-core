@@ -908,13 +908,13 @@ impl SyncChallengeResponse {
 
 #[cfg(test)]
 mod tests {
+    use macro_rules_attr::apply;
     use rand::random;
 
     use super::*;
     use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     impl PeerStanding {

@@ -1039,6 +1039,7 @@ impl SecretWitness for NativeCurrencyWitness {
 pub mod test {
     use std::panic;
 
+    use macro_rules_attr::apply;
     use num_traits::CheckedAdd;
     use num_traits::Zero;
     use proptest::collection::vec;
@@ -1048,8 +1049,6 @@ pub mod test {
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::proof::Claim;
     use test_strategy::proptest;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -1067,6 +1066,7 @@ pub mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
+    use crate::tests::shared_tokio_runtime;
 
     impl ConsensusProgramSpecification for NativeCurrency {
         fn source(&self) {

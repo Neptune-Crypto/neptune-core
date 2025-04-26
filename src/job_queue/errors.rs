@@ -15,7 +15,7 @@ pub enum JobHandleError {
     #[error("channel send error cancelling job")]
     CancelJobError(#[from] tokio::sync::watch::error::SendError<()>),
 
-    #[error("channel recv error waiting for job results")]
+    #[error("channel recv error waiting for job results: {0}")]
     JobResultError(#[from] tokio::sync::oneshot::error::RecvError),
 }
 
@@ -73,7 +73,18 @@ impl From<JobHandleError> for JobHandleErrorSync {
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
-pub enum JobQueueError {
+#[non_exhaustive]
+pub enum AddJobError {
     #[error("channel send error adding job.  error: {0}")]
-    AddJobError(String),
+    SendError(#[from] tokio::sync::mpsc::error::SendError<()>),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum StopQueueError {
+    #[error("channel send error adding job.  error: {0}")]
+    SendError(#[from] tokio::sync::watch::error::SendError<()>),
+
+    #[error("join error while waiting for job-queue to stop.  error: {0}")]
+    JoinError(#[from] tokio::task::JoinError),
 }

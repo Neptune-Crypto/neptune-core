@@ -132,12 +132,11 @@ mod tests {
     }
 
     pub mod streams {
+        use macro_rules_attr::apply;
         use trait_tests::streams as stream_tests;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
-
 
         use super::*;
+        use crate::tests::shared_tokio_runtime;
 
         #[apply(shared_tokio_runtime)]
         pub async fn stream() {

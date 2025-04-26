@@ -710,6 +710,7 @@ impl ConsensusProgram for SingleProof {
 #[cfg(test)]
 mod test {
     use assert2::let_assert;
+    use macro_rules_attr::apply;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -729,7 +730,6 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     impl ConsensusProgramSpecification for SingleProof {

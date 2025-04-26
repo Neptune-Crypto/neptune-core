@@ -139,6 +139,7 @@ mod migration {
 
 #[cfg(test)]
 mod test {
+    use macro_rules_attr::apply;
     use tasm_lib::prelude::Digest;
 
     use super::*;
@@ -155,9 +156,8 @@ mod test {
     use crate::models::state::Timestamp;
     use crate::tests::shared;
     use crate::tests::shared::unit_test_data_directory;
-    use crate::DataDirectory;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
+    use crate::DataDirectory;
 
     /// tests migrating a simulated v0 wallet db to v1.
     ///

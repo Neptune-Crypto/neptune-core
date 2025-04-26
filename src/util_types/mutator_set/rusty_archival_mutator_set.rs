@@ -108,16 +108,16 @@ impl StorageWriter for RustyArchivalMutatorSet {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::random;
     use rand::RngCore;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
     async fn persist_test() {

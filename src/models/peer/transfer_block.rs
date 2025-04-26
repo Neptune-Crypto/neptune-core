@@ -73,6 +73,7 @@ impl TryFrom<&Block> for TransferBlock {
 
 #[cfg(test)]
 mod test {
+    use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -83,7 +84,6 @@ mod test {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::invalid_empty_block;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
 
     #[test]

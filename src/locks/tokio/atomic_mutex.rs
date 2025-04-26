@@ -555,12 +555,11 @@ impl<T> Atomic<T> for AtomicMutex<T> {
 #[cfg(test)]
 mod tests {
     use futures::future::FutureExt;
-    use tracing_test::traced_test;
     use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
-
+    use tracing_test::traced_test;
 
     use super::*;
+    use crate::tests::shared_tokio_runtime;
 
     /// Verify (compile-time) that AtomicMutex:.lock() and :.lock_mut() accept
     /// mutable values. (FnMut)

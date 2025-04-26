@@ -328,6 +328,7 @@ impl ConsensusProgram for BlockProgram {
 #[cfg(test)]
 pub(crate) mod test {
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -359,9 +360,8 @@ pub(crate) mod test {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::GlobalStateLock;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
+    use crate::GlobalStateLock;
 
     impl ConsensusProgramSpecification for BlockProgram {
         fn source(&self) {

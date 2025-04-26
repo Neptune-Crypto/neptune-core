@@ -3615,6 +3615,7 @@ pub mod error {
 #[cfg(test)]
 mod rpc_server_tests {
     use anyhow::Result;
+    use macro_rules_attr::apply;
     use num_traits::One;
     use num_traits::Zero;
     use rand::rngs::StdRng;
@@ -3622,9 +3623,6 @@ mod rpc_server_tests {
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
-
 
     use super::*;
     use crate::config_models::cli_args;
@@ -3641,6 +3639,7 @@ mod rpc_server_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::unit_test_data_directory;
+    use crate::tests::shared_tokio_runtime;
     use crate::Block;
 
     async fn test_rpc_server(

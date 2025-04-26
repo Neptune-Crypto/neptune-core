@@ -1080,6 +1080,7 @@ impl Block {
 
 #[cfg(test)]
 pub(crate) mod block_tests {
+    use macro_rules_attr::apply;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1114,9 +1115,8 @@ pub(crate) mod block_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::util_types::archival_mmr::ArchivalMmr;
-    use macro_rules_attr::apply;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 

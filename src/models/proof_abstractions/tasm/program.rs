@@ -193,10 +193,9 @@ pub mod test {
     use std::path::PathBuf;
     use std::time::Duration;
     use std::time::SystemTime;
-    use macro_rules_attr::apply;
-    use crate::tests::shared_tokio_runtime;
 
     use itertools::Itertools;
+    use macro_rules_attr::apply;
     use rand::seq::SliceRandom;
     use tasm_lib::triton_vm;
     use tracing::debug;
@@ -207,6 +206,7 @@ pub mod test {
     use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::tests::shared_tokio_runtime;
     use crate::triton_vm::stark::Stark;
 
     const TEST_DATA_DIR: &str = "test_data";
