@@ -184,7 +184,7 @@ impl<'a> Arbitrary<'a> for LockScriptAndWitness {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use num_traits::Zero;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;

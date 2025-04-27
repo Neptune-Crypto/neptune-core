@@ -833,7 +833,7 @@ pub(super) fn get_upgrade_task_from_mempool(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use macro_rules_attr::apply;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;

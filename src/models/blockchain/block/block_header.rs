@@ -270,11 +270,11 @@ impl BlockHeaderWithBlockHashWitness {
 }
 
 #[cfg(test)]
-pub(crate) mod block_header_tests {
+pub(crate) mod tests {
     use rand::Rng;
 
     use super::*;
-    use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
+    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
 
     pub fn random_block_header() -> BlockHeader {
         let mut rng = rand::rng();

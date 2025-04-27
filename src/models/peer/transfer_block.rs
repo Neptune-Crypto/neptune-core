@@ -72,7 +72,7 @@ impl TryFrom<&Block> for TransferBlock {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;

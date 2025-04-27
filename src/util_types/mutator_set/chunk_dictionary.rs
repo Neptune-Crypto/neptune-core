@@ -207,7 +207,7 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
 }
 
 #[cfg(test)]
-mod chunk_dict_tests {
+mod tests {
 
     use macro_rules_attr::apply;
     use twenty_first::math::other::random_elements;
@@ -216,7 +216,7 @@ mod chunk_dict_tests {
 
     use super::*;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::archival_mmr::mmr_test::mock;
+    use crate::util_types::archival_mmr::tests::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 

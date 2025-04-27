@@ -85,12 +85,12 @@ pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) 
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use macro_rules_attr::apply;
     use rand::Rng;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-    use test::ms_membership_proof::MsMembershipProof;
-    use test::removal_record::RemovalRecord;
+    use tests::ms_membership_proof::MsMembershipProof;
+    use tests::removal_record::RemovalRecord;
 
     use super::*;
     use crate::tests::shared::mock_item_and_randomnesses;

@@ -21,7 +21,7 @@ pub(crate) mod wallet_state;
 pub mod wallet_status;
 
 #[cfg(test)]
-mod wallet_tests {
+mod tests {
     use expected_utxo::ExpectedUtxo;
     use itertools::Itertools;
     use macro_rules_attr::apply;
@@ -48,7 +48,7 @@ mod wallet_tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;

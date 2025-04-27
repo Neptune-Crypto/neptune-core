@@ -279,7 +279,7 @@ pub mod error {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use macro_rules_attr::apply;
 
     use super::*;

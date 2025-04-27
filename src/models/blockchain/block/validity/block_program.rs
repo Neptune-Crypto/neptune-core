@@ -326,7 +326,7 @@ impl ConsensusProgram for BlockProgram {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::rngs::StdRng;
@@ -346,13 +346,13 @@ pub(crate) mod test {
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::create_block_transaction_from;
     use crate::mine_loop::TxMergeOrigin;
-    use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
+    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TritonVmProofJobOptions;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::builtins::verify_stark;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::models::state::tx_creation_config::TxCreationConfig;

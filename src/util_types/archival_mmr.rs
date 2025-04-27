@@ -348,7 +348,7 @@ impl ArchivalMmr<DbtVec<Digest>> {
 }
 
 #[cfg(test)]
-pub(crate) mod mmr_test {
+pub(crate) mod tests {
 
     use std::cmp;
 

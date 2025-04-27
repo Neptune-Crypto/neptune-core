@@ -195,7 +195,7 @@ impl Distribution<Timestamp> for StandardUniform {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use test_strategy::proptest;

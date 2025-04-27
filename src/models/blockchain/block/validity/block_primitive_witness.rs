@@ -114,7 +114,7 @@ impl BlockPrimitiveWitness {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use std::sync::OnceLock;
 
     use itertools::izip;

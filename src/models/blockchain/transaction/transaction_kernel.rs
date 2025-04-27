@@ -412,7 +412,7 @@ impl TransactionKernelModifier {
 }
 
 #[cfg(test)]
-pub mod transaction_kernel_tests {
+pub mod tests {
     use itertools::Itertools;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;

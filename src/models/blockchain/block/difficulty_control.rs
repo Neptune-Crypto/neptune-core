@@ -487,7 +487,7 @@ pub(crate) fn max_cumulative_pow_after(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_bigint::BigUint;

@@ -90,7 +90,7 @@ impl BasicSnippet for NewClaim {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::HashMap;
 
     use rand::rngs::StdRng;

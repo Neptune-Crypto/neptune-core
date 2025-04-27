@@ -139,14 +139,14 @@ impl Display for BlockHeight {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use macro_rules_attr::apply;
     use num_traits::CheckedAdd;
     use num_traits::CheckedSub;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::models::blockchain::block::block_tests::PREMINE_MAX_SIZE;
+    use crate::models::blockchain::block::tests::PREMINE_MAX_SIZE;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;

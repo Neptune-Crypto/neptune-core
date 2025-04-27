@@ -457,7 +457,7 @@ where
 }
 
 #[cfg(test)]
-mod archival_mutator_set_tests {
+mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::rngs::StdRng;

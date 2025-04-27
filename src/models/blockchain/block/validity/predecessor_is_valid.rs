@@ -50,7 +50,7 @@ impl ConsensusProgram for PredecessorIsValid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
 
     impl ConsensusProgramSpecification for PredecessorIsValid {
         fn source(&self) {

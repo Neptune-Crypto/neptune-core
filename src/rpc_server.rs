@@ -3613,7 +3613,7 @@ pub mod error {
 }
 
 #[cfg(test)]
-mod rpc_server_tests {
+mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
     use num_traits::One;
@@ -3628,7 +3628,7 @@ mod rpc_server_tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+    use crate::models::blockchain::transaction::transaction_kernel::tests::pseudorandom_transaction_kernel;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;

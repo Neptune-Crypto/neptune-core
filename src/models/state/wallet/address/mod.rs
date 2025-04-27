@@ -29,7 +29,7 @@ pub type SpendingKey = AddressableKey;
 pub use receiving_address::ReceivingAddress;
 
 #[cfg(test)]
-mod test {
+mod tests {
     use generation_address::GenerationReceivingAddress;
     use generation_address::GenerationSpendingKey;
     use proptest_arbitrary_interop::arb;

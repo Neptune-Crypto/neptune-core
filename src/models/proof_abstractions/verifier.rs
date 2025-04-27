@@ -82,7 +82,7 @@ pub(crate) async fn cache_true_claim(claim: Claim) {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::Rng;

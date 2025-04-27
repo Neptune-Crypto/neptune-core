@@ -4117,7 +4117,7 @@ pub(crate) mod tests {
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
-        use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+        use crate::models::blockchain::transaction::transaction_kernel::tests::pseudorandom_transaction_kernel;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
 

@@ -1933,7 +1933,7 @@ impl PeerLoopHandler {
 }
 
 #[cfg(test)]
-mod peer_loop_tests {
+mod tests {
     use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;

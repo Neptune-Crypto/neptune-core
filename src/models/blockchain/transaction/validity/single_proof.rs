@@ -708,7 +708,7 @@ impl ConsensusProgram for SingleProof {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use assert2::let_assert;
     use macro_rules_attr::apply;
     use proptest::prelude::Strategy;
@@ -723,11 +723,11 @@ mod test {
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
-    use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::test::deterministic_merge_witness;
-    use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_only_additions_to_mutator_set;
+    use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness;
+    use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::tests::deterministic_update_witness_only_additions_to_mutator_set;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
@@ -970,7 +970,7 @@ mod test {
     }
 
     mod merge_tests {
-        use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::test::deterministic_merge_witness_with_coinbase;
+        use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase;
 
         use super::*;
 
@@ -1010,7 +1010,7 @@ mod test {
         use twenty_first::prelude::Mmr;
 
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_additions_and_removals;
+        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::tests::deterministic_update_witness_additions_and_removals;
         use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
         use super::*;

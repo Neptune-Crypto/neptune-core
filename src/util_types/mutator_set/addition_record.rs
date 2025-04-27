@@ -44,7 +44,7 @@ impl Display for AdditionRecord {
 }
 
 #[cfg(test)]
-mod addition_record_tests {
+mod tests {
     use rand::random;
 
     use super::*;

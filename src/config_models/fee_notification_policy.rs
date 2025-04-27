@@ -46,7 +46,7 @@ impl From<FeeNotificationPolicy> for UtxoNotificationMedium {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::FeeNotificationPolicy;
 
     #[test]

@@ -553,7 +553,7 @@ pub(crate) async fn close_peer_connected_callback(
 }
 
 #[cfg(test)]
-mod connect_tests {
+mod tests {
     use std::str::FromStr;
     use std::time::Duration;
     use std::time::SystemTime;

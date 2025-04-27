@@ -472,12 +472,12 @@ impl ProofCollection {
 }
 
 #[cfg(test)]
-pub mod test {
+pub mod tests {
     use proptest::prop_assert;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
 
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(

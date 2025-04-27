@@ -559,7 +559,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use std::cmp::max;
 
     use arbitrary::Arbitrary;

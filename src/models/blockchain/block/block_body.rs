@@ -149,7 +149,7 @@ impl MastHash for BlockBody {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest::prelude::BoxedStrategy;
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;

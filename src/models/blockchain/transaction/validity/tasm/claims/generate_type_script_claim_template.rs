@@ -96,7 +96,7 @@ impl BasicSnippet for GenerateTypeScriptClaimTemplate {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::HashMap;
 
     use proptest::prelude::Strategy;

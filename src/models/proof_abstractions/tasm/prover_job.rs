@@ -26,7 +26,7 @@ use crate::macros::log_scope_duration;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 #[cfg(test)]
-use crate::models::proof_abstractions::tasm::program::test;
+use crate::models::proof_abstractions::tasm::program::tests;
 use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
@@ -291,7 +291,7 @@ impl ProverJob {
             let _dummy = rx;
             _ = ProverProcessCompletion::Cancelled;
 
-            let proof = test::load_proof_or_produce_and_save(
+            let proof = tests::load_proof_or_produce_and_save(
                 &self.claim,
                 self.program.clone(),
                 self.nondeterminism.clone(),

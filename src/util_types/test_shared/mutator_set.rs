@@ -414,7 +414,7 @@ fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: 
 }
 
 #[cfg(test)]
-mod shared_tests_test {
+mod tests {
     use macro_rules_attr::apply;
 
     use super::*;

@@ -112,7 +112,7 @@ impl WalletConfiguration {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
 
     use super::*;
     use crate::config_models::cli_args::Args;

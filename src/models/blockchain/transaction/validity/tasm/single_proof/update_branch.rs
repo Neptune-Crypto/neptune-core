@@ -670,7 +670,7 @@ impl BasicSnippet for UpdateBranch {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use macro_rules_attr::apply;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
