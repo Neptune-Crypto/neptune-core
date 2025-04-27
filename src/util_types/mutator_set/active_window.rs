@@ -175,7 +175,7 @@ impl ActiveWindow {
 }
 
 #[cfg(test)]
-mod active_window_tests {
+mod tests {
     use rand::RngCore;
 
     use super::*;

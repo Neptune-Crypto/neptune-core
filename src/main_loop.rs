@@ -737,7 +737,7 @@ impl MainLoopHandler {
                         // twice. That should be OK though, as the appropriate
                         // database entries are simply overwritten with the new
                         // block info. See the
-                        // [GlobalState::test::setting_same_tip_twice_is_allowed]
+                        // [GlobalState::tests::setting_same_tip_twice_is_allowed]
                         // test for a test of this phenomenon.
 
                         let update_jobs_ = global_state_mut.set_new_tip(new_block).await?;
@@ -1859,7 +1859,7 @@ impl MainLoopHandler {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::str::FromStr;
     use std::time::UNIX_EPOCH;
 

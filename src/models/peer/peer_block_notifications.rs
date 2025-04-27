@@ -28,7 +28,7 @@ impl From<&Block> for PeerBlockNotification {
 #[cfg(test)]
 mod tests {
     use super::PeerBlockNotification;
-    use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
+    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
 
     #[test]
     fn block_notification_hash_matches_block_hash() {

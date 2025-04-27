@@ -501,7 +501,7 @@ impl MutatorSetAccumulator {
 }
 
 #[cfg(test)]
-mod ms_accumulator_tests {
+mod tests {
     use itertools::izip;
     use itertools::Itertools;
     use macro_rules_attr::apply;

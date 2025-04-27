@@ -138,7 +138,7 @@ mod migration {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use macro_rules_attr::apply;
     use tasm_lib::prelude::Digest;
 

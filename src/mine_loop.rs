@@ -995,12 +995,12 @@ pub(crate) async fn mine(
 }
 
 #[cfg(test)]
-pub(crate) mod mine_loop_tests {
+pub(crate) mod tests {
     use std::hint::black_box;
 
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
-    use block_header::block_header_tests::random_block_header;
+    use block_header::tests::random_block_header;
     use difficulty_control::Difficulty;
     use itertools::Itertools;
     use macro_rules_attr::apply;
@@ -1015,7 +1015,7 @@ pub(crate) mod mine_loop_tests {
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
+    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;

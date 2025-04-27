@@ -1691,7 +1691,7 @@ impl GlobalState {
 }
 
 #[cfg(test)]
-mod global_state_tests {
+mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use num_traits::Zero;
@@ -1710,7 +1710,7 @@ mod global_state_tests {
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;

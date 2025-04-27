@@ -47,7 +47,7 @@ pub trait MastHash {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use strum::EnumCount;
     use strum::FromRepr;
 

@@ -151,7 +151,7 @@ pub fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8
 }
 
 #[cfg(test)]
-pub(super) mod test {
+pub(super) mod tests {
     use rand::Rng;
     use rand::TryRngCore;
 

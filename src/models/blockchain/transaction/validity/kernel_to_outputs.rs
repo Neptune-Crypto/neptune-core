@@ -348,7 +348,7 @@ impl ConsensusProgram for KernelToOutputs {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
@@ -358,8 +358,8 @@ mod test {
     use super::*;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::triton_vm::proof::Claim;
     use crate::triton_vm::stark::Stark;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;

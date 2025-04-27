@@ -899,7 +899,7 @@ impl BasicSnippet for MergeBranch {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use itertools::Itertools;
     use num_traits::CheckedAdd;
     use proptest::strategy::Strategy;

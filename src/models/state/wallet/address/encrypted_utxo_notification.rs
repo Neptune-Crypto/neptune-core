@@ -122,7 +122,7 @@ impl EncryptedUtxoNotification {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use bech32::FromBase32;

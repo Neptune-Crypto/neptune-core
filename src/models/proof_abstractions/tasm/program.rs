@@ -182,7 +182,7 @@ pub struct TritonVmProofJobOptions {
 }
 
 #[cfg(test)]
-pub mod test {
+pub mod tests {
     use std::fs::create_dir_all;
     use std::fs::File;
     use std::io::stdout;

@@ -291,12 +291,27 @@ impl Transaction {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use lock_script::LockScript;
+    use macro_rules_attr::apply;
+    use proptest::prelude::Strategy;
+    use proptest::test_runner::TestRunner;
+    use rand::random;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm::prelude::Tip5;
     use tests::primitive_witness::SaltedUtxos;
+    use tests::utxo::Utxo;
+    use tracing_test::traced_test;
 
     use super::*;
+    use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::mock_block_from_transaction_and_msa;
+    use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl Transaction {
@@ -351,28 +366,6 @@ pub(crate) mod tests {
         let decoded = *PrimitiveWitness::decode(&encoded).unwrap();
         assert_eq!(primitive_witness, decoded);
     }
-}
-
-#[cfg(test)]
-mod transaction_tests {
-    use lock_script::LockScript;
-    use macro_rules_attr::apply;
-    use proptest::prelude::Strategy;
-    use proptest::test_runner::TestRunner;
-    use rand::random;
-    use tasm_lib::triton_vm::prelude::Tip5;
-    use tracing_test::traced_test;
-    use transaction_tests::utxo::Utxo;
-
-    use super::*;
-    use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::tests::shared::make_mock_transaction;
-    use crate::tests::shared::mock_block_from_transaction_and_msa;
-    use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::commit;
 
     #[traced_test]
     #[test]

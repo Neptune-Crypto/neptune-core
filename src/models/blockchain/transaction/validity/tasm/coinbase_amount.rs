@@ -135,7 +135,7 @@ impl BasicSnippet for CoinbaseAmount {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::HashMap;
 
     use arbitrary::Unstructured;

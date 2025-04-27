@@ -106,7 +106,7 @@ impl CoinWithPossibleTimeLock {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use rand::Rng;

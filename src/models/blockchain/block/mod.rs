@@ -1079,7 +1079,7 @@ impl Block {
 }
 
 #[cfg(test)]
-pub(crate) mod block_tests {
+pub(crate) mod tests {
     use macro_rules_attr::apply;
     use rand::random;
     use rand::rngs::StdRng;
@@ -1098,8 +1098,8 @@ pub(crate) mod block_tests {
     use crate::database::NeptuneLevelDb;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::mine_loop::composer_parameters::ComposerParameters;
-    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::mine_loop::prepare_coinbase_transaction_stateless;
+    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
@@ -1441,7 +1441,7 @@ pub(crate) mod block_tests {
 
         use super::*;
         use crate::job_queue::triton_vm::TritonVmJobPriority;
-        use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+        use crate::mine_loop::tests::make_coinbase_transaction_from_state;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;

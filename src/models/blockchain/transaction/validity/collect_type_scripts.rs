@@ -317,7 +317,7 @@ impl From<&PrimitiveWitness> for CollectTypeScriptsWitness {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -332,8 +332,8 @@ mod test {
     use super::*;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     impl ConsensusProgramSpecification for CollectTypeScripts {

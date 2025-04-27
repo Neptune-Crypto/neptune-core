@@ -198,7 +198,7 @@ impl From<&PrimitiveWitness> for CollectLockScriptsWitness {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
@@ -208,8 +208,8 @@ mod test {
 
     use super::*;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
 
     impl ConsensusProgramSpecification for CollectLockScripts {
         fn source(&self) {

@@ -1131,7 +1131,7 @@ impl ArchivalState {
 }
 
 #[cfg(test)]
-mod archival_state_tests {
+mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
@@ -1150,7 +1150,7 @@ mod archival_state_tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;

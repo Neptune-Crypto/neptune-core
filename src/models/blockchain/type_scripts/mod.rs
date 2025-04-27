@@ -145,7 +145,7 @@ impl std::hash::Hash for TypeScriptAndWitness {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;

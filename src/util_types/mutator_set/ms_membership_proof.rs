@@ -591,7 +591,7 @@ pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembe
 }
 
 #[cfg(test)]
-mod ms_proof_tests {
+mod tests {
     use itertools::Either;
     use itertools::Itertools;
     use macro_rules_attr::apply;

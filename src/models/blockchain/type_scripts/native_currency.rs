@@ -1036,7 +1036,7 @@ impl SecretWitness for NativeCurrencyWitness {
 }
 
 #[cfg(test)]
-pub mod test {
+pub mod tests {
     use std::panic;
 
     use macro_rules_attr::apply;
@@ -1058,12 +1058,12 @@ pub mod test {
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::type_scripts::native_currency_amount::test::invalid_positive_amount;
+    use crate::models::blockchain::type_scripts::native_currency_amount::tests::invalid_positive_amount;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;

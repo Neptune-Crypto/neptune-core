@@ -102,7 +102,7 @@ pub(crate) use state_lock_call_async;
 pub(crate) use state_lock_call_mut_async;
 
 #[cfg(test)]
-pub mod test {
+pub mod tests {
 
     use super::*;
 

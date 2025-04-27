@@ -376,7 +376,7 @@ pub(crate) enum RemovalRecordValidityError {
 }
 
 #[cfg(test)]
-mod removal_record_tests {
+mod tests {
     use itertools::Itertools;
     use rand::prelude::IndexedRandom;
     use rand::Rng;

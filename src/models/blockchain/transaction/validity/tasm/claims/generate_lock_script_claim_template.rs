@@ -66,7 +66,7 @@ impl BasicSnippet for GenerateLockScriptClaimTemplate {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::HashMap;
 
     use proptest::prelude::Strategy;

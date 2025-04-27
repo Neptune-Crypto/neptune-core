@@ -998,7 +998,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest::collection::vec;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
@@ -1014,8 +1014,8 @@ mod test {
     use super::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use super::*;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
 
     impl ConsensusProgramSpecification for TimeLock {
         #[expect(clippy::needless_return)]

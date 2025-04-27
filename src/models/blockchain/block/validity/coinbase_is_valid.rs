@@ -52,7 +52,7 @@ impl ConsensusProgram for CoinbaseIsValid {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+    use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
 
     impl ConsensusProgramSpecification for CoinbaseIsValid {
         fn source(&self) {

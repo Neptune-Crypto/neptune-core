@@ -124,7 +124,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use itertools::Itertools;
     use proptest::collection::vec;
     use proptest::prelude::*;

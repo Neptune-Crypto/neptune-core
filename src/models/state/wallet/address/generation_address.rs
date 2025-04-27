@@ -425,7 +425,7 @@ impl GenerationReceivingAddress {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     mod generation_spending_key {

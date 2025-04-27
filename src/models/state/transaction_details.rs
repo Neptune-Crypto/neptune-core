@@ -325,7 +325,7 @@ impl TransactionDetails {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 

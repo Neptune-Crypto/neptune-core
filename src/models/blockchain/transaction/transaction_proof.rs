@@ -123,7 +123,7 @@ pub enum TransactionProofError {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::twenty_first::bfe_vec;
     use crate::BFieldElement;

@@ -276,7 +276,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use proptest::prelude::*;
     use rand::Rng;
     use test_strategy::proptest;

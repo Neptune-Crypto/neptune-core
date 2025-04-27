@@ -584,7 +584,7 @@ impl From<&Args> for TritonVmProofJobOptions {
 }
 
 #[cfg(test)]
-mod cli_args_tests {
+mod tests {
     use std::net::Ipv6Addr;
     use std::ops::RangeBounds;
 

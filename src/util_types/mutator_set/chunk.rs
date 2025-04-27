@@ -130,7 +130,7 @@ impl<'a> Arbitrary<'a> for Chunk {
 }
 
 #[cfg(test)]
-mod chunk_tests {
+mod tests {
     use std::collections::HashSet;
 
     use num_traits::Zero;

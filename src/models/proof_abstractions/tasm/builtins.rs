@@ -360,7 +360,7 @@ pub fn verify_mmr_successor_proof(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use tasm_lib::verifier::stark_verify::StarkVerify;
 
     use super::*;

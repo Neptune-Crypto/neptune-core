@@ -1089,7 +1089,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use itertools::izip;
     use itertools::Itertools;
     use macro_rules_attr::apply;
