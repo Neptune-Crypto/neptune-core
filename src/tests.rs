@@ -21,7 +21,7 @@ macro_rules! shared_tokio_runtime {
         fn $fn_name() $(-> $ret)? { // Propagate the return type to the #[test] fn
             let runtime = $crate::tests::tokio_runtime();
             runtime.block_on(async {
-                async fn __inner() $(-> $ret)? {
+                $vis async fn __inner() $(-> $ret)? {
                     $($tt)*
                 }
                 __inner().await // Return the awaited result

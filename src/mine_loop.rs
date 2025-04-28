@@ -1181,6 +1181,7 @@ pub(crate) mod mine_loop_tests {
         tock
     }
 
+    #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
         // Verify that a block template made with transaction from the mempool is a valid block
