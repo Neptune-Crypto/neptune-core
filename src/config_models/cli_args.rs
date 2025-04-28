@@ -209,7 +209,7 @@ pub struct Args {
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
-    pub(crate) listen_addr: IpAddr,
+    pub listen_addr: IpAddr,
 
     /// Maximum number of blocks that the client can catch up to without going
     /// into sync mode.

@@ -1,6 +1,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -48,6 +50,9 @@ impl GenesisNode {
     pub fn default_args() -> Args {
         let mut args = Args::default();
         args.network = Network::RegTest;
+
+        // ensure we bind to localhost so windows firewall does not prevent/block
+        args.listen_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
         // we default proving capability to primitive-witness as lowest common
         // denominator and because otherwise dev machines often miss this case.
