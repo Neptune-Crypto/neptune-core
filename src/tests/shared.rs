@@ -20,17 +20,15 @@ use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use proptest::collection::vec;
+use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
+use proptest::prop_compose;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
 use proptest_arbitrary_interop::arb;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
-use rand::random;
-use rand::rngs::StdRng;
 use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -68,14 +66,14 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::propcompose_txkernel_with_lengths;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -115,6 +113,37 @@ use crate::HandshakeData;
 use crate::RPCServerToMain;
 use crate::PEER_CHANNEL_CAPACITY;
 use crate::VERSION;
+
+/// Ubiquitous container holding any combination of randomness used in the test helpers; implements both
+/// random and `proptest` generation. Useful when helper needs few random values and a call to it becomes
+/// cluttered.
+#[derive(arbitrary::Arbitrary, Debug, Clone, PartialEq, Eq)]
+pub struct Randomness<const BA: usize, const D: usize> {
+    pub bytes_arr: [[u8; 32]; BA],
+    pub digests: [Digest; D],
+}
+impl<const BA: usize, const D: usize> rand::distr::Distribution<Randomness<BA, D>>
+    for rand::distr::StandardUniform
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Randomness<BA, D> {
+        let mut bytes = [[Default::default(); 32]; BA];
+        let mut digests = [Default::default(); D];
+        bytes.iter_mut().for_each(|b| rng.fill_bytes(b));
+        digests.iter_mut().for_each(|d| *d = rng.random());
+        Randomness {
+            bytes_arr: bytes,
+            digests,
+        }
+    }
+}
+impl<const BA: usize, const D: usize> Default for Randomness<BA, D> {
+    fn default() -> Self {
+        Self {
+            bytes_arr: [[Default::default(); 32]; BA],
+            digests: [Default::default(); D],
+        }
+    }
+}
 
 /// Return an empty peer map
 pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
@@ -265,10 +294,9 @@ pub(crate) async fn mock_genesis_global_state(
 /// A state with a premine UTXO and self-mined blocks. Both composing and
 /// guessing was done by the returned entity. Tip has height of
 /// `num_blocks_mined`.
-pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
+pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MINED: usize>(
     cli_args: cli_args::Args,
-    rng: &mut T,
-    num_blocks_mined: usize,
+    coinbase_sender_randomness_coll: [Digest; NUM_BLOCKS_MINED],
 ) -> GlobalStateLock {
     let wallet = WalletEntropy::devnet_wallet();
     let own_key = wallet.nth_generation_spending_key_for_tests(0);
@@ -277,15 +305,14 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
         mock_genesis_global_state(network, 2, wallet.clone(), cli_args).await;
     let mut previous_block = Block::genesis(network);
 
-    for _ in 0..num_blocks_mined {
-        let guesser_preimage = wallet.guesser_preimage(previous_block.hash());
+    for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
             &previous_block,
             None,
             own_key,
-            rng.random(),
+            coinbase_sender_randomness,
             0.5,
-            guesser_preimage,
+            wallet.guesser_preimage(previous_block.hash()),
         )
         .await;
 
@@ -453,63 +480,12 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
-pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    if rng.next_u32() % 2 == 0 {
-        None
-    } else {
-        Some(thing)
+// TODO ditch this by rewriting the underlying `Strategy` with `IntoRange`
+prop_compose! {
+    pub fn propcompose_txkernel() (num_inputs in 1usize..=5, num_outputs in 1usize..=6, num_public_announcements in 0usize..5)
+    (r in propcompose_txkernel_with_lengths(num_inputs, num_outputs, num_public_announcements)) -> TransactionKernel {
+        r
     }
-}
-
-pub fn pseudorandom_amount(seed: [u8; 32]) -> NativeCurrencyAmount {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let number: u128 = rng.random::<u128>() >> 10;
-    NativeCurrencyAmount::from_nau(number.try_into().unwrap())
-}
-
-pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    (
-        rng.random(),
-        NativeCurrencyAmount::coins(rng.random_range(0..42000000)).to_native_coins(),
-    )
-        .into()
-}
-
-pub fn random_transaction_kernel() -> TransactionKernel {
-    let mut rng = rand::rng();
-    let num_inputs = 1 + (rng.next_u32() % 5) as usize;
-    let num_outputs = 1 + (rng.next_u32() % 6) as usize;
-    let num_public_announcements = (rng.next_u32() % 5) as usize;
-    pseudorandom_transaction_kernel(
-        rng.random(),
-        num_inputs,
-        num_outputs,
-        num_public_announcements,
-    )
-}
-
-pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let len = 10 + (rng.next_u32() % 50) as usize;
-    let message = (0..len).map(|_| rng.random()).collect_vec();
-    PublicAnnouncement { message }
-}
-
-pub fn random_public_announcement() -> PublicAnnouncement {
-    let mut rng = rand::rng();
-    pseudorandom_public_announcement(rng.random::<[u8; 32]>())
-}
-
-pub fn random_amount() -> NativeCurrencyAmount {
-    let mut rng = rand::rng();
-    pseudorandom_amount(rng.random::<[u8; 32]>())
-}
-
-pub fn random_option<T>(thing: T) -> Option<T> {
-    let mut rng = rand::rng();
-    pseudorandom_option(rng.random::<[u8; 32]>(), thing)
 }
 
 pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
@@ -637,14 +613,6 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     }
 }
 
-pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
-    let mut rng = rand::rng();
-    let item: Digest = rng.random();
-    let sender_randomness: Digest = rng.random();
-    let receiver_preimage: Digest = rng.random();
-    (item, sender_randomness, receiver_preimage)
-}
-
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord>,
@@ -652,27 +620,21 @@ pub fn make_mock_transaction_with_wallet(
     fee: NativeCurrencyAmount,
     _wallet_state: &WalletState,
     timestamp: Option<Timestamp>,
-) -> Transaction {
-    let timestamp = match timestamp {
-        Some(ts) => ts,
-        None => Timestamp::now(),
-    };
-    let kernel = TransactionKernelProxy {
+) -> BoxedStrategy<Transaction> {
+    transaction_kernel::transaction_kernel_tests::propcompose_txkernel_with_usualtxdata(
         inputs,
         outputs,
-        public_announcements: vec![],
         fee,
-        timestamp,
-        coinbase: None,
-        mutator_set_hash: random(),
-        merge_bit: false,
-    }
-    .into_kernel();
-
-    Transaction {
+        match timestamp {
+            Some(ts) => ts,
+            None => Timestamp::now(),
+        },
+    )
+    .prop_map(|kernel| Transaction {
         kernel,
         proof: TransactionProof::invalid(),
-    }
+    })
+    .boxed()
 }
 
 /// Create a block containing the supplied transaction kernel, starting from
@@ -760,19 +722,16 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
-    seed: [u8; 32],
+    coinbase_sender_randomness: Digest,
     guesser_fraction: f64,
     guesser_preimage: Digest,
 ) -> (Block, Vec<ExpectedUtxo>) {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-
     // Build coinbase UTXO and associated data
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
         None => previous_block.kernel.header.timestamp + TARGET_BLOCK_INTERVAL,
     };
 
-    let coinbase_sender_randomness: Digest = rng.random();
     let composer_parameters = ComposerParameters::new(
         composer_key.to_address().into(),
         coinbase_sender_randomness,
@@ -819,13 +778,13 @@ pub(crate) async fn make_mock_block(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
-    seed: [u8; 32],
+    coinbase_sender_randomness: Digest,
 ) -> (Block, Vec<ExpectedUtxo>) {
     make_mock_block_guesser_preimage_and_guesser_fraction(
         previous_block,
         block_timestamp,
         composer_key,
-        seed,
+        coinbase_sender_randomness,
         0f64,
         Digest::default(),
     )
@@ -971,13 +930,12 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 pub(crate) async fn fake_valid_block_from_tx_for_tests(
     predecessor: &Block,
     tx: Transaction,
-    seed: [u8; 32],
+    nonce: Digest,
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx).await;
 
-    let mut rng = StdRng::from_seed(seed);
     while !block.has_proof_of_work(predecessor.header()) {
-        mine_iteration_for_tests(&mut block, &mut rng);
+        mine_iteration_for_tests(&mut block, nonce);
     }
 
     block
@@ -1060,10 +1018,9 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         selected_mempool_txs = vec![nop_transaction];
     }
 
-    let mut rng = StdRng::from_seed(shuffle_seed);
     for tx_to_include in selected_mempool_txs {
         block_transaction =
-            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
+            fake_merge_transactions_for_tests(block_transaction, tx_to_include, shuffle_seed)
                 .await
                 .expect("Must be able to merge transactions in mining context");
     }
@@ -1074,16 +1031,16 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
 async fn fake_block_successor(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
     with_valid_pow: bool,
+    rness: Randomness<1, 3>,
     network: Network,
 ) -> Block {
     fake_block_successor_with_merged_tx(
         predecessor,
         timestamp,
-        seed,
         with_valid_pow,
         vec![],
+        rness,
         network,
     )
     .await
@@ -1092,16 +1049,15 @@ async fn fake_block_successor(
 pub async fn fake_block_successor_with_merged_tx(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
     with_valid_pow: bool,
     txs: Vec<Transaction>,
+    rness: Randomness<1, 3>,
     network: Network,
 ) -> Block {
-    let mut rng = StdRng::from_seed(seed);
-
+    let (mut seed_bytes, mut seed_digests) = (rness.bytes_arr.to_vec(), rness.digests.to_vec());
     let composer_parameters = ComposerParameters::new(
-        GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
-        rng.random(),
+        GenerationReceivingAddress::derive_from_seed(seed_digests.pop().unwrap()).into(),
+        seed_digests.pop().unwrap(),
         None,
         0.5f64,
         FeeNotificationPolicy::OffChain,
@@ -1110,7 +1066,7 @@ pub async fn fake_block_successor_with_merged_tx(
         predecessor,
         composer_parameters,
         timestamp,
-        rng.random(),
+        seed_bytes.pop().unwrap(),
         txs,
         network,
     )
@@ -1118,7 +1074,7 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.random()).await
+        fake_valid_block_from_tx_for_tests(predecessor, block_tx, seed_digests.pop().unwrap()).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }
@@ -1127,19 +1083,19 @@ pub async fn fake_block_successor_with_merged_tx(
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
+    rness: Randomness<1, 3>,
     network: Network,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, false, network).await
+    fake_block_successor(predecessor, timestamp, false, rness, network).await
 }
 
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
+    rness: Randomness<1, 3>,
     network: Network,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, true, network).await
+    fake_block_successor(predecessor, timestamp, true, rness, network).await
 }
 
 /// Create a block with coinbase going to self. For testing purposes.
@@ -1149,13 +1105,13 @@ pub(crate) async fn fake_valid_successor_for_tests(
 /// will not pass `triton_vm::verify`, as its validity is only mocked.
 pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
-    seed: [u8; 32],
+    rness: Randomness<1, 3>,
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
-        seed,
+        rness,
         state_lock.cli().network,
     )
     .await
@@ -1170,13 +1126,18 @@ pub(crate) async fn fake_valid_block_for_tests(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     predecessor: &Block,
     block_interval: Timestamp,
-    seed: [u8; 32],
+    rness: [Randomness<1, 3>; N],
     network: Network,
 ) -> [Block; N] {
-    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, seed, network, N)
-        .await
-        .try_into()
-        .unwrap()
+    fake_valid_sequence_of_blocks_for_tests_dyn(
+        predecessor,
+        block_interval,
+        rness.to_vec(),
+        network,
+    )
+    .await
+    .try_into()
+    .unwrap()
 }
 
 /// Create a deterministic sequence of valid blocks.
@@ -1188,17 +1149,15 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     mut predecessor: &Block,
     block_interval: Timestamp,
-    seed: [u8; 32],
+    mut rness_vec: Vec<Randomness<1, 3>>,
     network: Network,
-    n: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    for _ in 0..n {
+    while let Some(rness) = rness_vec.pop() {
         let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
-            rng.random(),
+            rness,
             network,
         )
         .await;

@@ -561,20 +561,19 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 pub(crate) mod test {
     use std::cmp::max;
+    use std::panic::catch_unwind;
 
-    use arbitrary::Arbitrary;
-    use arbitrary::Unstructured;
     use get_size2::GetSize;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::FromPrimitive;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
+    use proptest::prelude::*;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::prop_assume;
     use proptest_arbitrary_interop::arb;
-    use rand::Rng;
     use test_strategy::proptest;
 
     use super::*;
@@ -592,12 +591,14 @@ pub(crate) mod test {
             .boxed()
     }
 
-    #[test]
-    fn test_string_conversion() {
-        let mut rng = rand::rng();
-
-        for _ in 0..100 {
-            let number = rng.random_range(0..42000000);
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 100, .. ProptestConfig::default()
+          })]
+        #[test]
+        fn test_string_conversion(
+            number in 0..42000000u32
+        ) {
             let amount = NativeCurrencyAmount::coins(number);
             let string = amount.to_string();
             let reconstructed_amount = NativeCurrencyAmount::coins_from_str(&string)
@@ -607,14 +608,12 @@ pub(crate) mod test {
         }
     }
 
-    #[test]
-    fn test_bfe_conversion() {
-        let mut rng = rand::rng();
-
-        for _ in 0..5 {
-            let amount =
-                NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.random::<[u8; 32]>()))
-                    .unwrap();
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 5, .. ProptestConfig::default()
+          })]
+        #[test]
+        fn test_bfe_conversion(amount in arb::<NativeCurrencyAmount>()) {
             let bfes = amount.encode();
             let reconstructed_amount = *NativeCurrencyAmount::decode(&bfes).unwrap();
 
@@ -624,17 +623,12 @@ pub(crate) mod test {
 
     #[test]
     fn test_bfe_conversion_with_option_amount() {
-        let mut rng = rand::rng();
-
-        for _ in 0..10 {
-            let amount =
-                NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.random::<[u8; 32]>()))
-                    .unwrap();
+        proptest::proptest!(ProptestConfig::with_cases(10), |(amount in arb::<NativeCurrencyAmount>())| {
             let bfes = Some(amount).encode();
             let reconstructed_amount = *Option::<NativeCurrencyAmount>::decode(&bfes).unwrap();
 
             assert_eq!(Some(amount), reconstructed_amount);
-        }
+        });
 
         let amount: Option<NativeCurrencyAmount> = None;
         let bfes = amount.encode();
@@ -651,17 +645,32 @@ pub(crate) mod test {
         assert_eq!(a_amount + b_amount, NativeCurrencyAmount::coins(a + b));
     }
 
-    #[test]
-    fn from_nau_conversion_pbt() {
-        let mut rng = rand::rng();
-        let a: u64 = rng.random_range(0..(1 << 63));
-        let b: u64 = rng.random_range(0..(1 << 63));
-        let a_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(a.into());
-        let b_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(b.into());
-        assert_eq!(
-            a_amount + b_amount,
-            NativeCurrencyAmount::from_nau((a + b).into())
-        );
+    proptest::proptest! {
+        #[test]
+        fn from_nau_conversion_pbt(
+            a in (0u64..(1 << 63)),
+            b in (0u64..(1 << 63)),
+        ) {
+            let a_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(a.into());
+            let b_amount: NativeCurrencyAmount = NativeCurrencyAmount::from_nau(b.into());
+            assert_eq!(
+                a_amount + b_amount,
+                NativeCurrencyAmount::from_nau((a + b).into())
+            );
+        }
+
+        #[test]
+        fn amount_scalar_mul_pbt(
+            a in 0..42000000u32,
+            b in 0..42000000u32
+        ) {
+            if u64::from(a) * u64::from(b) <= 42000000 {
+                let prod_checked: NativeCurrencyAmount = NativeCurrencyAmount::coins(a * b);
+                let mut prod_calculated: NativeCurrencyAmount = NativeCurrencyAmount::coins(a);
+                prod_calculated = prod_calculated.scalar_mul(b);
+                assert_eq!(prod_checked, prod_calculated);
+            } else {assert![catch_unwind(|| NativeCurrencyAmount::coins(a).scalar_mul(b)).is_err()]}
+        }
     }
 
     #[test]
@@ -696,22 +705,6 @@ pub(crate) mod test {
     fn simple_f64_lossy_mul_one() {
         let one_hundred = NativeCurrencyAmount::coins(100);
         assert_eq!(one_hundred, one_hundred.lossy_f64_fraction_mul(1f64));
-    }
-
-    #[test]
-    fn amount_scalar_mul_pbt() {
-        let mut rng = rand::rng();
-        let mut a = 6481;
-        let mut b = 6481;
-        while u64::from(a) * u64::from(b) > 42000000 {
-            a = rng.random_range(0..42000000);
-            b = rng.random_range(0..42000000);
-        }
-
-        let prod_checked: NativeCurrencyAmount = NativeCurrencyAmount::coins(a * b);
-        let mut prod_calculated: NativeCurrencyAmount = NativeCurrencyAmount::coins(a);
-        prod_calculated = prod_calculated.scalar_mul(b);
-        assert_eq!(prod_checked, prod_calculated);
     }
 
     #[test]

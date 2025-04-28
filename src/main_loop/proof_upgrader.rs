@@ -1143,7 +1143,8 @@ mod test {
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
-        let mut alice = state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;
+        let mut alice =
+            state_with_premine_and_self_mined_blocks(cli_args, rng.random::<[Digest; 1]>()).await;
 
         let mut transactions = vec![];
         for _ in 0..=1 {
@@ -1186,9 +1187,9 @@ mod test {
         let block2 = fake_block_successor_with_merged_tx(
             &block1,
             now,
-            rng.random(),
             false,
             vec![mined_tx.into()],
+            rng.random(),
             network,
         )
         .await;
