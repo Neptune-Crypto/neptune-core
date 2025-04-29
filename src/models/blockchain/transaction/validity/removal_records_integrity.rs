@@ -1064,10 +1064,10 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::catch_change_in_program;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::TransactionKernelModifier;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
@@ -1376,7 +1376,7 @@ mod tests {
         )?;
     }
 
-    catch_change_in_program!(
+    test_program_snapshot!(
         RemovalRecordsIntegrity,
         // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
         "a7bf63235fe9b8eb4ba14e3698917d4aed142501abf1fb71e86c0b2e0f714615b0ee13b1fb9cddbc"

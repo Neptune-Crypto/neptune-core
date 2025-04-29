@@ -660,9 +660,43 @@ pub mod test {
             .expect("cannot write to file");
     }
 
-    #[macro_export]
-    macro_rules! catch_change_in_program {
-        ($consensus_program: expr, $hash_hex: literal) => {
+    /// Test for regressions in a consensus program.
+    ///
+    /// As consensus programs are refactored to improve readability, it is
+    /// important to ensure that the program does not actually change. Any such
+    /// change would constitute a hard fork.
+    ///
+    /// This test checks the program's hash against a hardcoded value. If the
+    /// program changes and that hardcoded value is not updated in lockstep, the
+    /// test will fail.
+    ///
+    /// Example usage:
+    ///
+    /// ```
+    /// use crate::models::proof_abstractions::tasm::program::test_program_snapshot;
+    ///
+    /// struct MyProgram;
+    ///
+    /// impl ConsensusProgram for MyProgram {
+    ///     fn library_and_code() ->  (Library, Vec<LabelledInstruction>) {
+    ///         /// ...
+    ///         (Library::new(), vec![])
+    ///     }
+    /// }
+    ///
+    /// #[cfg(test)]
+    /// mod test {
+    ///     use super::*;
+    ///
+    ///     test_program_snapshot!(
+    ///         MyProgram,
+    ///         // snapshot taken from master on 2025-02-11 at 12:00 [commit id]
+    ///         "c0f8cbc73a844ab6c3586d8891e29b677a3aa08f25f9aec0f854a72bf2e2f84c2a48c9dd1bbe0a66"
+    ///     );
+    /// }
+    /// ```
+    macro_rules! test_program_snapshot {
+        ($consensus_program:expr, $hash_hex:literal $(,)?) => {
             #[test]
             fn program_hash_has_not_changed() {
                 let old_hash = $hash_hex.to_string();
@@ -673,4 +707,6 @@ pub mod test {
             }
         };
     }
+
+    pub(crate) use test_program_snapshot;
 }

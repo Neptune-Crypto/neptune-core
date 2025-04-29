@@ -1013,8 +1013,8 @@ mod test {
     use super::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use super::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use super::*;
-    use crate::catch_change_in_program;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
 
     impl ConsensusProgramSpecification for TimeLock {
@@ -1315,7 +1315,7 @@ mod test {
         prop_assert_eq!(tasm_result.unwrap(), rust_result.unwrap());
     }
 
-    catch_change_in_program!(
+    test_program_snapshot!(
         TimeLock,
         // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
         "4b4d251947a07f9f2c016c1c271c04ce41013ff50031bd42854919be6e0e4849ebf931e856b542ad"
