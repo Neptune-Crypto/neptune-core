@@ -182,6 +182,7 @@ pub struct TritonVmProofJobOptions {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use std::fs::create_dir_all;
     use std::fs::File;

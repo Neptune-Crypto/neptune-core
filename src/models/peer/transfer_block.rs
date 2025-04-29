@@ -72,6 +72,7 @@ impl TryFrom<&Block> for TransferBlock {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
     use rand::rngs::StdRng;

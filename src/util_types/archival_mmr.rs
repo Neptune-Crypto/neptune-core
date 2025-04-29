@@ -348,6 +348,7 @@ impl ArchivalMmr<DbtVec<Digest>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
 
     use std::cmp;

@@ -3613,6 +3613,7 @@ pub mod error {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;

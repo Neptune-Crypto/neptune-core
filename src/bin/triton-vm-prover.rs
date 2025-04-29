@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::io::BufRead;
 use std::io::Write;
 
@@ -37,6 +39,7 @@ fn main() {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use tasm_lib::triton_vm::isa::triton_asm;
 

@@ -152,6 +152,7 @@ impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> St
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::SimpleRustyStorage;
     use super::*;

@@ -553,6 +553,7 @@ pub(crate) async fn close_peer_connected_callback(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::str::FromStr;
     use std::time::Duration;

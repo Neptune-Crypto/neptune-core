@@ -75,6 +75,7 @@ impl IncomingUtxo {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;

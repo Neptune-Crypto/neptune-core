@@ -833,6 +833,7 @@ pub(super) fn get_upgrade_task_from_mempool(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
     use tokio::sync::broadcast;

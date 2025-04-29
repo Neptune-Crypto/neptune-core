@@ -86,6 +86,7 @@ impl From<TransferTransaction> for Transaction {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

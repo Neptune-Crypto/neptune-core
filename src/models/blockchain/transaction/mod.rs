@@ -290,6 +290,7 @@ impl Transaction {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use lock_script::LockScript;
     use macro_rules_attr::apply;

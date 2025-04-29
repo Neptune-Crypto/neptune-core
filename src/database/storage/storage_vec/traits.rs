@@ -230,6 +230,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
 pub trait StorageVec<T: Send>: StorageVecBase<T> + StorageVecStream<T> {}
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(in super::super) mod tests {
     use super::*;
 

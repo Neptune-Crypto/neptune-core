@@ -360,6 +360,7 @@ pub fn verify_mmr_successor_proof(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use tasm_lib::verifier::stark_verify::StarkVerify;
 

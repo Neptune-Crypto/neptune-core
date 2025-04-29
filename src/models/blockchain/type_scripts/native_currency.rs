@@ -1036,6 +1036,7 @@ impl SecretWitness for NativeCurrencyWitness {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use std::panic;
 

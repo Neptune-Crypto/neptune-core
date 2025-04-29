@@ -1079,6 +1079,7 @@ impl Block {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use macro_rules_attr::apply;
     use rand::random;

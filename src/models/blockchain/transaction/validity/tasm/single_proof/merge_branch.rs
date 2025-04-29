@@ -899,6 +899,7 @@ impl BasicSnippet for MergeBranch {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use itertools::Itertools;
     use num_traits::CheckedAdd;

@@ -139,6 +139,7 @@ impl Display for BlockHeight {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
     use num_traits::CheckedAdd;

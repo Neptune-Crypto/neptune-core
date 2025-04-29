@@ -184,6 +184,7 @@ impl<'a> Arbitrary<'a> for LockScriptAndWitness {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use num_traits::Zero;
     use proptest::prop_assert;

@@ -89,6 +89,7 @@ impl ConsensusProgram for PrincipalBlockValidationLogic {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;

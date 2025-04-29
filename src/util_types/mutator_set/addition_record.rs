@@ -44,6 +44,7 @@ impl Display for AdditionRecord {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use rand::random;
 

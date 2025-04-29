@@ -152,6 +152,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Itertools;
     use proptest::collection::vec;

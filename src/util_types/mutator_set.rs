@@ -85,6 +85,7 @@ pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
     use rand::Rng;

@@ -16,8 +16,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: llvm-tools-preview
 
@@ -32,7 +32,7 @@ jobs:
       # at all, documentation tests are skipped.
       - name: Collect coverage data (skip doctests & benchmarks)
         run: >
-          cargo llvm-cov nextest
+          cargo +nightly llvm-cov nextest
           --lib --bins --tests --examples
           --lcov --output-path lcov.info
           --

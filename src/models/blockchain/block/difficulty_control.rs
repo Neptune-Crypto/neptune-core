@@ -487,6 +487,7 @@ pub(crate) fn max_cumulative_pow_after(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;

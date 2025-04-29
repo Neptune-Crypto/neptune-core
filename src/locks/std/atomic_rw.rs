@@ -442,6 +442,7 @@ impl<T> DerefMut for AtomicRwWriteGuard<'_, T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

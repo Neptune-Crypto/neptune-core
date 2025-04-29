@@ -145,6 +145,7 @@ impl std::hash::Hash for TypeScriptAndWitness {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;

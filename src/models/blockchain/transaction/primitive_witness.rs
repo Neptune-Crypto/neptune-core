@@ -1089,6 +1089,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::izip;
     use itertools::Itertools;

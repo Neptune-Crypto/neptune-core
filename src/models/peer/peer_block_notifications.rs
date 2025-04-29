@@ -26,6 +26,7 @@ impl From<&Block> for PeerBlockNotification {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::PeerBlockNotification;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;

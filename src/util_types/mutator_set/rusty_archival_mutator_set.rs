@@ -106,6 +106,7 @@ impl StorageWriter for RustyArchivalMutatorSet {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;

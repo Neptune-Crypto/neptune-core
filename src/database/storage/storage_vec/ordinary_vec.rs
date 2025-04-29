@@ -123,6 +123,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::traits::tests as trait_tests;
     use super::*;

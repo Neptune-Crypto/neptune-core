@@ -21,6 +21,7 @@ pub(crate) mod wallet_state;
 pub mod wallet_status;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use expected_utxo::ExpectedUtxo;
     use itertools::Itertools;

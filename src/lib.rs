@@ -1,10 +1,25 @@
 // recursion limit for macros (e.g. triton_asm!)
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
+//
 // enables nightly feature async_fn_track_caller for crate feature log-slow-write-lock.
 // log-slow-write-lock logs warning when a write-lock is held longer than 100 millis.
 // to enable: cargo +nightly build --features log-slow-write-lock
 #![cfg_attr(feature = "track-lock-location", feature(async_fn_track_caller))]
+//
+// If code coverage tool `cargo-llvm-cov` is running with the nightly toolchain,
+// enable the unstable “coverage” attribute. This allows using the annotation
+// `#[coverage(off)]` to explicitly exclude certain parts of the code from
+// being considered as “code under test.” Most prominently, the annotation
+// should be added to every `#[cfg(test)]` module. Since the “coverage”
+// feature is enable only conditionally, the annotation to use is:
+// #[cfg_attr(coverage_nightly, coverage(off))]
+//
+// See also:
+// - https://github.com/Neptune-Crypto/neptune-core/issues/570
+// - https://github.com/taiki-e/cargo-llvm-cov#exclude-code-from-coverage
+// - https://github.com/rust-lang/rust/issues/84605
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 // danda: making all of these pub for now, so docs are generated.
 // later maybe we ought to split some stuff out into re-usable crate(s)...?
@@ -25,6 +40,7 @@ pub mod rpc_server;
 pub mod util_types;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests;
 
 use std::collections::HashMap;

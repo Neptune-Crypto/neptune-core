@@ -149,6 +149,7 @@ impl MastHash for BlockBody {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::prelude::BoxedStrategy;
     use proptest::strategy::Strategy;

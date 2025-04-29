@@ -424,6 +424,7 @@ impl<T> DerefMut for AtomicMutexGuard<'_, T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

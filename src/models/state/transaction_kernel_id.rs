@@ -94,6 +94,7 @@ impl TransactionKernel {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;

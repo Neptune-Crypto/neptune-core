@@ -591,6 +591,7 @@ pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembe
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Either;
     use itertools::Itertools;

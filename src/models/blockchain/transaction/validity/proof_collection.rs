@@ -472,6 +472,7 @@ impl ProofCollection {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use proptest::prop_assert;
     use test_strategy::proptest;

@@ -82,6 +82,7 @@ pub(crate) async fn cache_true_claim(claim: Claim) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;

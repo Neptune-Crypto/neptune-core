@@ -130,6 +130,7 @@ impl<'a> Arbitrary<'a> for Chunk {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::HashSet;
 

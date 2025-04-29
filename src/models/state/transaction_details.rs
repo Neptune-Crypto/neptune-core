@@ -325,6 +325,7 @@ impl TransactionDetails {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;

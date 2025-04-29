@@ -195,6 +195,7 @@ impl Distribution<Timestamp> for StandardUniform {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::prelude::BFieldElement;

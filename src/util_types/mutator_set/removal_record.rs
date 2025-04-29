@@ -376,6 +376,7 @@ pub(crate) enum RemovalRecordValidityError {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use itertools::Itertools;
     use rand::prelude::IndexedRandom;

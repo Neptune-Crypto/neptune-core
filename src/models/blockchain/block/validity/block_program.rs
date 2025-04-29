@@ -326,6 +326,7 @@ impl ConsensusProgram for BlockProgram {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;

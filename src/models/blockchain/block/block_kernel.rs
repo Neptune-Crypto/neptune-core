@@ -57,6 +57,7 @@ impl MastHash for BlockKernel {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;

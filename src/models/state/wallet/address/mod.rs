@@ -29,6 +29,7 @@ pub type SpendingKey = AddressableKey;
 pub use receiving_address::ReceivingAddress;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use generation_address::GenerationReceivingAddress;
     use generation_address::GenerationSpendingKey;

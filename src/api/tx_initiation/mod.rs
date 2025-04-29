@@ -71,6 +71,7 @@ pub mod initiator;
 pub mod send;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod test_util;
 
 // private worker

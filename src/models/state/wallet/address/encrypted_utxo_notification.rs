@@ -122,6 +122,7 @@ impl EncryptedUtxoNotification {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;

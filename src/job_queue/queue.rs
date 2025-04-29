@@ -334,6 +334,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::time::Instant;
 

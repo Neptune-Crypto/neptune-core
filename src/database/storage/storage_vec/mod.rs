@@ -21,6 +21,7 @@ mod ordinary_vec_private;
 pub use ordinary_vec::*;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::HashMap;
 

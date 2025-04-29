@@ -102,8 +102,8 @@ pub(crate) use state_lock_call_async;
 pub(crate) use state_lock_call_mut_async;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
-
     use super::*;
 
     fn fibonacci(n: u32) -> u32 {

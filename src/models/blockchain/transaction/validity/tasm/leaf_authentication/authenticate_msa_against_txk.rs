@@ -143,6 +143,7 @@ impl BasicSnippet for AuthenticateMsaAgainstTxk {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::HashMap;
     use std::collections::VecDeque;

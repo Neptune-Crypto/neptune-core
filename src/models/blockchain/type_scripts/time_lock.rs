@@ -998,6 +998,7 @@ pub mod neptune_arbitrary {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::collection::vec;
     use proptest::prelude::Arbitrary;

@@ -207,8 +207,8 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-
     use macro_rules_attr::apply;
     use twenty_first::math::other::random_elements;
     use twenty_first::math::tip5::Digest;

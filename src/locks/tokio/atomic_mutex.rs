@@ -553,6 +553,7 @@ impl<T> Atomic<T> for AtomicMutex<T> {
 */
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use futures::future::FutureExt;
     use macro_rules_attr::apply;

@@ -317,6 +317,7 @@ impl From<&PrimitiveWitness> for CollectTypeScriptsWitness {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;

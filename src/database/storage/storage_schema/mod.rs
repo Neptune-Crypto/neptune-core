@@ -45,6 +45,7 @@ pub use simple_rusty_reader::*;
 pub use simple_rusty_storage::*;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc;
 

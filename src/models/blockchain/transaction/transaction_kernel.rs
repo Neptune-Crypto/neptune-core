@@ -412,6 +412,7 @@ impl TransactionKernelModifier {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use itertools::Itertools;
     use proptest::prelude::Strategy;

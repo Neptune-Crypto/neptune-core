@@ -708,6 +708,7 @@ impl ConsensusProgram for SingleProof {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use assert2::let_assert;
     use macro_rules_attr::apply;

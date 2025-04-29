@@ -66,6 +66,7 @@ impl BasicSnippet for GenerateLockScriptClaimTemplate {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::HashMap;
 

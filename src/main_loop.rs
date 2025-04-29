@@ -1859,6 +1859,7 @@ impl MainLoopHandler {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::str::FromStr;
     use std::time::UNIX_EPOCH;
