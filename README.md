@@ -71,6 +71,8 @@ built-in peer-discovery process.
 
 ## Documentation
 
+The docs are at [docs.neptune.cash](https://docs.neptune.cash/).
+
 Documentation uses [https://rust-lang.github.io/mdBook/](mdBook). To run a local copy:
 
 - install mdBook: `cargo install mdbook`
@@ -103,6 +105,10 @@ neptune-cli block-height
 
 If you set up `neptune-core` to listen for RPC requests on a different port from the default (9799),
 then the flag `--port <port>` is your friend.
+
+## Release Candidates and Public Testnet
+
+It is policy that each release candidate be made available for public testing on `testnet` prior to official release.  [Details](https://docs.neptune.cash/contributing/git-workflow.html#testnet-policy-pre-release)
 
 ## Setup for Development (Ubuntu)
 
