@@ -358,6 +358,7 @@ mod test {
     use super::*;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::triton_vm::proof::Claim;
     use crate::triton_vm::stark::Stark;
@@ -489,4 +490,10 @@ mod test {
             "proof fails"
         );
     }
+
+    test_program_snapshot!(
+        KernelToOutputs,
+        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
+        "ea038961191a092999f1b22b0f3dc7661f47ed6a7da7f6eb7104d7b6733514feeb881c317fb92681"
+    );
 }

@@ -352,6 +352,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::builtins::verify_stark;
+    use crate::models::proof_abstractions::tasm::program::test::test_program_snapshot;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
@@ -600,4 +601,10 @@ pub(crate) mod test {
             "tasm output must equal rust output"
         );
     }
+
+    test_program_snapshot!(
+        BlockProgram,
+        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
+        "2a3126ef86970a4a8df02711c2fbb4e5c9e025e257e0d169aab38114737a4cb9c84f9985b679c55a"
+    );
 }
