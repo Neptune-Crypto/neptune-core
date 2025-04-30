@@ -30,6 +30,7 @@ pub mod tests;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -123,7 +124,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
     info!("Now getting wallet state. This may take a while if the database needs pruning.");
     let wallet_state =
-        WalletState::new_from_context(&data_directory, wallet_file_context, &cli_args).await;
+        WalletState::try_new_from_context(&data_directory, wallet_file_context, &cli_args).await?;
     info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync
@@ -559,4 +560,25 @@ impl Drop for ScopeDurationLogger<'_> {
             tracing::debug!("{}", msg);
         }
     }
+}
+
+/// recursively copy source dir to destination
+pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::Result<()> {
+    if !source.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Source is not a directory",
+        ));
+    }
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let dest_path = &destination.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir_recursive(&entry.path(), dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), dest_path)?;
+        }
+    }
+    Ok(())
 }

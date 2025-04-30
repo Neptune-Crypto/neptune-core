@@ -23,13 +23,29 @@ pub struct RustyWalletDatabase {
 }
 
 impl RustyWalletDatabase {
-    pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
+    /// try to connect to db and fail if schema requires migration
+    pub async fn try_connect(
+        db: NeptuneLevelDb<RustyKey, RustyValue>,
+    ) -> Result<Self, WalletDbConnectError> {
+        Self::try_connect_internal(db, false).await
+    }
+
+    /// try to connect to db and migrate schema if required
+    pub async fn try_connect_and_migrate(
+        db: NeptuneLevelDb<RustyKey, RustyValue>,
+    ) -> Result<Self, WalletDbConnectError> {
+        Self::try_connect_internal(db, true).await
+    }
+
+    async fn try_connect_internal(
+        db: NeptuneLevelDb<RustyKey, RustyValue>,
+        migrate: bool,
+    ) -> Result<Self, WalletDbConnectError> {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
             "RustyWalletDatabase-Schema",
             crate::LOG_TOKIO_LOCK_EVENT_CB,
         );
-
         let mut tables = WalletDbTables::load_schema_in_order(&mut storage).await;
         let schema_version = tables.schema_version.get();
 
@@ -39,6 +55,7 @@ impl RustyWalletDatabase {
         let is_new_db = schema_version == 0 && tables.sync_label.get() == Digest::default();
         if is_new_db {
             tables.schema_version.set(WALLET_DB_SCHEMA_VERSION).await;
+            storage.persist().await;
             tracing::info!(
                 "set new wallet database to schema version: v{}",
                 WALLET_DB_SCHEMA_VERSION
@@ -49,27 +66,40 @@ impl RustyWalletDatabase {
             match schema_version.cmp(&WALLET_DB_SCHEMA_VERSION) {
                 // happy path. db schema version matches code schema version.
                 Ordering::Equal => {
-                    tracing::info!("Wallet DB schema version {} is correct.  proceeding", schema_version);
+                    tracing::info!(
+                        "Wallet DB schema version {} is correct.  proceeding",
+                        schema_version
+                    );
                 }
 
                 // database has old schema version and needs to be migrated.
                 Ordering::Less => {
-                    migrate_db::migrate_range(
-                        &mut storage,
-                        schema_version,
-                        WALLET_DB_SCHEMA_VERSION,
-                    )
-                    .await
-                    .unwrap();
+                    if migrate {
+                        migrate_db::migrate_range(
+                            &mut storage,
+                            schema_version,
+                            WALLET_DB_SCHEMA_VERSION,
+                        )
+                        .await?;
+                    } else {
+                        return Err(WalletDbConnectError::SchemaVersionTooLow {
+                            found: schema_version,
+                            expected: WALLET_DB_SCHEMA_VERSION,
+                        });
+                    }
                 }
 
                 // database is too new, probably from a newer neptune-core binary.
-                Ordering::Greater =>
-                    panic!("Wallet database schema version is higher than expected.  It appears to come from a newer release of neptune-core.  expected schema version: {}, found: {}", WALLET_DB_SCHEMA_VERSION, schema_version)
+                Ordering::Greater => {
+                    return Err(WalletDbConnectError::SchemaVersionTooHigh {
+                        found: schema_version,
+                        expected: WALLET_DB_SCHEMA_VERSION,
+                    });
+                }
             }
         }
 
-        RustyWalletDatabase { storage, tables }
+        Ok(RustyWalletDatabase { storage, tables })
     }
 
     /// get monitored_utxos.
@@ -147,6 +177,11 @@ impl RustyWalletDatabase {
         self.tables.symmetric_key_counter.set(counter).await;
     }
 
+    /// retrieve the database schema version
+    pub fn schema_version(&self) -> u16 {
+        self.tables.schema_version.get()
+    }
+
     #[cfg(test)]
     pub fn storage(&self) -> &SimpleRustyStorage {
         &self.storage
@@ -160,5 +195,23 @@ impl StorageWriter for RustyWalletDatabase {
 
     async fn drop_unpersisted(&mut self) {
         unimplemented!("wallet does not need it")
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum WalletDbConnectError {
+    #[error("Wallet database schema version is lower than expected.  expected schema version: {}, found: {}", found, expected)]
+    SchemaVersionTooLow { found: u16, expected: u16 },
+    #[error("Wallet database schema version is higher than expected.  It appears to come from a newer release of neptune-core.  expected schema version: {}, found: {}", found, expected)]
+    SchemaVersionTooHigh { found: u16, expected: u16 },
+    #[error("wallet db connect failed: {0}")]
+    Failed(String),
+}
+
+// convert anyhow::Error to WalletDbConnectError::Failed.
+// note that anyhow Error is not serializable.
+impl From<anyhow::Error> for WalletDbConnectError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Failed(e.to_string())
     }
 }
