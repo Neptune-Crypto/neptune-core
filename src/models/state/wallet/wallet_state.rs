@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
+use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -19,7 +21,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tracing::debug;
-use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
@@ -48,6 +49,8 @@ use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::database::storage::storage_schema::DbtVec;
+use crate::database::storage::storage_schema::RustyKey;
+use crate::database::storage::storage_schema::RustyValue;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::database::NeptuneLevelDb;
@@ -65,6 +68,7 @@ use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::rusty_wallet_database::WalletDbConnectError;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::prelude::twenty_first;
@@ -273,15 +277,13 @@ impl WalletState {
     /// Create a `WalletState` object from related data.
     ///
     /// Convenience method to extract required data prior to calling the
-    /// canonical constructor, [`Self::new`].
-    pub(crate) async fn new_from_context(
+    /// canonical constructor, [Self::try_new()].
+    pub(crate) async fn try_new_from_context(
         data_dir: &DataDirectory,
         wallet_file_context: WalletFileContext,
         cli_args: &Args,
-    ) -> Self {
-        let database_is_new = !tokio::fs::try_exists(&data_dir.wallet_database_dir_path())
-            .await
-            .unwrap();
+    ) -> Result<Self> {
+        let database_is_new = !tokio::fs::try_exists(&data_dir.wallet_database_dir_path()).await?;
         info!(
             "wallet DB directory path is {}. Exists: {}",
             data_dir.wallet_database_dir_path().display(),
@@ -297,36 +299,34 @@ impl WalletState {
             configuration.enable_scan_mode();
         }
 
-        Self::new(configuration, wallet_entropy).await
+        Self::try_new(configuration, wallet_entropy).await
     }
 
     /// Construct a `WalletState` object.
-    ///
-    /// Canonical constructor.
-    pub(crate) async fn new(
+    pub(crate) async fn try_new(
         configuration: WalletConfiguration,
         wallet_entropy: WalletEntropy,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         const NUM_PREMINE_KEYS: usize = 10;
 
         let wallet_database_path = configuration.wallet_database_directory_path();
-        DataDirectory::create_dir_if_not_exists(&wallet_database_path)
-            .await
-            .unwrap();
-        let wallet_db = NeptuneLevelDb::new(
-            &wallet_database_path,
-            &crate::database::create_db_if_missing(),
-        )
-        .await;
-        let wallet_db = match wallet_db {
-            Ok(wdb) => wdb,
-            Err(err) => {
-                error!("Could not open wallet database: {err:?}");
-                panic!();
-            }
-        };
+        DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
+        let wallet_db = Self::open_wallet_db(&wallet_database_path).await?;
 
-        let rusty_wallet_database = RustyWalletDatabase::connect(wallet_db).await;
+        let rusty_wallet_database = match RustyWalletDatabase::try_connect(wallet_db).await {
+            Err(WalletDbConnectError::SchemaVersionTooLow { found, expected: _ }) => {
+                // DB schema version is too low, so we need to migrate it.
+                // note: wallet_db was moved into try_connect() and is now dropped/closed.
+
+                // safety first! backup wallet DB before migrating schema.
+                Self::backup_database(&configuration, found).await?;
+
+                // attempt to connect and migrate the DB to latest version.
+                let db = Self::open_wallet_db(&wallet_database_path).await?;
+                RustyWalletDatabase::try_connect_and_migrate(db).await
+            }
+            other => other,
+        }?;
 
         let sync_label = rusty_wallet_database.get_sync_label();
 
@@ -434,14 +434,48 @@ impl WalletState {
                     &MutatorSetAccumulator::default(),
                     &Block::genesis(configuration.network()),
                 )
-                .await
-                .expect("Updating wallet state with genesis block must succeed");
+                .await?;
 
             // No db-persisting here, as all of state should preferably be
             // persisted at the same time.
         }
 
-        wallet_state
+        Ok(wallet_state)
+    }
+
+    async fn open_wallet_db(path: &Path) -> anyhow::Result<NeptuneLevelDb<RustyKey, RustyValue>> {
+        NeptuneLevelDb::new(path, &crate::database::create_db_if_missing())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to open wallet db at '{}': {}", path.display(), e))
+    }
+
+    /// performs backup of DB dir by copying it to a new directory.
+    async fn backup_database(
+        configuration: &WalletConfiguration,
+        schema_version: u16,
+    ) -> anyhow::Result<PathBuf> {
+        let db_dir = configuration.wallet_database_directory_path();
+        let backup_dir = configuration
+            .wallet_database_next_unused_backup_path(schema_version)
+            .ok_or_else(|| anyhow::anyhow!("unable to find an unused backup path"))?;
+
+        // we open DB first to ensure no-one else can use it meanwhile.
+        let _db = Self::open_wallet_db(&db_dir).await?;
+
+        tracing::info!(
+            "backing up wallet database from {} to {}",
+            db_dir.display(),
+            backup_dir.display()
+        );
+
+        // perform the backup.
+        crate::copy_dir_recursive(&db_dir, &backup_dir).map_err(|e| {
+            anyhow::anyhow!("failed copying wallet database to backup directory. {e}")
+        })?;
+
+        tracing::info!("backed up wallet database to {}", backup_dir.display());
+
+        Ok(backup_dir) // _db is dropped/closed
     }
 
     /// Extract `ExpectedUtxo`s from the `TxOutputList` that require off-chain
@@ -1993,7 +2027,7 @@ pub(crate) mod tests {
             cli_args: &Args,
         ) -> Self {
             let configuration = WalletConfiguration::new(data_dir).absorb_options(cli_args);
-            Self::new(configuration, wallet_entropy).await
+            Self::try_new(configuration, wallet_entropy).await.unwrap()
         }
     }
 
@@ -4948,6 +4982,49 @@ pub(crate) mod tests {
                 .get_wallet_status(block_two.hash(), &block_two.mutator_set_accumulator_after())
                 .await;
             assert_eq!(2, wallet_status.synced_unspent.len());
+        }
+    }
+
+    mod wallet_db_backup {
+        use super::*;
+        use crate::tests::shared::unit_test_data_directory;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn backup_wallet_db_and_open() -> Result<()> {
+            // basic setup
+            let cli = cli_args::Args::default();
+            let mut rng = StdRng::from_rng(&mut rng());
+            let wallet_entropy = WalletEntropy::new_pseudorandom(rng.random());
+            let data_dir = unit_test_data_directory(cli.network).unwrap();
+
+            let mut configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);
+
+            // instantiate WalletState to create a new DB and obtain schema version
+            let schema_version =
+                WalletState::try_new(configuration.clone(), wallet_entropy.clone())
+                    .await?
+                    .wallet_db
+                    .schema_version();
+
+            // perform db backup
+            let backup_dir = WalletState::backup_database(&configuration, schema_version).await?;
+
+            // verify backup dir exists and is different from source db dir.
+            assert!(backup_dir.exists());
+            assert_ne!(backup_dir, configuration.wallet_database_directory_path());
+
+            // load backup database into a new WalletState and obtain schema version
+            configuration.wallet_database_directory = backup_dir;
+            let schema_version_from_backup = WalletState::try_new(configuration, wallet_entropy)
+                .await?
+                .wallet_db
+                .schema_version();
+
+            // verify that schema version from backup DB matches original DB.
+            assert_eq!(schema_version, schema_version_from_backup);
+
+            Ok(())
         }
     }
 }

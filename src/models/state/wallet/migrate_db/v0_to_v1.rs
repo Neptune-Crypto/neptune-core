@@ -155,7 +155,6 @@ mod tests {
     use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
     use crate::models::state::Timestamp;
-    use crate::tests::shared;
     use crate::tests::shared::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
     use crate::DataDirectory;
@@ -220,7 +219,7 @@ mod tests {
 
         // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
         // migration occurs.
-        let wallet_db_v1 = RustyWalletDatabase::connect(db_v0).await;
+        let wallet_db_v1 = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
 
         // dump the (migrated) v1 database to stdout
         println!("dump of v1 (upgraded) database");
@@ -274,7 +273,7 @@ mod tests {
         let wallet_database_path = data_dir.wallet_database_dir_path();
 
         // copy DB in test_data to wallet_database_path
-        shared::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
+        crate::copy_dir_recursive(&test_data_wallet_db_dir, &wallet_database_path)?;
 
         // open v0 DB file
         tracing::info!("opening existing v0 DB for migration to v1");
@@ -286,7 +285,7 @@ mod tests {
 
         // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
         // migration occurs.
-        let wallet_db_v1 = RustyWalletDatabase::connect(db_v0).await;
+        let wallet_db_v1 = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
 
         // dump the (migrated) v1 database to stdout
         println!("dump of v1 (upgraded) database");
