@@ -11,7 +11,7 @@ It can be visualized like this:
 master     / topic   \
 ----------------------------------------->
     * v0.3.0-rc1    * v0.4.0-rc1
-    * v0.3.0        | v0.4.0
+    * v0.3.0        | v0.4.0-rc2
                     ---------
                             * v0.4.0-rc2
                             * v0.4.0
@@ -20,6 +20,8 @@ master     / topic   \
 ```
 
 _note: "*" represents a tag and "|" represents a branch point._
+
+_not shown: changes from branches v0.4.0-rc2 and v0.4.1 should be merged into master, if applicable._
 
 ### visualization, described
 
@@ -105,9 +107,9 @@ It is project policy that each major and minor release be tested as a
 release-candidate in the public community testnet prior to making an official
 release.
 
-A period of public testnet testing provides the community an opportunity to try out
-candidate builds in their own unique environments and report any issues, and to
-prepare for new features in advance.
+A period of public testnet testing provides the community with an opportunity to
+try out candidate builds in their own unique environments and report any issues,
+and to prepare for new features in advance.
 
 It is also an important period of integration testing "in the wild" for the
 release candidate binary.  Operating on a public testnet, it will necessarily be
@@ -116,21 +118,23 @@ that do not occur with automated testing.
 
 #### Some specifics
 
-1. Each release candidate must be publically announced with a dedicated topic in
+1. The release candidate should be published using the same release process as
+   the eventual release; see [releasing](releasing.md).
+2. Each release candidate must be publicly announced with a dedicated topic in
    [talk.neptune.cash](https://talk.neptune.cash).
-2. The release candidate should target 2 weeks of testing after the announcement
+3. The release candidate should target 2 weeks of testing after the announcement
    on average with a minimum of 1 week.
-3. The company behind neptune-cash will provide at least 1 dedicated machine for
+4. The company behind neptune-cash will provide at least 1 dedicated machine for
    the public testnet for the purpose of running the release-candidate binary
    and composing blocks.  Of course the community is also encouraged to run
    nodes and mine (compose or guess) if possible.
-4. A set of automated tests will be created that utilize the RPC API to perform
+5. A set of automated tests will be created that utilize the RPC API to perform
    automated transactions and test basic functionality of the live running
    nodes. These tests should/must be run at least once against each
    release-candidate binary while connected to the public testnet network.
-5. If the release-candidate introduces breaking consensus changes, then a
-reset/restart of the testnet from the genesis block may be performed.
-6. Patch releases may skip testnet testing if the risk seems low and/or the
+6. If the release-candidate introduces breaking consensus changes, then a
+   reset/restart of the testnet from the genesis block may be performed.
+7. Patch releases may skip testnet testing if the risk seems low and/or the
    urgency is sufficiently high.
 
 
@@ -209,36 +213,8 @@ The normal/typical release flow would be:
 
 The release flow for a major version change is essentially the same except that the major version number is bumped and the minor version returns to 0.
 
+Detailed release instructions are in [releasing.md](releasing.md).
 
-## Release Candidate Protocol  (-rc1, -rc2, etc)
-
- - determine source branch and new version.  (see visualization above.)
- - checkout the source branch and ensure working directory is clean.
- - Set the version in `Cargo.toml` (including the -rcX suffix).
- - Ensure that source branch (eg master) builds against crates that live on
-   [crates.io](https://crates.io). In particular, no dependencies on github
-   repositories or revisions.
- - review `README.md` to ensure the installation instructions are up-to-date.
- - Ensure that all tests pass.
- - Create a commit with the subject line `v0.3.0-rc1` (or whatever the new version number is) and in the body list all the changes.
- - Push present branch to github.
- - Add a tag marking the current commit version:
-   - `git tag v0.3.0-rc1` (or whatever the next version is)
-   - `git push --tags`.
- - build binaries and make a "release" on github
- - start a testnet with the release-candidate executables.
- - announce the release and new testnet on [talk.neptune.cash](https://talk.neptune.cash).
-
-## Release Protocol (major.minor.point)
-  Perform steps as above except:
-   - `git tag v0.3.0` (or whatever the next version is)
-   - `git tag latest-release`
-   - `git push --tags`.
-   - no need to make a testnet.
-   - announce the release on [talk.neptune.cash](https://talk.neptune.cash)
-   - Consider updating social media:
-     - telegram, twitter/x, reddit.com/r/cryptocurrencies,
-       reddit.com/r/neptune-cash, etc.
 
 ## latest-release tag
 

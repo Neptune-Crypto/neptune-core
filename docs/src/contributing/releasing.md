@@ -2,6 +2,23 @@
 
 This section describes the steps to publish a new version of Neptune Core, and to release & distribute its binary artifacts.
 
+## Automation
+
+This is presently a largely manual process.  It is expected/encouraged that one
+or more custom deployment tools will be developed so this becomes a push-button
+process instead, or even fully automated when certain event(s) happen.  Such a
+tool will remove tedium as well as the human error factor, which is important
+for performing the task regularly and consistently.
+
+## Release Candidate vs Release.
+
+Review the distinction [here](git-workflow.md), and make sure you know which is being generating and what the correct version should be.
+
+A release should typically be performed two weeks after the matching
+release-candidate has begun testing in testnet, though circumstances might
+dictate otherwise. Also patch releases (major and minor version unchanged) can
+be an exception.
+
 ## Pre-requisites
 
 The following tools are used to ensure a high quality release.
@@ -53,7 +70,10 @@ An appropriate commit message could be:
 
 ### Bump Version
 
-Bump the version in `Cargo.toml` [as appropriate](https://doc.rust-lang.org/cargo/reference/semver.html).
+Bump the version in `Cargo.toml` [as appropriate](git-workflow.md#version_identifier)
+
+See also: https://doc.rust-lang.org/cargo/reference/semver.html.
+
 
 ### Confirm Version Bump as Semantic
 
@@ -166,15 +186,37 @@ Edit them until you are happy, then push the tag(s) to GitHub.
  - To show tags: `git tag --list`
  - To push a tag: `git push origin [tag_name]`
 
-### Set Branch `release`
+### If a release-candidate:
 
-By convention, branch `release` should always point to the latest stable commit compatible with the latest release.
+#### Deploy release to testnet machine(s).
 
-```sh
-git checkout release
-git reset --hard master
-git push --force-with-lease
+(full instructions: TBD)
+
+Announce the release-candidate in a post at talk.neptune.cash.
+
+Ensure that a composer is running using the release-candidate binary.
+
+### If an actual release:
+
+#### Set tag `latest-release`
+
+The tag `latest-release` should always point to the commit for the *latest
+release*.
+
+*note: never a release-candidate, eg ".rc1".*
+
 ```
+git tag --force latest-release
+git push --force origin latest-release
+```
+
+#### Consider updating social media
+
+  Announce the release in a post at talk.neptune.cash.
+
+  telegram, twitter/x, reddit.com/r/cryptocurrencies,
+  reddit.com/r/neptune-cash, etc.
+
 
 ### Check Release Artifacts & Page
 
