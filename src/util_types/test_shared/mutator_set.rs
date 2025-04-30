@@ -111,8 +111,7 @@ pub fn random_mmra() -> MmrAccumulator {
 }
 
 proptest::prop_compose! {
-    /// Generate a pseudorandom removal record from the given seed, for testing purposes.
-    pub fn propcompose_rr() (
+    pub fn propcompose_rr_with_independent_absindset_chunkdict() (
         absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
         target_chunks in crate::util_types::mutator_set::chunk_dictionary::chunk_dict_tests::propcompose_chunkdict()
     ) -> RemovalRecord {RemovalRecord {absolute_indices, target_chunks}}

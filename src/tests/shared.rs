@@ -1194,8 +1194,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
 // recursively copy source dir to destination
 pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::Result<()> {
     if !source.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             "Source is not a directory",
         ));
     }

@@ -456,7 +456,7 @@ pub mod transaction_kernel_tests {
             num_outputs: usize,
             num_public_announcements: usize,
         ) (
-            inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_rr(), num_inputs),
+            inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict(), num_inputs),
             outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
             public_announcements in collection::vec(collection::vec(arb::<BFieldElement>(), 10..59), num_public_announcements).prop_map(
                 |vecvec| vecvec.into_iter().map(|message| PublicAnnouncement { message }).collect_vec()
