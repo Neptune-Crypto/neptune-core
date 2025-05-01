@@ -177,7 +177,7 @@ impl Debug for WalletState {
             )
             .field(
                 "wallet_directory_path",
-                &self.configuration.wallet_files_directory_path(),
+                &self.configuration.data_directory().wallet_directory_path(),
             )
             .finish()
     }
@@ -226,7 +226,8 @@ impl WalletState {
 
         #[cfg(test)]
         {
-            tokio::fs::create_dir_all(self.configuration.wallet_files_directory_path()).await?;
+            tokio::fs::create_dir_all(self.configuration.data_directory().wallet_directory_path())
+                .await?;
         }
 
         // Open file
@@ -309,7 +310,7 @@ impl WalletState {
     ) -> anyhow::Result<Self> {
         const NUM_PREMINE_KEYS: usize = 10;
 
-        let wallet_database_path = configuration.wallet_database_directory_path();
+        let wallet_database_path = configuration.data_directory().wallet_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
         let wallet_db = Self::open_wallet_db(&wallet_database_path).await?;
 
@@ -454,10 +455,14 @@ impl WalletState {
         configuration: &WalletConfiguration,
         schema_version: u16,
     ) -> anyhow::Result<PathBuf> {
-        let db_dir = configuration.wallet_database_directory_path();
+        let db_dir = configuration.data_directory().wallet_database_dir_path();
         let backup_dir = configuration
-            .wallet_database_next_unused_backup_path(schema_version)
+            .data_directory()
+            .wallet_db_next_unused_migration_backup_path(schema_version)
             .ok_or_else(|| anyhow::anyhow!("unable to find an unused backup path"))?;
+
+        // ensure backup dir exists
+        DataDirectory::create_dir_if_not_exists(&backup_dir).await?;
 
         // we open DB first so leveldb ensures no-one else can use it meanwhile.
         // not for windows since this causes a "used by another process" os error 32.
@@ -5001,8 +5006,8 @@ pub(crate) mod tests {
             let mut rng = StdRng::from_rng(&mut rng());
             let wallet_entropy = WalletEntropy::new_pseudorandom(rng.random());
             let data_dir = unit_test_data_directory(cli.network).unwrap();
-
-            let mut configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);
+            let configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);
+            let db_dir = configuration.data_directory().wallet_database_dir_path();
 
             // instantiate WalletState to create a new DB and obtain schema version
             let schema_version =
@@ -5016,10 +5021,19 @@ pub(crate) mod tests {
 
             // verify backup dir exists and is different from source db dir.
             assert!(backup_dir.exists());
-            assert_ne!(backup_dir, configuration.wallet_database_directory_path());
+            assert_ne!(backup_dir, db_dir);
+
+            // move orig wallet db to wallet-db-tmp. (get it out of the way)
+            let db_dir_renamed = configuration
+                .data_directory()
+                .database_dir_path()
+                .join("wallet-db-tmp");
+            std::fs::rename(&db_dir, &db_dir_renamed)?;
+
+            // move backup wallet-db to location of original wallet-db so it will be loaded
+            std::fs::rename(&backup_dir, &db_dir)?;
 
             // load backup database into a new WalletState and obtain schema version
-            configuration.wallet_database_directory = backup_dir;
             let schema_version_from_backup = WalletState::try_new(configuration, wallet_entropy)
                 .await?
                 .wallet_db
