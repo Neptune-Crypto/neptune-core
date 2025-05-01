@@ -200,9 +200,9 @@ impl StorageWriter for RustyWalletDatabase {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum WalletDbConnectError {
-    #[error("Wallet database schema version is lower than expected.  expected schema version: {}, found: {}", found, expected)]
+    #[error("Wallet database schema version is lower than expected.  expected schema version: {}, found: {}", expected, found)]
     SchemaVersionTooLow { found: u16, expected: u16 },
-    #[error("Wallet database schema version is higher than expected.  It appears to come from a newer release of neptune-core.  expected schema version: {}, found: {}", found, expected)]
+    #[error("Wallet database schema version is higher than expected.  It appears to come from a newer release of neptune-core.  expected schema version: {}, found: {}", expected, found)]
     SchemaVersionTooHigh { found: u16, expected: u16 },
     #[error("wallet db connect failed: {0}")]
     Failed(String),
