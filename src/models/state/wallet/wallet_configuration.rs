@@ -124,11 +124,11 @@ impl WalletConfiguration {
         schema_version: u16,
     ) -> Option<PathBuf> {
         let mut path = self.wallet_database_directory_path();
-        path.pop();
+        path.pop().then_some(())?; // returns None if pop() is false
         let max_tries = 1000;
 
         // increment filename until we find an unused path or exhaust tries.
-        (1..max_tries)
+        (1..=max_tries)
             .map(|i| {
                 path.join(format!(
                     "{}.schema-v{}.bak.{}",
