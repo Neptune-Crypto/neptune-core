@@ -459,8 +459,13 @@ impl WalletState {
             .wallet_database_next_unused_backup_path(schema_version)
             .ok_or_else(|| anyhow::anyhow!("unable to find an unused backup path"))?;
 
-        // we open DB first to ensure no-one else can use it meanwhile.
+        // we open DB first so leveldb ensures no-one else can use it meanwhile.
+        // not for windows since this causes a "used by another process" os error 32.
+        #[cfg(not(target_os = "windows"))]
         let _db = Self::open_wallet_db(&db_dir).await?;
+        // dummy await point on Windows to avoid "no await statements" error.
+        #[cfg(target_os = "windows")]
+        let _ready = futures::future::ready(()).await;
 
         tracing::info!(
             "backing up wallet database from {} to {}",
