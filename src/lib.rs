@@ -563,11 +563,11 @@ impl Drop for ScopeDurationLogger<'_> {
 }
 
 /// recursively copy source dir to destination
-pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::Result<()> {
+pub(crate) fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::Result<()> {
     if !source.is_dir() {
         return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Source is not a directory",
+            std::io::ErrorKind::NotADirectory,
+            format!("not a directory: {}", source.display()),
         ));
     }
     std::fs::create_dir_all(destination)?;
