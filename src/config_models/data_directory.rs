@@ -22,9 +22,10 @@ use crate::models::state::wallet::wallet_file::WALLET_OUTPUT_COUNT_DB_NAME;
 
 const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
+const DB_MIGRATION_BACKUPS_DIR: &str = "migration_backups";
 
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataDirectory {
     data_dir: PathBuf,
 }
@@ -128,6 +129,46 @@ impl DataDirectory {
     /// This directory lives within `DataDirectory::database_dir_path()`.
     pub fn wallet_database_dir_path(&self) -> PathBuf {
         self.database_dir_path().join(Path::new(WALLET_DB_NAME))
+    }
+
+    /// directory for storing database backups before migrating schema to newer version
+    pub fn db_migration_backups_dir_path(&self) -> PathBuf {
+        self.database_dir_path()
+            .join(Path::new(DB_MIGRATION_BACKUPS_DIR))
+    }
+
+    /// returns next unused path for wallet database backup
+    ///
+    /// This is useful when creating a backup, to avoid overwriting
+    /// a previous backup.
+    ///
+    /// notes:
+    /// 1. backup directory is `<wallet_db_name>-schema-v<schema-version>.bak.<count>`
+    /// 2. will try up to 1000 backup directory names, incrementing a counter.
+    ///
+    /// Returns None if:
+    /// 1. wallet DB path is the filesystem root
+    /// 2. 1000 backup directories already exist
+    pub(crate) fn wallet_db_next_unused_migration_backup_path(
+        &self,
+        schema_version: u16,
+    ) -> Option<PathBuf> {
+        self.db_next_unused_migration_backup_path(WALLET_DB_NAME, schema_version)
+    }
+
+    // internal fn. all DBs can be backed up into the same "migration_backups" dir.
+    fn db_next_unused_migration_backup_path(
+        &self,
+        db_name: &str,
+        schema_version: u16,
+    ) -> Option<PathBuf> {
+        let path = self.db_migration_backups_dir_path();
+        let max_tries = 1000;
+
+        // increment filename until we find an unused path or exhaust tries.
+        (1..=max_tries)
+            .map(|i| path.join(format!("{}.schema-v{}.bak.{}", db_name, schema_version, i)))
+            .find(|p| !p.exists())
     }
 
     /// The wallet output count database directory path.

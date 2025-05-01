@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use tracing::info;
 
 use super::scan_mode_configuration::ScanModeConfiguration;
-use super::wallet_file::WALLET_DB_NAME;
 use super::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
@@ -23,11 +22,8 @@ pub(crate) struct WalletConfiguration {
     /// How many mutator set membership proofs to store per monitored UTXO.
     pub(crate) num_mps_per_utxo: usize,
 
-    /// Where wallet files are stored
-    wallet_files_directory: PathBuf,
-
-    /// Where the wallet database is stored
-    pub(crate) wallet_database_directory: PathBuf,
+    /// data directory configs for neptune-core
+    data_directory: DataDirectory,
 
     /// Which network we are on
     network: Network,
@@ -42,8 +38,7 @@ impl WalletConfiguration {
         Self {
             scan_mode: None,
             num_mps_per_utxo: 0,
-            wallet_files_directory: data_dir.wallet_directory_path(),
-            wallet_database_directory: data_dir.wallet_database_dir_path(),
+            data_directory: data_dir.clone(),
             network: Network::Main,
         }
     }
@@ -95,51 +90,18 @@ impl WalletConfiguration {
     }
 
     pub(crate) fn incoming_secrets_path(&self) -> PathBuf {
-        self.wallet_files_directory_path()
+        self.data_directory()
+            .wallet_directory_path()
             .join(WALLET_INCOMING_SECRETS_FILE_NAME)
-    }
-
-    pub(crate) fn wallet_files_directory_path(&self) -> PathBuf {
-        self.wallet_files_directory.to_owned()
-    }
-
-    pub(crate) fn wallet_database_directory_path(&self) -> PathBuf {
-        self.wallet_database_directory.to_owned()
-    }
-
-    /// returns next unused path for wallet-database backup
-    ///
-    /// This is useful when creating a backup, to avoid overwriting
-    /// a previous backup.
-    ///
-    /// notes:
-    /// 1. backup directory is `<wallet_db_name>-schema-v<schema-version>.bak.<count>`
-    /// 2. will try up to 1000 backup directory names, incrementing a counter.
-    ///
-    /// Returns None if:
-    /// 1. wallet DB path is the filesystem root
-    /// 2. 1000 backup directories already exist
-    pub(crate) fn wallet_database_next_unused_backup_path(
-        &self,
-        schema_version: u16,
-    ) -> Option<PathBuf> {
-        let mut path = self.wallet_database_directory_path();
-        path.pop().then_some(())?; // returns None if pop() is false
-        let max_tries = 1000;
-
-        // increment filename until we find an unused path or exhaust tries.
-        (1..=max_tries)
-            .map(|i| {
-                path.join(format!(
-                    "{}.schema-v{}.bak.{}",
-                    WALLET_DB_NAME, schema_version, i
-                ))
-            })
-            .find(|p| !p.exists())
     }
 
     pub(crate) fn network(&self) -> Network {
         self.network
+    }
+
+    /// get the data directory
+    pub(crate) fn data_directory(&self) -> &DataDirectory {
+        &self.data_directory
     }
 }
 
