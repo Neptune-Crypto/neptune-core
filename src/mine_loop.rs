@@ -33,6 +33,7 @@ use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::network::Network;
+use crate::job_queue::errors::JobHandleErrorSync;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -656,8 +657,7 @@ pub(crate) async fn create_block_transaction_from(
             vm_job_queue.clone(),
             job_options.clone(),
         )
-        .await
-        .expect("Must be able to merge transactions in mining context");
+        .await?; // fix #579.  propagate error up.
     }
 
     let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
@@ -839,20 +839,34 @@ pub(crate) async fn mine(
                 restart_guessing = true;
             }
             Ok(Err(e)) = &mut composer_task => {
-                stop_composing = true;
 
-                match e.downcast_ref::<prover_job::ProverJobError>() {
-                    Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
-                        pause_mine = true;
-                        tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
-                    },
-                    _ => {
-                        // Ensure graceful shutdown in case of error during
-                        // composition.
-                        tracing::error!("Composition failed:\n{e}\n. \
-                            Try adjusting the environment variables \
-                            \"TVM_LDE_TRACE\" and \"RAYON_NUM_THREADS\".");
-                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
+                // fix issue 579.
+                // we must check if error indicates job was cancelled.
+                // note that cancellation can occur any time that the cancellation
+                // channel Sender gets dropped, which occurs if composer_task gets aborted
+                // which occurs if any other branch of this select!{} resolves first.
+                // Common causes are NewBlock and NewBlockProposal messages from main.
+                let job_cancelled = e.downcast_ref::<JobHandleErrorSync>()
+                    .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
+
+                if job_cancelled {
+                    tracing::debug!("composer job was cancelled. continuing normal operation");
+                } else {
+                    stop_composing = true;
+
+                    match e.downcast_ref::<prover_job::ProverJobError>() {
+                        Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
+                            pause_mine = true;
+                            tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
+                        },
+                        _ => {
+                            // Ensure graceful shutdown in case of error during
+                            // composition.
+                            tracing::error!("Composition failed:\n{e}\n. \
+                                Try adjusting the environment variables \
+                                \"TVM_LDE_TRACE\" and \"RAYON_NUM_THREADS\".");
+                            to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
+                        }
                     }
                 }
             },

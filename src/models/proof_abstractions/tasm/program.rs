@@ -12,6 +12,7 @@ use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
+use crate::job_queue::errors::JobHandleError;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
@@ -135,7 +136,10 @@ pub(crate) async fn prove_consensus_program(
                 _ = cancel_job_rx.changed() => {
                     debug!("forwarding job cancellation request to job");
                     cancel_tx.send(())?;
-                    anyhow::bail!("job cancelled by caller");
+
+                    // Ideally we would await job_handle.result() but we
+                    // can't because it takes self and upsets borrow checker.
+                    Err(JobHandleError::JobCancelled)
                 }
                 // case: job completion.
                 result = job_handle.result() => result,
