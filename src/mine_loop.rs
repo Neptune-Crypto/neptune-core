@@ -673,6 +673,7 @@ pub(crate) async fn mine(
     mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut global_state_lock: GlobalStateLock,
+    perform_initial_sleep: bool,
 ) -> Result<()> {
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
@@ -684,7 +685,10 @@ pub(crate) async fn mine(
     // abort e.g. the composer.
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
 
-    tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+    if perform_initial_sleep {
+        tracing::info!("sleeping for {} seconds while node initializes", INITIAL_MINING_SLEEP_IN_SECONDS);
+        tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+    }
     let cli_args = global_state_lock.cli().clone();
 
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
@@ -1050,6 +1054,8 @@ pub(crate) mod tests {
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
+    use crate::MINER_CHANNEL_CAPACITY;
+    use crate::job_queue::errors::JobHandleErrorSync;
 
     /// Produce a transaction that allocates the given fraction of the block
     /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
@@ -1972,4 +1978,83 @@ pub(crate) mod tests {
             )
         }
     }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn job_cancel_msg_cancels_composing() -> anyhow::Result<()> {
+        let network = Network::Main;
+        let cli_args = cli_args::Args {
+            compose: true,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
+
+        let (cancel_job_tx, cancel_job_rx) = tokio::sync::watch::channel(());
+        
+        let mine_task = async move {
+            let genesis_block = Block::genesis(network);
+            let gsl = global_state_lock.clone();
+            let cli = &cli_args;
+            let mut job_options: TritonVmProofJobOptions = cli.into();
+            job_options.cancel_job_rx = Some(cancel_job_rx);
+            create_block_transaction_from(&genesis_block, &gsl, Timestamp::now(), job_options, TxMergeOrigin::Mempool).await
+        };
+
+        let jh = tokio::task::spawn(mine_task);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        cancel_job_tx.send(()).unwrap();
+        let job_result = jh.await?;
+
+        let error = job_result.unwrap_err();
+
+        println!("error: {}", error);
+
+        let root_cause = error.root_cause();
+
+        println!("root cause: {:?}", root_cause);
+        
+        let job_cancelled = root_cause.to_string().contains("cancelled");
+/*
+        let downcast = root_cause.downcast_ref::<JobHandleErrorSync>();
+        println!("downcast: {:?}", downcast);
+
+        let job_cancelled = root_cause.downcast_ref::<JobHandleErrorSync>()
+                    .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
+*/
+        assert!(job_cancelled);
+
+        Ok(())
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn msg_from_main_does_not_crash_composer() -> anyhow::Result<()> {
+        let network = Network::Main;
+        let cli_args = cli_args::Args {
+            compose: true,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
+
+        let (miner_to_main_tx, _miner_to_main_rx) =
+            mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
+        let (main_to_miner_tx, main_to_miner_rx) =
+            mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
+
+        let mine_task = mine(main_to_miner_rx, miner_to_main_tx, global_state_lock, false);
+
+        let jh = tokio::task::spawn(mine_task);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        main_to_miner_tx.send(MainToMiner::WaitForContinue).await?;
+        main_to_miner_tx.send(MainToMiner::Continue).await?;
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        assert!(!main_to_miner_tx.is_closed());
+        assert!(!jh.is_finished());
+
+        Ok(())
+    }    
 }
