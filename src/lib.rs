@@ -264,7 +264,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         let miner_join_handle = tokio::task::Builder::new()
             .name("miner")
             .spawn(async move {
-                mine_loop::mine(main_to_miner_rx, miner_to_main_tx, miner_state_lock)
+                let perform_initial_sleep = true;
+                mine_loop::mine(main_to_miner_rx, miner_to_main_tx, miner_state_lock, perform_initial_sleep)
                     .await
                     .expect("Error in mining task");
             })?;
