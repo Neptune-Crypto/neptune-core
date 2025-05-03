@@ -1,9 +1,9 @@
 pub(crate) mod composer_parameters;
-
 use std::cmp::max;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::job_queue::errors::JobHandleErrorSync;
 use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
@@ -32,8 +32,8 @@ use crate::api::export::TxInputList;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
+use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
-use crate::job_queue::errors::JobHandleErrorSync;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -48,7 +48,6 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -686,7 +685,10 @@ pub(crate) async fn mine(
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
 
     if perform_initial_sleep {
-        tracing::info!("sleeping for {} seconds while node initializes", INITIAL_MINING_SLEEP_IN_SECONDS);
+        tracing::info!(
+            "sleeping for {} seconds while node initializes",
+            INITIAL_MINING_SLEEP_IN_SECONDS
+        );
         tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
     }
     let cli_args = global_state_lock.cli().clone();
@@ -850,27 +852,15 @@ pub(crate) async fn mine(
                 // channel Sender gets dropped, which occurs if composer_task gets aborted
                 // which occurs if any other branch of this select!{} resolves first.
                 // Common causes are NewBlock and NewBlockProposal messages from main.
-                let job_cancelled = e.downcast_ref::<JobHandleErrorSync>()
-                    .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
-
-                if job_cancelled {
-                    tracing::debug!("composer job was cancelled. continuing normal operation");
-                } else {
-                    stop_composing = true;
-
-                    match e.downcast_ref::<prover_job::ProverJobError>() {
-                        Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
-                            pause_mine = true;
-                            tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
-                        },
-                        _ => {
-                            // Ensure graceful shutdown in case of error during
-                            // composition.
-                            tracing::error!("Composition failed:\n{e}\n. \
-                                Try adjusting the environment variables \
-                                \"TVM_LDE_TRACE\" and \"RAYON_NUM_THREADS\".");
-                            to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
-                        }
+                match e.root_cause().downcast_ref::<CreateProofError>() {
+                    Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
+                        debug!("composer job was cancelled. continuing normal operation");
+                    }
+                    _ => {
+                        // Ensure graceful shutdown in case of error during composition.
+                        stop_composing = true;
+                        error!("Composition failed: {}", e);
+                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
                     }
                 }
             },
@@ -1033,6 +1023,7 @@ pub(crate) mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
+    use crate::job_queue::errors::JobHandleErrorSync;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -1050,12 +1041,12 @@ pub(crate) mod tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
+    use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::MINER_CHANNEL_CAPACITY;
-    use crate::job_queue::errors::JobHandleErrorSync;
 
     /// Produce a transaction that allocates the given fraction of the block
     /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
@@ -1979,6 +1970,12 @@ pub(crate) mod tests {
         }
     }
 
+    // tests that a job cancel message cancels composing and results in JobCancelled error
+    //
+    // This test spawns a task that executes create_block_transaction_from()
+    // and then sends a job cancellation message to that task.
+    //
+    // It verifies that the task ends and the result is a JobCancelled error.
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn job_cancel_msg_cancels_composing() -> anyhow::Result<()> {
@@ -1988,22 +1985,34 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone())
+                .await;
 
         let (cancel_job_tx, cancel_job_rx) = tokio::sync::watch::channel(());
-        
+
         let mine_task = async move {
             let genesis_block = Block::genesis(network);
             let gsl = global_state_lock.clone();
             let cli = &cli_args;
             let mut job_options: TritonVmProofJobOptions = cli.into();
             job_options.cancel_job_rx = Some(cancel_job_rx);
-            create_block_transaction_from(&genesis_block, &gsl, Timestamp::now(), job_options, TxMergeOrigin::Mempool).await
+            create_block_transaction_from(
+                &genesis_block,
+                &gsl,
+                Timestamp::now(),
+                job_options,
+                TxMergeOrigin::Mempool,
+            )
+            .await
         };
+
+        let timeout = std::time::Duration::from_secs(10);
 
         let jh = tokio::task::spawn(mine_task);
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // wait until 1 job in queue
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
+
         cancel_job_tx.send(()).unwrap();
         let job_result = jh.await?;
 
@@ -2011,23 +2020,32 @@ pub(crate) mod tests {
 
         println!("error: {}", error);
 
-        let root_cause = error.root_cause();
+        let job_cancelled = matches!(
+            error.root_cause().downcast_ref::<CreateProofError>(),
+            Some(CreateProofError::JobHandleError(
+                JobHandleErrorSync::JobCancelled
+            ))
+        );
 
-        println!("root cause: {:?}", root_cause);
-        
-        let job_cancelled = root_cause.to_string().contains("cancelled");
-/*
-        let downcast = root_cause.downcast_ref::<JobHandleErrorSync>();
-        println!("downcast: {:?}", downcast);
-
-        let job_cancelled = root_cause.downcast_ref::<JobHandleErrorSync>()
-                    .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
-*/
         assert!(job_cancelled);
 
         Ok(())
     }
 
+    // tests that Stop/Start mining messages work as expected while composing.
+    //
+    // This test spawns task that executes the mining loop ie mine().
+    // and then sends StopMining, StartMining messages to the task.
+    //
+    // The StopMining message causes a job-cancelation message to be sent to
+    // prove_concensus_program() which forwards to to proving job.
+    //
+    // The result is that the composer_task terminates early with a JobCancelled error and for
+    // correct behavior, that error must not cause the mining loop to shut-down.
+    //
+    // The test verifies that the mining status actually changes after each message is
+    // sent and that the mining loop continues processing.
+    #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn msg_from_main_does_not_crash_composer() -> anyhow::Result<()> {
         let network = Network::Main;
@@ -2043,18 +2061,65 @@ pub(crate) mod tests {
         let (main_to_miner_tx, main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
 
-        let mine_task = mine(main_to_miner_rx, miner_to_main_tx, global_state_lock, false);
+        let mine_task = mine(
+            main_to_miner_rx,
+            miner_to_main_tx,
+            global_state_lock.clone(),
+            false,
+        );
 
         let jh = tokio::task::spawn(mine_task);
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        main_to_miner_tx.send(MainToMiner::WaitForContinue).await?;
-        main_to_miner_tx.send(MainToMiner::Continue).await?;
+        let timeout = std::time::Duration::from_secs(10);
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // wait until 1 job in queue
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
+
+        assert!(matches!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .mining_status,
+            MiningStatus::Composing(_)
+        ));
+
+        main_to_miner_tx.send(MainToMiner::StopMining).await?;
+
+        // wait until 0 jobs in queue
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 0).await?;
+
+        assert!(matches!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .mining_status,
+            MiningStatus::Inactive
+        ));
+        assert_eq!(vm_job_queue().num_jobs(), 0);
+
+        main_to_miner_tx.send(MainToMiner::StartMining).await?;
+
+        // wait until 1 job in queue again
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
+
+        assert!(matches!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .mining_status,
+            MiningStatus::Composing(_)
+        ));
+
+        // wait 3 more secs for mine-loop processing.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        // ensure mine-loop is still up and running.
         assert!(!main_to_miner_tx.is_closed());
         assert!(!jh.is_finished());
 
         Ok(())
-    }    
+    }
 }

@@ -14,6 +14,7 @@ use twenty_first::math::tip5::Digest;
 
 use super::utxo::Utxo;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
+use crate::api::tx_initiation::error::CreateProofError;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -161,16 +162,16 @@ impl LockScriptAndWitness {
         public_input: PublicInput,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Proof> {
+    ) -> Result<Proof, CreateProofError> {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
-        Ok(ProofBuilder::new()
+        ProofBuilder::new()
             .program(self.program.clone())
             .claim(claim)
             .nondeterminism(self.nondeterminism())
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
-            .await?)
+            .await
     }
 }
 

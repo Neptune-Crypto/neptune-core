@@ -1,17 +1,18 @@
 //! provides error types related to initiating transactions.
 
-use serde::Deserialize;
-use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::WitnessValidationError;
+use crate::job_queue::errors::AddJobError;
+use crate::job_queue::errors::JobHandleErrorSync;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+use crate::models::proof_abstractions::tasm::prover_job::ProverJobError;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// enumerates possible transaction send errors
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum CreateTxError {
     #[error("missing required data to build transaction")]
@@ -50,7 +51,7 @@ pub enum CreateTxError {
     Failed(String),
 }
 
-#[derive(Debug, Clone, thiserror::Error, strum::Display, Serialize, Deserialize)]
+#[derive(Debug, Clone, thiserror::Error, strum::Display)]
 #[non_exhaustive]
 pub enum ProofRequirement {
     Program,
@@ -60,8 +61,8 @@ pub enum ProofRequirement {
     TransactionProofInput,
 }
 
-/// enumerates possible transaction send errors
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+/// enumerates possible proof generation errors
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CreateProofError {
     #[error("missing required data to build proof: {0}")]
@@ -78,13 +79,21 @@ pub enum CreateProofError {
     #[error("target proof type {0} is not a triton-vm proof.")]
     NotVmProof(TransactionProofType),
 
-    // catch-all error, eg for anyhow errors
-    #[error("transaction could not be created.  reason: {0}")]
-    Failed(String),
+    #[error(transparent)]
+    AddJobError(#[from] AddJobError),
+
+    #[error(transparent)]
+    ProverJobError(#[from] ProverJobError),
+
+    #[error(transparent)]
+    JobHandleError(#[from] JobHandleErrorSync),
+
+    #[error("Could not forward job cancellation msg to proving job. {0}")]
+    JobCancelSendError(#[from] tokio::sync::watch::error::SendError<()>),
 }
 
-/// enumerates possible transaction send errors
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+/// enumerates possible upgrade-proof errors
+#[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum UpgradeProofError {
     #[error("transaction is not found in mempool")]
@@ -98,7 +107,7 @@ pub enum UpgradeProofError {
 }
 
 /// enumerates possible transaction send errors
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SendError {
     #[error("send() is not supported by this node")]
@@ -128,14 +137,6 @@ pub enum SendError {
 // convert anyhow::Error to a CreateTxError::Failed.
 // note that anyhow Error is not serializable.
 impl From<anyhow::Error> for CreateTxError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::Failed(e.to_string())
-    }
-}
-
-// convert anyhow::Error to a CreateProofError::Failed.
-// note that anyhow Error is not serializable.
-impl From<anyhow::Error> for CreateProofError {
     fn from(e: anyhow::Error) -> Self {
         Self::Failed(e.to_string())
     }

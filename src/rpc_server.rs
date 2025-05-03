@@ -3543,15 +3543,15 @@ pub mod error {
     use super::*;
 
     /// enumerates possible rpc api errors
-    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+    #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
     #[non_exhaustive]
     pub enum RpcError {
         // auth error
-        #[error(transparent)]
+        #[error("auth error: {0}")]
         Auth(#[from] rpc_auth::error::AuthError),
 
         // catch-all error, eg for anyhow errors
-        #[error("rpc call failed")]
+        #[error("rpc call failed: {0}")]
         Failed(String),
 
         // API specific error variants.
@@ -3561,23 +3561,59 @@ pub mod error {
         #[error("capacity to store exported block proposals exceeded")]
         ExportedBlockProposalStorageCapacityExceeded,
 
-        #[error(transparent)]
-        CreateTxError(#[from] tx_initiation::error::CreateTxError),
+        #[error("create transaction error: {0}")]
+        CreateTxError(String),
 
-        #[error(transparent)]
-        UpgradeProofError(#[from] tx_initiation::error::UpgradeProofError),
+        #[error("upgrade proof error: {0}")]
+        UpgradeProofError(String),
 
-        #[error(transparent)]
-        SendError(#[from] tx_initiation::error::SendError),
+        #[error("send error: {0}")]
+        SendError(String),
 
-        #[error(transparent)]
-        RegTestError(#[from] api::regtest::error::RegTestError),
+        #[error("regtest error: {0}")]
+        RegTestError(String),
 
-        #[error(transparent)]
-        Error(#[from] api::wallet::error::WalletError),
+        #[error("wallet error: {0}")]
+        Error(String),
 
-        #[error(transparent)]
-        ClaimError(#[from] ClaimError),
+        #[error("claim error: {0}")]
+        ClaimError(String),
+    }
+
+    impl From<tx_initiation::error::CreateTxError> for RpcError {
+        fn from(err: tx_initiation::error::CreateTxError) -> Self {
+            RpcError::CreateTxError(err.to_string())
+        }
+    }
+
+    impl From<tx_initiation::error::UpgradeProofError> for RpcError {
+        fn from(err: tx_initiation::error::UpgradeProofError) -> Self {
+            RpcError::UpgradeProofError(err.to_string())
+        }
+    }
+
+    impl From<tx_initiation::error::SendError> for RpcError {
+        fn from(err: tx_initiation::error::SendError) -> Self {
+            RpcError::SendError(err.to_string())
+        }
+    }
+
+    impl From<api::regtest::error::RegTestError> for RpcError {
+        fn from(err: api::regtest::error::RegTestError) -> Self {
+            RpcError::RegTestError(err.to_string())
+        }
+    }
+
+    impl From<api::wallet::error::WalletError> for RpcError {
+        fn from(err: api::wallet::error::WalletError) -> Self {
+            RpcError::Error(err.to_string())
+        }
+    }
+
+    impl From<ClaimError> for RpcError {
+        fn from(err: ClaimError) -> Self {
+            RpcError::ClaimError(err.to_string())
+        }
     }
 
     // convert anyhow::Error to an RpcError::Failed.
@@ -5285,27 +5321,12 @@ mod tests {
                     .send(ctx, token, outputs.clone(), ChangePolicy::Burn, fee)
                     .await;
 
-                // .send_to_many_inner(
-                //     ctx,
-                //     outputs.clone(),
-                //     (
-                //         UtxoNotificationMedium::OnChain,
-                //         UtxoNotificationMedium::OnChain,
-                //     ),
-                //     fee,
-                //     timestamp,
-                //     TxProvingCapability::PrimitiveWitness,
-                // )
-                // .await;
-
                 // any attempts after the 2nd send should result in RateLimit error.
                 match i {
                     0..2 => assert!(result.is_ok()),
                     _ => assert!(matches!(
                         result,
-                        Err(RpcError::SendError(
-                            tx_initiation::error::SendError::RateLimit { .. }
-                        ))
+                        Err(RpcError::SendError(s)) if s.contains("Send rate limit reached")
                     )),
                 }
             }

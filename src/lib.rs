@@ -265,9 +265,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
             .name("miner")
             .spawn(async move {
                 let perform_initial_sleep = true;
-                mine_loop::mine(main_to_miner_rx, miner_to_main_tx, miner_state_lock, perform_initial_sleep)
-                    .await
-                    .expect("Error in mining task");
+                mine_loop::mine(
+                    main_to_miner_rx,
+                    miner_to_main_tx,
+                    miner_state_lock,
+                    perform_initial_sleep,
+                )
+                .await
+                .expect("Error in mining task");
             })?;
         task_join_handles.push(miner_join_handle);
         info!("Started mining task");
