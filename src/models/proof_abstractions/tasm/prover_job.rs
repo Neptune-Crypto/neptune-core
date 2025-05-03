@@ -276,7 +276,6 @@ impl ProverJob {
     ///
     /// If we are in a test environment, try reading it from disk. If it is not
     /// there, generate it and store it to disk.
-    #[cfg_attr(test, expect(clippy::unused_async))]
     async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
         // produce mock proofs if network so requires. (ie RegTest)
         if self.job_settings.network.use_mock_proof() {
@@ -284,24 +283,35 @@ impl ProverJob {
             return ProverProcessCompletion::Finished(proof).into();
         }
 
-        // todo: make test version async, cancellable.
         #[cfg(test)]
-        {
-            // avoid some 'unused' compiler warnings.
-            let _dummy = rx;
-            _ = ProverProcessCompletion::Cancelled;
+        let result = self.prove_for_unit_testing(rx).await;
 
-            let proof = tests::load_proof_or_produce_and_save(
-                &self.claim,
-                self.program.clone(),
-                self.nondeterminism.clone(),
-            );
-            ProverProcessCompletion::Finished(proof).into()
-        }
         #[cfg(not(test))]
-        {
-            // invoke external prover
-            self.prove_out_of_process(rx).await.into()
+        let result = self.prove_out_of_process(rx).await;
+
+        result.into()
+    }
+
+    #[cfg(test)]
+    async fn prove_for_unit_testing(
+        &self,
+        mut rx: JobCancelReceiver,
+    ) -> Result<ProverProcessCompletion, VmProcessError> {
+        let claim = self.claim.clone();
+        let program = self.program.clone();
+        let nondeterminism = self.nondeterminism.clone();
+
+        let prove_jh = tokio::task::spawn_blocking(move || {
+            let proof = tests::load_proof_or_produce_and_save(&claim, program, nondeterminism);
+            ProverProcessCompletion::Finished(proof)
+        });
+
+        tokio::select! {
+            result = prove_jh => Ok(result.unwrap()),
+            _ = rx.changed() => {
+                tracing::debug!("prover job got cancel message.  cancelling.");
+                Ok(ProverProcessCompletion::Cancelled)
+            }
         }
     }
 

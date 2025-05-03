@@ -295,6 +295,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     pub fn add_job(&self, job: Box<dyn Job>, priority: P) -> Result<JobHandle, AddJobError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
+        let cancel_tx = super::traits::LogWhenDropped(cancel_tx);
+        let cancel_rx = super::traits::LogWhenDropped(cancel_rx);
 
         let job_id = JobId::random();
 
@@ -330,6 +332,17 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             result_rx,
             cancel_tx,
         })
+    }
+
+    /// returns total number of jobs, queued plus running.
+    pub fn num_jobs(&self) -> usize {
+        let guard = self.shared.lock().unwrap();
+        guard.jobs.len() + guard.current_job.as_ref().map(|_| 1).unwrap_or(0)
+    }
+
+    /// returns number of queued jobs
+    pub fn num_queued_jobs(&self) -> usize {
+        self.shared.lock().unwrap().jobs.len()
     }
 }
 

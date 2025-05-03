@@ -1231,3 +1231,70 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
 
     true
 }
+
+// recursively copy source dir to destination
+pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::Result<()> {
+    if !source.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Source is not a directory",
+        ));
+    }
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let dest_path = &destination.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir_recursive(&entry.path(), dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Waits for an async predicate to return true or a timeout.
+///
+/// # Arguments
+///
+/// * `predicate`: `async || -> bool` closure to evaluate.
+/// * `timeout_secs`: Max seconds to wait (floating-point).
+///
+/// # Returns
+///
+/// `Ok(())` on success, `Err(_)` on timeout.
+///
+/// # Example
+///
+/// ```
+/// async fn is_ready() -> bool { true }
+///
+/// #[tokio::main]
+/// async fn main() -> Result<()> {
+///     wait_until(async || is_ready().await, 1.5).await?;
+///     Ok(())
+/// }
+/// ```
+pub async fn wait_until<F, Fut>(
+    timeout: std::time::Duration,
+    mut predicate: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = bool> + Send + 'static,
+{
+    let start = std::time::Instant::now();
+    loop {
+        if predicate().await {
+            break;
+        }
+        if start.elapsed() > timeout {
+            anyhow::bail!(
+                "timeout reached after {} seconds",
+                start.elapsed().as_secs_f32()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    Ok(())
+}

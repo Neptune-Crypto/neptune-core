@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
+use crate::api::tx_initiation::error::CreateProofError;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::prelude::*;
 use itertools::Itertools;
@@ -232,7 +233,7 @@ impl SingleProof {
         primitive_witness: &PrimitiveWitness,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Proof> {
+    ) -> Result<Proof, CreateProofError> {
         let proof_collection = ProofCollection::produce(
             primitive_witness,
             triton_vm_job_queue.clone(),

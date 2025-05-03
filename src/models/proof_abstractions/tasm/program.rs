@@ -12,6 +12,7 @@ use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
+use crate::api::tx_initiation::error::CreateProofError;
 use crate::job_queue::errors::JobHandleError;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -69,15 +70,15 @@ where
         nondeterminism: NonDeterminism,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Proof> {
-        Ok(ProofBuilder::new()
+    ) -> Result<Proof, CreateProofError> {
+        ProofBuilder::new()
             .program(self.program())
             .claim(claim)
             .nondeterminism(nondeterminism)
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
-            .await?)
+            .await
     }
 }
 
@@ -101,7 +102,7 @@ pub(crate) async fn prove_consensus_program(
     nondeterminism: NonDeterminism,
     triton_vm_job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
-) -> anyhow::Result<Proof> {
+) -> Result<Proof, CreateProofError> {
     // regtest mode: just return a mock (empty) Proof
     if proof_job_options.job_settings.network.use_mock_proof() {
         return Ok(Proof::valid_mock(claim));
@@ -123,6 +124,7 @@ pub(crate) async fn prove_consensus_program(
     // instead of calling job_handle.cancel() inside select!()
     // we get a handle to the cancellation channel sender here.
     let cancel_tx = job_handle.cancel_tx().to_owned();
+    let job_id = job_handle.job_id();
 
     let job_result = match proof_job_options.cancel_job_rx {
         // fix for issue #348.
@@ -134,7 +136,7 @@ pub(crate) async fn prove_consensus_program(
             tokio::select! {
                 // case: sender cancelled, or sender dropped.
                 _ = cancel_job_rx.changed() => {
-                    debug!("forwarding job cancellation request to job");
+                    debug!("received job cancellation request.  forwarding to job: {}", job_id);
                     cancel_tx.send(())?;
 
                     // Ideally we would await job_handle.result() but we

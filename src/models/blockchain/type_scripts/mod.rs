@@ -21,6 +21,7 @@ use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Coin;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
+use crate::api::tx_initiation::error::CreateProofError;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -108,21 +109,21 @@ impl TypeScriptAndWitness {
         salted_outputs_hash: Digest,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Proof> {
+    ) -> Result<Proof, CreateProofError> {
         let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
             .flat_map(|d| d.reversed().values())
             .collect_vec();
         let claim = Claim::new(self.program.hash()).with_input(input);
 
-        Ok(ProofBuilder::new()
+        ProofBuilder::new()
             .program(self.program.clone())
             .claim(claim)
             .nondeterminism(self.nondeterminism())
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
-            .await?)
+            .await
     }
 }
 
