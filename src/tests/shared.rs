@@ -69,6 +69,7 @@ use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::tests::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
@@ -279,15 +280,18 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
 
     for _ in 0..num_blocks_mined {
         let guesser_preimage = wallet.guesser_preimage(previous_block.hash());
-        let (next_block, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
-            &previous_block,
-            None,
-            own_key,
-            rng.random(),
-            0.5,
-            guesser_preimage,
-        )
-        .await;
+        let (next_block, composer_utxos) =
+            make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+                &previous_block,
+                vec![],
+                vec![],
+                None,
+                own_key,
+                rng.random(),
+                0.5,
+                guesser_preimage,
+            )
+            .await;
 
         global_state_lock
             .set_new_self_composed_tip(next_block.clone(), composer_utxos)
@@ -756,8 +760,11 @@ pub(crate) fn invalid_block_with_transaction(
 /// guesser-preimage and guesser fraction.
 ///
 /// Returns (block, composer's expected UTXOs).
-pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
     previous_block: &Block,
+    inputs: Vec<RemovalRecord>,
+    outputs: Vec<AdditionRecord>,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
@@ -783,7 +790,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
 
     let cli = cli_args::Args::default();
 
-    let (tx, composer_txos) = make_coinbase_transaction_stateless(
+    let (mut transaction, composer_txos) = make_coinbase_transaction_stateless(
         previous_block,
         composer_parameters,
         block_timestamp,
@@ -793,7 +800,18 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     .await
     .unwrap();
 
-    let mut block = Block::block_template_invalid_proof(previous_block, tx, block_timestamp, None);
+    let kernel_proxy = TransactionKernelProxy::from(transaction.kernel.clone());
+    let new_outputs = [kernel_proxy.outputs, outputs].concat();
+    let new_inputs = [kernel_proxy.inputs, inputs].concat();
+
+    let new_kernel = TransactionKernelModifier::default()
+        .outputs(new_outputs)
+        .inputs(new_inputs)
+        .modify(transaction.kernel.clone());
+    transaction.kernel = new_kernel;
+
+    let mut block =
+        Block::block_template_invalid_proof(previous_block, transaction, block_timestamp, None);
     block.set_header_guesser_digest(guesser_preimage.hash());
 
     let composer_expected_utxos = composer_txos
@@ -821,8 +839,33 @@ pub(crate) async fn make_mock_block(
     composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
 ) -> (Block, Vec<ExpectedUtxo>) {
-    make_mock_block_guesser_preimage_and_guesser_fraction(
+    make_mock_block_with_inputs_and_outputs(
         previous_block,
+        vec![],
+        vec![],
+        block_timestamp,
+        composer_key,
+        seed,
+    )
+    .await
+}
+
+/// Build a fake block with a random hash, containing the given inputs and
+/// outputs as well as two outputs for the composer.
+///
+/// Returns (block, composer-utxos).
+pub(crate) async fn make_mock_block_with_inputs_and_outputs(
+    previous_block: &Block,
+    inputs: Vec<RemovalRecord>,
+    outputs: Vec<AdditionRecord>,
+    block_timestamp: Option<Timestamp>,
+    composer_key: generation_address::GenerationSpendingKey,
+    seed: [u8; 32],
+) -> (Block, Vec<ExpectedUtxo>) {
+    make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+        previous_block,
+        inputs,
+        outputs,
         block_timestamp,
         composer_key,
         seed,

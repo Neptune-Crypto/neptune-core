@@ -2016,7 +2016,7 @@ pub(crate) mod tests {
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
+    use crate::tests::shared::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
@@ -2557,8 +2557,10 @@ pub(crate) mod tests {
 
         // `bob` both composes and guesses the PoW solution of this block.
         let (block_1a, expected_utxos_block_1a) =
-            make_mock_block_guesser_preimage_and_guesser_fraction(
+            make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
+                vec![],
+                vec![],
                 None,
                 bob_key,
                 mock_block_seed,
@@ -2591,8 +2593,10 @@ pub(crate) mod tests {
         // solution. `bob` did *not* find the PoW-solution for this block.
         let guesser_preimage_1b: Digest = rng.random();
         let (block_1b, expected_utxos_block_1b) =
-            make_mock_block_guesser_preimage_and_guesser_fraction(
+            make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
+                vec![],
+                vec![],
                 None,
                 bob_key,
                 mock_block_seed,
@@ -3473,8 +3477,10 @@ pub(crate) mod tests {
 
             // Alice mines a block
             let (block, composer_expected_utxos) =
-                make_mock_block_guesser_preimage_and_guesser_fraction(
+                make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                     &genesis,
+                    vec![],
+                    vec![],
                     None,
                     alice_wallet.nth_generation_spending_key(0),
                     rng.random(),
@@ -4107,8 +4113,10 @@ pub(crate) mod tests {
 
             let guesser_fraction = 0.6f64;
             let (block_1a, composer_expected_utxos_1a) =
-                make_mock_block_guesser_preimage_and_guesser_fraction(
+                make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                     &genesis,
+                    vec![],
+                    vec![],
                     None,
                     alice_wallet.nth_generation_spending_key(14),
                     rng.random(),
