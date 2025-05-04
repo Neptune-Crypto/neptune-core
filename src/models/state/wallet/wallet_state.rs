@@ -2564,8 +2564,7 @@ pub(crate) mod tests {
                 None,
                 bob_key,
                 mock_block_seed,
-                guesser_fraction,
-                guesser_preimage_1a,
+                (guesser_fraction, guesser_preimage_1a),
             )
             .await;
 
@@ -2600,8 +2599,7 @@ pub(crate) mod tests {
                 None,
                 bob_key,
                 mock_block_seed,
-                guesser_fraction,
-                guesser_preimage_1b,
+                (guesser_fraction, guesser_preimage_1b),
             )
             .await;
 
@@ -3484,8 +3482,7 @@ pub(crate) mod tests {
                     None,
                     alice_wallet.nth_generation_spending_key(0),
                     rng.random(),
-                    guesser_fraction,
-                    guesser_preimage,
+                    (guesser_fraction, guesser_preimage),
                 )
                 .await;
 
@@ -4120,8 +4117,7 @@ pub(crate) mod tests {
                     None,
                     alice_wallet.nth_generation_spending_key(14),
                     rng.random(),
-                    guesser_fraction,
-                    guesser_preimage,
+                    (guesser_fraction, guesser_preimage),
                 )
                 .await;
 
