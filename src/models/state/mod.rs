@@ -31,6 +31,7 @@ use anyhow::ensure;
 use anyhow::Result;
 use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
+use itertools::Itertools;
 use mempool::Mempool;
 use mempool::TransactionOrigin;
 use mining_state::MiningState;
@@ -84,6 +85,7 @@ use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 use crate::RPCServerToMain;
 use crate::VERSION;
@@ -1217,11 +1219,16 @@ impl GlobalState {
                 };
                 let MutatorSetUpdate {
                     additions,
-                    removals,
+                    mut removals,
                 } = apply_block.mutator_set_update();
 
                 // apply additions
                 for addition_record in &additions {
+                    RemovalRecord::batch_update_from_addition(
+                        &mut removals.iter_mut().collect_vec(),
+                        &block_msa,
+                    );
+
                     membership_proof
                         .update_from_addition(
                             Hash::hash(&monitored_utxo.utxo),
@@ -1233,11 +1240,18 @@ impl GlobalState {
                 }
 
                 // apply removals
-                for removal_record in &removals {
-                    membership_proof.update_from_remove(removal_record);
-                    block_msa.remove(removal_record);
+                let mut applied_removals = removals.clone();
+                while let Some(applied_removal_record) = applied_removals.pop() {
+                    RemovalRecord::batch_update_from_remove(
+                        &mut applied_removals.iter_mut().collect_vec(),
+                        &applied_removal_record,
+                    );
+
+                    membership_proof.update_from_remove(&applied_removal_record);
+                    block_msa.remove(&applied_removal_record);
                 }
 
+                // sanity check
                 assert_eq!(
                     block_msa.hash(),
                     apply_block.mutator_set_accumulator_after().hash()
