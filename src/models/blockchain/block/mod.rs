@@ -1754,7 +1754,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
-        use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
+        use crate::tests::shared::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
 
         #[apply(shared_tokio_runtime)]
         async fn guesser_fee_addition_records_are_consistent() {
@@ -1765,8 +1765,10 @@ pub(crate) mod tests {
             let genesis_block = Block::genesis(Network::Main);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
             let guesser_preimage = rng.random();
-            let (block1, _) = make_mock_block_guesser_preimage_and_guesser_fraction(
+            let (block1, _) = make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
+                vec![],
+                vec![],
                 None,
                 a_key,
                 rng.random(),
