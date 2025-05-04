@@ -1772,8 +1772,7 @@ pub(crate) mod tests {
                 None,
                 a_key,
                 rng.random(),
-                0.4,
-                guesser_preimage,
+                (0.4, guesser_preimage),
             )
             .await;
             let ars = block1.guesser_fee_addition_records();

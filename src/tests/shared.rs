@@ -288,8 +288,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
                 None,
                 own_key,
                 rng.random(),
-                0.5,
-                guesser_preimage,
+                (0.5, guesser_preimage),
             )
             .await;
 
@@ -760,7 +759,6 @@ pub(crate) fn invalid_block_with_transaction(
 /// guesser-preimage and guesser fraction.
 ///
 /// Returns (block, composer's expected UTXOs).
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
     previous_block: &Block,
     inputs: Vec<RemovalRecord>,
@@ -768,9 +766,10 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
-    guesser_fraction: f64,
-    guesser_preimage: Digest,
+    guesser_parameters: (f64, Digest),
 ) -> (Block, Vec<ExpectedUtxo>) {
+    let (guesser_fraction, guesser_preimage) = guesser_parameters;
+
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
     // Build coinbase UTXO and associated data
@@ -869,8 +868,7 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
         block_timestamp,
         composer_key,
         seed,
-        0f64,
-        Digest::default(),
+        (0f64, Digest::default()),
     )
     .await
 }
