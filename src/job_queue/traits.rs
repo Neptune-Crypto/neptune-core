@@ -5,6 +5,8 @@ use std::ops::DerefMut;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
+use super::errors::JobHandleError;
+
 //pub type JobCancelReceiver = watch::Receiver<()>; // used in pub trait
 //pub(super) type JobCancelSender = watch::Sender<()>;
 pub type JobCancelReceiver = LogWhenDropped<watch::Receiver<()>>; // used in pub trait
@@ -101,6 +103,24 @@ impl std::fmt::Display for JobCompletion {
 impl<T: JobResult> From<T> for JobCompletion {
     fn from(result: T) -> Self {
         Self::Finished(Box::new(result))
+    }
+}
+
+impl TryFrom<JobCompletion> for Box<dyn JobResult> {
+    type Error = JobHandleError;
+
+    fn try_from(jc: JobCompletion) -> Result<Self, Self::Error> {
+        jc.result()
+    }
+}
+
+impl JobCompletion {
+    pub fn result(self) -> Result<Box<dyn JobResult>, JobHandleError> {
+        match self {
+            JobCompletion::Finished(r) => Ok(r),
+            JobCompletion::Cancelled => Err(JobHandleError::JobCancelled),
+            JobCompletion::Panicked(e) => Err(JobHandleError::JobPanicked(e)),
+        }
     }
 }
 

@@ -6,6 +6,7 @@ use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::WitnessValidationError;
 use crate::job_queue::errors::AddJobError;
+use crate::job_queue::errors::JobHandleError;
 use crate::job_queue::errors::JobHandleErrorSync;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobError;
@@ -132,6 +133,12 @@ pub enum SendError {
         tip_digest: Digest,
         max: usize,
     },
+}
+
+impl From<JobHandleError> for CreateProofError {
+    fn from(e: JobHandleError) -> Self {
+        e.into_sync().into()
+    }
 }
 
 // convert anyhow::Error to a CreateTxError::Failed.

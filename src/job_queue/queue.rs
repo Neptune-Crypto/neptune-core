@@ -1,7 +1,11 @@
 use std::collections::VecDeque;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::task::Context;
+use std::task::Poll;
 
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -14,7 +18,6 @@ use super::traits::Job;
 use super::traits::JobCancelReceiver;
 use super::traits::JobCancelSender;
 use super::traits::JobCompletion;
-use super::traits::JobResult;
 use super::traits::JobResultReceiver;
 use super::traits::JobResultSender;
 
@@ -38,6 +41,14 @@ impl JobId {
 }
 
 /// A job-handle enables cancelling a job and awaiting results
+///
+/// A JobHandle can be awaited directly.  It returns a
+/// `Result<JobCompletion, JobHandleError>`
+///
+/// See [JobCompletion] and [JobHandleError] for details.
+///
+/// When the `JobHandle` is dropped a cancellation message is sent to the job
+/// task.
 #[derive(Debug)]
 pub struct JobHandle {
     job_id: JobId,
@@ -45,45 +56,40 @@ pub struct JobHandle {
     cancel_tx: JobCancelSender,
 }
 impl JobHandle {
-    /// wait for job to complete
+    /// sends cancel message to job and returns immediately.
     ///
-    /// a completed job may either be finished, cancelled, or panicked.
-    pub async fn complete(self) -> Result<JobCompletion, JobHandleError> {
-        Ok(self.result_rx.await?)
-    }
-
-    /// wait for job result, or err if cancelled or a panic occurred within job.
-    pub async fn result(self) -> Result<Box<dyn JobResult>, JobHandleError> {
-        match self.complete().await? {
-            JobCompletion::Finished(r) => Ok(r),
-            JobCompletion::Cancelled => Err(JobHandleError::JobCancelled),
-            JobCompletion::Panicked(e) => Err(JobHandleError::JobPanicked(e)),
-        }
-    }
-
-    /// cancel job and return immediately.
+    /// note: await the JobHandle after calling `cancel()` to ensure the job has
+    /// ended and obtain a [JobCompletion]
     pub fn cancel(&self) -> Result<(), JobHandleError> {
         Ok(self.cancel_tx.send(())?)
     }
 
-    /// cancel job and wait for it to complete.
-    pub async fn cancel_and_await(self) -> Result<JobCompletion, JobHandleError> {
-        self.cancel_tx.send(())?;
-        self.complete().await
-    }
-
-    /// channel receiver for job results
-    pub fn result_rx(self) -> JobResultReceiver {
-        self.result_rx
-    }
-
-    /// channel sender for cancelling job.
-    pub fn cancel_tx(&self) -> &JobCancelSender {
-        &self.cancel_tx
-    }
-
+    /// obtain randomly generated job identifier
     pub fn job_id(&self) -> JobId {
         self.job_id
+    }
+}
+
+impl Future for JobHandle {
+    type Output = Result<JobCompletion, JobHandleError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Directly poll the underlying result_rx
+        let result_rx = &mut self.get_mut().result_rx;
+        Pin::new(result_rx).poll(cx).map_err(|e| e.into())
+    }
+}
+
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        tracing::debug!("JobHandle dropping for job: {}", self.job_id);
+        if !self.cancel_tx.is_closed() {
+            if let Err(e) = self.cancel_tx.send(()) {
+                tracing::error!("job-cancel message could not be sent. {}", e);
+            } else {
+                tracing::debug!("Sent job-cancel msg to job: {}", self.job_id);
+            }
+        }
     }
 }
 
@@ -391,6 +397,18 @@ mod tests {
         workers::cancel_job(true).await
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn cancel_sync_job_in_select() -> anyhow::Result<()> {
+        workers::cancel_job_in_select(false).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn cancel_async_job_in_select() -> anyhow::Result<()> {
+        workers::cancel_job_in_select(true).await
+    }
+
     #[test]
     #[traced_test]
     fn runtime_shutdown_timeout_force_cancels_sync_job() -> anyhow::Result<()> {
@@ -438,6 +456,7 @@ mod tests {
 
         use super::*;
         use crate::job_queue::errors::JobHandleErrorSync;
+        use crate::job_queue::traits::JobResult;
 
         #[derive(PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
@@ -537,17 +556,9 @@ mod tests {
                 });
 
                 // process job and print results.
-                handles.push(job_queue.add_job(job1, DoubleJobPriority::Low)?.result_rx());
-                handles.push(
-                    job_queue
-                        .add_job(job2, DoubleJobPriority::Medium)?
-                        .result_rx(),
-                );
-                handles.push(
-                    job_queue
-                        .add_job(job3, DoubleJobPriority::High)?
-                        .result_rx(),
-                );
+                handles.push(job_queue.add_job(job1, DoubleJobPriority::Low)?);
+                handles.push(job_queue.add_job(job2, DoubleJobPriority::Medium)?);
+                handles.push(job_queue.add_job(job3, DoubleJobPriority::High)?);
             }
 
             // wait for all jobs to complete.
@@ -612,8 +623,9 @@ mod tests {
 
                 let result = job_queue
                     .add_job(job, DoubleJobPriority::Low)?
-                    .result()
                     .await
+                    .map_err(|e| e.into_sync())?
+                    .result()
                     .map_err(|e| e.into_sync())?;
 
                 let job_result = result.into_any().downcast::<DoubleJobResult>().unwrap();
@@ -641,8 +653,88 @@ mod tests {
 
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-            let completion = job_handle.cancel_and_await().await.unwrap();
+            job_handle.cancel().unwrap();
+            let completion = job_handle.await.unwrap();
             assert!(matches!(completion, JobCompletion::Cancelled));
+
+            Ok(())
+        }
+
+        // this test demonstrates how to listen for a cancellation message
+        // and cancel a job when it is received.
+        //
+        // The key concepts demonstrated are:
+        //  1. using tokio::select!{} to execute the job and listen for a
+        //     cancellation message simultaneously.
+        //  2. using tokio::pin!() to avoid borrow-checker complaints in the select.
+        //  3. using into_sync() to convert JobHandleError into JobHandleErrorSync for
+        //     inter-thread usage.
+        //  4. using downcast to obtain the job result.
+        pub async fn cancel_job_in_select(is_async: bool) -> anyhow::Result<()> {
+            async fn do_some_work(
+                is_async: bool,
+                cancel_work_rx: tokio::sync::oneshot::Receiver<()>,
+            ) -> Result<DoubleJobResult, JobHandleErrorSync> {
+                // create a job queue.  (this could be done elsewhere)
+                let job_queue = JobQueue::start();
+
+                // start a 1 hour job.
+                let duration = std::time::Duration::from_secs(3600); // 1 hour job.
+
+                let job = Box::new(DoubleJob {
+                    data: 10,
+                    duration,
+                    is_async,
+                });
+
+                // add the job to queue
+                let job_handle = job_queue.add_job(job, DoubleJobPriority::Low).unwrap();
+
+                // pin job_handle, so borrow checker knows the address can't change
+                // and it is safe to use in both select branches
+                tokio::pin!(job_handle);
+
+                // execute job and simultaneously listen for cancel msg from elsewhere
+                let completion = tokio::select! {
+                    // case: job completion.
+                    completion = &mut job_handle => completion,
+
+                    // case: sender cancelled, or sender dropped.
+                    _ = cancel_work_rx => {
+                        job_handle.cancel().map_err(|e| e.into_sync())?;
+                        job_handle.await
+                    }
+                };
+
+                // obtain job result (via downcast)
+                let result: DoubleJobResult = *completion
+                    .map_err(|e| e.into_sync())?
+                    .result()
+                    .map_err(|e| e.into_sync())?
+                    .into_any()
+                    .downcast::<DoubleJobResult>()
+                    .expect("downcast should succeed, else bug");
+
+                Ok(result)
+            }
+
+            // create cancellation channel for the worker task
+            let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+
+            // create the worker task, that will create and run the job
+            let worker_task = async move { do_some_work(is_async, cancel_rx).await };
+
+            // spawn the worker task
+            let jh = tokio::task::spawn(worker_task);
+
+            // send cancel message to the worker task
+            cancel_tx.send(()).unwrap();
+
+            // wait for worker task to finish (with an error)
+            let job_handle_error = jh.await?.unwrap_err();
+
+            // ensure the error indicates JobCancelled
+            assert!(matches!(job_handle_error, JobHandleErrorSync::JobCancelled));
 
             Ok(())
         }
@@ -851,7 +943,7 @@ mod tests {
             /// verifies that a job that panics will be ended properly.
             ///
             /// Properly means that:
-            /// 1. an error is returned from job_handle.result() indicating job panicked.
+            /// 1. an error is returned from JobCompletion::result() indicating job panicked.
             /// 2. caller is able to obtain panic info, which matches job's panic msg.
             /// 3. the job-queue continues accepting new jobs.
             /// 4. the job-queue continues processing jobs.
@@ -867,7 +959,7 @@ mod tests {
                 };
                 let job_handle = job_queue.add_job(Box::new(job), DoubleJobPriority::Low)?;
 
-                let job_result = job_handle.result().await;
+                let job_result = job_handle.await.map_err(|e| e.into_sync())?.result();
 
                 println!("job_result: {:#?}", job_result);
 
@@ -892,7 +984,11 @@ mod tests {
                 let new_job_handle = job_queue.add_job(newjob, DoubleJobPriority::Low)?;
 
                 // ensure job processes and returns a result without error.
-                assert!(new_job_handle.result().await.is_ok());
+                assert!(new_job_handle
+                    .await
+                    .map_err(|e| e.into_sync())?
+                    .result()
+                    .is_ok());
 
                 Ok(())
             }

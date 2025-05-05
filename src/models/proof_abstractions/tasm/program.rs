@@ -13,7 +13,6 @@ use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
-use crate::job_queue::errors::JobHandleError;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
@@ -116,17 +115,11 @@ pub(crate) async fn prove_consensus_program(
         proof_job_options.job_settings,
     );
 
-    // queue the job and await the result.
-    // todo: perhaps the priority should (somehow) depend on type of Program?
+    // queue the job and obtain a job handle.
     let job_handle = triton_vm_job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
+    tokio::pin!(job_handle);
 
-    // satisfy borrow checker.
-    // instead of calling job_handle.cancel() inside select!()
-    // we get a handle to the cancellation channel sender here.
-    let cancel_tx = job_handle.cancel_tx().to_owned();
-    let job_id = job_handle.job_id();
-
-    let job_result = match proof_job_options.cancel_job_rx {
+    let completion = match proof_job_options.cancel_job_rx {
         // fix for issue #348.
         // if we have a cancellation channel from caller then we select on
         // both the channel and job.  If we get a cancel request from the
@@ -134,25 +127,23 @@ pub(crate) async fn prove_consensus_program(
         // which removes it from the job-queue.
         Some(mut cancel_job_rx) => {
             tokio::select! {
+                // case: job completion.
+                completion = &mut job_handle => completion?,
+
                 // case: sender cancelled, or sender dropped.
                 _ = cancel_job_rx.changed() => {
-                    debug!("received job cancellation request.  forwarding to job: {}", job_id);
-                    cancel_tx.send(())?;
-
-                    // Ideally we would await job_handle.result() but we
-                    // can't because it takes self and upsets borrow checker.
-                    Err(JobHandleError::JobCancelled)
+                    debug!("received cancellation request for job: {}.  cancelling.", job_handle.job_id());
+                    job_handle.cancel()?;
+                    job_handle.await?
                 }
-                // case: job completion.
-                result = job_handle.result() => result,
             }
         }
-        None => job_handle.result().await,
+        None => job_handle.await?,
     };
 
     // obtain resulting proof.
-    let result: Result<Proof, ProverJobError> = job_result
-        .map_err(|e| e.into_sync())?
+    let result: Result<Proof, ProverJobError> = completion
+        .result()?
         .into_any()
         .downcast::<ProverJobResult>()
         .expect("downcast should succeed, else bug")
