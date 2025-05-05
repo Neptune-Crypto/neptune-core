@@ -1087,6 +1087,24 @@ impl GlobalState {
         Ok(())
     }
 
+    /// Fix mutator set membership proofs that are unsynced.
+    ///
+    /// This method fixes membership proofs that are synced to an old block,
+    /// possibly even a block that lives on an abandoned chain. It does not work
+    /// for corrupted membership proofs. It assumes that the node stores all
+    /// historical blocks; it does not assume that the node stores an archival
+    /// mutator set.
+    ///
+    /// The algorithm works as follows. For each unsynced monitored UTXO, start
+    /// by finding a path connecting the block it is synced to, to the current
+    /// tip. This path may involve some blocks to revert ("backwards"),
+    /// certainly involves a latest universal common ancestor ("LUCA"), and
+    /// probably involves some blocks to apply ("forwards"). As we walk this
+    /// this path, the mutator set membership proof of the monitored UTXO is
+    /// modified in accordance with the mutator set update induced by the block
+    /// in question, which could be a revert (backwards) or a regular apply
+    /// (forwards).
+    ///
     ///  Locking:
     ///   * acquires `monitored_utxos_lock` for write
     pub async fn resync_membership_proofs_from_stored_blocks(
@@ -1224,6 +1242,7 @@ impl GlobalState {
 
                 // apply additions
                 for addition_record in &additions {
+                    // keep removal records up-to-date
                     RemovalRecord::batch_update_from_addition(
                         &mut removals.iter_mut().collect_vec(),
                         &block_msa,
@@ -1242,6 +1261,7 @@ impl GlobalState {
                 // apply removals
                 let mut applied_removals = removals.clone();
                 while let Some(applied_removal_record) = applied_removals.pop() {
+                    // keep removal records in sync
                     RemovalRecord::batch_update_from_remove(
                         &mut applied_removals.iter_mut().collect_vec(),
                         &applied_removal_record,
