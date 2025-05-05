@@ -185,9 +185,6 @@ impl ProofBuilder {
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 
-        Ok(
-            prove_consensus_program(program, claim, nondeterminism, job_queue, proof_job_options)
-                .await?,
-        )
+        prove_consensus_program(program, claim, nondeterminism, job_queue, proof_job_options).await
     }
 }

@@ -13,18 +13,17 @@
 //! are called inside spawn_blocking() in order to execute on tokio's blocking
 //! thread-pool.  Async jobs are simply awaited.
 //!
-//! An async_priority_channel::unbounded is used for queueing the jobs.
-//! This is much like tokio::sync::mpsc::unbounded except:
-//!  1. it supports prioritizing channel events (jobs)
-//!  2. order of events with same priority is undefined.
-//!     see: <https://github.com/rmcgibbo/async-priority-channel/issues/75>
+//! There is no upper limit on the number of jobs. (except RAM).
 //!
-//! Using an unbounded channel means that there is no backpressure and no
-//! upper limit on the number of jobs. (except RAM).
+//! Jobs may be of mixed (heterogenous) types in a single [JobQueue] instance.
+//! Any type that implements the [Job](traits::Job) trait may be a job.
 //!
-//! A nice feature is that jobs may be of mixed (heterogenous) types
-//! in a single JobQueue instance.  Any type that implements the Job trait
-//! may be a job.
+//! Each Job has an associated [JobHandle] that is used to await or cancel the
+//! job.  If the `JobHandle` is dropped, the job will be cancelled.
+
+// please note that the job_queue module has zero neptune-core specific
+// code in it.  It is intended/planned to move job_queue into its own
+// crate in the (near) future.
 
 pub mod errors;
 mod queue;

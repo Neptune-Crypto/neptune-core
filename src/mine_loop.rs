@@ -3,7 +3,6 @@ use std::cmp::max;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::job_queue::errors::JobHandleErrorSync;
 use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
@@ -34,6 +33,7 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
+use crate::job_queue::errors::JobHandleErrorSync;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
