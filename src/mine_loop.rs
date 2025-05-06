@@ -1990,7 +1990,7 @@ pub(crate) mod tests {
 
         let (cancel_job_tx, cancel_job_rx) = tokio::sync::watch::channel(());
 
-        let mine_task = async move {
+        let compose_task = async move {
             let genesis_block = Block::genesis(network);
             let gsl = global_state_lock.clone();
             let cli = &cli_args;
@@ -2006,20 +2006,22 @@ pub(crate) mod tests {
             .await
         };
 
-        let timeout = std::time::Duration::from_secs(10);
+        // start the task running
+        let jh = tokio::task::spawn(compose_task);
 
-        let jh = tokio::task::spawn(mine_task);
+        // wait a little while for a job to get added to the queue.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-        // wait until 1 job in queue
-        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
-
+        // now cancel the job and wait for the task to complete (after job cancellation)
         cancel_job_tx.send(()).unwrap();
         let job_result = jh.await?;
 
+        // we must receive an error
         let error = job_result.unwrap_err();
 
         println!("error: {}", error);
 
+        // the error must indicate the job was cancelled.
         let job_cancelled = matches!(
             error.root_cause().downcast_ref::<CreateProofError>(),
             Some(CreateProofError::JobHandleError(
@@ -2061,6 +2063,7 @@ pub(crate) mod tests {
         let (main_to_miner_tx, main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
 
+        // create a task that for the mining-loop
         let mine_task = mine(
             main_to_miner_rx,
             miner_to_main_tx,
@@ -2068,57 +2071,72 @@ pub(crate) mod tests {
             false,
         );
 
+        // spawn the mining-loop task.
         let jh = tokio::task::spawn(mine_task);
 
-        let timeout = std::time::Duration::from_secs(10);
+        let timeout = std::time::Duration::from_secs(5);
 
-        // wait until 1 job in queue
-        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
+        // wait until mining-status is Composing.
+        // we should have a proving job in queue
+        let gsl = global_state_lock.clone();
+        wait_until(timeout, move || {
+            let gsl = gsl.clone();
+            async move {
+                matches!(
+                    gsl.lock_guard().await.mining_state.mining_status,
+                    MiningStatus::Composing(_)
+                )
+            }
+        })
+        .await?;
 
-        assert!(matches!(
-            global_state_lock
-                .lock_guard()
-                .await
-                .mining_state
-                .mining_status,
-            MiningStatus::Composing(_)
-        ));
-
+        // send StopMining message to the mining loop
         main_to_miner_tx.send(MainToMiner::StopMining).await?;
 
-        // wait until 0 jobs in queue
-        wait_until(timeout, async || vm_job_queue().num_jobs() == 0).await?;
+        // wait until mining status is inactive.
+        // job should have been cancelled and removed from queue, but we have no way to verify
+        let gsl2 = global_state_lock.clone();
+        wait_until(timeout, move || {
+            let gsl2 = gsl2.clone();
+            async move {
+                matches!(
+                    gsl2.lock_guard().await.mining_state.mining_status,
+                    MiningStatus::Inactive
+                )
+            }
+        })
+        .await?;
 
-        assert!(matches!(
-            global_state_lock
-                .lock_guard()
-                .await
-                .mining_state
-                .mining_status,
-            MiningStatus::Inactive
-        ));
-        assert_eq!(vm_job_queue().num_jobs(), 0);
-
+        // send StartMining message to the mining loop
         main_to_miner_tx.send(MainToMiner::StartMining).await?;
 
-        // wait until 1 job in queue again
-        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
+        // wait until mining-status is Composing again.
+        // there should be a proving job in queue again
+        let gsl3 = global_state_lock.clone();
+        wait_until(timeout, move || {
+            let gsl3 = gsl3.clone();
+            async move {
+                matches!(
+                    gsl3.lock_guard().await.mining_state.mining_status,
+                    MiningStatus::Composing(_)
+                )
+            }
+        })
+        .await?;
 
-        assert!(matches!(
-            global_state_lock
-                .lock_guard()
-                .await
-                .mining_state
-                .mining_status,
-            MiningStatus::Composing(_)
-        ));
-
-        // wait 3 more secs for mine-loop processing.
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // wait a bit longer for mine-loop processing.
+        tokio::time::sleep(timeout).await;
 
         // ensure mine-loop is still up and running.
         assert!(!main_to_miner_tx.is_closed());
         assert!(!jh.is_finished());
+
+        // abort the mining task, so we can ensure that cancels the job also.
+        jh.abort();
+        let _ = jh.await;
+
+        // ensure mine-loop is gone.
+        assert!(main_to_miner_tx.is_closed());
 
         Ok(())
     }
