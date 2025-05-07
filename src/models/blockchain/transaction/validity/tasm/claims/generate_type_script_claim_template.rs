@@ -115,10 +115,10 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
 
     impl Function for GenerateTypeScriptClaimTemplate {
         fn rust_shadow(

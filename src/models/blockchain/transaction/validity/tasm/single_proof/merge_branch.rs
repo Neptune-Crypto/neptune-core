@@ -910,10 +910,10 @@ pub(crate) mod tests {
     use strum::EnumCount;
 
     use super::*;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MergeWitness {

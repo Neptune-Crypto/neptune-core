@@ -16,8 +16,6 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -41,6 +39,8 @@ use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
+use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::MainToPeerTask;
 

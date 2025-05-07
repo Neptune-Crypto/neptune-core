@@ -47,8 +47,6 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -72,6 +70,8 @@ mod tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...

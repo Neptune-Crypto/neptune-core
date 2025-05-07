@@ -872,8 +872,6 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -895,6 +893,8 @@ mod tests {
     use crate::tests::shared::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
 
     #[apply(shared_tokio_runtime)]
     pub async fn insert_then_get_then_remove_then_get() {

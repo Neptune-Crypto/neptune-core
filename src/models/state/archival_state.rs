@@ -1148,8 +1148,6 @@ mod tests {
     use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -1172,6 +1170,8 @@ mod tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {

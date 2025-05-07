@@ -25,9 +25,15 @@
 // code in it.  It is intended/planned to move job_queue into its own
 // crate in the (near) future.
 
+pub mod channels;
 pub mod errors;
+mod job_completion;
+mod job_handle;
+mod job_id;
 mod queue;
 pub mod traits;
-pub mod triton_vm;
 
+pub use job_completion::JobCompletion;
+pub use job_handle::JobHandle;
+pub use job_id::JobId;
 pub use queue::JobQueue;

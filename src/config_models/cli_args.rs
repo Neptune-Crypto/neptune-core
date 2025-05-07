@@ -15,12 +15,12 @@ use sysinfo::System;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::scan_mode_configuration::ScanModeConfiguration;
+use crate::triton_vm_job_queue::TritonVmJobPriority;
 
 /// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]

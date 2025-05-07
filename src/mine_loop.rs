@@ -34,9 +34,6 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
 use crate::job_queue::errors::JobHandleErrorSync;
-use crate::job_queue::triton_vm::vm_job_queue;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -59,6 +56,9 @@ use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::triton_vm_job_queue::vm_job_queue;
+use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 /// Information related to the resources to be used for guessing.
@@ -846,13 +846,29 @@ pub(crate) async fn mine(
             }
             Ok(Err(e)) = &mut composer_task => {
 
-                // fix issue 579.
-                // we must check if error indicates job was cancelled.
-                // note that cancellation can occur any time that the cancellation
-                // channel Sender gets dropped, which occurs if composer_task gets aborted
-                // which occurs if any other branch of this select!{} resolves first.
-                // Common causes are NewBlock and NewBlockProposal messages from main.
                 match e.root_cause().downcast_ref::<CreateProofError>() {
+                    // address issue 579.
+                    //
+                    // we check if error indicates job was cancelled.
+                    //
+                    // if so, we simply log and continue. ignoring the error.
+                    //
+                    // this is a fail-safe and appears unreachable for present
+                    // codebase during normal mining-loop operation.
+                    //
+                    // job cancellation can occur any time that the cancellation
+                    // channel Sender gets dropped, which occurs if
+                    // composer_task gets aborted which occurs if any other
+                    // branch of this select!{} resolves first.  Common causes
+                    // are NewBlock and NewBlockProposal messages from main.
+                    //
+                    // HOWEVER: if the composer_task is aborted because another
+                    // branch of the select resolves first then this branch
+                    // should not execute making this check unnecessary.
+                    //
+                    // The remaining sources of cancellation are:
+                    // 1. mining loop exits, eg during graceful shutdown.
+                    // 2. some future change to codebase
                     Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
                         debug!("composer job was cancelled. continuing normal operation");
                     }
@@ -1024,7 +1040,6 @@ pub(crate) mod tests {
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::job_queue::errors::JobHandleErrorSync;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1043,6 +1058,7 @@ pub(crate) mod tests {
     use crate::tests::shared::random_transaction_kernel;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;

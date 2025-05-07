@@ -2006,7 +2006,6 @@ pub(crate) mod tests {
     use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
@@ -2022,6 +2021,7 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
 
     impl WalletState {
         /// Delete all guesser-preimage keys from database and cache.

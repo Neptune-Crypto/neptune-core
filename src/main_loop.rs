@@ -30,9 +30,6 @@ use tracing::warn;
 
 use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
-use crate::job_queue::triton_vm::vm_job_queue;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -58,6 +55,9 @@ use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
+use crate::triton_vm_job_queue::vm_job_queue;
+use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::SUCCESS_EXIT_CODE;
 
 const PEER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(2 * 60);

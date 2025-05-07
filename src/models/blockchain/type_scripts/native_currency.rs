@@ -1053,8 +1053,6 @@ pub mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
@@ -1069,6 +1067,8 @@ pub mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
 
     impl ConsensusProgramSpecification for NativeCurrency {
         fn source(&self) {
