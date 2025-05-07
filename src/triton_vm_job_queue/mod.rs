@@ -2,7 +2,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use super::super::JobQueue;
+use crate::job_queue::JobQueue;
 
 // todo: maybe we want to have more levels or just make it an integer eg u8.
 // or maybe name the levels by type/usage of job/proof.

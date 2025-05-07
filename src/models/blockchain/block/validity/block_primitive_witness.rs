@@ -131,8 +131,6 @@ pub(crate) mod tests {
     use tasm_lib::triton_vm::prelude::Tip5;
 
     use super::BlockPrimitiveWitness;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::block_appendix::BlockAppendix;
     use crate::models::blockchain::block::block_body::BlockBody;
     use crate::models::blockchain::block::block_header::BlockHeader;
@@ -150,6 +148,8 @@ pub(crate) mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;

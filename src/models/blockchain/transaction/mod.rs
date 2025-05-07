@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::config_models::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -10,6 +9,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::prelude::twenty_first;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 pub mod lock_script;
 pub mod primitive_witness;
@@ -305,12 +305,12 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_block_from_transaction_and_msa;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;

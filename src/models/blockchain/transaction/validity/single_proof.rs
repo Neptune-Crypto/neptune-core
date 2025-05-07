@@ -33,7 +33,7 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -721,7 +721,7 @@ mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;

@@ -1,11 +1,11 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
 use crate::config_models::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::triton_vm_job_queue::TritonVmJobPriority;
 
 /// a builder for [TritonVmProofJobOptions]
 ///
@@ -127,7 +127,7 @@ impl TritonVmProofJobOptionsBuilder {
     /// use neptune_cash::api::export::TransactionProof;
     /// use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-    /// use neptune_cash::job_queue::triton_vm::vm_job_queue;
+    /// use neptune_cash::triton_vm_job_queue::vm_job_queue;
     /// use std::time::Duration;
     ///
     /// async fn prove_with_timeout(tx_details: TransactionDetails, timeout: Duration) -> anyhow::Result<TransactionProof> {

@@ -1710,8 +1710,6 @@ mod tests {
     use super::*;
     use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
     use crate::models::state::tx_creation_config::TxCreationConfig;
@@ -1726,6 +1724,8 @@ mod tests {
     use crate::tests::shared::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
 
     mod handshake {
         use super::*;

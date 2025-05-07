@@ -29,8 +29,6 @@ use std::sync::Arc;
 use super::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::api::tx_initiation::error::ProofRequirement;
-use crate::job_queue::triton_vm::vm_job_queue;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -43,6 +41,8 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
+use crate::triton_vm_job_queue::vm_job_queue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 /// a builder for [TransactionProof]
 ///

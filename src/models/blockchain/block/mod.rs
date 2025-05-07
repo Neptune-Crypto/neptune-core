@@ -51,7 +51,6 @@ use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::config_models::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
@@ -67,6 +66,7 @@ use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::prelude::twenty_first;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -1097,7 +1097,6 @@ pub(crate) mod tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::mine_loop::composer_parameters::ComposerParameters;
     use crate::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
@@ -1117,6 +1116,7 @@ pub(crate) mod tests {
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
@@ -1441,11 +1441,11 @@ pub(crate) mod tests {
         use rand::SeedableRng;
 
         use super::*;
-        use crate::job_queue::triton_vm::TritonVmJobPriority;
         use crate::mine_loop::tests::make_coinbase_transaction_from_state;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;
+        use crate::triton_vm_job_queue::TritonVmJobPriority;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
