@@ -98,7 +98,7 @@ impl Display for TransactionDetails {
 impl TransactionDetails {
     /// Create (`TransactionDetails` for) a nop-transaction, with no inputs and
     /// no outputs. Can be used if a merge bit needs to be flipped.
-    pub(crate) fn nop(
+    pub fn nop(
         mutator_set_accumulator: MutatorSetAccumulator,
         now: Timestamp,
         network: Network,

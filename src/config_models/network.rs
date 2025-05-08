@@ -40,7 +40,7 @@ pub enum Network {
 }
 
 impl Network {
-    pub(crate) fn launch_date(&self) -> Timestamp {
+    pub fn launch_date(&self) -> Timestamp {
         match self {
             Network::RegTest => {
                 const SEVEN_DAYS: u64 = 1000 * 60 * 60 * 24 * 7;

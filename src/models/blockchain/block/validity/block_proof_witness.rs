@@ -31,7 +31,7 @@ use crate::models::proof_abstractions::SecretWitness;
 ///
 /// This is the witness for the [`BlockProgram`].
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
-pub(crate) struct BlockProofWitness {
+pub struct BlockProofWitness {
     pub(super) block_body: BlockBody,
     pub(crate) claims: Vec<Claim>,
     pub(crate) proofs: Vec<Proof>,
@@ -63,11 +63,11 @@ impl BlockProofWitness {
         self.claims.clone()
     }
 
-    pub(crate) fn appendix(&self) -> BlockAppendix {
+    pub fn appendix(&self) -> BlockAppendix {
         BlockAppendix::new(self.claims())
     }
 
-    pub(crate) fn produce(block_primitive_witness: BlockPrimitiveWitness) -> BlockProofWitness {
+    pub fn produce(block_primitive_witness: BlockPrimitiveWitness) -> BlockProofWitness {
         let txk_mast_hash = block_primitive_witness
             .body()
             .transaction_kernel

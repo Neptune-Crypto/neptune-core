@@ -221,7 +221,7 @@ pub struct SingleProof;
 
 impl SingleProof {
     /// Not to be confused with SingleProofWitness::claim
-    pub(crate) fn claim(tx_kernel_mast_hash: Digest) -> Claim {
+    pub fn claim(tx_kernel_mast_hash: Digest) -> Claim {
         Claim::about_program(&Self.program()).with_input(tx_kernel_mast_hash.reversed().values())
     }
 

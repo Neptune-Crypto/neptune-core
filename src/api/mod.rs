@@ -45,6 +45,7 @@
 //! Please read the [GlobalStateLock](crate::GlobalStateLock) docs carefully because it is critical
 //! not to hold the lock too long or cause a deadlock situation.
 mod api_impl;
+pub mod benchmarks;
 pub mod export;
 pub mod regtest;
 pub mod tx_initiation;

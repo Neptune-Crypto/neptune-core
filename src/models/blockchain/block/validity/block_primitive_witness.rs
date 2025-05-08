@@ -39,7 +39,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 // note: I removed unused PartialEq, Eq derive.   If we ever need one
 // PartialEq should be derived manually to ignore maybe_body.
 #[derive(Clone, Debug)]
-pub(crate) struct BlockPrimitiveWitness {
+pub struct BlockPrimitiveWitness {
     predecessor_block: Block,
     transaction: Transaction,
 
@@ -47,7 +47,7 @@ pub(crate) struct BlockPrimitiveWitness {
 }
 
 impl BlockPrimitiveWitness {
-    pub(crate) fn new(predecessor_block: Block, transaction: Transaction) -> Self {
+    pub fn new(predecessor_block: Block, transaction: Transaction) -> Self {
         Self {
             predecessor_block,
             transaction,
@@ -59,7 +59,7 @@ impl BlockPrimitiveWitness {
         &self.transaction
     }
 
-    pub(crate) fn header(
+    pub fn header(
         &self,
         timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
@@ -74,7 +74,7 @@ impl BlockPrimitiveWitness {
         )
     }
 
-    pub(crate) fn body(&self) -> &BlockBody {
+    pub fn body(&self) -> &BlockBody {
         self.maybe_body.get_or_init(|| {
             let predecessor_msa_digest = self.predecessor_block
             .mutator_set_accumulator_after()
