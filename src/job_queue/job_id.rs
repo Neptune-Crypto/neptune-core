@@ -1,4 +1,4 @@
-/// a randomly generated Job identifier
+/// A unique identifier for a [Job](super::traits::Job)
 #[derive(Debug, Clone, Copy)]
 pub struct JobId([u8; 12]);
 
@@ -12,6 +12,7 @@ impl std::fmt::Display for JobId {
 }
 
 impl JobId {
+    /// generates a random JobId
     pub(super) fn random() -> Self {
         Self(rand::random())
     }
