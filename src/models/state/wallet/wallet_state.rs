@@ -278,8 +278,8 @@ impl WalletState {
     /// Create a `WalletState` object from related data.
     ///
     /// Convenience method to extract required data prior to calling the
-    /// canonical constructor, [Self::try_new()].
-    pub(crate) async fn try_new_from_context(
+    /// canonical constructor, `Self::try_new()`.
+    pub async fn try_new_from_context(
         data_dir: &DataDirectory,
         wallet_file_context: WalletFileContext,
         cli_args: &Args,
@@ -1347,7 +1347,7 @@ impl WalletState {
     ///
     /// Assume the given block is valid and that the wallet state is not synced
     /// with the new block yet but is synced with the previous block (if any).
-    pub(crate) async fn update_wallet_state_with_new_block(
+    pub async fn update_wallet_state_with_new_block(
         &mut self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         new_block: &Block,
@@ -1426,6 +1426,7 @@ impl WalletState {
                 all_existing_mutxos,
             )
         }
+
         let tx_kernel = new_block.kernel.body.transaction_kernel.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
