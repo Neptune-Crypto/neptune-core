@@ -3574,7 +3574,7 @@ pub mod error {
         RegTestError(String),
 
         #[error("wallet error: {0}")]
-        Error(String),
+        WalletError(String),
 
         #[error("claim error: {0}")]
         ClaimError(String),
@@ -3606,7 +3606,7 @@ pub mod error {
 
     impl From<api::wallet::error::WalletError> for RpcError {
         fn from(err: api::wallet::error::WalletError) -> Self {
-            RpcError::Error(err.to_string())
+            RpcError::WalletError(err.to_string())
         }
     }
 

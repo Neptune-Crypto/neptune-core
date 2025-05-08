@@ -1232,24 +1232,6 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     true
 }
 
-// recursively copy source dir to destination
-pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::Result<()> {
-    if !source.is_dir() {
-        return Err(std::io::Error::other("Source is not a directory"));
-    }
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        let dest_path = &destination.join(entry.file_name());
-        if entry.path().is_dir() {
-            copy_dir_recursive(&entry.path(), dest_path)?;
-        } else {
-            std::fs::copy(entry.path(), dest_path)?;
-        }
-    }
-    Ok(())
-}
-
 /// Waits for an async predicate to return true or a timeout.
 ///
 /// # Arguments

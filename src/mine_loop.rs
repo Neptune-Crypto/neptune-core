@@ -672,25 +672,31 @@ pub(crate) async fn mine(
     mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut global_state_lock: GlobalStateLock,
-    perform_initial_sleep: bool,
 ) -> Result<()> {
-    // Wait before starting mining task to ensure that peers have sent us information about
-    // their latest blocks. This should prevent the client from finding blocks that will later
-    // be orphaned.
-    const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
-
     // Set PoW guessing to restart every N seconds, if it has been started. Only
     // the guesser task may set this to actually resolve, as this will otherwise
     // abort e.g. the composer.
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
 
-    if perform_initial_sleep {
+    // we disable the initial sleep when invoked for unit tests.
+    //
+    // note: it can take an arbitrary amount of time to obtain latest-block info
+    // from peers.  If that is important, we should be listening on a channel
+    // instead or better this task should not be started until obtained.
+    #[cfg(not(test))]
+    {
+        // Wait before starting mining task to ensure that peers have sent us
+        // information about their latest blocks. This should prevent the client
+        // from finding blocks that will later be orphaned.
+        const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
+
         tracing::info!(
             "sleeping for {} seconds while node initializes",
             INITIAL_MINING_SLEEP_IN_SECONDS
         );
         tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
     }
+
     let cli_args = global_state_lock.cli().clone();
 
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
@@ -849,9 +855,8 @@ pub(crate) async fn mine(
                 match e.root_cause().downcast_ref::<CreateProofError>() {
                     // address issue 579.
                     //
-                    // we check if error indicates job was cancelled.
-                    //
-                    // if so, we simply log and continue. ignoring the error.
+                    // check if error indicates job was cancelled. If so,
+                    // simply log and continue, but ignore the error.
                     //
                     // this is a fail-safe and appears unreachable for present
                     // codebase during normal mining-loop operation.
@@ -2084,7 +2089,6 @@ pub(crate) mod tests {
             main_to_miner_rx,
             miner_to_main_tx,
             global_state_lock.clone(),
-            false,
         );
 
         // spawn the mining-loop task.
