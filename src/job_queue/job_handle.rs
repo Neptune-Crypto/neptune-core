@@ -38,6 +38,16 @@ impl JobHandle {
         }
     }
 
+    // indicates if job has finished processing or not.
+    //
+    // returns true if job completed normally or was cancelled or panicked.
+    //
+    // returns false if job is still waiting in the queue or is presently
+    // processing.
+    pub fn is_finished(&self) -> bool {
+        self.cancel_tx.is_closed()
+    }
+
     /// sends cancel message to job and returns immediately.
     ///
     /// note: await the JobHandle after calling `cancel()` to ensure the job has
