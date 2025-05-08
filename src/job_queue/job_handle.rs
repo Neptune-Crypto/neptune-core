@@ -89,7 +89,11 @@ impl JobHandle {
     /// use neptune_cash::job_queue::traits::Job;
     /// use neptune_cash::job_queue::errors::JobHandleErrorSync;
     ///
-    /// async fn do_some_work(job_queue: &mut JobQueue<u8>, job: Box<dyn Job>, cancel_work_rx: tokio::sync::oneshot::Receiver<()>) -> Result<JobCompletion, JobHandleErrorSync> {
+    /// async fn do_some_work(
+    ///     job_queue: &mut JobQueue<u8>,
+    ///     job: Box<dyn Job>,
+    ///     cancel_work_rx: tokio::sync::oneshot::Receiver<()>,
+    /// ) -> Result<JobCompletion, JobHandleErrorSync> {
     ///
     ///     // add the job to queue
     ///     let job_priority: u8 = 10;
@@ -116,10 +120,17 @@ impl JobHandle {
     /// ```
     /// *note: also demonstrates mapping JobHandleError to JobHandleErrorSync which implements Send+Sync.*
     pub fn cancel(&self) -> Result<(), JobHandleError> {
-        Ok(self.cancel_tx.send(())?)
+        let result = self.cancel_tx.send(()).map_err(JobHandleError::from);
+
+        match result {
+            Ok(_) => tracing::debug!("Sent job-cancel msg to job: {}", self.job_id),
+            Err(ref e) => tracing::error!("{}", e),
+        };
+
+        result
     }
 
-    /// obtain randomly generated job identifier
+    /// obtain the job identifier
     pub fn job_id(&self) -> JobId {
         self.job_id
     }
@@ -141,11 +152,7 @@ impl Drop for JobHandle {
     fn drop(&mut self) {
         tracing::debug!("JobHandle dropping for job: {}", self.job_id);
         if !self.cancel_tx.is_closed() {
-            if let Err(e) = self.cancel_tx.send(()) {
-                tracing::error!("job-cancel message could not be sent. {}", e);
-            } else {
-                tracing::debug!("Sent job-cancel msg to job: {}", self.job_id);
-            }
+            let _ = self.cancel();
         }
     }
 }

@@ -21,17 +21,17 @@ use super::traits::Job;
 /// implements a job queue that sends result of each job to a listener.
 #[derive(Debug)]
 pub struct JobQueue<P: Ord + Send + Sync + 'static> {
-    // holds job-queue which is shared between tokio tasks
+    /// holds job-queue which is shared between tokio tasks
     shared_queue: Arc<Mutex<SharedQueue<P>>>,
 
-    // channel to inform process_jobs task that a job has been added
+    /// channel to inform process_jobs task that a job has been added
     tx_job_added: mpsc::UnboundedSender<()>,
 
-    // channel to inform process_jobs task to stop processing.
+    /// channel to inform process_jobs task to stop processing.
     tx_stop: tokio::sync::watch::Sender<()>,
 
-    // JoinHandle of process_jobs task
-    process_jobs_task_handle: Option<JoinHandle<()>>, // Store the job processing task handle
+    /// JoinHandle of process_jobs task
+    process_jobs_task_handle: Option<JoinHandle<()>>,
 }
 
 // we implement Drop so we can send stop message to process_jobs task
@@ -64,9 +64,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         let (tx_stop, rx_stop) = watch::channel(());
 
         // spawn the process_jobs task
-        let shared_queue2 = shared_queue.clone();
         let process_jobs_task_handle =
-            tokio::spawn(process_jobs(shared_queue2, rx_stop, rx_job_added));
+            tokio::spawn(process_jobs(shared_queue.clone(), rx_stop, rx_job_added));
 
         tracing::info!("JobQueue: started new queue.");
 
@@ -166,25 +165,25 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     }
 }
 
-// implements the process_jobs task, spawned by JobQueue::start().
-//
-// this fn calls tokio::select!{} in a loop.  The select has two branches:
-// 1. receive 'job_added' message over mpsc channel (unbounded)
-// 2. receive 'stop' message over watch channel
-//
-// job_added:
-//
-// When a 'job_added' msg is received, the highest priority queued job is picked
-// to run next.  We await the job, and then send results to the JobHandle.
-//
-// Note that jobs can take a long time to run and thus msgs can pile up in the
-// job_added channel, which is unbounded. These messages are of type "()" so
-// are as small as possible.
-//
-// stop:
-//
-// When a 'stop' msg is received we send a cancel msg to the current job (if any) and
-// wait for it to complete. Then we exit the loop and return.
+/// implements the process_jobs task, spawned by JobQueue::start().
+///
+/// this fn calls tokio::select!{} in a loop.  The select has two branches:
+/// 1. receive 'job_added' message over mpsc channel (unbounded)
+/// 2. receive 'stop' message over watch channel
+///
+/// job_added:
+///
+/// When a 'job_added' msg is received, the highest priority queued job is picked
+/// to run next.  We await the job, and then send results to the JobHandle.
+///
+/// Note that jobs can take a long time to run and thus msgs can pile up in the
+/// job_added channel, which is unbounded. These messages are of type "()" so
+/// are as small as possible.
+///
+/// stop:
+///
+/// When a 'stop' msg is received we send a cancel msg to the current job (if any) and
+/// wait for it to complete. Then we exit the loop and return.
 async fn process_jobs<P: Ord + Send + Sync + 'static>(
     shared_queue: Arc<Mutex<SharedQueue<P>>>,
     mut rx_stop: watch::Receiver<()>,
@@ -236,7 +235,7 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
         let timer = tokio::time::Instant::now();
 
         // spawn task that performs the job, either async or blocking.
-        let task_handle = if next_job.job.is_async() {
+        let job_task_handle = if next_job.job.is_async() {
             tokio::spawn(
                 async move { next_job.job.run_async_cancellable(next_job.cancel_rx).await },
             )
@@ -244,39 +243,23 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
             tokio::task::spawn_blocking(move || next_job.job.run(next_job.cancel_rx))
         };
 
-        let task_result = tokio::select! {
+        // execute job task and simultaneously listen for a 'stop' message.
+        let job_task_result = tokio::select! {
+            // execute the job task
+            job_task_result = job_task_handle => job_task_result,
+
             // handle msg over 'stop' channel which indicates we must exit the loop.
             _ = rx_stop.changed() => {
-                tracing::debug!("task process_jobs received Stop message.");
 
-                // acquire mutex lock and obtain current_job info, if any.
-                let maybe_info = shared_queue.lock().unwrap().current_job.as_ref().map(|cj| (cj.job_id, cj.cancel_tx.clone()) );
-
-                // if there is a presently executing job we need to cancel it
-                // and wait for it to complete.
-                if let Some((job_id, cancel_tx)) = maybe_info {
-                    match cancel_tx.send(()) {
-                        Ok(()) => {
-                            // wait for channel to close, indicating job has cancelled (or otherwise completed)
-                            tracing::debug!("JobQueue: notified current job {} to cancel.  waiting...", job_id);
-                            cancel_tx.closed().await;
-                            tracing::debug!("JobQueue: current job {} has cancelled.", job_id);
-                        }
-                        Err(e) => {
-                            tracing::warn!("could not send cancellation msg to current job {}. {}", job_id, e)
-                        }
-                    }
-                }
+                handle_stop_signal(&shared_queue).await;
 
                 // exit loop, processing ends.
                 break;
             },
-
-            task_result = task_handle => task_result,
         };
 
         // create JobCompletion from task results
-        let job_completion = match task_result {
+        let job_completion = match job_task_result {
             Ok(jc) => jc,
             Err(e) => {
                 if e.is_panic() {
@@ -308,6 +291,44 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
         }
     }
     tracing::debug!("task process_jobs exiting");
+}
+
+/// handles the 'stop' branch of tokio::select!{} in process_job() task
+async fn handle_stop_signal<P: Ord + Send + Sync + 'static>(
+    shared_queue: &Arc<Mutex<SharedQueue<P>>>,
+) {
+    tracing::debug!("task process_jobs received Stop message.");
+
+    // acquire mutex lock and obtain current_job info, if any.
+    let maybe_info = shared_queue
+        .lock()
+        .unwrap()
+        .current_job
+        .as_ref()
+        .map(|cj| (cj.job_id, cj.cancel_tx.clone()));
+
+    // if there is a presently executing job we need to cancel it
+    // and wait for it to complete.
+    if let Some((job_id, cancel_tx)) = maybe_info {
+        match cancel_tx.send(()) {
+            Ok(()) => {
+                // wait for channel to close, indicating job has cancelled (or otherwise completed)
+                tracing::debug!(
+                    "JobQueue: notified current job {} to cancel.  waiting...",
+                    job_id
+                );
+                cancel_tx.closed().await;
+                tracing::debug!("JobQueue: current job {} has cancelled.", job_id);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "could not send cancellation msg to current job {}. {}",
+                    job_id,
+                    e
+                )
+            }
+        }
+    }
 }
 
 /// represents a job in the queue.
@@ -572,8 +593,8 @@ mod tests {
             // wait for all jobs to complete.
             let mut results = futures::future::join_all(handles).await;
 
-            assert_eq!(job_queue.num_jobs(), 0);
-            assert_eq!(job_queue.num_queued_jobs(), 0);
+            assert_eq!(0, job_queue.num_jobs());
+            assert_eq!(0, job_queue.num_queued_jobs());
 
             // the results are in the same order as handles passed to join_all.
             // we sort them by the timestamp in job result, ascending.

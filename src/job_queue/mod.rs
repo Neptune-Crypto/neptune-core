@@ -13,6 +13,11 @@
 //! are called inside spawn_blocking() in order to execute on tokio's blocking
 //! thread-pool.  Async jobs are simply awaited.
 //!
+//! It supports prioritizing Jobs. The order of job execution is not a simple
+//! FIFO or LIFO but rather depends on the assigned priority of each job.
+//! Job priority level can be specified via any type that implements [Ord]
+//! such as a custom enum.
+//!
 //! There is no upper limit on the number of jobs. (except RAM).
 //!
 //! Jobs may be of mixed (heterogenous) types in a single [JobQueue] instance.
