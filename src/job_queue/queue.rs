@@ -451,6 +451,12 @@ mod tests {
         workers::panics::panic_in_job_ends_job_cleanly(false).await
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn stop_queue() -> anyhow::Result<()> {
+        workers::stop_queue().await
+    }
+
     mod workers {
         use std::any::Any;
 
@@ -458,14 +464,14 @@ mod tests {
         use crate::job_queue::errors::JobHandleErrorSync;
         use crate::job_queue::traits::JobResult;
 
-        #[derive(PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
             Low = 1,
             Medium = 2,
             High = 3,
         }
 
-        #[derive(PartialEq, Debug, Clone)]
+        #[derive(Debug, PartialEq, Clone)]
         struct DoubleJobResult(u64, u64, Instant);
         impl JobResult for DoubleJobResult {
             fn as_any(&self) -> &dyn Any {
@@ -477,6 +483,7 @@ mod tests {
         }
 
         // represents a prover job.  implements Job.
+        #[derive(Debug)]
         struct DoubleJob {
             data: u64,
             duration: std::time::Duration,
@@ -561,8 +568,15 @@ mod tests {
                 handles.push(job_queue.add_job(job3, DoubleJobPriority::High)?);
             }
 
+            // we can't know exact number of jobs in queue because it is already processing.
+            assert!(job_queue.num_jobs() > 0);
+            assert!(job_queue.num_queued_jobs() > 0);
+
             // wait for all jobs to complete.
             let mut results = futures::future::join_all(handles).await;
+
+            assert_eq!(job_queue.num_jobs(), 0);
+            assert_eq!(job_queue.num_queued_jobs(), 0);
 
             // the results are in the same order as handles passed to join_all.
             // we sort them by the timestamp in job result, ascending.
@@ -633,6 +647,49 @@ mod tests {
                 assert_eq!(i, job_result.0);
                 assert_eq!(i * 2, job_result.1);
             }
+
+            Ok(())
+        }
+
+        // tests that stopping job_queue also cancels presently running job
+        // and queued job(s)
+        pub(super) async fn stop_queue() -> anyhow::Result<()> {
+            // create a job queue
+            let job_queue = JobQueue::start();
+            // start a 1 hour job.
+            let duration = std::time::Duration::from_secs(3600); // 1 hour job.
+
+            let job = Box::new(DoubleJob {
+                data: 10,
+                duration,
+                is_async: true,
+            });
+            let job2 = Box::new(DoubleJob {
+                data: 10,
+                duration,
+                is_async: true,
+            });
+            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
+            let job2_handle = job_queue.add_job(job2, DoubleJobPriority::Low)?;
+
+            // so we have some test coverage for debug impls.
+            println!("job-queue: {:?}", job_queue);
+
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            job_queue.stop().await?;
+
+            assert_eq!(job_handle.is_finished(), true);
+            assert_eq!(job2_handle.is_finished(), true);
+
+            assert!(matches!(
+                job_handle.await.unwrap(),
+                JobCompletion::Cancelled
+            ));
+            assert!(matches!(
+                job2_handle.await.unwrap(),
+                JobCompletion::Cancelled
+            ));
 
             Ok(())
         }
