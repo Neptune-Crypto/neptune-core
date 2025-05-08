@@ -195,10 +195,56 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
     // are added due to job priorities.
     let mut job_num: usize = 1;
 
-    // loop until 'stop' msg is received.
-    loop {
-        tokio::select! {
+    // loop until 'stop' msg is received or job_added channel is closed.
+    //
+    // note:  this unbounded channel will grow in size as new job(s) are
+    // added while an existing job is running.  ie, we read from the
+    // channel after each job completes.
+    while rx_job_added.recv().await.is_some() {
+        // Find the next job to run, and the number of jobs left in queue
+        tracing::debug!("task process_jobs received JobAdded message.");
+        let (next_job, num_pending) = {
+            // acquire mutex lock
+            let mut guard = shared_queue.lock().unwrap();
 
+            // pick the highest priority job
+            guard
+                .jobs
+                .make_contiguous()
+                .sort_by(|a, b| b.priority.cmp(&a.priority));
+            let job = guard.jobs.pop_front().unwrap();
+
+            // set highest priority job as the current job
+            guard.current_job = Some(CurrentJob {
+                job_num,
+                job_id: job.job_id,
+                cancel_tx: job.cancel_tx.clone(),
+            });
+
+            (job, guard.jobs.len())
+        }; // mutex lock is released when guard drops.
+
+        // log that we are starting a job
+        tracing::info!(
+            "  *** JobQueue: begin job #{} - {} - {} queued job(s) ***",
+            job_num,
+            next_job.job_id,
+            num_pending
+        );
+
+        // record time that job starts
+        let timer = tokio::time::Instant::now();
+
+        // spawn task that performs the job, either async or blocking.
+        let task_handle = if next_job.job.is_async() {
+            tokio::spawn(
+                async move { next_job.job.run_async_cancellable(next_job.cancel_rx).await },
+            )
+        } else {
+            tokio::task::spawn_blocking(move || next_job.job.run(next_job.cancel_rx))
+        };
+
+        let task_result = tokio::select! {
             // handle msg over 'stop' channel which indicates we must exit the loop.
             _ = rx_stop.changed() => {
                 tracing::debug!("task process_jobs received Stop message.");
@@ -224,91 +270,41 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
 
                 // exit loop, processing ends.
                 break;
-            }
+            },
 
-            // handle msg over job_added channel
-            //
-            // note:  this unbounded channel will grow in size as new job(s) are
-            // added while an existing job is running.  ie, we read from the
-            // channel after each job completes.
-            _ = rx_job_added.recv() => {
+            task_result = task_handle => task_result,
+        };
 
-                // Find the next job to run, and the number of jobs left in queue
-                tracing::debug!("task process_jobs received JobAdded message.");
-                let (next_job, num_pending) = {
-
-                    // acquire mutex lock
-                    let mut guard = shared_queue.lock().unwrap();
-
-                    // pick the highest priority job
-                    guard
-                        .jobs
-                        .make_contiguous()
-                        .sort_by(|a, b| b.priority.cmp(&a.priority));
-                    let job = guard.jobs.pop_front().unwrap();
-
-                    // set highest priority job as the current job
-                    guard.current_job = Some(CurrentJob {
-                        job_num,
-                        job_id: job.job_id,
-                        cancel_tx: job.cancel_tx.clone(),
-                    });
-
-                    (job, guard.jobs.len())
-                }; // mutex lock is released when guard drops.
-
-                // log that we are starting a job
-                tracing::info!(
-                    "  *** JobQueue: begin job #{} - {} - {} queued job(s) ***",
-                    job_num,
-                    next_job.job_id,
-                    num_pending
-                );
-
-                // record time that job starts
-                let timer = tokio::time::Instant::now();
-
-                // spawn task that performs the job, either async or blocking.
-                let task_handle = if next_job.job.is_async() {
-                    tokio::spawn(async move {
-                        next_job.job.run_async_cancellable(next_job.cancel_rx).await
-                    })
+        // create JobCompletion from task results
+        let job_completion = match task_result {
+            Ok(jc) => jc,
+            Err(e) => {
+                if e.is_panic() {
+                    JobCompletion::Panicked(e.into_panic())
+                } else if e.is_cancelled() {
+                    JobCompletion::Cancelled
                 } else {
-                    tokio::task::spawn_blocking(move || next_job.job.run(next_job.cancel_rx))
-                };
-
-                // create JobCompletion from task results
-                let job_completion = match task_handle.await {
-                    Ok(jc) => jc,
-                    Err(e) => {
-                        if e.is_panic() {
-                            JobCompletion::Panicked(e.into_panic())
-                        } else if e.is_cancelled() {
-                            JobCompletion::Cancelled
-                        } else {
-                            unreachable!()
-                        }
-                    }
-                };
-
-                // log that job has ended.
-                tracing::info!(
-                    "  *** JobQueue: ended job #{} - {} - Completion: {} - {} secs ***",
-                    job_num,
-                    next_job.job_id,
-                    job_completion,
-                    timer.elapsed().as_secs_f32()
-                );
-                job_num += 1;
-
-                // obtain mutex lock and set current-job to None
-                shared_queue.lock().unwrap().current_job = None;
-
-                // send job results to the JobHandle receiver
-                if let Err(e) = next_job.result_tx.send(job_completion) {
-                    tracing::warn!("job-handle dropped? {}", e);
+                    unreachable!()
                 }
             }
+        };
+
+        // log that job has ended.
+        tracing::info!(
+            "  *** JobQueue: ended job #{} - {} - Completion: {} - {} secs ***",
+            job_num,
+            next_job.job_id,
+            job_completion,
+            timer.elapsed().as_secs_f32()
+        );
+        job_num += 1;
+
+        // obtain mutex lock and set current-job to None
+        shared_queue.lock().unwrap().current_job = None;
+
+        // send job results to the JobHandle receiver
+        if let Err(e) = next_job.result_tx.send(job_completion) {
+            tracing::warn!("job-handle dropped? {}", e);
         }
     }
     tracing::debug!("task process_jobs exiting");
@@ -461,6 +457,7 @@ mod tests {
         use std::any::Any;
 
         use super::*;
+        use crate::job_queue::errors::JobHandleError;
         use crate::job_queue::errors::JobHandleErrorSync;
         use crate::job_queue::traits::JobResult;
 
@@ -679,16 +676,16 @@ mod tests {
 
             job_queue.stop().await?;
 
-            assert_eq!(job_handle.is_finished(), true);
-            assert_eq!(job2_handle.is_finished(), true);
+            assert!(job_handle.is_finished());
+            assert!(job2_handle.is_finished());
 
             assert!(matches!(
-                job_handle.await.unwrap(),
-                JobCompletion::Cancelled
+                job_handle.await,
+                Err(JobHandleError::JobResultError(_))
             ));
             assert!(matches!(
-                job2_handle.await.unwrap(),
-                JobCompletion::Cancelled
+                job2_handle.await,
+                Err(JobHandleError::JobResultError(_))
             ));
 
             Ok(())
