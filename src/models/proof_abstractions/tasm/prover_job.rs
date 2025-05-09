@@ -19,8 +19,8 @@ use tokio::io::AsyncWriteExt;
 use crate::config_models::network::Network;
 use crate::job_queue::channels::JobCancelReceiver;
 use crate::job_queue::traits::Job;
-use crate::job_queue::traits::JobResult;
 use crate::job_queue::JobCompletion;
+use crate::job_queue::JobResultWrapper;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
@@ -95,7 +95,7 @@ enum ProverProcessCompletion {
 impl From<ProverProcessCompletion> for JobCompletion {
     fn from(ppc: ProverProcessCompletion) -> Self {
         match ppc {
-            ProverProcessCompletion::Finished(proof) => ProverJobResult::from(proof).into(),
+            ProverProcessCompletion::Finished(proof) => ProverJobResult::new(Ok(proof)).into(),
             ProverProcessCompletion::Cancelled => Self::Cancelled,
         }
     }
@@ -104,36 +104,12 @@ impl From<Result<ProverProcessCompletion, VmProcessError>> for JobCompletion {
     fn from(result: Result<ProverProcessCompletion, VmProcessError>) -> Self {
         match result {
             Ok(ppc) => ppc.into(),
-            Err(e) => ProverJobResult(Err(e.into())).into(),
+            Err(e) => ProverJobResult::new(Err(e.into())).into(),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct ProverJobResult(pub Result<Proof, ProverJobError>);
-impl JobResult for ProverJobResult {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
-        self
-    }
-}
-impl From<Box<ProverJobResult>> for Result<Proof, ProverJobError> {
-    fn from(v: Box<ProverJobResult>) -> Self {
-        (*v).0
-    }
-}
-impl From<Proof> for ProverJobResult {
-    fn from(proof: Proof) -> Self {
-        Self(Ok(proof))
-    }
-}
-impl From<ProverJobError> for ProverJobResult {
-    fn from(e: ProverJobError) -> Self {
-        Self(Err(e))
-    }
-}
+pub(super) type ProverJobResult = JobResultWrapper<Result<Proof, ProverJobError>>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProverJobSettings {
@@ -453,7 +429,7 @@ impl Job for ProverJob {
         tokio::select!(
             result = self.check_if_allowed() => {
                 if let Err(e) = result {
-                    return ProverJobResult::from(e).into()
+                    return ProverJobResult::new(Err(e)).into()
                 }
             }
 

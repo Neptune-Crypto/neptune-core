@@ -33,7 +33,7 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
-use crate::job_queue::errors::JobHandleErrorSync;
+use crate::job_queue::errors::JobHandleError;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -874,7 +874,7 @@ pub(crate) async fn mine(
                     // The remaining sources of cancellation are:
                     // 1. mining loop exits, eg during graceful shutdown.
                     // 2. some future change to codebase
-                    Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
+                    Some(CreateProofError::JobHandleError(JobHandleError::JobCancelled)) => {
                         debug!("composer job was cancelled. continuing normal operation");
                     }
                     _ => {
@@ -1044,7 +1044,7 @@ pub(crate) mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
-    use crate::job_queue::errors::JobHandleErrorSync;
+    use crate::job_queue::errors::JobHandleError;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -2046,7 +2046,7 @@ pub(crate) mod tests {
         let job_cancelled = matches!(
             error.root_cause().downcast_ref::<CreateProofError>(),
             Some(CreateProofError::JobHandleError(
-                JobHandleErrorSync::JobCancelled
+                JobHandleError::JobCancelled
             ))
         );
 
