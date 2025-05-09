@@ -102,11 +102,17 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         Ok(())
     }
 
-    /// adds job to job-queue and returns immediately.
+    /// adds job to job-queue (with interior mutability)
     ///
-    /// job-results can be obtained by via JobHandle::results().await
-    /// The job can be cancelled by JobHandle::cancel()
-    pub fn add_job(&self, job: Box<dyn Job>, priority: P) -> Result<JobHandle, AddJobError> {
+    /// returns immediately (does not wait for job).
+    ///
+    /// note that this method utilizes interior mutability. Consider calling
+    /// [`Self::add_job_mut()`] instead to make the mutation explicit.
+    pub fn add_job(
+        &self,
+        job: impl Into<Box<dyn Job>>,
+        priority: P,
+    ) -> Result<JobHandle, AddJobError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
 
@@ -115,7 +121,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // represent a job in the queue
         let m = QueuedJob {
-            job,
+            job: job.into(),
             job_id,
             result_tx,
             cancel_tx: cancel_tx.clone(),
@@ -151,6 +157,32 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // create and return JobHandle
         Ok(JobHandle::new(job_id, result_rx, cancel_tx))
+    }
+
+    /// Adds a job to the queue (with explicit mutability).
+    ///
+    /// returns immediately (does not wait for job).
+    ///
+    /// job-results can be obtained by via JobHandle::results().await
+    /// The job can be cancelled by JobHandle::cancel()
+    ///
+    /// Unlike [`Self::add_job()`], this method takes `&mut self`, explicitly
+    /// signaling to the compiler that the `JobQueue` internal state is being
+    /// modified.
+    ///
+    /// This explicit mutability encourages callers to use correct function
+    /// signatures and avoids hidden interior mutability, which can be a source
+    /// of confusion and potentially subtle borrow checker issues when reasoning
+    /// about a given codebase/architecture.
+    ///
+    /// Explicit mutability generally leads to improved compiler optimizations
+    /// and stronger borrow checker guarantees by enforcing exclusive access.
+    pub fn add_job_mut(
+        &mut self,
+        job: impl Into<Box<dyn Job>>,
+        priority: P,
+    ) -> Result<JobHandle, AddJobError> {
+        self.add_job(job, priority)
     }
 
     /// returns total number of jobs, queued plus running.
@@ -474,13 +506,17 @@ mod tests {
         workers::stop_queue().await
     }
 
-    mod workers {
-        use std::any::Any;
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn job_result_wrapper() -> anyhow::Result<()> {
+        workers::job_result_wrapper().await
+    }
 
+    mod workers {
         use super::*;
         use crate::job_queue::errors::JobHandleError;
-        use crate::job_queue::errors::JobHandleErrorSync;
         use crate::job_queue::traits::JobResult;
+        use crate::job_queue::JobResultWrapper;
 
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
@@ -489,16 +525,7 @@ mod tests {
             High = 3,
         }
 
-        #[derive(Debug, PartialEq, Clone)]
-        struct DoubleJobResult(u64, u64, Instant);
-        impl JobResult for DoubleJobResult {
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
-            fn into_any(self: Box<Self>) -> Box<dyn Any> {
-                self
-            }
-        }
+        type DoubleJobResult = JobResultWrapper<(u64, u64, Instant)>;
 
         // represents a prover job.  implements Job.
         #[derive(Debug)]
@@ -529,11 +556,9 @@ mod tests {
 
                         std::thread::sleep(sleep_time);
                     } else {
-                        break JobCompletion::Finished(Box::new(DoubleJobResult(
-                            self.data,
-                            self.data * 2,
-                            Instant::now(),
-                        )));
+                        break JobCompletion::Finished(
+                            DoubleJobResult::new((self.data, self.data * 2, Instant::now())).into(),
+                        );
                     }
                 };
 
@@ -543,10 +568,9 @@ mod tests {
 
             async fn run_async(&self) -> Box<dyn JobResult> {
                 tokio::time::sleep(self.duration).await;
-                let r = DoubleJobResult(self.data, self.data * 2, Instant::now());
-
+                let r = DoubleJobResult::new((self.data, self.data * 2, Instant::now()));
                 tracing::info!("results: {:?}", r);
-                Box::new(r)
+                r.into()
             }
         }
 
@@ -557,33 +581,33 @@ mod tests {
             let start_of_test = Instant::now();
 
             // create a job queue
-            let job_queue = JobQueue::start();
+            let mut job_queue = JobQueue::start();
 
             let mut handles = vec![];
             let duration = std::time::Duration::from_millis(20);
 
             // create 30 jobs, 10 at each priority level.
             for i in (1..10).rev() {
-                let job1 = Box::new(DoubleJob {
+                let job1 = DoubleJob {
                     data: i,
                     duration,
                     is_async,
-                });
-                let job2 = Box::new(DoubleJob {
+                };
+                let job2 = DoubleJob {
                     data: i * 100,
                     duration,
                     is_async,
-                });
-                let job3 = Box::new(DoubleJob {
+                };
+                let job3 = DoubleJob {
                     data: i * 1000,
                     duration,
                     is_async,
-                });
+                };
 
                 // process job and print results.
-                handles.push(job_queue.add_job(job1, DoubleJobPriority::Low)?);
-                handles.push(job_queue.add_job(job2, DoubleJobPriority::Medium)?);
-                handles.push(job_queue.add_job(job3, DoubleJobPriority::High)?);
+                handles.push(job_queue.add_job_mut(job1, DoubleJobPriority::Low)?);
+                handles.push(job_queue.add_job_mut(job2, DoubleJobPriority::Medium)?);
+                handles.push(job_queue.add_job_mut(job3, DoubleJobPriority::High)?);
             }
 
             // we can't know exact number of jobs in queue because it is already processing.
@@ -598,30 +622,24 @@ mod tests {
 
             // the results are in the same order as handles passed to join_all.
             // we sort them by the timestamp in job result, ascending.
-            results.sort_by(
-                |a_completion, b_completion| match (a_completion, b_completion) {
-                    (Ok(JobCompletion::Finished(a_dyn)), Ok(JobCompletion::Finished(b_dyn))) => {
-                        let a = a_dyn.as_any().downcast_ref::<DoubleJobResult>().unwrap().2;
+            results.sort_by(|a_completion, b_completion| {
+                let a = <&DoubleJobResult>::try_from(a_completion.as_ref().unwrap())
+                    .unwrap()
+                    .2;
+                let b = <&DoubleJobResult>::try_from(b_completion.as_ref().unwrap())
+                    .unwrap()
+                    .2;
 
-                        let b = b_dyn.as_any().downcast_ref::<DoubleJobResult>().unwrap().2;
-
-                        a.cmp(&b)
-                    }
-                    _ => panic!("at least one job did not finish"),
-                },
-            );
+                a.cmp(&b)
+            });
 
             // iterate job results and verify that:
             //   timestamp of each is greater than prev.
             //   input value of each is greater than prev, except every 9th item which should be < prev
             //     because there are nine jobs per level.
-            let mut prev = Box::new(DoubleJobResult(9999, 0, start_of_test));
+            let mut prev = DoubleJobResult::new((9999, 0, start_of_test));
             for (i, c) in results.into_iter().enumerate() {
-                let Ok(JobCompletion::Finished(dyn_result)) = c else {
-                    panic!("A job did not finish");
-                };
-
-                let job_result = dyn_result.into_any().downcast::<DoubleJobResult>().unwrap();
+                let job_result = DoubleJobResult::try_from(c?)?;
 
                 assert!(job_result.2 > prev.2);
 
@@ -642,25 +660,20 @@ mod tests {
         // the job initiator.
         pub(super) async fn get_job_result(is_async: bool) -> anyhow::Result<()> {
             // create a job queue
-            let job_queue = JobQueue::start();
+            let mut job_queue = JobQueue::start();
             let duration = std::time::Duration::from_millis(20);
 
             // create 10 jobs
             for i in 0..10 {
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: i,
                     duration,
                     is_async,
-                });
+                };
 
-                let result = job_queue
-                    .add_job(job, DoubleJobPriority::Low)?
-                    .await
-                    .map_err(|e| e.into_sync())?
-                    .result()
-                    .map_err(|e| e.into_sync())?;
+                let completion = job_queue.add_job_mut(job, DoubleJobPriority::Low)?.await?;
 
-                let job_result = result.into_any().downcast::<DoubleJobResult>().unwrap();
+                let job_result = DoubleJobResult::try_from(completion)?;
 
                 assert_eq!(i, job_result.0);
                 assert_eq!(i * 2, job_result.1);
@@ -673,22 +686,22 @@ mod tests {
         // and queued job(s)
         pub(super) async fn stop_queue() -> anyhow::Result<()> {
             // create a job queue
-            let job_queue = JobQueue::start();
+            let mut job_queue = JobQueue::start();
             // start a 1 hour job.
             let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-            let job = Box::new(DoubleJob {
+            let job = DoubleJob {
                 data: 10,
                 duration,
                 is_async: true,
-            });
-            let job2 = Box::new(DoubleJob {
+            };
+            let job2 = DoubleJob {
                 data: 10,
                 duration,
                 is_async: true,
-            });
-            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
-            let job2_handle = job_queue.add_job(job2, DoubleJobPriority::Low)?;
+            };
+            let job_handle = job_queue.add_job_mut(job, DoubleJobPriority::Low)?;
+            let job2_handle = job_queue.add_job_mut(job2, DoubleJobPriority::Low)?;
 
             // so we have some test coverage for debug impls.
             println!("job-queue: {:?}", job_queue);
@@ -715,16 +728,16 @@ mod tests {
         // tests/demonstrates that a long running job can be cancelled early.
         pub(super) async fn cancel_job(is_async: bool) -> anyhow::Result<()> {
             // create a job queue
-            let job_queue = JobQueue::start();
+            let mut job_queue = JobQueue::start();
             // start a 1 hour job.
             let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-            let job = Box::new(DoubleJob {
+            let job = DoubleJob {
                 data: 10,
                 duration,
                 is_async,
-            });
-            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
+            };
+            let job_handle = job_queue.add_job_mut(job, DoubleJobPriority::Low)?;
 
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
@@ -742,28 +755,26 @@ mod tests {
         //  1. using tokio::select!{} to execute the job and listen for a
         //     cancellation message simultaneously.
         //  2. using tokio::pin!() to avoid borrow-checker complaints in the select.
-        //  3. using into_sync() to convert JobHandleError into JobHandleErrorSync for
-        //     inter-thread usage.
-        //  4. using downcast to obtain the job result.
+        //  3. obtaining the job result.
         pub async fn cancel_job_in_select(is_async: bool) -> anyhow::Result<()> {
             async fn do_some_work(
                 is_async: bool,
                 cancel_work_rx: tokio::sync::oneshot::Receiver<()>,
-            ) -> Result<DoubleJobResult, JobHandleErrorSync> {
+            ) -> Result<DoubleJobResult, JobHandleError> {
                 // create a job queue.  (this could be done elsewhere)
-                let job_queue = JobQueue::start();
+                let mut job_queue = JobQueue::start();
 
                 // start a 1 hour job.
                 let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: 10,
                     duration,
                     is_async,
-                });
+                };
 
                 // add the job to queue
-                let job_handle = job_queue.add_job(job, DoubleJobPriority::Low).unwrap();
+                let job_handle = job_queue.add_job_mut(job, DoubleJobPriority::Low).unwrap();
 
                 // pin job_handle, so borrow checker knows the address can't change
                 // and it is safe to use in both select branches
@@ -776,19 +787,17 @@ mod tests {
 
                     // case: sender cancelled, or sender dropped.
                     _ = cancel_work_rx => {
-                        job_handle.cancel().map_err(|e| e.into_sync())?;
+                        job_handle.cancel()?;
                         job_handle.await
                     }
                 };
 
+                println!("job_completion: {:#?}", completion);
+
                 // obtain job result (via downcast)
-                let result: DoubleJobResult = *completion
-                    .map_err(|e| e.into_sync())?
-                    .result()
-                    .map_err(|e| e.into_sync())?
-                    .into_any()
-                    .downcast::<DoubleJobResult>()
-                    .expect("downcast should succeed, else bug");
+                let result = DoubleJobResult::try_from(completion?)?;
+
+                println!("job_result: {:#?}", result);
 
                 Ok(result)
             }
@@ -809,7 +818,7 @@ mod tests {
             let job_handle_error = jh.await?.unwrap_err();
 
             // ensure the error indicates JobCancelled
-            assert!(matches!(job_handle_error, JobHandleErrorSync::JobCancelled));
+            assert!(matches!(job_handle_error, JobHandleError::JobCancelled));
 
             Ok(())
         }
@@ -840,16 +849,16 @@ mod tests {
             let rt = tokio::runtime::Runtime::new()?;
             let result = rt.block_on(async {
                 // create a job queue
-                let job_queue = JobQueue::start();
+                let mut job_queue = JobQueue::start();
                 // start a 1 hour job.
                 let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: 10,
                     duration,
                     is_async,
-                });
-                let _rx = job_queue.add_job(job, DoubleJobPriority::Low)?;
+                };
+                let _rx = job_queue.add_job_mut(job, DoubleJobPriority::Low)?;
 
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 println!("finished scope");
@@ -888,18 +897,18 @@ mod tests {
 
             let result = rt.block_on(async {
                 // create a job queue
-                let job_queue = JobQueue::start();
+                let mut job_queue = JobQueue::start();
 
                 // this job takes at least 5 secs to complete.
                 let duration = std::time::Duration::from_secs(5);
 
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: 10,
                     duration,
                     is_async,
-                });
+                };
 
-                let rx_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
+                let rx_handle = job_queue.add_job_mut(job, DoubleJobPriority::Low)?;
                 drop(rx_handle);
 
                 // sleep 50 ms to let job get started.
@@ -944,7 +953,7 @@ mod tests {
 
             let result_ok_clone = result_ok.clone();
             rt.block_on(async {
-                // create a job queue
+                // create a job queue (not mutable)
                 let job_queue = Arc::new(JobQueue::start());
 
                 // spawns background task that adds job
@@ -956,12 +965,13 @@ mod tests {
                     // the test will always succeed due to the await point.
                     std::thread::sleep(std::time::Duration::from_millis(200));
 
-                    let job = Box::new(DoubleJob {
+                    let job = DoubleJob {
                         data: 10,
                         duration: std::time::Duration::from_secs(1),
                         is_async,
-                    });
+                    };
 
+                    // add job (with JobQueue interior mutability).
                     let result = job_queue_cloned.add_job(job, DoubleJobPriority::Low);
 
                     // an assert on result.is_ok() would panic, but that panic would be
@@ -1027,16 +1037,14 @@ mod tests {
             /// async_job == false --> test a blocking job
             pub async fn panic_in_job_ends_job_cleanly(async_job: bool) -> anyhow::Result<()> {
                 // create a job queue
-                let job_queue = JobQueue::start();
+                let mut job_queue = JobQueue::start();
 
                 let job = PanicJob {
                     is_async: async_job,
                 };
-                let job_handle = job_queue.add_job(Box::new(job), DoubleJobPriority::Low)?;
+                let job_handle = job_queue.add_job_mut(job, DoubleJobPriority::Low)?;
 
-                let job_result = job_handle.await.map_err(|e| e.into_sync())?.result();
-
-                println!("job_result: {:#?}", job_result);
+                let job_result = job_handle.await?.result();
 
                 // verify that job_queue channels are still open
                 assert!(!job_queue.tx_job_added.is_closed());
@@ -1044,29 +1052,63 @@ mod tests {
 
                 // verify that we get an error with the job's panic msg.
                 assert!(matches!(
-                    job_result.map_err(|e| e.into_sync()),
-                    Err(JobHandleErrorSync::JobPanicked(e)) if e == *PANIC_STR
+                    job_result,
+                    Err(e) if e.panic_message() == Some((*PANIC_STR).to_string())
                 ));
 
                 // ensure we can still run another job afterwards.
-                let newjob = Box::new(DoubleJob {
+                let newjob = DoubleJob {
                     data: 10,
                     duration: std::time::Duration::from_millis(50),
                     is_async: false,
-                });
+                };
 
                 // ensure we can add another job.
-                let new_job_handle = job_queue.add_job(newjob, DoubleJobPriority::Low)?;
+                let new_job_handle = job_queue.add_job_mut(newjob, DoubleJobPriority::Low)?;
 
                 // ensure job processes and returns a result without error.
-                assert!(new_job_handle
-                    .await
-                    .map_err(|e| e.into_sync())?
-                    .result()
-                    .is_ok());
+                assert!(new_job_handle.await?.result().is_ok());
 
                 Ok(())
             }
+        }
+
+        // demonstrates/tests usage of JobResultWrapper
+        pub(super) async fn job_result_wrapper() -> anyhow::Result<()> {
+            type MyJobResult = JobResultWrapper<(u64, u64, Instant)>;
+
+            // represents a custom job.  implements Job.
+            #[derive(Debug)]
+            struct MyJob {
+                data: u64,
+                duration: std::time::Duration,
+            }
+
+            #[async_trait::async_trait]
+            impl Job for MyJob {
+                fn is_async(&self) -> bool {
+                    true
+                }
+
+                async fn run_async(&self) -> Box<dyn JobResult> {
+                    tokio::time::sleep(self.duration).await;
+                    MyJobResult::new((self.data, self.data * 2, Instant::now())).into()
+                }
+            }
+
+            let mut job_queue = JobQueue::start();
+            let job = MyJob {
+                data: 15,
+                duration: std::time::Duration::from_secs(5),
+            };
+            let job_handle = job_queue.add_job_mut(job, 10usize)?;
+            let completion = job_handle.await?;
+            let job_result = MyJobResult::try_from(completion)?;
+            let answer = job_result.into_inner();
+
+            assert_eq!(answer.0 * 2, answer.1);
+
+            Ok(())
         }
     }
 }

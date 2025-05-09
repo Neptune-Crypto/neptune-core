@@ -87,13 +87,13 @@ impl JobHandle {
     /// use neptune_cash::job_queue::JobQueue;
     /// use neptune_cash::job_queue::JobCompletion;
     /// use neptune_cash::job_queue::traits::Job;
-    /// use neptune_cash::job_queue::errors::JobHandleErrorSync;
+    /// use neptune_cash::job_queue::errors::JobHandleError;
     ///
     /// async fn do_some_work(
     ///     job_queue: &mut JobQueue<u8>,
     ///     job: Box<dyn Job>,
     ///     cancel_work_rx: tokio::sync::oneshot::Receiver<()>,
-    /// ) -> Result<JobCompletion, JobHandleErrorSync> {
+    /// ) -> Result<JobCompletion, JobHandleError> {
     ///
     ///     // add the job to queue
     ///     let job_priority: u8 = 10;
@@ -110,15 +110,13 @@ impl JobHandle {
     ///
     ///         // case: sender cancelled, or sender dropped.
     ///         _ = cancel_work_rx => {
-    ///             job_handle.cancel().map_err(|e| e.into_sync())?;
+    ///             job_handle.cancel()?;
     ///             job_handle.await
     ///         }
     ///     };
     ///     job_completion_result
-    ///         .map_err(|e| e.into_sync())
     /// }
     /// ```
-    /// *note: also demonstrates mapping JobHandleError to JobHandleErrorSync which implements Send+Sync.*
     pub fn cancel(&self) -> Result<(), JobHandleError> {
         let result = self.cancel_tx.send(()).map_err(JobHandleError::from);
 
