@@ -99,9 +99,12 @@ impl MutatorSetUpdate {
         authenticated_items: &mut [&mut AuthenticatedItem],
     ) -> bool {
         let mut cloned_removals = self.removals.clone();
-        let mut applied_removal_records = cloned_removals.iter_mut().rev().collect::<Vec<_>>();
+        let mut remaining_removal_records = cloned_removals.iter_mut().rev().collect::<Vec<_>>();
         for addition_record in &self.additions {
-            RemovalRecord::batch_update_from_addition(&mut applied_removal_records, ms_accumulator);
+            RemovalRecord::batch_update_from_addition(
+                &mut remaining_removal_records,
+                ms_accumulator,
+            );
 
             RemovalRecord::batch_update_from_addition(removal_records, ms_accumulator);
 
@@ -115,9 +118,9 @@ impl MutatorSetUpdate {
         }
 
         let mut removal_records_are_valid = true;
-        while let Some(applied_removal_record) = applied_removal_records.pop() {
+        while let Some(applied_removal_record) = remaining_removal_records.pop() {
             RemovalRecord::batch_update_from_remove(
-                &mut applied_removal_records,
+                &mut remaining_removal_records,
                 applied_removal_record,
             );
 
