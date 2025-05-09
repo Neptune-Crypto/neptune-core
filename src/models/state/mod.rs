@@ -1100,9 +1100,9 @@ impl GlobalState {
     /// tip. This path may involve some blocks to revert ("backwards"),
     /// certainly involves a latest universal common ancestor ("LUCA"), and
     /// probably involves some blocks to apply ("forwards"). As we walk this
-    /// this path, the mutator set membership proof of the monitored UTXO is
-    /// modified in accordance with the mutator set update induced by the block
-    /// in question, which could be a revert (backwards) or a regular apply
+    /// path, the mutator set membership proof of the monitored UTXO is modified
+    /// in accordance with the mutator set update induced by the block in
+    /// question, which could be a revert (backwards) or a regular apply
     /// (forwards).
     ///
     ///  Locking:
@@ -1259,16 +1259,17 @@ impl GlobalState {
                 }
 
                 // apply removals
-                let mut applied_removals = removals.clone();
-                while let Some(applied_removal_record) = applied_removals.pop() {
+                let mut remaining_removal_records = removals;
+                remaining_removal_records.reverse();
+                while let Some(current_removal_record) = remaining_removal_records.pop() {
                     // keep removal records in sync
                     RemovalRecord::batch_update_from_remove(
-                        &mut applied_removals.iter_mut().collect_vec(),
-                        &applied_removal_record,
+                        &mut remaining_removal_records.iter_mut().collect_vec(),
+                        &current_removal_record,
                     );
 
-                    membership_proof.update_from_remove(&applied_removal_record);
-                    block_msa.remove(&applied_removal_record);
+                    membership_proof.update_from_remove(&current_removal_record);
+                    block_msa.remove(&current_removal_record);
                 }
 
                 // sanity check
