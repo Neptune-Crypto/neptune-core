@@ -1,7 +1,5 @@
 use std::fmt::Display;
 
-use anyhow::bail;
-use anyhow::Result;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -198,7 +196,7 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         network: Network,
-    ) -> Result<TransactionDetails> {
+    ) -> Result<TransactionDetails, TransactionDetailsError> {
         Self::new(
             tx_inputs,
             tx_outputs,
@@ -225,7 +223,7 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         network: Network,
-    ) -> Result<TransactionDetails> {
+    ) -> Result<TransactionDetails, TransactionDetailsError> {
         Self::new(
             tx_inputs,
             tx_outputs,
@@ -252,7 +250,7 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         network: Network,
-    ) -> Result<TransactionDetails> {
+    ) -> Result<TransactionDetails, TransactionDetailsError> {
         let tx_inputs: TxInputList = tx_inputs.into();
         let tx_outputs: TxOutputList = tx_outputs.into();
 
@@ -267,19 +265,22 @@ impl TransactionDetails {
 
         // sanity check: do we even have enough funds?
         if total_spend > total_spendable {
-            error!("Insufficient funds.\n\n total_spend: {total_spend}\
-            \ntotal_spendable: {total_spendable}\ntotal_input: {total_input}\ncoinbase amount: {coinbase_amount}");
-            bail!("Not enough available funds.");
+            return Err(TransactionDetailsError::InsufficientFunds {
+                inputs_sum: total_spendable,
+                outputs_sum: total_spend,
+            });
         }
         if total_spend < total_spendable {
-            let diff = total_spend - total_spendable;
-            bail!("Missing change output in the amount of {}", diff);
+            return Err(TransactionDetailsError::InputsExceedOutputs {
+                inputs_sum: total_spendable,
+                outputs_sum: total_spend,
+            });
         }
         if tx_inputs
             .iter()
             .any(|x| !mutator_set_accumulator.verify(x.mutator_set_item(), x.mutator_set_mp()))
         {
-            bail!("Invalid mutator set membership proof/mutator set pair provided.");
+            return Err(TransactionDetailsError::InvalidMutatorSetMembershipProof);
         }
 
         Ok(TransactionDetails {
@@ -322,6 +323,28 @@ impl TransactionDetails {
     pub fn primitive_witness(&self) -> PrimitiveWitness {
         self.into()
     }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub(crate) enum TransactionDetailsError {
+    #[error(
+        "Insufficient funds.  inputs_sum: {}, outputs_sum: {}",
+        inputs_sum,
+        outputs_sum
+    )]
+    InsufficientFunds {
+        inputs_sum: NativeCurrencyAmount,
+        outputs_sum: NativeCurrencyAmount,
+    },
+
+    #[error("inputs_sum ({}) exceeds outputs_sum({})", inputs_sum, outputs_sum)]
+    InputsExceedOutputs {
+        inputs_sum: NativeCurrencyAmount,
+        outputs_sum: NativeCurrencyAmount,
+    },
+
+    #[error("Invalid mutator set membership proof/mutator set pair provided.")]
+    InvalidMutatorSetMembershipProof,
 }
 
 #[cfg(test)]

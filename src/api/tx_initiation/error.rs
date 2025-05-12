@@ -9,6 +9,7 @@ use crate::job_queue::errors::AddJobError;
 use crate::job_queue::errors::JobHandleError;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobError;
+use crate::models::state::transaction_details::TransactionDetailsError;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// enumerates possible transaction send errors
@@ -46,9 +47,27 @@ pub enum CreateTxError {
     #[error("witness validation failed")]
     WitnessValidationFailed(#[from] WitnessValidationError),
 
-    // catch-all error, eg for anyhow errors
-    #[error("transaction could not be created.  reason: {0}")]
-    Failed(String),
+    #[error("{0}")]
+    InvalidMutatorSetMembershipProof(String),
+}
+
+// translates TransactionDetailsError (crate internal) to CreateTxError (public)
+impl From<TransactionDetailsError> for CreateTxError {
+    fn from(e: TransactionDetailsError) -> Self {
+        match e {
+            TransactionDetailsError::InsufficientFunds {
+                inputs_sum,
+                outputs_sum,
+            } => Self::InsufficientFunds {
+                requested: outputs_sum,
+                available: inputs_sum,
+            },
+            TransactionDetailsError::InputsExceedOutputs { .. } => Self::NotExactChange,
+            TransactionDetailsError::InvalidMutatorSetMembershipProof => {
+                Self::InvalidMutatorSetMembershipProof(e.to_string())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error, strum::Display)]
@@ -132,14 +151,6 @@ pub enum SendError {
         tip_digest: Digest,
         max: usize,
     },
-}
-
-// convert anyhow::Error to a CreateTxError::Failed.
-// note that anyhow Error is not serializable.
-impl From<anyhow::Error> for CreateTxError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::Failed(e.to_string())
-    }
 }
 
 // convert anyhow::Error to a SendError::Failed.
