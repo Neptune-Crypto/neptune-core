@@ -6,6 +6,7 @@ use tasm_lib::prelude::Digest;
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -79,17 +80,28 @@ impl TxCreationArtifacts {
     /// in particular:
     ///  1. Self::details.network matches provided Network.
     ///  2. Transaction and TransactionDetails match.
-    ///  3. Transaction proof is valid, and thus the Tx itself is valid.
-    ///
-    /// At present we do NOT validate the TransactionDetails themselves
-    /// because if the details match the transaction and the transaction is
-    /// valid, that is sufficient.
+    ///  3. TransactionDetails are valid, indicating the PrimitiveWitness is valid.
+    ///  4. Transaction proof is valid, and thus the Tx itself is valid.
+    //
+    // note: we could skip the TransactionDetails validation when the network
+    // does not mock-proofs, eg for Mainnet. When a real proof is present
+    // that validation alone is sufficient because if the Transaction
+    // is valid and the TransactionDetails match then the TransactionDetails
+    // logically must be valid as well.
+    //
+    // When mock proofs are used, the Transaction proof will typically be
+    // considered "valid" but the TransactionDetails might not be valid, so
+    // it should be checked.
+    //
+    // For now we elect to validate the TransactionDetails anyway because:
+    // 1. TransactionDetails::validate() provides more granular error variants indicating
+    //    where the problem lies compared to Transaction::verify_proof() which just
+    //    returns a bool
+    // 2. it keeps the implementation the same regardless whether the network
+    //    uses mock proofs or not.
     pub async fn verify(&self, network: Network) -> Result<(), TxCreationArtifactsError> {
         // tbd: maybe we should get rid of the network arg.  it's present
         // out of abundance of caution.
-
-        // todo: (how) can we also verify that self.details.network matches the Tx?
-        // it could be spoofed.
 
         // note: we check the least expensive things first.
 
@@ -111,12 +123,13 @@ impl TxCreationArtifacts {
             });
         }
 
-        // 3. validate that transaction (proof) is valid.
+        // 3. validate the TransactionDetails
+        self.details.validate().await?;
+
+        // 4. validate that transaction (proof) is valid.
         if !self.transaction.verify_proof(network).await {
             return Err(TxCreationArtifactsError::InvalidProof);
         }
-
-        // 4. skipped.  validate the transaction details is valid.
 
         Ok(())
     }
@@ -131,6 +144,9 @@ pub enum TxCreationArtifactsError {
         tx_hash: Digest,
         details_hash: Digest,
     },
+
+    #[error(transparent)]
+    InvalidWitness(#[from] WitnessValidationError),
 
     #[error("invalid proof")]
     InvalidProof,

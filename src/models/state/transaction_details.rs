@@ -10,10 +10,10 @@ use tasm_lib::prelude::Digest;
 
 use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
-use crate::api::tx_initiation::error::CreateTxError;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_input::TxInputList;
@@ -273,14 +273,11 @@ impl TransactionDetails {
     /// verifies the transaction details are valid.
     ///
     /// specifically, a [PrimitiveWitness] is built from these
-    /// details and validated in the triton VM.
-    pub async fn validate(&self) -> Result<(), CreateTxError> {
-        // note: we map the WitnessValidationError into CreateTxError as this
-        // method is called during Tx creation, and for consistency in that
-        // process.
-        Ok(PrimitiveWitness::from_transaction_details(self)
+    /// details and validated.
+    pub async fn validate(&self) -> Result<(), WitnessValidationError> {
+        PrimitiveWitness::from_transaction_details(self)
             .validate()
-            .await?)
+            .await
     }
 
     pub fn primitive_witness(&self) -> PrimitiveWitness {
