@@ -5,7 +5,6 @@ use tasm_lib::prelude::Digest;
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::RecordTransactionError;
-use crate::api::export::WitnessValidationError;
 use crate::job_queue::errors::AddJobError;
 use crate::job_queue::errors::JobHandleError;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
@@ -43,9 +42,6 @@ pub enum CreateTxError {
 
     #[error("cannot generate change key for immutable wallet.")]
     CantGenChangeKeyForImmutableWallet,
-
-    #[error("witness validation failed")]
-    WitnessValidationFailed(#[from] WitnessValidationError),
 }
 
 #[derive(Debug, Clone, thiserror::Error, strum::Display)]
