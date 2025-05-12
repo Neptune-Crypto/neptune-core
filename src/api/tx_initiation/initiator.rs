@@ -192,7 +192,7 @@ impl TransactionInitiator {
         self.worker().check_rate_limit().await?;
 
         // note: acquires write-lock.
-        // note: this should validate tx, but presently does not.
+        // note: tx is validated internally.
         self.global_state_lock.record_transaction(tx).await?;
 
         // note: cheap arc clone of tx.
