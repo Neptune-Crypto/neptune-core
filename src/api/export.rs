@@ -29,6 +29,7 @@ pub use crate::models::state::wallet::transaction_input::TxInput;
 pub use crate::models::state::wallet::transaction_input::TxInputList;
 pub use crate::models::state::wallet::transaction_output::TxOutputList;
 pub use crate::models::state::GlobalStateLock;
+pub use crate::models::state::RecordTransactionError;
 pub use crate::models::state::StateLock;
 pub use crate::triton_vm::prelude::Program;
 pub use crate::triton_vm::proof::Claim;

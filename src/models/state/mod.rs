@@ -47,6 +47,7 @@ use tracing::warn;
 use transaction_kernel_id::TransactionKernelId;
 use twenty_first::math::digest::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
+use tx_creation_artifacts::TxCreationArtifactsError;
 use tx_proving_capability::TxProvingCapability;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
@@ -287,7 +288,10 @@ impl GlobalStateLock {
     }
 
     /// stores/records a transaction into local state (mempool and wallet)
-    pub async fn record_transaction(&mut self, tx_artifacts: &TxCreationArtifacts) -> Result<()> {
+    pub async fn record_transaction(
+        &mut self,
+        tx_artifacts: &TxCreationArtifacts,
+    ) -> std::result::Result<(), RecordTransactionError> {
         // verifies that:
         //  1. Self::network matches provided Network.
         //  2. Transaction and TransactionDetails match.
@@ -349,6 +353,13 @@ impl DerefMut for GlobalStateLock {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.global_state_lock
     }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
+pub enum RecordTransactionError {
+    #[error("Invalid transaction: {0}")]
+    InvalidTransaction(#[from] TxCreationArtifactsError),
 }
 
 /// abstracts over lock acquisition types for [GlobalStateLock]
