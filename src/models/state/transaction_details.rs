@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
 use num_traits::CheckedSub;
@@ -8,7 +7,6 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
-use tracing::error;
 
 use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
@@ -179,7 +177,6 @@ impl TransactionDetails {
             mutator_set_accumulator,
             network,
         )
-        .expect("new_without_coinbase should succeed when total output amount is zero and no inputs are provided")
     }
 
     /// Construct a [`TransactionDetails`] instance with coinbase from state
@@ -198,7 +195,7 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         network: Network,
-    ) -> Result<TransactionDetails> {
+    ) -> Self {
         Self::new(
             tx_inputs,
             tx_outputs,
@@ -225,7 +222,7 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         network: Network,
-    ) -> Result<TransactionDetails> {
+    ) -> Self {
         Self::new(
             tx_inputs,
             tx_outputs,
@@ -239,11 +236,7 @@ impl TransactionDetails {
 
     /// Constructor for TransactionDetails with some sanity checks.
     ///
-    /// # Error
-    ///
-    /// Returns an error if (any of)
-    ///  - the transaction is not balanced
-    ///  - some mutator set membership proof is invalid.
+    /// This fn does not perform any validation.  use validate() instead.
     pub(crate) fn new(
         tx_inputs: impl Into<TxInputList>,
         tx_outputs: impl Into<TxOutputList>,
@@ -252,45 +245,16 @@ impl TransactionDetails {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         network: Network,
-    ) -> Result<TransactionDetails> {
-        let tx_inputs: TxInputList = tx_inputs.into();
-        let tx_outputs: TxOutputList = tx_outputs.into();
-
-        // total amount to be spent -- determines how many and which UTXOs to use
-        let total_spend = tx_outputs.total_native_coins() + fee;
-        let total_input: NativeCurrencyAmount = tx_inputs
-            .iter()
-            .map(|x| x.utxo.get_native_currency_amount())
-            .sum();
-        let coinbase_amount = coinbase.unwrap_or(NativeCurrencyAmount::zero());
-        let total_spendable = total_input + coinbase_amount;
-
-        // sanity check: do we even have enough funds?
-        if total_spend > total_spendable {
-            error!("Insufficient funds.\n\n total_spend: {total_spend}\
-            \ntotal_spendable: {total_spendable}\ntotal_input: {total_input}\ncoinbase amount: {coinbase_amount}");
-            bail!("Not enough available funds.");
-        }
-        if total_spend < total_spendable {
-            let diff = total_spend - total_spendable;
-            bail!("Missing change output in the amount of {}", diff);
-        }
-        if tx_inputs
-            .iter()
-            .any(|x| !mutator_set_accumulator.verify(x.mutator_set_item(), x.mutator_set_mp()))
-        {
-            bail!("Invalid mutator set membership proof/mutator set pair provided.");
-        }
-
-        Ok(TransactionDetails {
-            tx_inputs,
-            tx_outputs,
+    ) -> Self {
+        Self {
+            tx_inputs: tx_inputs.into(),
+            tx_outputs: tx_outputs.into(),
             fee,
             coinbase,
             timestamp,
             mutator_set_accumulator,
             network,
-        })
+        }
     }
 
     /// amount spent (excludes change and fee)

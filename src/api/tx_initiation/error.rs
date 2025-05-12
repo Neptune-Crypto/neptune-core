@@ -4,6 +4,7 @@ use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::RecordTransactionError;
 use crate::api::export::WitnessValidationError;
 use crate::job_queue::errors::AddJobError;
 use crate::job_queue::errors::JobHandleError;
@@ -45,10 +46,6 @@ pub enum CreateTxError {
 
     #[error("witness validation failed")]
     WitnessValidationFailed(#[from] WitnessValidationError),
-
-    // catch-all error, eg for anyhow errors
-    #[error("transaction could not be created.  reason: {0}")]
-    Failed(String),
 }
 
 #[derive(Debug, Clone, thiserror::Error, strum::Display)]
@@ -122,9 +119,8 @@ pub enum SendError {
     #[error(transparent)]
     Proof(#[from] CreateProofError),
 
-    // catch-all error, eg for anyhow errors
-    #[error("transaction could not be sent.  reason: {0}")]
-    Failed(String),
+    #[error(transparent)]
+    RecordTransaction(#[from] RecordTransactionError),
 
     #[error("Send rate limit reached for block height {height} ({digest}). A maximum of {max} tx may be sent per block.", digest = tip_digest.to_hex())]
     RateLimit {
@@ -132,20 +128,4 @@ pub enum SendError {
         tip_digest: Digest,
         max: usize,
     },
-}
-
-// convert anyhow::Error to a CreateTxError::Failed.
-// note that anyhow Error is not serializable.
-impl From<anyhow::Error> for CreateTxError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::Failed(e.to_string())
-    }
-}
-
-// convert anyhow::Error to a SendError::Failed.
-// note that anyhow Error is not serializable.
-impl From<anyhow::Error> for SendError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::Failed(e.to_string())
-    }
 }

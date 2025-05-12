@@ -522,10 +522,6 @@ pub(super) fn prepare_coinbase_transaction_stateless(
         timestamp,
         mutator_set_accumulator,
         network,
-    )
-    .expect(
-        "all inputs' ms membership proofs must be valid because inputs are empty;\
- and tx must be balanced because the one output receives exactly the coinbase amount",
     );
 
     Ok((composer_outputs, transaction_details))
