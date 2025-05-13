@@ -647,6 +647,12 @@ impl Mempool {
         tx_proving_capability: TxProvingCapability,
         composing: bool,
     ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
+        // If the mempool is empty, there is nothing to do.
+        if self.is_empty() {
+            self.set_tip_digest_sync_label(new_block.hash());
+            return (vec![], vec![]);
+        }
+
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
         // proofs back to previous blocks. It would be nice if we could handle a
@@ -783,10 +789,7 @@ impl Mempool {
         // transactions in the mempool. So we should shrink it to max size after
         // applying the block.
         self.shrink_to_max_size();
-
-        // Update the sync-label to keep track of reorganizations
-        let current_block_digest = new_block.hash();
-        self.set_tip_digest_sync_label(current_block_digest);
+        self.set_tip_digest_sync_label(new_block.hash());
 
         (events, update_jobs)
     }
