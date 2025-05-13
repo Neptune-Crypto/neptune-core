@@ -36,7 +36,7 @@ impl WalletEntropy {
     }
 
     /// Create a `WalletEntropy` object with a fixed digest
-    pub(crate) fn devnet_wallet() -> Self {
+    pub fn devnet_wallet() -> Self {
         let secret_seed = SecretKeyMaterial(xfe!([
             12063201067205522823_u64,
             1529663126377206632_u64,
