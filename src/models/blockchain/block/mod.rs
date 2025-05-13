@@ -1136,12 +1136,16 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg(test)]
     impl Block {
-        #[cfg(test)]
         fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
             self.kernel.header.difficulty = difficulty;
             self.unset_digest();
             self
+        }
+
+        pub(crate) fn set_proof(&mut self, proof: BlockProof) {
+            self.proof = proof;
         }
     }
 
