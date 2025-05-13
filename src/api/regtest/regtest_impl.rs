@@ -18,6 +18,9 @@ pub struct RegTest {
 
 impl From<GlobalStateLock> for RegTest {
     fn from(gsl: GlobalStateLock) -> Self {
+        // only networks that use mock proofs are supported.
+        assert!(gsl.cli().network.use_mock_proof());
+
         Self {
             worker: RegTestPrivate::new(gsl),
         }

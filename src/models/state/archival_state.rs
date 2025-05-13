@@ -794,7 +794,7 @@ impl ArchivalState {
     }
 
     // Return the block with a given block digest, iff it's available in state somewhere.
-    pub(crate) async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
+    pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record: Option<BlockRecord> = self
             .block_index_db
             .get(BlockIndexKey::Block(block_digest))

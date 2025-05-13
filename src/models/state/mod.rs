@@ -337,6 +337,30 @@ impl GlobalStateLock {
     }
 }
 
+// note: this will only succeed in situations where the caller holds the only
+// instance of GlobalStateLock, ie: Arc::strong_count() == 1.
+impl TryFrom<GlobalStateLock> for GlobalState {
+    type Error = GlobalStateLock;
+
+    fn try_from(gsl: GlobalStateLock) -> Result<Self, GlobalStateLock> {
+        let GlobalStateLock {
+            global_state_lock,
+            cli,
+            rpc_server_to_main_tx,
+        } = gsl;
+
+        let arc_mutex: Arc<tokio::sync::RwLock<GlobalState>> = global_state_lock.into();
+        match Arc::try_unwrap(arc_mutex) {
+            Ok(mutex) => Ok(mutex.into_inner()),
+            Err(arc_mutex) => Err(GlobalStateLock {
+                global_state_lock: sync_tokio::AtomicRw::from(arc_mutex),
+                cli,
+                rpc_server_to_main_tx,
+            }),
+        }
+    }
+}
+
 impl Deref for GlobalStateLock {
     type Target = sync_tokio::AtomicRw<GlobalState>;
 

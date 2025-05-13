@@ -428,7 +428,7 @@ impl MainLoopHandler {
         }
     }
 
-    pub fn global_state_lock(&mut self) -> GlobalStateLock {
+    pub fn global_state_lock(&self) -> GlobalStateLock {
         self.global_state_lock.clone()
     }
 
