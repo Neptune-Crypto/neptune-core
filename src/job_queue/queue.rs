@@ -104,7 +104,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
     /// adds job to job-queue (with interior mutability)
     ///
-    /// returns immediately (does not wait for job).
+    /// returns a [`JobHandle`] that can be used to await or cancel the job.
     ///
     /// note that this method utilizes interior mutability. Consider calling
     /// [`Self::add_job_mut()`] instead to make the mutation explicit.
@@ -161,7 +161,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
     /// Adds a job to the queue (with explicit mutability).
     ///
-    /// returns immediately (does not wait for job).
+    /// returns a [`JobHandle`] that can be used to await or cancel the job.
     ///
     /// job-results can be obtained by via JobHandle::results().await
     /// The job can be cancelled by JobHandle::cancel()

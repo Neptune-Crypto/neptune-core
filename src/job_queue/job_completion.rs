@@ -1,6 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
-use std::sync::Mutex;
 
 use super::errors::JobHandleError;
 use super::traits::JobResult;
@@ -61,7 +59,7 @@ impl JobCompletion {
         match self {
             JobCompletion::Finished(r) => Ok(r),
             JobCompletion::Cancelled => Err(JobHandleError::JobCancelled),
-            JobCompletion::Panicked(e) => Err(JobHandleError::JobPanicked(Arc::new(Mutex::new(e)))),
+            JobCompletion::Panicked(e) => Err(e.into()),
         }
     }
 

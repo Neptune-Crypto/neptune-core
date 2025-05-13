@@ -145,8 +145,6 @@
 //! // -------------------------------------------
 //!
 //! // define job priority levels for this job-queue.
-//! // note that the queue could process only one type of
-//! // job, or mixed job types.
 //! #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 //! enum QueueJobPriority {
 //!     Low = 1,

@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::Mutex;
 
 /// a job-handle error.
@@ -7,10 +6,9 @@ pub enum JobHandleError {
     #[error("the job was cancelled")]
     JobCancelled,
 
-    // note: the Arc<Mutex<_>> is used to make the inner Box `Sync`.
-    // The mutex is never acquired and can thus never be poisoned.
+    // see comment for PanicInfo below
     #[error("the job panicked during processing")]
-    JobPanicked(Arc<Mutex<Box<dyn std::any::Any + Send + 'static>>>),
+    JobPanicked(PanicInfo),
 
     #[error("channel send error cancelling job")]
     CancelJobError(#[from] tokio::sync::watch::error::SendError<()>),
@@ -27,7 +25,7 @@ pub enum JobHandleError {
 
 impl From<Box<dyn std::any::Any + Send + 'static>> for JobHandleError {
     fn from(panic_info: Box<dyn std::any::Any + Send + 'static>) -> Self {
-        Self::JobPanicked(Arc::new(Mutex::new(panic_info)))
+        Self::JobPanicked(PanicInfo(Mutex::new(panic_info)))
     }
 }
 
@@ -136,12 +134,9 @@ impl JobHandleError {
     pub fn try_into_panic(self) -> Result<Box<dyn std::any::Any + Send + 'static>, Self> {
         match self {
             // Consume self here
-            Self::JobPanicked(arc_mutex) => {
-                // 1. The 1st unwrap() cannot fail because the Arc is never cloned.
-                //    Thus Arc::into_inner() is guaranteed to return Some().
-                // 2. The 2nd unwrap() cannot fail because the Mutex is guaranteed unpoisoned
-                //    because lock() is never called on it.
-                Ok(Arc::into_inner(arc_mutex).unwrap().into_inner().unwrap())
+            Self::JobPanicked(panic_mutex) => {
+                // The unwrap() cannot fail. see PanicInfo comment.
+                Ok(panic_mutex.0.into_inner().unwrap())
             }
             other => Err(other), // For other variants, just return them
         }
@@ -181,8 +176,8 @@ impl JobHandleError {
     /// ```
     pub fn panic_message(&self) -> Option<String> {
         match self {
-            JobHandleError::JobPanicked(payload) => {
-                let guard = payload.lock().unwrap();
+            JobHandleError::JobPanicked(panic_mutex) => {
+                let guard = panic_mutex.0.lock().unwrap();
                 if let Some(s) = guard.downcast_ref::<&'static str>() {
                     Some((*s).to_string())
                 } else {
@@ -193,6 +188,29 @@ impl JobHandleError {
         }
     }
 }
+
+/// Holds panic information
+//
+// 1. The Box holds panic info as returned from tokio JoinError::into_panic()
+// 2. The Mutex makes the panic info `Sync`.
+// 3. PanicInfo makes the mutex private to guarantee lock() can never be called
+//    on it by code outside this module.
+// 4. lock() is never called inside this module.
+// 5. Since lock() is never called:
+//    a. the mutex can never be poisoned.
+//    b. Mutex::into_inner() is guaranteed to succeed.
+//
+// possible alternatives to Mutex:
+//
+// Mutex is only being used for `Sync` not for locking.
+//
+// other possible candidates are discussed here:
+// https://github.com/Neptune-Crypto/neptune-core/pull/584#discussion_r2086163632
+//
+// std::sync::Exclusive seems a better fit, but is not yet in stable rust as
+// of rust 1.86.0.
+#[derive(Debug)]
+pub struct PanicInfo(Mutex<Box<dyn std::any::Any + Send + 'static>>);
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]

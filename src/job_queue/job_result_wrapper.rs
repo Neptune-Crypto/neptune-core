@@ -4,15 +4,13 @@
 //!
 //! It is useful for:
 //!
-//! 1. returning job results of type T as `Box<dyn JobResults>` when implementing
+//! 1. returning job results of type T as `Box<dyn JobResult>` when implementing
 //!    the `Job` trait.
 //!
-//! 2. converting the `Box<dyn JobResults>` from a completed `Job` back into `T`.
+//! 2. converting the `Box<dyn JobResult>` from a completed `Job` back into `T`.
 //!
 //! See [module docs](super) for usage examples.
 use std::any::Any;
-use std::cmp::Ordering;
-use std::fmt::Debug;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -34,9 +32,12 @@ use super::JobCompletion;
 /// * `T`: The specific type of the job result being wrapped. This type must be
 ///   `'static`, `Send`, and `Sync`.
 ///
-/// `JobResultWrapper` also implements the following traits if T
+/// `JobResultWrapper` also implements the following traits **if** T
 /// implements the trait:
 ///   Debug, Clone, Copy, Display, PartialOrd, Ord, PartialEq, Eq,
+//
+// note: each derive only applies if T impl's the trait.
+#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub struct JobResultWrapper<T>(T);
 
 impl<T: 'static + Send + Sync> JobResult for JobResultWrapper<T> {
@@ -101,57 +102,11 @@ impl<T: 'static + Send + Sync> From<JobResultWrapper<T>> for Box<dyn JobResult> 
     }
 }
 
-impl<T: Debug> Debug for JobResultWrapper<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("JobResultWrapper").field(&self.0).finish()
-    }
-}
-
 impl<T: Display> Display for JobResultWrapper<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
-
-// Clippy warns about a manual Clone impl on a Copy type, but this is necessary
-// to handle the case where T is Clone but not Copy.
-//
-// Ideally, this could be expressed more clearly using negative trait bounds
-// (#[feature(negative_impls)]), like this:
-//
-// impl<T: Clone + !Copy> Clone for JobResultWrapper<T> {..}
-// impl<T: Clone + Copy> Clone for JobResultWrapper<T> {..}
-//
-// However, negative trait bounds are not yet stable in Rust as of rustc
-// v1.86.0.
-#[allow(clippy::expl_impl_clone_on_copy)]
-impl<T: Clone> Clone for JobResultWrapper<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T: Copy> Copy for JobResultWrapper<T> {}
-
-impl<T: PartialOrd> PartialOrd for JobResultWrapper<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl<T: Ord> Ord for JobResultWrapper<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl<T: PartialEq> PartialEq for JobResultWrapper<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-impl<T: Eq> Eq for JobResultWrapper<T> {}
 
 impl<T> JobResultWrapper<T> {
     /// convert into inner `T`
