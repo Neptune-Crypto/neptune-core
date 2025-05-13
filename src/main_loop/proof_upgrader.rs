@@ -393,7 +393,6 @@ impl UpgradeJob {
                     if !upgraded.is_confirmable_relative_to(&tip_mutator_set) {
                         let verbose_log_msg = upgrade_job.double_spend_warn_msg();
                         warn!("Upgraded transaction is no longer confirmable. {verbose_log_msg}");
-                        global_state.mempool_remove(upgraded.kernel.txid()).await;
                         return;
                     }
 

@@ -5,8 +5,6 @@ use tasm_lib::prelude::Digest;
 use super::error::RegTestError;
 use crate::api::export::Timestamp;
 use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
-use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
-use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 

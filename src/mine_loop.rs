@@ -46,8 +46,6 @@ use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
-use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
@@ -535,9 +533,9 @@ pub(super) fn prepare_coinbase_transaction_stateless(
 ///
 /// In the general case, this is (just) the mempool.
 pub(crate) enum TxMergeOrigin {
-    Mempool,
+    TxPool,
     #[cfg(test)]
-    ExplicitList(Vec<Transaction>),
+    Explicit(Option<Transaction>),
 }
 
 /// Create the transaction that goes into the block template. The transaction is
@@ -554,7 +552,7 @@ pub(crate) async fn create_block_transaction(
         global_state_lock,
         timestamp,
         job_options,
-        TxMergeOrigin::Mempool,
+        TxMergeOrigin::TxPool,
     )
     .await
 }
@@ -566,8 +564,6 @@ pub(crate) async fn create_block_transaction_from(
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
-    let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
-
     let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
     let mutator_set_hash = predecessor_block_ms.hash();
     debug!("Creating block transaction with mutator set hash: {mutator_set_hash}",);
@@ -580,85 +576,71 @@ pub(crate) async fn create_block_transaction_from(
         .await
         .composer_parameters(predecessor_block.header().height.next());
 
-    // A coinbase transaction implies mining. So you *must*
-    // be able to create a SingleProof.
-    let vm_job_queue = vm_job_queue();
+    // A coinbase transaction implies mining. So you *must* be able to create a
+    // SingleProof.
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters.clone(),
         timestamp,
-        vm_job_queue.clone(),
+        vm_job_queue(),
         job_options.clone(),
     )
     .await?;
 
-    // Get most valuable transactions from mempool.
-    let only_merge_single_proofs = true;
-    let mut transactions_to_merge = match tx_merge_origin {
+    // Get most valuable transaction from transaction pool.
+    let maybe_tx_to_merge = match tx_merge_origin {
+        TxMergeOrigin::TxPool => {
+            global_state_lock
+                .lock_guard()
+                .await
+                .tx_pool
+                .best_tx_for_composition()
+                .await
+        }
         #[cfg(test)]
-        TxMergeOrigin::ExplicitList(transactions) => transactions,
-        TxMergeOrigin::Mempool => global_state_lock
-            .lock_guard()
-            .await
-            .mempool
-            .get_transactions_for_block(
-                block_capacity_for_transactions,
-                Some(MAX_NUM_TXS_TO_MERGE),
-                only_merge_single_proofs,
-                mutator_set_hash,
-            ),
+        TxMergeOrigin::Explicit(transaction) => transaction,
     };
 
-    // If necessary, populate list with nop-tx.
-    // Guarantees that some merge happens in below loop, which sets merge-bit.
-    if transactions_to_merge.is_empty() {
-        let nop = TransactionDetails::nop(
-            predecessor_block.mutator_set_accumulator_after(),
-            timestamp,
-            global_state_lock.cli().network,
-        );
-        let nop = PrimitiveWitness::from_transaction_details(&nop);
+    // If necessary, use nop-tx. Guarantees that the merge happens below,
+    // setting the merge-bit.
+    let tx_to_merge = match maybe_tx_to_merge {
+        Some(tx) => tx,
+        None => {
+            let nop = TransactionDetails::nop(
+                predecessor_block.mutator_set_accumulator_after(),
+                timestamp,
+                global_state_lock.cli().network,
+            );
+            let nop = PrimitiveWitness::from_transaction_details(&nop);
+            let options = TritonVmProofJobOptionsBuilder::new()
+                .template(&job_options)
+                .proof_type(TransactionProofType::SingleProof)
+                .build();
+            let proof = TransactionProofBuilder::new()
+                .primitive_witness_ref(&nop)
+                .job_queue(vm_job_queue())
+                .proof_job_options(options)
+                .build()
+                .await?;
 
-        // ensure that proof-type is SingleProof
-        let options = TritonVmProofJobOptionsBuilder::new()
-            .template(&job_options)
-            .proof_type(TransactionProofType::SingleProof)
-            .build();
+            Transaction {
+                kernel: nop.kernel,
+                proof,
+            }
+        }
+    };
 
-        let proof = TransactionProofBuilder::new()
-            .primitive_witness_ref(&nop)
-            .job_queue(vm_job_queue.clone())
-            .proof_job_options(options)
-            .build()
-            .await?;
-        let nop = Transaction {
-            kernel: nop.kernel,
-            proof,
-        };
+    let tx_kernel = &tx_to_merge.kernel;
+    info!(
+        "Merging tx with {} inputs, {} outputs, fee {}.",
+        tx_kernel.inputs.len(),
+        tx_kernel.outputs.len(),
+        tx_kernel.fee,
+    );
 
-        transactions_to_merge = vec![nop];
-    }
-
-    let num_merges = transactions_to_merge.len();
-    let mut block_transaction = coinbase_transaction;
-    for (i, tx_to_include) in transactions_to_merge.into_iter().enumerate() {
-        info!("Merging transaction {} / {}", i + 1, num_merges);
-        info!(
-            "Merging tx with {} inputs, {} outputs. With fee {}.",
-            tx_to_include.kernel.inputs.len(),
-            tx_to_include.kernel.outputs.len(),
-            tx_to_include.kernel.fee
-        );
-        block_transaction = Transaction::merge_with(
-            block_transaction,
-            tx_to_include,
-            rng.random(),
-            vm_job_queue.clone(),
-            job_options.clone(),
-        )
+    let block_transaction = coinbase_transaction
+        .merge_with(tx_to_merge, rng.random(), vm_job_queue(), job_options)
         .await?; // fix #579.  propagate error up.
-    }
-
     let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
 
     Ok((block_transaction, own_expected_utxos))
@@ -1051,7 +1033,6 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
-    use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -1266,16 +1247,12 @@ pub(crate) mod tests {
                 config,
             )
             .await
-            .unwrap()
-            .transaction;
+            .unwrap();
 
         let mut cli = cli_args::Args::default();
         for guesser_fee_fraction in [0f64, 0.5, 1.0] {
             // Verify constructed coinbase transaction and block template when mempool is empty
-            assert!(
-                alice.lock_guard().await.mempool.is_empty(),
-                "Mempool must be empty at start of loop"
-            );
+            assert!(alice.lock_guard().await.tx_pool.is_empty());
 
             cli.guesser_fraction = guesser_fee_fraction;
             alice.set_cli(cli.clone()).await;
@@ -1337,13 +1314,8 @@ pub(crate) mod tests {
                 "Block template created by miner with empty mempool must be valid"
             );
 
-            {
-                let mut alice_gsm = alice.lock_guard_mut().await;
-                alice_gsm
-                    .mempool_insert((*tx_from_alice).clone(), TransactionOrigin::Own)
-                    .await;
-                assert_eq!(1, alice_gsm.mempool.len());
-            }
+            alice.record_transaction(&tx_from_alice);
+            assert_eq!(1, alice.lock_guard().await.tx_pool.len());
 
             // Build transaction for block
             let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
@@ -1381,7 +1353,7 @@ pub(crate) mod tests {
                 "Block template created by miner with non-empty mempool must be valid"
             );
 
-            alice.lock_guard_mut().await.mempool_clear().await;
+            alice.lock_guard_mut().await.tx_pool.clear();
         }
     }
 
@@ -1402,10 +1374,7 @@ pub(crate) mod tests {
         let genesis_block = Block::genesis(network);
         let mocked_now = genesis_block.header().timestamp + Timestamp::months(7);
 
-        assert!(
-            alice.lock_guard().await.mempool.is_empty(),
-            "Mempool must be empty at start of test"
-        );
+        assert!(alice.lock_guard().await.tx_pool.is_empty());
         let (sender_1, receiver_1) = oneshot::channel();
         let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
         compose_block(
@@ -2022,7 +1991,7 @@ pub(crate) mod tests {
                 &gsl,
                 Timestamp::now(),
                 job_options,
-                TxMergeOrigin::Mempool,
+                TxMergeOrigin::TxPool,
             )
             .await
         };

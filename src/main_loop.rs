@@ -50,7 +50,6 @@ use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
-use crate::models::state::mempool::TransactionOrigin;
 use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
@@ -62,7 +61,6 @@ use crate::SUCCESS_EXIT_CODE;
 
 const PEER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(2 * 60);
 const SYNC_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
-const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
 const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
 
@@ -490,7 +488,7 @@ impl MainLoopHandler {
             let mut state = self.global_state_lock.lock_guard_mut().await;
             for updated in &updated_txs {
                 let txid = updated.kernel.txid();
-                if let Some(tx) = state.mempool.get_mut(txid) {
+                if let Some(tx) = state.tx_pool.get_mut(txid) {
                     *tx = updated.to_owned();
                 } else {
                     warn!("Updated transaction which is no longer in mempool");
@@ -840,29 +838,24 @@ impl MainLoopHandler {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::Transaction");
 
                 debug!(
-                    "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
+                    "`peer_loop` received following transaction from peer. \
+                    {} inputs, {} outputs. \
+                    Synced to mutator set hash: {}",
                     pt2m_transaction.transaction.kernel.inputs.len(),
                     pt2m_transaction.transaction.kernel.outputs.len(),
                     pt2m_transaction.transaction.kernel.mutator_set_hash
                 );
 
+                if let Err(err) = self
+                    .global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .tx_pool
+                    .try_insert(Arc::new(pt2m_transaction.transaction.to_owned()))
                 {
-                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-                    if pt2m_transaction.confirmable_for_block
-                        != global_state_mut.chain.light_state().hash()
-                    {
-                        warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
-                        return Ok(());
-                    }
-
-                    // Insert into mempool
-                    global_state_mut
-                        .mempool_insert(
-                            pt2m_transaction.transaction.to_owned(),
-                            TransactionOrigin::Foreign,
-                        )
-                        .await;
-                }
+                    warn!("transaction not included in tx pool: {err}");
+                    // todo: punish the peer that sent the transaction?
+                };
 
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
@@ -1454,9 +1447,6 @@ impl MainLoopHandler {
         let mut block_sync_interval = time::interval(SYNC_REQUEST_INTERVAL);
         block_sync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut mempool_cleanup_interval = time::interval(MEMPOOL_PRUNE_INTERVAL);
-        mempool_cleanup_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
         let mut utxo_notification_cleanup_interval = time::interval(EXPECTED_UTXOS_PRUNE_INTERVAL);
         utxo_notification_cleanup_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -1629,19 +1619,6 @@ impl MainLoopHandler {
                     self.block_sync(&mut main_loop_state).await?;
                 }
 
-                // Clean up mempool: remove stale / too old transactions
-                _ = mempool_cleanup_interval.tick() => {
-                    log_slow_scope!(fn_name!() + "::select::mempool_cleanup_interval");
-
-                    debug!("Timer: mempool-cleaner job");
-                    self
-                        .global_state_lock
-                        .lock_guard_mut()
-                        .await
-                        .mempool_prune_stale_transactions()
-                        .await;
-                }
-
                 // Clean up incoming UTXO notifications: remove stale / too old
                 // UTXO notifications from pool
                 _ = utxo_notification_cleanup_interval.tick() => {
@@ -1783,8 +1760,8 @@ impl MainLoopHandler {
                 self.global_state_lock
                     .lock_guard_mut()
                     .await
-                    .mempool_clear()
-                    .await;
+                    .tx_pool
+                    .clear();
 
                 Ok(false)
             }
@@ -2225,8 +2202,8 @@ mod tests {
                 .global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*proof_collection_tx).clone(), TransactionOrigin::Foreign)
-                .await;
+                .tx_pool
+                .insert(proof_collection_tx.clone());
 
             assert!(
                 main_loop_handler

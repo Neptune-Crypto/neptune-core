@@ -64,8 +64,9 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::tx_pool::SubscriberToken;
+use crate::models::state::tx_pool::TransactionPoolEvent;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::rusty_wallet_database::WalletDbConnectError;
@@ -84,9 +85,17 @@ pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
     pub wallet_entropy: WalletEntropy,
 
-    /// these two fields are for monitoring wallet-affecting utxos in the mempool.
-    /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
+    /// Monitors wallet-affecting UTXOs in the mempool, in particular, those
+    /// transactions that spend UTXOs owned by this wallet.
+    ///
+    /// Avoids selecting the same UTXO multiple times when creating new
+    /// transactions, and helps computing the wallet's unconfirmed balance.
     mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
+
+    /// Monitors wallet-affecting UTXOs in the mempool, in particular, those
+    /// transactions that benefit this wallet.
+    ///
+    /// Helps computing the wallet's unconfirmed balance.
     mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<IncomingUtxo>>,
 
     // these fields represent all known keys that have been handed out,
@@ -513,25 +522,31 @@ impl WalletState {
     }
 
     /// handles a list of mempool events
-    pub(in crate::models::state) async fn handle_mempool_events(
+    pub(in crate::models::state) async fn handle_tx_pool_events(
         &mut self,
-        events: impl IntoIterator<Item = MempoolEvent>,
+        events: impl IntoIterator<Item = TransactionPoolEvent>,
     ) {
         for event in events {
-            self.handle_mempool_event(event).await;
+            self.handle_tx_pool_event(event).await;
         }
     }
 
-    /// handles a single mempool event.
+    /// Handle a single mempool event.
     ///
     /// note: the wallet watches the mempool in order to keep track of
     /// unconfirmed utxos sent from or to the wallet. This enables
-    /// calculation of unconfirmed balance.  It also lays foundation for
+    /// calculation of unconfirmed balance. It also lays foundation for
     /// spending unconfirmed utxos. (issue #189)
-    pub(in crate::models::state) async fn handle_mempool_event(&mut self, event: MempoolEvent) {
+    pub(in crate::models::state) async fn handle_tx_pool_event(
+        &mut self,
+        event: TransactionPoolEvent,
+    ) {
         match event {
-            MempoolEvent::AddTx(tx) => {
-                debug!(r"handling mempool AddTx event.  details:\n{}", tx.kernel);
+            TransactionPoolEvent::Addition(tx) => {
+                debug!(
+                    r"handling transaction pool addition event. Details:\n{}",
+                    tx.kernel
+                );
 
                 let spent_utxos = self.scan_for_spent_utxos(&tx.kernel).await;
 
@@ -551,15 +566,13 @@ impl WalletState {
 
                 self.mempool_spent_utxos.insert(tx_id, spent_utxos);
                 self.mempool_unspent_utxos.insert(tx_id, own_utxos);
+
+                todo!("how to tell the tx_pool about a tx's priority here?");
             }
-            MempoolEvent::RemoveTx(tx) => {
-                let tx_id = tx.kernel.txid();
-                debug!("handling mempool RemoveTx event.  tx: {}", tx_id);
+            TransactionPoolEvent::Removal(tx_id) => {
+                debug!("handling transaction pool removal event. tx ID: {tx_id}");
                 self.mempool_spent_utxos.remove(&tx_id);
                 self.mempool_unspent_utxos.remove(&tx_id);
-            }
-            MempoolEvent::UpdateTxMutatorSet(_tx_hash_pre_update, _tx_post_update) => {
-                // Wallet doesn't need to do anything here.
             }
         }
     }
@@ -781,15 +794,15 @@ impl WalletState {
         pin_mut!(stream); // needed for iteration
 
         while let Some((i, monitored_utxo)) = stream.next().await {
-            let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(Hash::hash(&monitored_utxo.utxo)),
-                None => continue,
+            let Some((_, msmp)) = monitored_utxo.get_latest_membership_proof_entry() else {
+                continue;
             };
-
+            let abs_i = msmp.compute_indices(Hash::hash(&monitored_utxo.utxo));
             if confirmed_absolute_index_sets.contains(&abs_i) {
                 spent_own_utxos.push((monitored_utxo.utxo, abs_i, i));
             }
         }
+
         spent_own_utxos
     }
 
@@ -1987,13 +2000,17 @@ impl WalletState {
         }
         own_coins
     }
+
+    /// The token with which this wallet can identify itself to the
+    /// [transaction pool](crate::models::state::tx_pool::TransactionPool].
+    pub(crate) fn tx_pool_subscriber_token(&self) -> SubscriberToken {
+        todo!()
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
-    use std::sync::Arc;
-
     use generation_address::GenerationSpendingKey;
     use macro_rules_attr::apply;
     use rand::prelude::*;
@@ -3280,13 +3297,12 @@ pub(crate) mod tests {
         use rand::SeedableRng;
 
         use super::*;
+        use crate::api::export::TxCreationArtifacts;
         use crate::config_models::cli_args;
         use crate::models::blockchain::block::block_height::BlockHeight;
-        use crate::models::blockchain::transaction::Transaction;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-        use crate::models::state::TransactionOrigin;
         use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
@@ -3331,7 +3347,7 @@ pub(crate) mod tests {
                     .await?
                     .hash();
 
-            let tx = {
+            let tx_creation_artifacts = {
                 // verify that confirmed and unconfirmed balances.
                 let gs = global_state_lock.lock_guard().await;
                 let msa = gs.chain.light_state().mutator_set_accumulator_after();
@@ -3372,16 +3388,13 @@ pub(crate) mod tests {
                     .tx_initiator_internal()
                     .create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, config)
                     .await?
-                    .transaction
             };
 
             // add the tx to the mempool.
             // note that the wallet should be notified of these changes.
             global_state_lock
-                .lock_guard_mut()
-                .await
-                .mempool_insert((*tx).clone(), TransactionOrigin::Own)
-                .await;
+                .record_transaction(&tx_creation_artifacts)
+                .await?;
 
             {
                 let gs = global_state_lock.lock_guard().await;
@@ -3401,11 +3414,7 @@ pub(crate) mod tests {
             }
 
             // clear the mempool, which drops our unconfirmed tx.
-            global_state_lock
-                .lock_guard_mut()
-                .await
-                .mempool_clear()
-                .await;
+            global_state_lock.lock_guard_mut().await.tx_pool.clear();
 
             {
                 // verify that wallet's unconfirmed balance is `coinbase amt` again.
@@ -3436,7 +3445,7 @@ pub(crate) mod tests {
                 fee: NativeCurrencyAmount,
                 timestamp: Timestamp,
                 change_key: SpendingKey,
-            ) -> Result<Arc<Transaction>> {
+            ) -> Result<TxCreationArtifacts> {
                 let mut rng = rand::rng();
                 let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
                 let tx_output = TxOutput::onchain_native_currency(
@@ -3454,7 +3463,6 @@ pub(crate) mod tests {
                     .tx_initiator_internal()
                     .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
-                    .map(|tx| tx.transaction)
             }
 
             let network = Network::Main;
@@ -3525,12 +3533,8 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-            // insert into mempool
-            alice
-                .lock_guard_mut()
-                .await
-                .mempool_insert((*tx1).clone(), TransactionOrigin::Own)
-                .await;
+            // insert into tx pool
+            alice.record_transaction(&tx1).await;
 
             // generate a second transaction
             let tx2 = outgoing_transaction(
@@ -3543,16 +3547,12 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-            // insert that one into the mempool too
-            alice
-                .lock_guard_mut()
-                .await
-                .mempool_insert((*tx2).clone(), TransactionOrigin::Own)
-                .await;
+            // insert that one into the tx pool too
+            alice.record_transaction(&tx2).await;
 
             // verify that the mempool contains two transactions
             // ==> did not kick anything out
-            assert_eq!(2, alice.lock_guard().await.mempool.len());
+            assert_eq!(2, alice.lock_guard().await.tx_pool.len());
 
             // Verify that one more transaction *cannot* be made, as all the
             // monitored UTXOs now have a transaction that spends them in the
@@ -4602,7 +4602,6 @@ pub(crate) mod tests {
     }
 
     pub(crate) mod fee_notifications {
-
         use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;

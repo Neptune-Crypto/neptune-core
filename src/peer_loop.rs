@@ -56,8 +56,6 @@ use crate::models::peer::SyncChallenge;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::block_proposal::BlockProposalRejectError;
-use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
-use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
@@ -1235,16 +1233,16 @@ impl PeerLoopHandler {
             PeerMessage::Transaction(transaction) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Transaction");
 
+                let transaction: Transaction = (*transaction).into();
                 debug!(
-                    "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
+                    "`peer_loop` received following transaction from peer. \
+                    {} inputs, {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.inputs.len(),
                     transaction.kernel.outputs.len(),
                     transaction.kernel.mutator_set_hash
                 );
 
-                let transaction: Transaction = (*transaction).into();
-
-                // 1. If transaction is invalid, punish.
+                // If transaction is invalid, punish.
                 if !transaction
                     .is_valid(self.global_state_lock.cli().network)
                     .await
@@ -1255,7 +1253,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 2. If transaction has coinbase, punish.
+                // If transaction has coinbase, punish.
                 // Transactions received from peers have not been mined yet.
                 // Only the miner is allowed to produce transactions with non-empty coinbase fields.
                 if transaction.kernel.coinbase.is_some() {
@@ -1265,7 +1263,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 3. If negative fee, punish.
+                // If negative fee, punish.
                 if transaction.kernel.fee.is_negative() {
                     warn!("Received negative-fee transaction.");
                     self.punish(NegativePeerSanction::TransactionWithNegativeFee)
@@ -1273,124 +1271,17 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 4. If transaction is already known, ignore.
-                if self
+                // Otherwise, relay to main
+                let tip = self
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .mempool
-                    .contains_with_higher_proof_quality(
-                        transaction.kernel.txid(),
-                        transaction.proof.proof_quality()?,
-                    )
-                {
-                    warn!("Received transaction that was already known");
-
-                    // We received a transaction that we *probably* haven't requested.
-                    // Consider punishing here, if this is abused.
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 5. if transaction is not confirmable, punish.
-                let (tip, mutator_set_accumulator_after) = {
-                    let state = self.global_state_lock.lock_guard().await;
-
-                    (
-                        state.chain.light_state().hash(),
-                        state.chain.light_state().mutator_set_accumulator_after(),
-                    )
-                };
-                if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
-                    warn!(
-                        "Received unconfirmable transaction with TXID {}. Unconfirmable because:",
-                        transaction.kernel.txid()
-                    );
-                    // get fine-grained error code for informative logging
-                    let confirmability_error_code = transaction
-                        .kernel
-                        .is_confirmable_relative_to(&mutator_set_accumulator_after);
-                    match confirmability_error_code {
-                        Ok(_) => unreachable!(),
-                        Err(TransactionConfirmabilityError::InvalidRemovalRecord(index)) => {
-                            warn!("invalid removal record (at index {index})");
-                            let invalid_removal_record = transaction.kernel.inputs[index].clone();
-                            let removal_record_error_code = invalid_removal_record
-                                .validate_inner(&mutator_set_accumulator_after);
-                            debug!(
-                                "Absolute index set of removal record {index}: {:?}",
-                                invalid_removal_record.absolute_indices
-                            );
-                            match removal_record_error_code {
-                                Ok(_) => unreachable!(),
-                                Err(RemovalRecordValidityError::AbsentAuthenticatedChunk) => {
-                                    debug!("invalid because membership proof is missing");
-                                }
-                                Err(RemovalRecordValidityError::InvalidSwbfiMmrMp {
-                                    chunk_index,
-                                }) => {
-                                    debug!("invalid because membership proof for chunk index {chunk_index} is invalid");
-                                }
-                            };
-                            self.punish(NegativePeerSanction::UnconfirmableTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
-                        Err(TransactionConfirmabilityError::DuplicateInputs) => {
-                            warn!("duplicate inputs");
-                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
-                        Err(TransactionConfirmabilityError::AlreadySpentInput(index)) => {
-                            warn!("already spent input (at index {index})");
-                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
-                    };
-                }
-
-                // If transaction cannot be applied to mutator set, punish.
-                // I don't think this can happen when above checks pass but we include
-                // the check to ensure that transaction can be applied.
-                let ms_update = MutatorSetUpdate::new(
-                    transaction.kernel.inputs.clone(),
-                    transaction.kernel.outputs.clone(),
-                );
-                let can_apply = ms_update
-                    .apply_to_accumulator(&mut mutator_set_accumulator_after.clone())
-                    .is_ok();
-                if !can_apply {
-                    warn!("Cannot apply transaction to current mutator set.");
-                    warn!("Transaction ID: {}", transaction.kernel.txid());
-                    self.punish(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                let tx_timestamp = transaction.kernel.timestamp;
-
-                // 6. Ignore if transaction is too old
-                let now = self.now();
-                if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
-                    // TODO: Consider punishing here
-                    warn!("Received too old tx");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 7. Ignore if transaction is too far into the future
-                if tx_timestamp
-                    > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
-                {
-                    // TODO: Consider punishing here
-                    warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Otherwise, relay to main
+                    .chain
+                    .light_state()
+                    .hash();
                 let pt2m_transaction = PeerTaskToMainTransaction {
                     transaction,
-                    confirmable_for_block: tip,
+                    confirmable_for_block: tip, // todo: this info should come from the peer
                 };
                 self.to_main_tx
                     .send(PeerTaskToMain::Transaction(Box::new(pt2m_transaction)))
@@ -1935,6 +1826,8 @@ impl PeerLoopHandler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::Arc;
+
     use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -3360,7 +3253,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn receive_transaction_request() {
         let network = Network::Main;
-        let dummy_tx = invalid_empty_single_proof_transaction();
+        let dummy_tx = Arc::new(invalid_empty_single_proof_transaction());
         let txid = dummy_tx.kernel.txid();
 
         for transaction_is_known in [false, true] {
@@ -3372,15 +3265,15 @@ mod tests {
                 state_lock
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(dummy_tx.clone(), TransactionOrigin::Own)
-                    .await;
+                    .tx_pool
+                    .insert(dummy_tx.clone());
             }
 
             let mock = if transaction_is_known {
                 Mock::new(vec![
                     Action::Read(PeerMessage::TransactionRequest(txid)),
                     Action::Write(PeerMessage::Transaction(Box::new(
-                        (&dummy_tx).try_into().unwrap(),
+                        (&*dummy_tx).try_into().unwrap(),
                     ))),
                     Action::Read(PeerMessage::Bye),
                 ])
@@ -3542,19 +3435,13 @@ mod tests {
         );
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
-        assert!(
-            state_lock.lock_guard().await.mempool.is_empty(),
-            "Mempool must be empty at init"
-        );
+        assert!(state_lock.lock_guard().await.tx_pool.is_empty());
         state_lock
             .lock_guard_mut()
             .await
-            .mempool_insert(transaction_1.clone(), TransactionOrigin::Foreign)
-            .await;
-        assert!(
-            !state_lock.lock_guard().await.mempool.is_empty(),
-            "Mempool must be non-empty after insertion"
-        );
+            .tx_pool
+            .insert(Arc::new(transaction_1.clone()));
+        assert!(!state_lock.lock_guard().await.tx_pool.is_empty());
 
         // Run the peer loop and verify expected exchange -- namely that the
         // tx notification is received and the the transaction is *not*
@@ -3784,8 +3671,8 @@ mod tests {
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert((*own_tx).to_owned(), TransactionOrigin::Foreign)
-                    .await;
+                    .tx_pool
+                    .insert(Arc::new(own_tx.to_owned()));
 
                 let tx_notification: TransactionNotification = new_tx.try_into().unwrap();
 

@@ -226,7 +226,7 @@ impl TransactionInitiator {
         let network = self.global_state_lock.cli().network;
         let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
-        let Some(tx) = gsm.mempool.get_mut(transaction_id) else {
+        let Some(tx) = gsm.tx_pool.get_mut(transaction_id) else {
             return Err(error::UpgradeProofError::TxNotInMempool);
         };
 
@@ -237,7 +237,7 @@ impl TransactionInitiator {
             return Err(error::UpgradeProofError::ProofNotAnUpgrade);
         }
 
-        // tbd: how long does this verify take?   If too slow,
+        // tbd: how long does this verify take? If too slow,
         // we could obtain tx with a read-lock first, verify,
         // then obtain again with write-lock to mutate it.
         if !transaction_proof
@@ -251,9 +251,6 @@ impl TransactionInitiator {
         tx.proof = transaction_proof;
 
         drop(gsm);
-
-        // tbd: do we need to remove this tx from mempool and re-add
-        // in order to trigger necessary events?
 
         // todo: Inform all peers about our hard work
         // for this, we need to hold the channel sender.
