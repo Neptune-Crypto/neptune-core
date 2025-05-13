@@ -282,6 +282,9 @@ impl ArchivalState {
     /// pairs must be stored to the block-index database for this block to be
     /// retrievable.
     ///
+    /// This function only stores the block to a file. It does not modify any
+    /// database. It does, however, read from the block index database.
+    ///
     /// The caller should verify that the block is not already stored, otherwise
     /// the block will be stored twice which will lead to inconsistencies.
     async fn store_block(
@@ -501,6 +504,32 @@ impl ArchivalState {
             .ammr_mut()
             .append(new_block.hash())
             .await;
+    }
+
+    /// Attempt to deserialize a list of blocks from a file, without access to
+    /// a database to provide indexing and pointers. Assumes the same
+    /// file-encoding for blocks as is used in the rest of this module.
+    ///
+    /// Use this to extract a list of blocks from a file without having access
+    /// to a database.
+    ///
+    /// Provides no validation that the blocks are valid, have enough PoW, or
+    /// are stored in order in the file.
+    pub(super) async fn blocks_from_file_without_record(path: &PathBuf) -> Result<Vec<Block>> {
+        let block_file = tokio::fs::OpenOptions::new().read(true).open(path).await?;
+        let file_size = block_file.metadata().await?.len();
+
+        let mut offset = 0;
+        let mut blocks = vec![];
+        while offset < file_size {
+            let mmap = unsafe { MmapOptions::new().offset(offset).map(&block_file)? };
+            let block: Block = bincode::deserialize(&mmap)?;
+            offset += bincode::serialized_size(&block)?;
+
+            blocks.push(block);
+        }
+
+        Ok(blocks)
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
@@ -1164,6 +1193,7 @@ mod tests {
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::invalid_block_with_transaction;
+    use crate::tests::shared::invalid_empty_blocks;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_archival_state;
     use crate::tests::shared::mock_genesis_global_state;
@@ -2384,6 +2414,28 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn get_blocks_directly_from_file_without_database() {
+        let network = Network::Main;
+        let mut archival_state = make_test_archival_state(network).await;
+        let blocks = invalid_empty_blocks(&archival_state.genesis_block, 10);
+
+        for i in 0..10 {
+            archival_state
+                .write_block_internal(&blocks[i], true)
+                .await
+                .unwrap();
+
+            let assumed_block_file = archival_state.data_dir.block_file_path(0);
+            let returned = ArchivalState::blocks_from_file_without_record(&assumed_block_file)
+                .await
+                .unwrap();
+
+            assert_eq!(blocks[0..=i], returned[..]);
+        }
     }
 
     #[traced_test]
