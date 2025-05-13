@@ -114,9 +114,21 @@ impl From<VmProof> for NeptuneProof {
 
 impl NeptuneProof {
     /// creates an invalid standard proof (not a mock proof)
+    #[cfg(test)]
     pub fn invalid() -> Self {
         Self {
             proof: VmProof(vec![]),
+        }
+    }
+
+    /// creates an invalid proof (not a mock proof) of a specified length, in
+    /// number of b-field elements.
+    #[cfg(test)]
+    pub fn invalid_with_size(len: usize) -> Self {
+        use num_traits::ConstZero;
+
+        Self {
+            proof: VmProof(vec![BFieldElement::ZERO; len]),
         }
     }
 

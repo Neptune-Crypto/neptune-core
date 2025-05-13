@@ -278,6 +278,24 @@ impl ArchivalState {
         &self.genesis_block
     }
 
+    /// Return the number of files used to store the raw blocks.
+    #[cfg(test)]
+    pub(crate) async fn num_block_files(&self) -> u32 {
+        let last_rec = self
+            .block_index_db
+            .get(BlockIndexKey::LastFile)
+            .await
+            .map(|x| x.as_last_file_record())
+            .unwrap_or_default();
+        last_rec.last_file + 1
+    }
+
+    /// Return the directory in which the raw blocks are stored.
+    #[cfg(test)]
+    pub(crate) fn block_dir_path(&self) -> PathBuf {
+        self.data_dir.block_dir_path()
+    }
+
     /// Write a block disk, without setting it as tip. The returned (key, value)
     /// pairs must be stored to the block-index database for this block to be
     /// retrievable.

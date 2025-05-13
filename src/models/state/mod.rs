@@ -23,6 +23,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -40,6 +41,7 @@ use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::Zero;
+use regex::Regex;
 use tasm_lib::triton_vm::prelude::*;
 use tracing::debug;
 use tracing::info;
@@ -87,6 +89,7 @@ use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::ArchivalState;
 use crate::Hash;
 use crate::RPCServerToMain;
 use crate::VERSION;
@@ -1729,6 +1732,108 @@ impl GlobalState {
         let events = self.mempool.prune_stale_transactions();
         self.wallet_state.handle_mempool_events(events).await
     }
+
+    /// Read all blocks contained in the specified directory and store these to
+    /// the archival state.
+    ///
+    /// Will ignore blocks that are already known to this node but logs a
+    /// warning when such blocks are encountered. Will return an error if any
+    /// processed block is either invalid or does not have sufficient PoW, iff
+    /// block validation is specified.
+    ///
+    /// Can be used to bootstrap the node without having to download all blocks
+    /// from a peer. Assumes the same file structure as is created in the
+    /// directory of blocks under normal operations of the node software, i.e.
+    /// where blocks are mined locally or received from peers.
+    ///
+    /// Returns the number of blocks read from the directory.
+    pub(crate) async fn bootstrap_from_directory(
+        &mut self,
+        directory: &Path,
+        validate_blocks: bool,
+    ) -> Result<usize> {
+        debug!(
+            "Reading all blocks from directory '{}'",
+            directory.to_string_lossy()
+        );
+        let entries = directory.read_dir()?;
+
+        let blk_file_name_regex = Regex::new(r"^blk(\d+)\.dat$").unwrap();
+
+        let mut block_file_indices = vec![];
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let Ok(file_name) = entry.file_name().into_string() else {
+                bail!("Could not convert {entry:?} to file name");
+            };
+
+            if !blk_file_name_regex.is_match(&file_name) {
+                continue;
+            }
+
+            let caps = blk_file_name_regex.captures(&file_name).unwrap();
+            block_file_indices.push(caps[1].parse::<u32>()?);
+        }
+
+        // Sort to ensure blocks are applied in order, from file blk0.dat to
+        // blk\d\d.dat, while avoiding to process e.g. blk10.dat before
+        // blk2.dat.
+        block_file_indices.sort_unstable();
+
+        let mut num_stored_blocks = 0;
+
+        let mut predecessor = self.chain.light_state().clone();
+        for block_file_index in block_file_indices {
+            let mut file_path = directory.to_path_buf();
+            let block_file_name = format!("blk{block_file_index}.dat");
+            file_path.push(&block_file_name);
+            let blocks = ArchivalState::blocks_from_file_without_record(&file_path).await?;
+
+            // Blocks are assumed to be stored in-order in the file.
+            for block in blocks {
+                let block_is_new = self
+                    .chain
+                    .archival_state()
+                    .get_block_header(block.hash())
+                    .await
+                    .is_none();
+                let block_height = block.header().height;
+                if !block_is_new {
+                    warn!(
+                        "Attempted to process a block from {block_file_name} \
+                        which was already known. Block height: {block_height}."
+                    );
+                    continue;
+                }
+
+                if validate_blocks {
+                    ensure!(
+                        block
+                            .is_valid(&predecessor, Timestamp::now(), self.cli.network)
+                            .await,
+                        "Attempted to process a block from {block_file_name} \
+                        which is invalid. Block height: {block_height}."
+                    );
+                    ensure!(
+                        block.has_proof_of_work(predecessor.header()),
+                        "Attempted to process a block from {block_file_name} \
+                        which does not have required PoW amount. \
+                        Block height: {block_height}."
+                    );
+                }
+
+                self.set_new_tip_internal(block.clone()).await.unwrap();
+                num_stored_blocks += 1;
+                predecessor = block;
+            }
+        }
+
+        self.flush_databases().await?;
+
+        Ok(num_stored_blocks)
+    }
 }
 
 #[cfg(test)]
@@ -1748,10 +1853,12 @@ mod tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
+    use crate::api::export::NeptuneProof;
     use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::block::BlockProof;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::state::tx_creation_config::TxCreationConfig;
@@ -1761,6 +1868,7 @@ mod tests {
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_empty_block;
+    use crate::tests::shared::invalid_empty_blocks;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared::mock_genesis_global_state;
@@ -3851,6 +3959,70 @@ mod tests {
                 .await;
             }
         }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_restore_state_from_block_directory() {
+        // Ensure more than one file is used to store blocks.
+        const BIG_PROOF_LEN: usize = 6_250_000; // ~= 50MB
+        const MANY_BLOCKS: usize = 3;
+
+        let network = Network::Main;
+        let mut old_state = mock_genesis_global_state(
+            network,
+            3,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+        let mut old_state = old_state.lock_guard_mut().await;
+        let stored_blocks = invalid_empty_blocks(&Block::genesis(network), MANY_BLOCKS);
+        let big_bad_proof = BlockProof::SingleProof(NeptuneProof::invalid_with_size(BIG_PROOF_LEN));
+        for mut block in stored_blocks {
+            block.set_proof(big_bad_proof.clone());
+            old_state.set_new_tip_internal(block).await.unwrap();
+        }
+
+        assert!(
+            old_state.chain.archival_state().num_block_files().await > 1,
+            "Test assumption: More than one file must exist"
+        );
+
+        // Build the new state from the block directory of old state.
+        let block_dir = old_state.chain.archival_state().block_dir_path();
+        let mut new_state = mock_genesis_global_state(
+            network,
+            3,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+        let mut new_state = new_state.lock_guard_mut().await;
+        let validate_blocks = false;
+        new_state
+            .bootstrap_from_directory(&block_dir, validate_blocks)
+            .await
+            .unwrap();
+
+        assert_eq!(old_state.chain.light_state(), new_state.chain.light_state());
+        let tip = old_state.chain.light_state();
+        assert_eq!(*tip, new_state.chain.archival_state().get_tip().await);
+        assert_eq!(*tip, old_state.chain.archival_state().get_tip().await);
+        let msa = tip.mutator_set_accumulator_after();
+        assert_eq!(
+            old_state
+                .wallet_state
+                .get_wallet_status(tip.hash(), &msa)
+                .await
+                .synced_unspent,
+            new_state
+                .wallet_state
+                .get_wallet_status(tip.hash(), &msa)
+                .await
+                .synced_unspent,
+            "Restored wallet state must agree with original state"
+        );
     }
 
     // note: removed test have_to_specify_change_policy()
