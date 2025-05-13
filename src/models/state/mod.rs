@@ -1436,9 +1436,6 @@ impl GlobalState {
         // Mempool is not updated, as it's only defined relative to the tip.
         // Wallet is not updated, as it can be synced to tip at any point.
 
-        // Flush databases
-        self.flush_databases().await?;
-
         Ok(())
     }
 
@@ -1516,9 +1513,6 @@ impl GlobalState {
         // was just set as new tip. Also reset set of exported block proposals.
         self.mining_state.block_proposal = BlockProposal::none();
         self.mining_state.exported_block_proposals.clear();
-
-        // Flush databases
-        self.flush_databases().await?;
 
         Ok(update_jobs)
     }

@@ -549,13 +549,14 @@ impl MainLoopHandler {
                 self.main_to_miner_tx.send(MainToMiner::Continue);
                 return Ok(());
             }
-
             // set new tip and obtain list of update-jobs to perform.
             // the jobs update mutator-set data for:
             //   all tx if we are in composer role.
             //   else self-owned tx.
             // see: Mempool::update_with_block_and_predecessor()
-            gsm.set_new_tip(new_block_clone).await?
+            let update_jobs = gsm.set_new_tip(new_block_clone).await?;
+            gsm.flush_databases().await?;
+            update_jobs
         }; // write-lock is dropped here.
 
         // Share block with peers right away.
@@ -696,6 +697,8 @@ impl MainLoopHandler {
                             global_state_mut.store_block_not_tip(block).await?;
                         }
 
+                        global_state_mut.flush_databases().await?;
+
                         return Ok(());
                     }
 
@@ -743,6 +746,8 @@ impl MainLoopHandler {
                         let update_jobs_ = global_state_mut.set_new_tip(new_block).await?;
                         update_jobs.extend(update_jobs_);
                     }
+
+                    global_state_mut.flush_databases().await?;
 
                     update_jobs
                 };
