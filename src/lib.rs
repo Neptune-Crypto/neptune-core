@@ -223,7 +223,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
             bootstrap_directory.to_string_lossy()
         );
 
-        let validate_blocks = true;
+        let validate_blocks = !global_state_lock.cli().disable_bootstrap_block_validation;
         let num_blocks_read = global_state_lock
             .lock_guard_mut()
             .await
