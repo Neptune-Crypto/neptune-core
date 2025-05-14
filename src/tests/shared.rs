@@ -96,9 +96,9 @@ use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
-use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_pool::TransactionPool;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -237,11 +237,7 @@ pub(crate) async fn mock_genesis_global_state(
         light_state,
         archival_state,
     }));
-    let mempool = Mempool::new(
-        cli.max_mempool_size,
-        cli.max_mempool_num_tx,
-        genesis_block.hash(),
-    );
+    let mempool = TransactionPool::new(cli.max_mempool_size, genesis_block.hash());
 
     let wallet_state = mock_genesis_wallet_state(wallet, network, &cli).await;
 

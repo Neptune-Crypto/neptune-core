@@ -131,7 +131,6 @@ pub struct DashBoardOverviewDataFromClient {
     pub unconfirmed_total_balance: NativeCurrencyAmount,
     pub mempool_size: usize,
     pub mempool_total_tx_count: usize,
-    pub mempool_own_tx_count: usize,
 
     // `None` symbolizes failure in getting peer count
     pub peer_count: Option<usize>,
@@ -169,7 +168,7 @@ pub struct MempoolTransactionInfo {
 impl From<&Transaction> for MempoolTransactionInfo {
     fn from(mptx: &Transaction) -> Self {
         MempoolTransactionInfo {
-            id: mptx.kernel.txid(),
+            id: mptx.txid(),
             proof_type: match mptx.proof {
                 TransactionProof::Witness(_) => TransactionProofType::PrimitiveWitness,
                 TransactionProof::SingleProof(_) => TransactionProofType::SingleProof,
@@ -182,6 +181,12 @@ impl From<&Transaction> for MempoolTransactionInfo {
             fee: mptx.kernel.fee,
             synced: false,
         }
+    }
+}
+
+impl From<Arc<Transaction>> for MempoolTransactionInfo {
+    fn from(tx: Arc<Transaction>) -> Self {
+        tx.into()
     }
 }
 
@@ -2694,7 +2699,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.lock_guard().await.mempool.len())
+        Ok(self.state.lock_guard().await.tx_pool.len())
     }
 
     // documented in trait. do not add doc-comment.
@@ -2706,7 +2711,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.lock_guard().await.mempool.get_size())
+        Ok(self.state.lock_guard().await.tx_pool.get_size())
     }
 
     // documented in trait. do not add doc-comment.
@@ -2751,15 +2756,11 @@ impl RPC for NeptuneRPCServer {
         let syncing = state.net.sync_anchor.is_some();
         let mempool_size = {
             log_slow_scope!(fn_name!() + "::mempool.get_size()");
-            state.mempool.get_size()
+            state.tx_pool.get_size()
         };
         let mempool_total_tx_count = {
             log_slow_scope!(fn_name!() + "::mempool.len()");
-            state.mempool.len()
-        };
-        let mempool_own_tx_count = {
-            log_slow_scope!(fn_name!() + "::mempool.num_own_txs()");
-            state.mempool.num_own_txs()
+            state.tx_pool.len()
         };
         let cpu_temp = None; // disable for now.  call is too slow.
         let proving_capability = self.state.cli().proving_capability();
@@ -2810,7 +2811,6 @@ impl RPC for NeptuneRPCServer {
             unconfirmed_total_balance,
             mempool_size,
             mempool_total_tx_count,
-            mempool_own_tx_count,
             peer_count,
             max_num_peers,
             mining_status,
@@ -3489,11 +3489,11 @@ impl RPC for NeptuneRPCServer {
 
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state
-            .mempool
-            .get_sorted_iter()
+            .tx_pool
+            .iter()
             .skip(start_index)
             .take(number)
-            .map(|(txkid, _)| txkid)
+            .map(|tx| tx.txid())
             .collect_vec();
 
         let (incoming, outgoing): (HashMap<_, _>, HashMap<_, _>) = {
@@ -3511,17 +3511,15 @@ impl RPC for NeptuneRPCServer {
         let mempool_transactions = mempool_txkids
             .iter()
             .filter_map(|id| {
-                let mut mptxi = global_state
-                    .mempool
-                    .get(*id)
-                    .map(|tx| (MempoolTransactionInfo::from(tx), tx.kernel.mutator_set_hash))
-                    .map(|(mptxi, tx_msah)| {
-                        if tx_msah == tip_msah {
-                            mptxi.synced()
-                        } else {
-                            mptxi
-                        }
-                    });
+                let mut mptxi = global_state.tx_pool.get(*id).map(|tx| {
+                    let tx_msah = tx.kernel.mutator_set_hash;
+                    let mptxi = MempoolTransactionInfo::from(tx);
+                    if tx_msah == tip_msah {
+                        mptxi.synced()
+                    } else {
+                        mptxi
+                    }
+                });
                 if mptxi.is_some() {
                     if let Some(pos_effect) = incoming.get(id) {
                         mptxi = Some(mptxi.unwrap().with_positive_effect_on_balance(*pos_effect));

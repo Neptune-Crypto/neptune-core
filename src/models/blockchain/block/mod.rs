@@ -1104,7 +1104,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::TypeScript;
-    use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
@@ -1919,8 +1918,8 @@ pub(crate) mod tests {
     /// small ones that spend from one's own wallet. The difficulty you run into
     /// when you do this naïvely is that you end up merging in transactions that
     /// spend the same UTXOs over and over. To avoid doing this, you insert the
-    /// transaction into the mempool thus making the wallet aware of this
-    /// transaction and avoiding a double-spend of a UTXO.
+    /// transaction into the transaction pool thus making the wallet aware of
+    /// this transaction and avoiding a double-spend of a UTXO.
     #[apply(shared_tokio_runtime)]
     async fn avoid_reselecting_same_input_utxos() {
         let mut rng = StdRng::seed_from_u64(893423984854);
@@ -2004,8 +2003,8 @@ pub(crate) mod tests {
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(transaction.clone(), TransactionOrigin::Own)
-                    .await;
+                    .tx_pool
+                    .insert(Arc::new(transaction.clone()));
             }
 
             // compose block

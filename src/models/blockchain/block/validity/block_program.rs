@@ -476,7 +476,7 @@ pub(crate) mod tests {
                 state,
                 timestamp,
                 TritonVmProofJobOptions::default(),
-                TxMergeOrigin::ExplicitList(vec![tx]),
+                TxMergeOrigin::Explicit(vec![tx]),
             )
             .await
             .unwrap();
