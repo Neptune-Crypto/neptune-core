@@ -43,6 +43,10 @@ pub struct Args {
     #[clap(long, value_name = "DIR")]
     pub bootstrap_from_directory: Option<PathBuf>,
 
+    /// Set this to disable block validation for a faster bootstrapping.
+    #[clap(long)]
+    pub disable_bootstrap_block_validation: bool,
+
     /// Ban connections to this node from IP address.
     ///
     /// This node can still make outgoing connections to IP address.
