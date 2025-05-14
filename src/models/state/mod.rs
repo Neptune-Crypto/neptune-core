@@ -1809,6 +1809,26 @@ impl GlobalState {
                 }
 
                 if validate_blocks {
+                    let prev_block_digest = block.header().prev_block_digest;
+
+                    // Ensure we have the right predecessor, in case block data
+                    // contains reorganizations.
+                    let predecessor = if prev_block_digest == predecessor.hash() {
+                        predecessor
+                    } else {
+                        match self
+                            .chain
+                            .archival_state()
+                            .get_block(prev_block_digest)
+                            .await?
+                        {
+                            Some(pred) => pred,
+                            None => {
+                                bail!("Failed to find parent of block of height {block_height}");
+                            }
+                        }
+                    };
+
                     ensure!(
                         block
                             .is_valid(&predecessor, Timestamp::now(), self.cli.network)
