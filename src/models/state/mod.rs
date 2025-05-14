@@ -1825,6 +1825,7 @@ impl GlobalState {
                 }
 
                 self.set_new_tip_internal(block.clone()).await.unwrap();
+                info!("Updated state with block of height {block_height}.");
                 num_stored_blocks += 1;
                 predecessor = block;
             }
