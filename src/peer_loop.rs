@@ -32,9 +32,7 @@ use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
@@ -58,7 +56,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::block_proposal::BlockProposalRejectError;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
-use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
 const MAX_PEER_LIST_LENGTH: usize = 10;
@@ -1292,18 +1289,28 @@ impl PeerLoopHandler {
             PeerMessage::TransactionNotification(tx_notification) => {
                 // addresses #457
                 // new scope for state read-lock to avoid holding across peer.send()
-                {
+                'global_state_lock: {
                     log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
 
-                    // 1. Ignore if we already know this transaction, and
+                    // Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
                     let state = self.global_state_lock.lock_guard().await;
-                    let transaction_of_same_or_higher_proof_quality_is_known =
-                        state.mempool.contains_with_higher_proof_quality(
-                            tx_notification.txid,
-                            tx_notification.proof_quality,
-                        );
-                    if transaction_of_same_or_higher_proof_quality_is_known {
+                    let tx_id = tx_notification.txid;
+                    let Some(pool_tx) = state.tx_pool.get(tx_id) else {
+                        break 'global_state_lock;
+                    };
+
+                    let Ok(pool_tx_proof_quality) = pool_tx.proof.proof_quality() else {
+                        // Any proof quality is better than none.
+                        // This would indicate that this client has a transaction with
+                        // e.g. primitive witness in mempool and now the same transaction
+                        // with an associated proof is queried. That probably shouldn't
+                        // happen.
+                        error!("Failed to read proof quality for tx in tx pool. txid: {tx_id}",);
+                        break 'global_state_lock;
+                    };
+
+                    if pool_tx_proof_quality >= tx_notification.proof_quality {
                         debug!("transaction with same or higher proof quality was already known");
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
@@ -1322,7 +1329,7 @@ impl PeerLoopHandler {
                     }
                 }
 
-                // 2. Request the actual `Transaction` from peer
+                // Request the actual `Transaction` from peer
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
                     .await?;
@@ -1331,11 +1338,11 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
                 let state = self.global_state_lock.lock_guard().await;
-                let Some(transaction) = state.mempool.get(transaction_identifier) else {
+                let Some(transaction) = state.tx_pool.get(transaction_identifier) else {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
-                let Ok(transfer_transaction) = transaction.try_into() else {
+                let Ok(transfer_transaction) = (&*transaction).try_into() else {
                     warn!("Peer requested transaction that cannot be converted to transfer object");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
@@ -3254,7 +3261,7 @@ mod tests {
     async fn receive_transaction_request() {
         let network = Network::Main;
         let dummy_tx = Arc::new(invalid_empty_single_proof_transaction());
-        let txid = dummy_tx.kernel.txid();
+        let txid = dummy_tx.txid();
 
         for transaction_is_known in [false, true] {
             let (_peer_broadcast_tx, from_main_rx, to_main_tx, _, mut state_lock, _hsd) =
@@ -3366,7 +3373,7 @@ mod tests {
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
         assert!(
-            state_lock.lock_guard().await.mempool.is_empty(),
+            state_lock.lock_guard().await.tx_pool.is_empty(),
             "Mempool must be empty at init"
         );
         peer_loop_handler

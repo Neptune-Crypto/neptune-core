@@ -84,14 +84,15 @@ impl From<Arc<Transaction>> for Transaction {
 }
 
 impl Transaction {
-    /// return transaction id.
+    /// The transaction's identifier.
     ///
-    /// note that transactions created by users are temporary.  Once confirmed
-    /// into a block they are merged into a single block transaction.  So this
-    /// id will not correspond to anything on the blockchain except for the
-    /// single transaction in each block.
+    /// Note that transactions created by users are temporary. Once confirmed
+    /// into a block, they are merged into a single block transaction.
+    /// Consequently, this ID will not correspond to anything on the blockchain
+    /// except for the single transaction in each block.
     ///
-    /// These id are useful for referencing transactions in the mempool however.
+    /// However, these id are useful for referencing transactions in the
+    /// [transaction pool](crate::models::state::tx_pool::TransactionPool).
     pub fn txid(&self) -> TransactionKernelId {
         self.kernel.txid()
     }

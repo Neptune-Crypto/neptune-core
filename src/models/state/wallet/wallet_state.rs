@@ -529,6 +529,7 @@ impl WalletState {
         for event in events {
             self.handle_tx_pool_event(event).await;
         }
+        todo!("current design requires the wallet to poll from the tx pool");
     }
 
     /// Handle a single mempool event.
@@ -562,7 +563,7 @@ impl WalletState {
                     .chain(own_utxos_from_expected_utxos)
                     .collect_vec();
 
-                let tx_id = tx.kernel.txid();
+                let tx_id = tx.txid();
 
                 self.mempool_spent_utxos.insert(tx_id, spent_utxos);
                 self.mempool_unspent_utxos.insert(tx_id, own_utxos);
@@ -4854,7 +4855,6 @@ pub(crate) mod tests {
             upgrade_job_one
                 .handle_upgrade(
                     dummy_queue.clone(),
-                    TransactionOrigin::Foreign,
                     true,
                     rando.clone(),
                     channel_to_nowhere_one,
@@ -4901,7 +4901,7 @@ pub(crate) mod tests {
             let single_proof_transaction = rando
                 .lock_guard()
                 .await
-                .mempool
+                .tx_pool
                 .get_transactions_for_block(10_000_000, None, true, genesis_mutator_set.hash())[0]
                 .clone();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
@@ -4915,7 +4915,6 @@ pub(crate) mod tests {
             upgrade_job_two
                 .handle_upgrade(
                     dummy_queue.clone(),
-                    TransactionOrigin::Foreign,
                     true,
                     rando.clone(),
                     channel_to_nowhere_two,
@@ -4928,7 +4927,7 @@ pub(crate) mod tests {
             let transactions_for_block = rando
                 .lock_guard()
                 .await
-                .mempool
+                .tx_pool
                 .get_transactions_for_block(10_000_000, None, true, block_one_mutator_set.hash());
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();

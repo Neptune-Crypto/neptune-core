@@ -221,36 +221,37 @@ impl TransactionInitiator {
     pub async fn upgrade_tx_proof(
         &mut self,
         transaction_id: TransactionKernelId,
-        transaction_proof: TransactionProof,
+        new_proof: TransactionProof,
     ) -> Result<(), error::UpgradeProofError> {
         let network = self.global_state_lock.cli().network;
-        let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
-        let Some(tx) = gsm.tx_pool.get_mut(transaction_id) else {
+        let Some(tx) = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .tx_pool
+            .get(transaction_id)
+        else {
             return Err(error::UpgradeProofError::TxNotInMempool);
         };
 
-        let new = TransactionProofType::from(&transaction_proof);
+        let new = TransactionProofType::from(&new_proof);
         let old = TransactionProofType::from(&tx.proof);
-
         if new <= old {
             return Err(error::UpgradeProofError::ProofNotAnUpgrade);
         }
 
-        // tbd: how long does this verify take? If too slow,
-        // we could obtain tx with a read-lock first, verify,
-        // then obtain again with write-lock to mutate it.
-        if !transaction_proof
-            .verify(tx.kernel.mast_hash(), network)
-            .await
-        {
+        if !new_proof.verify(tx.kernel.mast_hash(), network).await {
             return Err(error::UpgradeProofError::InvalidProof);
         }
 
-        // mutate
-        tx.proof = transaction_proof;
-
-        drop(gsm);
+        let mut new_tx = (*tx).clone();
+        new_tx.proof = new_proof;
+        self.global_state_lock
+            .lock_guard_mut()
+            .await
+            .tx_pool
+            .insert(Arc::new(new_tx));
 
         // todo: Inform all peers about our hard work
         // for this, we need to hold the channel sender.
@@ -276,7 +277,7 @@ impl TransactionInitiator {
         self.global_state_lock
             .lock_guard()
             .await
-            .mempool
+            .tx_pool
             .get(txid)
             .map(|tx| (&tx.proof).into())
             .ok_or(error::UpgradeProofError::TxNotInMempool)

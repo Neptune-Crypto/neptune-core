@@ -11,7 +11,6 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-use super::TransactionOrigin;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -51,8 +50,8 @@ const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF: usize = 100;
 /// A transaction proof can be in need of upgrading, either because it cannot
 /// be shared in its current state without leaking secret keys, or to make it
 /// more likely that a miner picks up this transaction.
-#[derive(Clone, Debug)]
-pub enum UpgradeJob {
+#[derive(Debug, Clone)]
+pub(crate) enum UpgradeJob {
     PrimitiveWitnessToProofCollection {
         primitive_witness: PrimitiveWitness,
     },
@@ -77,7 +76,7 @@ pub enum UpgradeJob {
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct UpdateMutatorSetDataJob {
     old_kernel: TransactionKernel,
     old_single_proof: Proof,
@@ -230,9 +229,7 @@ impl UpgradeJob {
     /// of length one.
     pub(super) fn affected_txids(&self) -> Vec<TransactionKernelId> {
         match self {
-            UpgradeJob::ProofCollectionToSingleProof { kernel, .. } => {
-                vec![kernel.txid()]
-            }
+            UpgradeJob::ProofCollectionToSingleProof { kernel, .. } => vec![kernel.txid()],
             UpgradeJob::Merge {
                 left_kernel,
                 right_kernel,
@@ -299,17 +296,13 @@ impl UpgradeJob {
     pub(crate) async fn handle_upgrade(
         self,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
-        tx_origin: TransactionOrigin,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
         main_to_peer_channel: tokio::sync::broadcast::Sender<MainToPeerTask>,
     ) {
         let mut upgrade_job = self;
 
-        let priority = match tx_origin {
-            TransactionOrigin::Foreign => TritonVmJobPriority::Lowest,
-            TransactionOrigin::Own => TritonVmJobPriority::High,
-        };
+        let priority = TritonVmJobPriority::High; // todo: figure out actual priority ========================
 
         // process in a loop.  in case a new block comes in while processing
         // the current tx, then we can move on to the next, and so on.
@@ -355,18 +348,16 @@ impl UpgradeJob {
                 .await
             {
                 Ok((upgraded_tx, expected_utxos)) => {
-                    info!(
-                        "Successfully upgraded transaction {}",
-                        upgraded_tx.kernel.txid()
-                    );
+                    info!("Successfully upgraded transaction {}", upgraded_tx.txid());
                     (upgraded_tx, expected_utxos)
                 }
                 Err(e) => {
-                    error!("UpgradeProof job failed. error: {e}");
-                    error!("upgrading of witness or proof in {tx_origin} transaction failed.");
                     error!(
-                        "Consider lowering your proving capability to {}, in case it is set higher.\nCurrent proving \
-                        capability is set to: {}.",
+                        "UpgradeProof job failed. error: {e}\n\
+                        Upgrading of witness or proof failed.\n\
+                        Consider lowering your proving capability to {}, in case \
+                        it is set higher.\n\
+                        Current proving capability is set to: {}.",
                         TxProvingCapability::ProofCollection,
                         global_state_lock.cli().proving_capability()
                     );
@@ -376,6 +367,8 @@ impl UpgradeJob {
 
             /* Check if upgrade resulted in valid transaction */
             upgrade_job = {
+                // todo: is the check for confirmability below relevant given
+                //   the new transaction pool?
                 let mut global_state = global_state_lock.lock_guard_mut().await;
                 let tip_mutator_set = global_state
                     .chain
@@ -399,9 +392,7 @@ impl UpgradeJob {
                     /* Handle successful upgrade */
                     // Insert tx into mempool before notifying peers, so we're
                     // sure to have it when they ask.
-                    global_state
-                        .mempool_insert(upgraded.clone(), tx_origin)
-                        .await;
+                    global_state.tx_pool.insert(Arc::new(upgraded.clone()));
 
                     global_state
                         .wallet_state
@@ -733,9 +724,8 @@ impl UpgradeJob {
 /// Return an [UpgradeJob] that describes work that can be done to upgrade the
 /// proof-quality of a transaction found in mempool. Also indicates whether the
 /// upgrade job affects one of our own transactions, or a foreign transaction.
-pub(super) fn get_upgrade_task_from_mempool(
-    global_state: &GlobalState,
-) -> Option<(UpgradeJob, TransactionOrigin)> {
+#[expect(unused)] // todo: get this going; see below
+pub(super) fn get_upgrade_task_from_tx_pool(global_state: &GlobalState) -> Option<UpgradeJob> {
     let tip_mutator_set = global_state
         .chain
         .light_state()
@@ -744,91 +734,11 @@ pub(super) fn get_upgrade_task_from_mempool(
     let min_gobbling_fee = global_state.min_gobbling_fee();
     let num_proofs_threshold = global_state.max_num_proofs();
 
-    // Do we have any `ProofCollection`s?
-    let proof_collection_job = if let Some((kernel, proof, tx_origin)) = global_state
-        .mempool
-        .most_dense_proof_collection(num_proofs_threshold)
-    {
-        if kernel.mutator_set_hash != tip_mutator_set.hash() {
-            error!("Deprecated transaction found in mempool. Has ProofCollection in need of updating. Consider clearing mempool.");
-            return None;
-        }
+    let raise = global_state.tx_pool.best_tx_for_raise();
+    let update = global_state.tx_pool.best_tx_for_update();
+    let merge = global_state.tx_pool.best_txs_for_merge();
 
-        let gobbling_fee = if tx_origin == TransactionOrigin::Own {
-            NativeCurrencyAmount::zero()
-        } else {
-            kernel.fee.lossy_f64_fraction_mul(gobbling_fraction)
-        };
-
-        let upgrade_is_worth_it =
-            gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
-        if upgrade_is_worth_it {
-            let upgrade_job = UpgradeJob::ProofCollectionToSingleProof {
-                kernel: kernel.to_owned(),
-                proof: proof.to_owned(),
-                mutator_set: tip_mutator_set.clone(),
-                gobbling_fee,
-            };
-            Some((upgrade_job, tx_origin))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    if let Some((_, TransactionOrigin::Own)) = &proof_collection_job {
-        return proof_collection_job;
-    }
-
-    // Can we merge two single proofs?
-    let merge_job = if let Some((
-        [(left_kernel, left_single_proof), (right_kernel, right_single_proof)],
-        tx_origin,
-    )) = global_state.mempool.most_dense_single_proof_pair()
-    {
-        if left_kernel.mutator_set_hash != right_kernel.mutator_set_hash
-            || right_kernel.mutator_set_hash != tip_mutator_set.hash()
-        {
-            error!("Deprecated transaction found in mempool. Has SingleProof in need of updating. Consider clearing mempool.");
-            return None;
-        }
-
-        let gobbling_fee = if tx_origin == TransactionOrigin::Own {
-            NativeCurrencyAmount::zero()
-        } else {
-            (left_kernel.fee + right_kernel.fee).lossy_f64_fraction_mul(gobbling_fraction)
-        };
-
-        let upgrade_is_worth_is =
-            gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
-        if upgrade_is_worth_is {
-            let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
-            let upgrade_decision = UpgradeJob::Merge {
-                left_kernel: left_kernel.to_owned(),
-                single_proof_left: left_single_proof.to_owned(),
-                right_kernel: right_kernel.to_owned(),
-                single_proof_right: right_single_proof.to_owned(),
-                shuffle_seed: rng.random(),
-                mutator_set: tip_mutator_set,
-                gobbling_fee,
-            };
-            Some((upgrade_decision, tx_origin))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // pick the most profitable option
-    let mut jobs = [proof_collection_job, merge_job]
-        .into_iter()
-        .flatten()
-        .collect_vec();
-    jobs.sort_by_key(|(job, _)| job.profitability());
-
-    jobs.first().cloned()
+    todo!("figure out how to prioritize between the three, set fees, construct jobs")
 }
 
 #[cfg(test)]
@@ -844,6 +754,7 @@ mod tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
     use crate::models::state::tx_creation_config::TxCreationConfig;
+    use crate::models::state::tx_pool::TransactionPriority;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::tests::shared::fake_block_successor_with_merged_tx;
@@ -912,47 +823,49 @@ mod tests {
         )
         .await;
 
-        for tx_origin in [TransactionOrigin::Own, TransactionOrigin::Foreign] {
-            let mut rando = mock_genesis_global_state(
-                network,
-                2,
-                WalletEntropy::new_random(),
-                cli_args.clone(),
-            )
-            .await;
-            let mut rando = rando.lock_guard_mut().await;
-            rando
-                .mempool_insert(pc_tx_low_fee.clone().into(), tx_origin)
+        // A low-fee transaction must only be returned for upgrading if the
+        // transaction pool considers it important enough.
+        let mut rando =
+            mock_genesis_global_state(network, 2, WalletEntropy::new_random(), cli_args.clone())
                 .await;
-            if tx_origin == TransactionOrigin::Own {
-                assert!(get_upgrade_task_from_mempool(&rando).is_some());
-            } else {
-                assert!(get_upgrade_task_from_mempool(&rando).is_none());
-            }
+        let mut rando = rando.lock_guard_mut().await;
+        rando.tx_pool.insert(pc_tx_low_fee.clone().into());
+        assert!(get_upgrade_task_from_tx_pool(&rando).is_none());
 
-            // A high-fee paying transaction must be returned for upgrading
-            // regardless of origin.
-            let pc_tx_high_fee = transaction_from_state(
-                alice.clone(),
-                512777439428,
-                TxProvingCapability::ProofCollection,
-                NativeCurrencyAmount::from_nau(1_000_000_000),
-            )
-            .await;
-            rando
-                .mempool_insert(pc_tx_high_fee.clone().into(), TransactionOrigin::Foreign)
-                .await;
-            let job = get_upgrade_task_from_mempool(&rando).unwrap().0;
-            let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
-                panic!("Expected proof-collection to single-proof job");
-            };
+        let tx_pool_subscriber_token = rando.tx_pool.subscribe();
+        rando.tx_pool.set_tx_priority(
+            tx_pool_subscriber_token,
+            pc_tx_low_fee.txid(),
+            TransactionPriority::Critical,
+        );
+        assert!(get_upgrade_task_from_tx_pool(&rando).is_some());
+        rando.tx_pool.clear();
 
-            assert_eq!(
-                pc_tx_high_fee.kernel.txid(),
-                kernel.txid(),
-                "Returned job must be the one with a high fee"
-            );
-        }
+        // A high-fee paying transaction must be returned for upgrading
+        // regardless of origin priority.
+        let pc_tx_high_fee = transaction_from_state(
+            alice.clone(),
+            512777439428,
+            TxProvingCapability::ProofCollection,
+            NativeCurrencyAmount::from_nau(1_000_000_000),
+        )
+        .await;
+        rando.tx_pool.insert(pc_tx_high_fee.clone().into());
+        rando.tx_pool.set_tx_priority(
+            tx_pool_subscriber_token,
+            pc_tx_high_fee.txid(),
+            TransactionPriority::Irrelevant,
+        );
+        let job = get_upgrade_task_from_tx_pool(&rando).unwrap();
+        let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
+            panic!("Expected proof-collection to single-proof job");
+        };
+
+        assert_eq!(
+            pc_tx_high_fee.txid(),
+            kernel.txid(),
+            "Returned job must be the one with a high fee"
+        );
     }
 
     #[traced_test]
@@ -981,8 +894,8 @@ mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*pwtx).clone(), TransactionOrigin::Own)
-                .await;
+                .tx_pool
+                .insert((*pwtx).clone().into());
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
             };
@@ -991,7 +904,6 @@ mod tests {
             pw_to_tx_upgrade_job
                 .handle_upgrade(
                     TritonVmJobQueue::get_instance(),
-                    TransactionOrigin::Own,
                     true,
                     alice.clone(),
                     main_to_peer_tx,
@@ -1004,7 +916,7 @@ mod tests {
             };
 
             assert_eq!(
-                pwtx.kernel.txid(),
+                pwtx.txid(),
                 tx_notification.txid,
                 "TXID in peer msg must match that from transaction"
             );
@@ -1013,8 +925,8 @@ mod tests {
             let mempool_tx = alice
                 .lock_guard()
                 .await
-                .mempool
-                .get(pwtx.kernel.txid())
+                .tx_pool
+                .get(pwtx.txid())
                 .unwrap()
                 .to_owned();
             match proving_capability {
@@ -1057,11 +969,7 @@ mod tests {
                 NativeCurrencyAmount::from_nau(100),
             )
             .await;
-            alice
-                .lock_guard_mut()
-                .await
-                .mempool_insert((*pwtx).clone(), TransactionOrigin::Own)
-                .await;
+            alice.lock_guard_mut().await.tx_pool.insert(pwtx.clone());
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
             };
@@ -1078,7 +986,6 @@ mod tests {
             upgrade_job
                 .handle_upgrade(
                     TritonVmJobQueue::get_instance(),
-                    TransactionOrigin::Own,
                     true,
                     alice.clone(),
                     main_to_peer_tx,
@@ -1091,7 +998,7 @@ mod tests {
             };
 
             assert_eq!(
-                pwtx.kernel.txid(),
+                pwtx.txid(),
                 tx_notification.txid,
                 "TXID in peer msg must match that from transaction"
             );
@@ -1100,8 +1007,8 @@ mod tests {
             let mempool_tx = alice
                 .lock_guard()
                 .await
-                .mempool
-                .get(pwtx.kernel.txid())
+                .tx_pool
+                .get(pwtx.txid())
                 .unwrap()
                 .to_owned();
             match proving_capability {
@@ -1158,14 +1065,14 @@ mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert(single_proof_tx.clone().into(), TransactionOrigin::Own)
-                .await;
+                .tx_pool
+                .insert(single_proof_tx.clone());
             transactions.push(single_proof_tx);
         }
 
         let (merge_upgrade_job, _) = {
             let alice = alice.lock_guard().await;
-            get_upgrade_task_from_mempool(&alice).unwrap()
+            get_upgrade_task_from_tx_pool(&alice).unwrap()
         };
         assert!(
             matches!(merge_upgrade_job, UpgradeJob::Merge { .. }),
@@ -1199,7 +1106,6 @@ mod tests {
         merge_upgrade_job
             .handle_upgrade(
                 TritonVmJobQueue::get_instance(),
-                TransactionOrigin::Own,
                 true,
                 alice.clone(),
                 main_to_peer_tx.clone(),
@@ -1211,14 +1117,10 @@ mod tests {
 
         drop(main_to_peer_tx);
 
-        // Since one transacion got mined, and the other didn't, we should still
-        // have the unmined transaction in the mempool. Since this transcation
+        // Since one transaction got mined, and the other didn't, we should still
+        // have the unmined transaction in the mempool. Since this transaction
         // is owned by this client, we want to keep it in the mempool.
-        assert_eq!(1, alice.lock_guard().await.mempool.len());
-        assert!(alice
-            .lock_guard()
-            .await
-            .mempool
-            .contains(unmined_tx.kernel.txid()));
+        assert_eq!(1, alice.lock_guard().await.tx_pool.len());
+        assert!(alice.lock_guard().await.tx_pool.contains(unmined_tx.txid()));
     }
 }

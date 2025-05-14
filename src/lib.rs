@@ -91,8 +91,8 @@ use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
-use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::tx_pool::TransactionPool;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
@@ -199,10 +199,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         archival_state,
     };
     let blockchain_state = BlockchainState::Archival(Box::new(blockchain_archival_state));
-    let mempool = Mempool::new(
+    let mempool = TransactionPool::new(
         cli_args.max_mempool_size,
-        cli_args.max_mempool_num_tx,
-        blockchain_state.light_state().hash(),
+        blockchain_state.light_state().to_owned(),
     );
 
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =

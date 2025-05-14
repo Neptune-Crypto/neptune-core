@@ -54,7 +54,6 @@ use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
-use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::peer::handshake_data::HandshakeData;
 use super::peer::handshake_data::VersionString;
@@ -70,7 +69,6 @@ use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::locks::tokio::AtomicRwReadGuard;
 use crate::locks::tokio::AtomicRwWriteGuard;
-use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -330,7 +328,7 @@ impl GlobalStateLock {
         // todo: The wallet should detect and set the priority by itself after
         //   the transaction pool has informed the wallet about the
         //   transaction's inclusion.
-        let tx_id = transaction.kernel.txid();
+        let tx_id = transaction.txid();
         let subscriber_token = gsm.wallet_state.tx_pool_subscriber_token();
         gsm.tx_pool.insert(transaction);
         gsm.tx_pool

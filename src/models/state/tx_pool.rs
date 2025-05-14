@@ -1,6 +1,11 @@
-//! The transaction pool (sometimes “mempool”) stores transactions prior to
-//! their inclusion in the blockchain.
+//! The transaction pool (also “mempool”) stores transactions prior to their
+//! inclusion in the blockchain.
 
+// todo: actually implement the tx pool
+#![expect(unused)]
+#![expect(unreachable_code)]
+
+use std::collections::hash_map::Values;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,6 +24,7 @@ use crate::models::blockchain::block::Block;
 #[derive(Debug, GetSize)]
 pub struct TransactionPool {
     // This type probably needs additional work.
+    // Keep order stable, by using BTreeMap?
     pool: HashMap<(BlockHeight, TransactionKernelId), PoolTransaction>,
 
     #[get_size(size = 8)] // Underlying type uses one u64.
@@ -50,9 +56,6 @@ pub struct TransactionPool {
     /// Inspired by Bitcoin's `mempoolminfee`.
     /// See also: https://bitcoin.stackexchange.com/questions/108126
     dynamic_min_fee_density: FeeDensity,
-
-    /// as needed:
-    more_fields: (),
 }
 
 /// A [`Transaction`] plus the metadata required for the [`TransactionPool`].
@@ -71,9 +74,6 @@ pub(self) struct PoolTransaction {
     fee_density: FeeDensity,
 
     priorities: HashMap<SubscriberToken, TransactionPriority>,
-
-    /// as needed:
-    more_fields: (),
 }
 
 /// In Neptune Atomic Units (NAU) per byte.
@@ -138,7 +138,6 @@ impl TransactionPool {
             last_prune_time: todo!(),
             configured_min_fee_density: todo!(),
             dynamic_min_fee_density: todo!(),
-            more_fields: (),
         }
     }
 
@@ -164,11 +163,19 @@ impl TransactionPool {
         todo!()
     }
 
+    pub fn contains(&self, tx_id: TransactionKernelId) -> bool {
+        todo!()
+    }
+
     pub fn get(&self, tx_id: TransactionKernelId) -> Option<Arc<Transaction>> {
         todo!()
     }
 
-    pub fn get_mut(&mut self, tx_id: TransactionKernelId) -> Option<&mut Transaction> {
+    pub fn len(&self) -> usize {
+        todo!()
+    }
+
+    pub fn is_empty(&self) -> bool {
         todo!()
     }
 
@@ -209,6 +216,11 @@ impl TransactionPool {
         todo!()
     }
 
+    /// todo: document
+    pub fn iter(&self) -> Iter {
+        self.into_iter()
+    }
+
     /// For upgraders, which perform the first of the three mining steps.
     ///
     /// The proof quality of the returned transaction (if any) can still be
@@ -216,7 +228,10 @@ impl TransactionPool {
     /// Raising the proof quality is upgrading work for which a fee can be
     /// claimed.
     //
-    // todo: should the return type be `impl Iterator<Transaction>`?
+    // todo: should the return type instead be any of the following?
+    // - `impl Iterator<Transaction>`
+    // - `Option<UpgradeJob>`
+    // - `Option<(Transaction, TransactionPriority)>
     pub(crate) async fn best_tx_for_raise(&self) -> Option<Transaction> {
         todo!()
     }
@@ -267,18 +282,52 @@ impl TransactionPool {
     }
 }
 
+/// An iterator over the transactions in the [`TransactionPool`].
+///
+/// This struct is created by the [`iter`](TransactionPool::iter) method on
+/// `TransactionPool`. See its documentation for more.
+#[derive(Debug, Default, Clone)]
+pub struct Iter<'a>(Values<'a, (BlockHeight, TransactionKernelId), PoolTransaction>);
+
+impl<'a> IntoIterator for &'a TransactionPool {
+    type Item = Arc<Transaction>;
+    type IntoIter = Iter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter(self.pool.values())
+    }
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Arc<Transaction>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|pool_tx| Arc::clone(&pool_tx.tx))
+    }
+}
+
+impl Extend<Transaction> for TransactionPool {
+    fn extend<T: IntoIterator<Item = Transaction>>(&mut self, iter: T) {
+        self.extend(iter.into_iter().map(Arc::new))
+    }
+}
+
+impl Extend<Arc<Transaction>> for TransactionPool {
+    fn extend<T: IntoIterator<Item = Arc<Transaction>>>(&mut self, iter: T) {
+        for tx in iter {
+            self.insert(tx)
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
-    impl TransactionPool {
-        pub fn len(&self) -> usize {
-            self.pool.len()
-        }
-
-        pub fn is_empty(&self) -> bool {
-            self.pool.is_empty()
-        }
+    #[test]
+    fn tx_pool_can_be_iterated_over() {
+        let tx_pool = TransactionPool::new(todo!(), todo!());
+        for _tx in &tx_pool {}
     }
 }

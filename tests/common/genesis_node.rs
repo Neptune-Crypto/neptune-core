@@ -263,7 +263,7 @@ impl GenesisNode {
         timeout_secs: u16,
     ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
-        while self.gsl.lock_guard().await.mempool.get(txid).is_none() {
+        while self.gsl.lock_guard().await.tx_pool.get(txid).is_none() {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!("tx not in mempool after {} seconds", timeout_secs);
             }
@@ -283,7 +283,7 @@ impl GenesisNode {
     ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
         loop {
-            if let Some(tx) = self.gsl.lock_guard().await.mempool.get(txid) {
+            if let Some(tx) = self.gsl.lock_guard().await.tx_pool.get(txid) {
                 if tx.proof.is_single_proof() {
                     break;
                 }

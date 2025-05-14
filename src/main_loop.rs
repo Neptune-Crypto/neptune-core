@@ -8,8 +8,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use itertools::Itertools;
-use proof_upgrader::get_upgrade_task_from_mempool;
-use proof_upgrader::UpdateMutatorSetDataJob;
+use proof_upgrader::get_upgrade_task_from_tx_pool;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
 use rand::seq::IndexedRandom;
@@ -48,15 +47,12 @@ use crate::models::peer::handshake_data::HandshakeData;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::PeerSynchronizationState;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::SUCCESS_EXIT_CODE;
 
 const PEER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(2 * 60);
@@ -147,9 +143,6 @@ struct MutableMainLoopState {
     /// A join-handle to a task performing transaction-proof upgrades.
     proof_upgrader_task: Option<JoinHandle<()>>,
 
-    /// A join-handle to a task running the update of the mempool transactions.
-    update_mempool_txs_handle: Option<JoinHandle<()>>,
-
     /// A channel that the task updating mempool transactions can use to
     /// communicate its result.
     update_mempool_receiver: mpsc::Receiver<Vec<Transaction>>,
@@ -164,7 +157,6 @@ impl MutableMainLoopState {
             potential_peers: PotentialPeersState::default(),
             task_handles,
             proof_upgrader_task: None,
-            update_mempool_txs_handle: None,
             update_mempool_receiver: dummy_receiver,
         }
     }
@@ -448,53 +440,15 @@ impl MainLoopHandler {
         }
     }
 
-    /// Run a list of Triton VM prover jobs that update the mutator set state
-    /// for transactions.
-    ///
-    /// Sends the result back through the provided channel.
-    async fn update_mempool_jobs(
-        update_jobs: Vec<UpdateMutatorSetDataJob>,
-        job_queue: Arc<TritonVmJobQueue>,
-        transaction_update_sender: mpsc::Sender<Vec<Transaction>>,
-        proof_job_options: TritonVmProofJobOptions,
-    ) {
-        debug!(
-            "Attempting to update transaction proofs of {} transactions",
-            update_jobs.len()
-        );
-        let mut result = vec![];
-        for job in update_jobs {
-            // Jobs for updating txs in the mempool have highest priority since
-            // they block the composer from continuing.
-            // TODO: Handle errors better here.
-            let job_result = job
-                .upgrade(job_queue.clone(), proof_job_options.clone())
-                .await
-                .unwrap();
-            result.push(job_result);
-        }
-
-        transaction_update_sender
-            .send(result)
-            .await
-            .expect("Receiver for updated txs in main loop must still exist");
-    }
-
     /// Handles a list of transactions whose proof has been updated with new
     /// mutator set data.
     async fn handle_updated_mempool_txs(&mut self, updated_txs: Vec<Transaction>) {
         // Update mempool with updated transactions
-        {
-            let mut state = self.global_state_lock.lock_guard_mut().await;
-            for updated in &updated_txs {
-                let txid = updated.kernel.txid();
-                if let Some(tx) = state.tx_pool.get_mut(txid) {
-                    *tx = updated.to_owned();
-                } else {
-                    warn!("Updated transaction which is no longer in mempool");
-                }
-            }
-        }
+        self.global_state_lock
+            .lock_guard_mut()
+            .await
+            .tx_pool
+            .extend(updated_txs.clone());
 
         // Then notify all peers
         for updated in updated_txs {
@@ -509,16 +463,11 @@ impl MainLoopHandler {
     /// Process a block whose PoW solution was solved by this client (or an
     /// external program) and has not been seen by the rest of the network yet.
     ///
-    /// Shares block with all connected peers, updates own state, and updates
-    /// any mempool transactions to be valid under this new block.
+    /// Shares block with all connected peers and updates own state.
     ///
     /// Locking:
     ///  * acquires `global_state_lock` for read and write
-    async fn handle_self_guessed_block(
-        &mut self,
-        main_loop_state: &mut MutableMainLoopState,
-        new_block: Box<Block>,
-    ) -> Result<()> {
+    async fn handle_self_guessed_block(&mut self, new_block: Box<Block>) -> Result<()> {
         let new_block_hash = new_block.hash();
 
         // clone block in advance, so lock is held less time.
@@ -537,7 +486,7 @@ impl MainLoopHandler {
         // was only checked against A.
         //
         // we release the lock as quickly as possible.
-        let update_jobs = {
+        {
             let mut gsm = self.global_state_lock.lock_guard_mut().await;
 
             // bail out if incoming block is not more canonical than present tip.
@@ -557,24 +506,17 @@ impl MainLoopHandler {
         }; // write-lock is dropped here.
 
         // Share block with peers right away.
-        let pmsg = MainToPeerTask::Block(new_block);
-        self.main_to_peer_broadcast(pmsg);
-
         info!("Locally-mined block is new tip: {}", new_block_hash);
         info!("broadcasting new block to peers");
-
-        self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
+        let pmsg = MainToPeerTask::Block(new_block);
+        self.main_to_peer_broadcast(pmsg);
 
         Ok(())
     }
 
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn handle_miner_task_message(
-        &mut self,
-        msg: MinerToMain,
-        main_loop_state: &mut MutableMainLoopState,
-    ) -> Result<Option<i32>> {
+    async fn handle_miner_task_message(&mut self, msg: MinerToMain) -> Result<Option<i32>> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
                 log_slow_scope!(fn_name!() + "::MinerToMain::NewBlockFound");
@@ -582,8 +524,7 @@ impl MainLoopHandler {
                 let new_block = new_block_info.block;
 
                 info!("Miner found new block: {}", new_block.kernel.header.height);
-                self.handle_self_guessed_block(main_loop_state, new_block)
-                    .await?;
+                self.handle_self_guessed_block(new_block).await?;
             }
             MinerToMain::BlockProposal(boxed_proposal) => {
                 let (block, expected_utxos) = *boxed_proposal;
@@ -662,7 +603,7 @@ impl MainLoopHandler {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
 
                 let last_block = blocks.last().unwrap().to_owned();
-                let update_jobs = {
+                {
                     // The peer tasks also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer (or from own miner).
@@ -720,7 +661,6 @@ impl MainLoopHandler {
                         }
                     }
 
-                    let mut update_jobs: Vec<UpdateMutatorSetDataJob> = vec![];
                     for new_block in blocks {
                         debug!(
                             "Storing block {} in database. Height: {}, Mined: {}",
@@ -737,22 +677,13 @@ impl MainLoopHandler {
                         // block info. See the
                         // [GlobalState::tests::setting_same_tip_twice_is_allowed]
                         // test for a test of this phenomenon.
-
-                        let update_jobs_ = global_state_mut.set_new_tip(new_block).await?;
-                        update_jobs.extend(update_jobs_);
+                        global_state_mut.set_new_tip(new_block).await?;
                     }
-
-                    update_jobs
-                };
+                }
 
                 // Inform all peers about new block
                 let pmsg = MainToPeerTask::Block(Box::new(last_block.clone()));
                 self.main_to_peer_broadcast(pmsg);
-
-                // Spawn task to handle mempool tx-updating after new blocks.
-                // TODO: Do clever trick to collapse all jobs relating to the same transaction,
-                //       identified by transaction-ID, into *one* update job.
-                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
 
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
@@ -1291,9 +1222,13 @@ impl MainLoopHandler {
 
     /// Scheduled task for upgrading the proofs of transactions in the mempool.
     ///
-    /// Will either perform a merge of two transactions supported with single
-    /// proofs, or will upgrade a transaction proof of the type
-    /// `ProofCollection` to `SingleProof`.
+    /// Will do one of the following:
+    /// - _raise_ an existing proof's proof quality, that is, transform a
+    ///   [`ProofCollection`] into a [`SingleProof`]
+    /// - _update_ a [`SingleProof`]-backed transaction, that is, update the
+    ///   transaction's removal records to be valid with respect to the latest
+    ///   mutator set and produce a corresponding proof
+    /// - _merge_ two [`SingleProof`]-backed transactions into one
     ///
     /// All proving takes place in a spawned task such that it doesn't block
     /// the main loop. The MutableMainLoopState gets the JoinHandle of the
@@ -1323,7 +1258,7 @@ impl MainLoopHandler {
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
         let tx_upgrade_interval = self.global_state_lock.cli().tx_upgrade_interval();
-        let (upgrade_candidate, tx_origin) = {
+        let upgrade_candidate = {
             let global_state = self.global_state_lock.lock_guard().await;
             let now = self.now();
             if !attempt_upgrade(&global_state, now, tx_upgrade_interval, main_loop_state)? {
@@ -1334,13 +1269,12 @@ impl MainLoopHandler {
             debug!("Attempting to run transaction-proof-upgrade");
 
             // Find a candidate for proof upgrade
-            let Some((upgrade_candidate, tx_origin)) = get_upgrade_task_from_mempool(&global_state)
-            else {
+            let Some(upgrade_candidate) = get_upgrade_task_from_tx_pool(&global_state) else {
                 debug!("Found no transaction-proof to upgrade");
                 return Ok(());
             };
 
-            (upgrade_candidate, tx_origin)
+            upgrade_candidate
         };
 
         info!(
@@ -1365,7 +1299,6 @@ impl MainLoopHandler {
                     upgrade_candidate
                         .handle_upgrade(
                             vm_job_queue,
-                            tx_origin,
                             perform_ms_update_if_needed,
                             global_state_lock_clone,
                             main_to_peer_broadcast_tx_clone,
@@ -1376,47 +1309,6 @@ impl MainLoopHandler {
         main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
 
         Ok(())
-    }
-
-    /// Post-processing when new block has arrived. Spawn a task to update
-    /// transactions in the mempool. Only when the spawned task has completed,
-    /// should the miner continue.
-    fn spawn_mempool_txs_update_job(
-        &self,
-        main_loop_state: &mut MutableMainLoopState,
-        update_jobs: Vec<UpdateMutatorSetDataJob>,
-    ) {
-        // job completion of the spawned task is communicated through the
-        // `update_mempool_txs_handle` channel.
-        let vm_job_queue = vm_job_queue();
-        if let Some(handle) = main_loop_state.update_mempool_txs_handle.as_ref() {
-            handle.abort();
-        }
-        let (update_sender, update_receiver) =
-            mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
-
-        // note: if this task is cancelled, the job will continue
-        // because TritonVmJobOptions::cancel_job_rx is None.
-        // see how compose_task handles cancellation in mine_loop.
-        let job_options = self
-            .global_state_lock
-            .cli()
-            .proof_job_options(TritonVmJobPriority::Highest);
-        main_loop_state.update_mempool_txs_handle = Some(
-            tokio::task::Builder::new()
-                .name("mempool tx ms-updater")
-                .spawn(async move {
-                    Self::update_mempool_jobs(
-                        update_jobs,
-                        vm_job_queue.clone(),
-                        update_sender,
-                        job_options,
-                    )
-                    .await
-                })
-                .unwrap(),
-        );
-        main_loop_state.update_mempool_receiver = update_receiver;
     }
 
     pub async fn run(&mut self) -> Result<i32> {
@@ -1569,8 +1461,7 @@ impl MainLoopHandler {
 
                 // Handle messages from miner task
                 Some(main_message) = self.miner_to_main_rx.recv() => {
-                    let exit_code = self.handle_miner_task_message(main_message, &mut main_loop_state).await?;
-
+                    let exit_code = self.handle_miner_task_message(main_message).await?;
                     if let Some(exit_code) = exit_code {
                         break exit_code;
                     }
@@ -1584,7 +1475,8 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server task
                 Some(rpc_server_message) = self.rpc_server_to_main_rx.recv() => {
-                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone(), &mut main_loop_state).await?;
+                    let shutdown_after_execution =
+                        self.handle_rpc_server_message(rpc_server_message.clone()).await?;
                     if shutdown_after_execution {
                         break SUCCESS_EXIT_CODE
                     }
@@ -1663,15 +1555,12 @@ impl MainLoopHandler {
 
     /// Handle messages from the RPC server. Returns `true` iff the client should shut down
     /// after handling this message.
-    async fn handle_rpc_server_message(
-        &mut self,
-        msg: RPCServerToMain,
-        main_loop_state: &mut MutableMainLoopState,
-    ) -> Result<bool> {
+    async fn handle_rpc_server_message(&mut self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::BroadcastTx(transaction) => {
                 debug!(
-                    "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
+                    "`main` received following transaction from RPC Server. \
+                    {} inputs, {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.inputs.len(),
                     transaction.kernel.outputs.len(),
                     transaction.kernel.mutator_set_hash
@@ -1715,7 +1604,6 @@ impl MainLoopHandler {
                         upgrade_job
                             .handle_upgrade(
                                 vm_job_queue.clone(),
-                                TransactionOrigin::Own,
                                 true,
                                 global_state_lock_clone,
                                 main_to_peer_broadcast_tx_clone,
@@ -1732,31 +1620,25 @@ impl MainLoopHandler {
                 Ok(false)
             }
             RPCServerToMain::BroadcastMempoolTransactions => {
-                info!("Broadcasting transaction notifications for all shareable transactions in mempool");
+                info!(
+                    "Broadcasting transaction notifications for all \
+                    shareable transactions in tx pool"
+                );
                 let state = self.global_state_lock.lock_guard().await;
-                let txs = state.mempool.get_sorted_iter().collect_vec();
-                for (txid, _) in txs {
-                    // Since a read-lock is held over global state, the
-                    // transaction must exist in the mempool.
-                    let tx = state
-                        .mempool
-                        .get(txid)
-                        .expect("Transaction from iter must exist in mempool");
-                    let notification = TransactionNotification::try_from(tx);
+                for tx in &state.tx_pool {
+                    let notification = TransactionNotification::try_from(&*tx);
                     match notification {
                         Ok(notification) => {
                             let pmsg = MainToPeerTask::TransactionNotification(notification);
                             self.main_to_peer_broadcast(pmsg);
                         }
-                        Err(error) => {
-                            warn!("{error}");
-                        }
+                        Err(error) => warn!("{error}"),
                     };
                 }
                 Ok(false)
             }
             RPCServerToMain::ClearMempool => {
-                info!("Clearing mempool");
+                info!("Clearing tx pool");
                 self.global_state_lock
                     .lock_guard_mut()
                     .await
@@ -1768,8 +1650,7 @@ impl MainLoopHandler {
             RPCServerToMain::ProofOfWorkSolution(new_block) => {
                 info!("Handling PoW solution from RPC call");
 
-                self.handle_self_guessed_block(main_loop_state, new_block)
-                    .await?;
+                self.handle_self_guessed_block(new_block).await?;
                 Ok(false)
             }
             RPCServerToMain::PauseMiner => {
@@ -1955,7 +1836,7 @@ mod tests {
 
         let block1 = Box::new(block1);
         main_loop_handler
-            .handle_self_guessed_block(&mut mutable_main_loop_state, block1.clone())
+            .handle_self_guessed_block(block1.clone())
             .await
             .unwrap();
         let new_block_height: u64 = main_loop_handler
@@ -2219,8 +2100,8 @@ mod tests {
                         .global_state_lock
                         .lock_guard()
                         .await
-                        .mempool
-                        .get(proof_collection_tx.kernel.txid())
+                        .tx_pool
+                        .get(proof_collection_tx.txid())
                         .unwrap()
                         .proof,
                     TransactionProof::ProofCollection(_)
@@ -2257,7 +2138,7 @@ mod tests {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .mempool
+                .tx_pool
                 .get_sorted_iter()
                 .next_back()
                 .expect("mempool should contain one item here");
@@ -2268,7 +2149,7 @@ mod tests {
                         .global_state_lock
                         .lock_guard()
                         .await
-                        .mempool
+                        .tx_pool
                         .get(merged_txid)
                         .unwrap()
                         .proof,

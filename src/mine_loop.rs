@@ -66,6 +66,10 @@ pub(crate) struct GuessingConfiguration {
     pub(crate) num_guesser_threads: Option<usize>,
 }
 
+async fn upgrade_transaction() {
+    todo!("get the first step of 3-step mining going")
+}
+
 async fn compose_block(
     latest_block: Block,
     global_state_lock: GlobalStateLock,
@@ -606,6 +610,7 @@ pub(crate) async fn create_block_transaction_from(
     let tx_to_merge = match maybe_tx_to_merge {
         Some(tx) => tx,
         None => {
+            warn!("No mergeable transaction for composition found. Creating nop.");
             let nop = TransactionDetails::nop(
                 predecessor_block.mutator_set_accumulator_after(),
                 timestamp,

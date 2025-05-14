@@ -115,13 +115,8 @@ impl RegTestPrivate {
             .wallet_entropy
             .guesser_spending_key(tip_block.hash());
 
-        // retrieve selected tx from mempool for block inclusion.
-        let txs_from_mempool = gs.mempool.get_transactions_for_block(
-            SIZE_20MB_IN_BYTES,
-            Some(MAX_NUM_TXS_TO_MERGE),
-            true, //only_merge_single_proofs
-            tip_block.mutator_set_accumulator_after().hash(),
-        );
+        // Retrieve selected tx from transaction pool for block inclusion.
+        let tx_from_mempool = gs.tx_pool.best_tx_for_composition().await;
 
         drop(gs);
 
@@ -131,7 +126,7 @@ impl RegTestPrivate {
             guesser_key,
             timestamp,
             rand::random(), // seed.
-            txs_from_mempool,
+            tx_from_mempool,
             gsl.cli().network,
         )?;
 

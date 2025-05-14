@@ -55,7 +55,7 @@ impl TryFrom<&Transaction> for TransactionNotification {
             TransactionProof::ProofCollection(_) => TransactionProofQuality::ProofCollection,
         };
         Ok(Self {
-            txid: transaction.kernel.txid(),
+            txid: transaction.txid(),
             mutator_set_hash: transaction.kernel.mutator_set_hash,
             proof_quality,
             fee: transaction.kernel.fee,

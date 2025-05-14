@@ -129,7 +129,7 @@ impl MockBlockGenerator {
         composer_parameters: ComposerParameters,
         timestamp: Timestamp,
         shuffle_seed: [u8; 32],
-        mut selected_mempool_txs: Vec<Transaction>,
+        selected_mempool_tx: Option<Transaction>,
     ) -> Result<(Transaction, TxOutputList)> {
         let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
             predecessor_block,
@@ -139,9 +139,7 @@ impl MockBlockGenerator {
         )?;
 
         let coinbase_transaction = Self::mock_transaction_from_details(&transaction_details);
-
-        let mut block_transaction = coinbase_transaction;
-        if selected_mempool_txs.is_empty() {
+        let selected_mempool_tx = selected_mempool_tx.unwrap_or_else(|| {
             // create the nop-tx and merge into the coinbase transaction to set the
             // merge bit to allow the tx to be included in a block.
             let nop_details = TransactionDetails::nop(
@@ -149,16 +147,12 @@ impl MockBlockGenerator {
                 timestamp,
                 network,
             );
-            let nop_transaction = Self::mock_transaction_from_details(&nop_details);
-
-            selected_mempool_txs = vec![nop_transaction];
-        }
+            Self::mock_transaction_from_details(&nop_details)
+        });
 
         let mut rng = StdRng::from_seed(shuffle_seed);
-        for tx_to_include in selected_mempool_txs {
-            block_transaction =
-                Self::merge_mock_transactions(block_transaction, tx_to_include, rng.random())?;
-        }
+        let block_transaction =
+            Self::merge_mock_transactions(coinbase_transaction, selected_mempool_tx, rng.random())?;
 
         Ok((block_transaction, composer_txos))
     }
@@ -178,7 +172,7 @@ impl MockBlockGenerator {
         guesser_key: HashLockKey,
         timestamp: Timestamp,
         seed: [u8; 32],
-        mempool_tx: Vec<Transaction>,
+        mempool_tx: Option<Transaction>,
         network: Network,
     ) -> Result<(Block, TxOutputList)> {
         let with_valid_pow = true;

@@ -29,6 +29,8 @@ use tarpc::context;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time;
+use tokio::time::Instant;
+use tokio::time::MissedTickBehavior;
 use twenty_first::prelude::Digest;
 
 use super::dashboard_app::DashboardEvent;
@@ -56,7 +58,6 @@ pub struct OverviewData {
 
     mempool_size: Option<ByteSize>,
     mempool_total_tx_count: Option<u32>,
-    mempool_own_tx_count: Option<u32>,
 
     listen_address: Option<SocketAddr>,
     peer_count: Option<usize>,
@@ -127,89 +128,59 @@ impl OverviewScreen {
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
         escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) {
-        // use macros to reduce boilerplate
-        macro_rules! setup_poller {
-            ($name: ident) => {
-                let $name = time::sleep(Duration::from_millis(1));
-                tokio::pin!($name);
-            };
-        }
-
-        macro_rules! reset_poller {
-            ($name: ident, $period: expr) => {
-                $name.as_mut().reset(tokio::time::Instant::now() + $period);
-            };
-        }
-
-        setup_poller!(dashboard_overview_data);
+        let mut dashboard_refresh = time::interval_at(
+            Instant::now() + Duration::from_millis(1),
+            Duration::from_secs(3),
+        );
+        dashboard_refresh.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
             select! {
-                _ = &mut dashboard_overview_data => {
-                        match rpc_client.dashboard_overview_data(context::current(), token).await {
+                _ = dashboard_refresh.tick() => {
+                    match rpc_client
+                        .dashboard_overview_data(context::current(), token)
+                        .await
+                    {
                         Ok(Ok(resp)) => {
-
                             {
                                 let mut own_overview_data = overview_data.lock().unwrap();
                                 own_overview_data.tip_digest = Some(resp.tip_digest);
                                 own_overview_data.block_header = Some(resp.tip_header);
-                                own_overview_data.mempool_size = Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
-                                own_overview_data.mempool_total_tx_count = Some(resp.mempool_total_tx_count.try_into().unwrap());
-                                own_overview_data.mempool_own_tx_count = Some(resp.mempool_own_tx_count.try_into().unwrap());
-                                own_overview_data.peer_count=resp.peer_count;
+                                own_overview_data.mempool_size =
+                                    Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
+                                own_overview_data.mempool_total_tx_count =
+                                    Some(resp.mempool_total_tx_count.try_into().unwrap());
+                                own_overview_data.peer_count = resp.peer_count;
                                 own_overview_data.max_num_peers = Some(resp.max_num_peers);
-                                own_overview_data.authenticated_peer_count=Some(0);
-                                own_overview_data.syncing=resp.syncing;
-                                own_overview_data.confirmed_available_balance = Some(resp.confirmed_available_balance);
-                                own_overview_data.confirmed_total_balance = Some(resp.confirmed_total_balance);
-                                own_overview_data.unconfirmed_available_balance = Some(resp.unconfirmed_available_balance);
-                                own_overview_data.unconfirmed_total_balance = Some(resp.unconfirmed_total_balance);
+                                own_overview_data.authenticated_peer_count = Some(0);
+                                own_overview_data.syncing = resp.syncing;
+                                own_overview_data.confirmed_available_balance =
+                                    Some(resp.confirmed_available_balance);
+                                own_overview_data.confirmed_total_balance =
+                                    Some(resp.confirmed_total_balance);
+                                own_overview_data.unconfirmed_available_balance =
+                                    Some(resp.unconfirmed_available_balance);
+                                own_overview_data.unconfirmed_total_balance =
+                                    Some(resp.unconfirmed_total_balance);
                                 own_overview_data.mining_status = resp.mining_status;
                                 own_overview_data.confirmations = resp.confirmations;
                                 own_overview_data.cpu_temperature = resp.cpu_temp;
                                 own_overview_data.proving_capability = resp.proving_capability;
                             }
 
-                            *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
-
-                            reset_poller!(dashboard_overview_data, Duration::from_secs(3));
-                        },
-                        Ok(Err(e)) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                            *escalatable_event.lock().unwrap() =
+                                Some(DashboardEvent::RefreshScreen);
+                        }
+                        Ok(Err(e)) => {
+                            *escalatable_event.lock().unwrap() =
+                                Some(DashboardEvent::Shutdown(e.to_string()))
+                        }
+                        Err(e) => {
+                            *escalatable_event.lock().unwrap() =
+                                Some(DashboardEvent::Shutdown(e.to_string()))
+                        }
                     }
                 }
-
-                // _ = &mut mempool_size => {
-                //     match rpc_client.get_mempool_size(context::current()).await {
-                //         Ok(ms) => {
-                //             overview_data.lock().unwrap().mempool_size=Some(ByteSize::b(ms.try_into().unwrap()));
-                //             reset_poller!(mempool_size,Duration::from_secs(10));
-                //         },
-                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                //     }
-                // }
-
-                // _ = &mut mempool_tx_count => {
-                //     match rpc_client.get_mempool_tx_count(context::current()).await {
-                //         Ok(txc) => {
-                //             overview_data.lock().unwrap().mempool_tx_count = Some(txc.try_into().unwrap());
-                //             reset_poller!(mempool_tx_count, Duration::from_secs(10));
-                //         },
-                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                //     }
-                // }
-
-                // _ = &mut peer_count => {
-                //     match rpc_client.get_peer_info(context::current()).await {
-                //         Ok(peers) => {
-                //             let num_peers=peers.len();
-                //             overview_data.lock().unwrap().peer_count=Some(num_peers);
-                //             overview_data.lock().unwrap().authenticated_peer_count=Some(0);
-                //             reset_poller!(peer_count,Duration::from_secs(5));
-                //         },
-                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                //     }
-                // }
             }
         }
     }
@@ -436,9 +407,8 @@ impl Widget for OverviewScreen {
         lines = vec![];
         lines.push(format!("size: {}", dashifnotset!(data.mempool_size)));
         lines.push(format!(
-            "tx count: {} ({} own)",
+            "tx count: {}",
             dashifnotset!(data.mempool_total_tx_count),
-            dashifnotset!(data.mempool_own_tx_count),
         ));
         Self::report(&lines, "Mempool")
             .style(style)
