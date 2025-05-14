@@ -1271,7 +1271,7 @@ mod tests {
     async fn archival_state_restore_test() -> Result<()> {
         let mut rng = rand::rng();
         // Verify that a restored archival mutator set is populated with the right `sync_label`
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let mut archival_state = make_test_archival_state(network).await;
         let cli_args = cli_args::Args::default();
         let genesis_wallet_state =
@@ -1310,7 +1310,7 @@ mod tests {
         // Verify that `update_mutator_set` writes the active window back to disk.
         // Creates blocks and transaction with invalid proofs.
 
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let mut rng = StdRng::seed_from_u64(107221549301u64);
         let cli_args = cli_args::Args::default_with_network(network);
         let alice_wallet =
@@ -1394,7 +1394,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let mut rng = rand::rng();
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let (mut archival_state, _peer_db_lock, _data_dir) =
             mock_genesis_archival_state(network).await;
         let own_wallet = WalletEntropy::new_random();
@@ -2228,7 +2228,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn get_tip_block_test() -> Result<()> {
         for network in [
-            Network::Alpha,
+            Network::Beta,
             Network::Beta,
             Network::Main,
             Network::RegTest,
@@ -2317,7 +2317,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn get_block_test() -> Result<()> {
         let mut rng = rand::rng();
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let mut archival_state = make_test_archival_state(network).await;
 
         let genesis = *archival_state.genesis_block.clone();
@@ -2738,7 +2738,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn find_path_simple_test() -> Result<()> {
         let mut rng = rand::rng();
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let mut archival_state = make_test_archival_state(network).await;
         let genesis = *archival_state.genesis_block.clone();
 
@@ -2888,7 +2888,7 @@ mod tests {
             assert_eq!(forwards_expected, forwards, "\n\nforwards digests must match expected value. Got:\n {forwards:?}\n\n, Expected from helper function:\n{forwards_expected:?}\n");
         }
 
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let mut archival_state = make_test_archival_state(network).await;
 
         let genesis = *archival_state.genesis_block.clone();
@@ -3233,7 +3233,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn digest_of_ancestors_panic_test() {
-        let archival_state = make_test_archival_state(Network::Alpha).await;
+        let archival_state = make_test_archival_state(Network::Beta).await;
 
         let genesis = archival_state.genesis_block.clone();
         archival_state
@@ -3245,7 +3245,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn digest_of_ancestors_test() {
         let mut rng = rand::rng();
-        let mut archival_state = make_test_archival_state(Network::Alpha).await;
+        let mut archival_state = make_test_archival_state(Network::Beta).await;
         let genesis = *archival_state.genesis_block.clone();
         let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
@@ -3344,7 +3344,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn write_block_db_test() -> Result<()> {
         let mut rng = rand::rng();
-        let mut archival_state = make_test_archival_state(Network::Alpha).await;
+        let mut archival_state = make_test_archival_state(Network::Beta).await;
         let genesis = *archival_state.genesis_block.clone();
         let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);

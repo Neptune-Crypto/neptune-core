@@ -1010,6 +1010,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 /// Create a block from a transaction without the hassle of proving but such
 /// that it appears valid.
 pub(crate) async fn fake_valid_block_from_tx_for_tests(
+    network: Network,
     predecessor: &Block,
     tx: Transaction,
     seed: [u8; 32],
@@ -1017,7 +1018,7 @@ pub(crate) async fn fake_valid_block_from_tx_for_tests(
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx).await;
 
     let mut rng = StdRng::from_seed(seed);
-    while !block.has_proof_of_work(predecessor.header()) {
+    while !block.has_proof_of_work(network, predecessor.header()) {
         mine_iteration_for_tests(&mut block, &mut rng);
     }
 
@@ -1159,7 +1160,7 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.random()).await
+        fake_valid_block_from_tx_for_tests(network, predecessor, block_tx, rng.random()).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }

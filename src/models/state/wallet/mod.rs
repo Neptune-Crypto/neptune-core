@@ -1113,7 +1113,7 @@ mod tests {
         let address = spending_key.to_address();
         println!(
             "_authority_wallet address: {}",
-            address.to_bech32m(Network::Alpha).unwrap()
+            address.to_bech32m(Network::Beta).unwrap()
         );
         println!(
             "_authority_wallet spending_lock: {}",

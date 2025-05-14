@@ -1232,7 +1232,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn prune_stale_transactions() {
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
         assert!(

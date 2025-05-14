@@ -3003,6 +3003,7 @@ pub(crate) mod tests {
             let sleepy_guessing = false;
             let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
             guess_nonce(
+                network,
                 block1_proposal,
                 *genesis_block.header(),
                 guesser_tx,

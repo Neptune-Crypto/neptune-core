@@ -186,9 +186,9 @@ impl GenerationSpendingKey {
         // Sanity check that spending key's receiver address can be encoded to
         // bech32m without loss of information.
         let receiving_address = spending_key.to_address();
-        let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
+        let encoded_address = receiving_address.to_bech32m(Network::Beta).unwrap();
         let decoded_address =
-            GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
+            GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Beta).unwrap();
         assert_eq!(
             receiving_address, decoded_address,
             "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"

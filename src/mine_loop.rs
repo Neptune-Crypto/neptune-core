@@ -38,6 +38,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::*;
@@ -114,6 +115,7 @@ async fn compose_block(
 
 /// Attempt to mine a valid block for the network.
 pub(crate) async fn guess_nonce(
+    network: Network,
     block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
@@ -135,6 +137,7 @@ pub(crate) async fn guess_nonce(
     // note: there is no async code inside the mining loop.
     tokio::task::spawn_blocking(move || {
         guess_worker(
+            network,
             block,
             previous_block_header,
             sender,
@@ -192,6 +195,7 @@ pub(crate) fn precalculate_block_auth_paths(
 
 /// Guess the nonce in parallel until success.
 fn guess_worker(
+    network: Network,
     mut block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
@@ -204,8 +208,39 @@ fn guess_worker(
         num_guesser_threads,
     } = guessing_configuration;
 
-    // This must match the rules in `[Block::has_proof_of_work]`.
-    let prev_difficulty = previous_block_header.difficulty;
+    // Following code must match the rules in `[Block::has_proof_of_work]`.
+
+    let now = Timestamp::now();
+
+    // a difficulty reset (to min difficulty) occurs on testnet(s)
+    // when the elapsed time between two blocks is greater than a
+    // max interval, defined by the network.  It never occurs for
+    // mainnet.
+    let difficulty_reset = match network.difficulty_reset_interval() {
+        Some(reset_interval)  => {
+            let elapsed = now - previous_block_header.timestamp;
+            elapsed >= reset_interval
+        }
+        None => false,  // mainnet path
+    };
+
+    let (prev_difficulty, new_difficulty) = if difficulty_reset {
+
+        let prev_difficulty = previous_block_header.difficulty;
+        let new_difficulty = difficulty_control(
+            now,
+            previous_block_header.timestamp,
+            previous_block_header.difficulty,
+            target_block_interval,
+            previous_block_header.height,
+        );
+        (prev_difficulty, new_difficulty)
+
+    } else {
+        // this is the difficulty reset
+        (Difficulty::MINIMUM, Difficulty::MINIMUM)
+    };
+
     let threshold = prev_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
@@ -222,14 +257,6 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    let now = Timestamp::now();
-    let new_difficulty = difficulty_control(
-        now,
-        previous_block_header.timestamp,
-        previous_block_header.difficulty,
-        target_block_interval,
-        previous_block_header.height,
-    );
     block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
     block.set_header_guesser_digest(guesser_key.after_image());
@@ -698,6 +725,7 @@ pub(crate) async fn mine(
     }
 
     let cli_args = global_state_lock.cli().clone();
+    let network = cli_args.network;
 
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
     let infinite = Duration::from_secs(u32::MAX.into());
@@ -779,6 +807,7 @@ pub(crate) async fn mine(
                 .lock(|s| s.chain.light_state().header().to_owned())
                 .await;
             let guesser_task = guess_nonce(
+                network,
                 proposal.to_owned(),
                 latest_block_header,
                 guesser_tx,
@@ -971,7 +1000,7 @@ pub(crate) async fn mine(
                             .lock(|s| s.chain.light_state().to_owned())
                             .await;
 
-                        if !new_block_found.block.has_proof_of_work(latest_block.header()) {
+                        if !new_block_found.block.has_proof_of_work(cli_args.network, latest_block.header()) {
                             error!("Own mined block did not have valid PoW Discarding.");
                         } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now(), global_state_lock.cli().network).await {
                                 // Block could be invalid if for instance the proof and proof-of-work
@@ -1490,6 +1519,7 @@ pub(crate) mod tests {
         let num_guesser_threads = None;
 
         guess_worker(
+            network,
             block,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
@@ -1505,7 +1535,7 @@ pub(crate) mod tests {
 
         assert!(mined_block_info
             .block
-            .has_proof_of_work(tip_block_orig.header()));
+            .has_proof_of_work(network, tip_block_orig.header()));
     }
 
     /// This test mines a single block at height 1 on the main network
@@ -1569,6 +1599,7 @@ pub(crate) mod tests {
         let num_guesser_threads = None;
 
         guess_worker(
+            network,
             template,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
@@ -1721,6 +1752,7 @@ pub(crate) mod tests {
             let height = block.header().height;
 
             guess_worker(
+                network,
                 block,
                 *prev_block.header(),
                 worker_task_tx,
@@ -1741,7 +1773,7 @@ pub(crate) mod tests {
             // block interval.
             assert!(mined_block_info
                 .block
-                .has_proof_of_work(prev_block.header()));
+                .has_proof_of_work(network, prev_block.header()));
 
             prev_block = *mined_block_info.block;
 
@@ -1929,6 +1961,7 @@ pub(crate) mod tests {
 
     #[test]
     fn block_hash_relates_to_predecessor_difficulty() {
+        let network = Network::Main;
         let difficulty = 100u32;
         // Difficulty X means we expect X trials before success.
         // Modeling the process as a geometric distribution gives the
@@ -1978,7 +2011,7 @@ pub(crate) mod tests {
         loop {
             successor_block.set_header_nonce(rng.random());
 
-            if successor_block.has_proof_of_work(predecessor_block.header()) {
+            if successor_block.has_proof_of_work(network, predecessor_block.header()) {
                 break;
             }
 

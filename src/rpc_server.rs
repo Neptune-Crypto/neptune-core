@@ -3889,7 +3889,7 @@ mod tests {
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         let rpc_server = test_rpc_server(
-            Network::Alpha,
+            Network::Beta,
             WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
@@ -3909,7 +3909,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn clear_ip_standing_test() -> Result<()> {
         let mut rpc_server = test_rpc_server(
-            Network::Alpha,
+            Network::Beta,
             WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
@@ -4068,7 +4068,7 @@ mod tests {
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
         let mut rpc_server = test_rpc_server(
-            Network::Alpha,
+            Network::Beta,
             WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
@@ -4197,7 +4197,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn utxo_digest_test() {
         let rpc_server = test_rpc_server(
-            Network::Alpha,
+            Network::Beta,
             WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),
@@ -4501,7 +4501,7 @@ mod tests {
         // the RPC call returns `None`, so we only verify that the call doesn't
         // crash the host machine, we don't verify that any value is returned.
         let rpc_server = test_rpc_server(
-            Network::Alpha,
+            Network::Beta,
             WalletEntropy::new_random(),
             2,
             cli_args::Args::default(),

@@ -295,7 +295,7 @@ impl PeerLoopHandler {
         debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
         for new_block in &received_blocks {
-            let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block.header());
+            let new_block_has_proof_of_work = new_block.has_proof_of_work(self.global_state_lock.cli().network, previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
             let new_block_is_valid = new_block
                 .is_valid(previous_block, now, self.global_state_lock.cli().network)
@@ -788,7 +788,7 @@ impl PeerLoopHandler {
                 peer_state_info.sync_challenge = None;
 
                 // Does response match issued challenge?
-                if !challenge_response.matches(issued_challenge) {
+                if !challenge_response.matches(self.global_state_lock.cli().network, issued_challenge) {
                     self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1970,7 +1970,7 @@ mod tests {
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(Network::Alpha, 2, cli_args::Args::default()).await?;
+            get_test_genesis_setup(Network::Beta, 2, cli_args::Args::default()).await?;
 
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
@@ -1993,7 +1993,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_peer_list() {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2, cli_args::Args::default())
+            get_test_genesis_setup(Network::Beta, 2, cli_args::Args::default())
                 .await
                 .unwrap();
 
@@ -2015,7 +2015,7 @@ mod tests {
             peer_infos[1].instance_id(),
         );
 
-        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Alpha, 2);
+        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Beta, 2);
         let expected_response = vec![
             (peer_address0, instance_id0),
             (peer_address1, instance_id1),
@@ -2937,7 +2937,7 @@ mod tests {
         cli.sync_mode_threshold = 2;
         state_lock.set_cli(cli).await;
 
-        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
+        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Beta, 1);
         let [block_1, _block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),

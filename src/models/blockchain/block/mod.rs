@@ -931,7 +931,16 @@ impl Block {
     /// `TARGET_BLOCK_INTERVAL` by a factor `ADVANCE_DIFFICULTY_CORRECTION_WAIT`
     /// then the effective difficulty is reduced by a factor
     /// `ADVANCE_DIFFICULTY_CORRECTION_FACTOR`.
-    pub fn has_proof_of_work(&self, previous_block_header: &BlockHeader) -> bool {
+    pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
+
+        // enforce network difficulty-reset-interval if present.
+        if let Some(reset_interval) = network.difficulty_reset_interval() {
+            let elapsed_interval = self.header().timestamp - previous_block_header.timestamp;
+            if elapsed_interval >= reset_interval {
+                return previous_block_header.difficulty == Difficulty::MINIMUM;
+            }
+        }
+
         let hash = self.hash();
         let threshold = previous_block_header.difficulty.target();
         if hash <= threshold {
