@@ -132,11 +132,14 @@ impl<'a> Arbitrary<'a> for Chunk {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use num_traits::Zero;
-    use rand::RngCore;
+    use rand::{rng, RngCore};
+    use statrs::distribution::{ContinuousCDF, Normal};
     use twenty_first::math::b_field_element::BFieldElement;
+
+    use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS, WINDOW_SIZE};
 
     use super::*;
 
@@ -310,5 +313,70 @@ mod tests {
         let decoded = *Chunk::decode(&encoded).unwrap();
 
         assert_eq!(chunk, decoded);
+    }
+
+    #[ignore = "informative statistics"]
+    #[test]
+    fn chunk_length_statistics() {
+        const NUM_CHUNKS_IN_WINDOW: u32 = WINDOW_SIZE / CHUNK_SIZE;
+        const N: u32 = NUM_CHUNKS_IN_WINDOW * NUM_TRIALS * BATCH_SIZE;
+
+        // sample histogram  chunk-size --> frequency
+        let num_samples = 100000;
+        let mut rng = rng();
+        let mut hist = HashMap::<usize, usize>::new();
+        for _ in 0..num_samples {
+            let mut chunk_size = 0;
+            for _ in 0..N {
+                let index = rng.next_u32() % (1 << 20);
+                chunk_size += usize::from(index < CHUNK_SIZE);
+            }
+            hist.entry(chunk_size).and_modify(|v| *v += 1).or_insert(1);
+        }
+
+        // calculate mean and stddev
+        let mean: f64 = hist
+            .iter()
+            .map(|(k, v)| (*k as f64) * (*v as f64))
+            .sum::<f64>()
+            / f64::from(num_samples);
+        let variance: f64 = hist
+            .iter()
+            .map(|(k, v)| ((*k as f64) - mean) * ((*k as f64) - mean) * (*v as f64))
+            .sum::<f64>()
+            / f64::from(num_samples);
+        let stddev = variance.sqrt();
+
+        println!("mean: {mean}");
+        println!("variance: {variance}");
+        println!("stddev: {stddev}");
+
+        // compute frequencies of large chunks
+        for threshold in [500, 600, 700, 800, 900] {
+            let excess = hist
+                .iter()
+                .filter(|(k, _v)| **k >= threshold)
+                .map(|(_k, v)| *v)
+                .sum::<usize>();
+            println!(
+                "tail mass >= {threshold}: {excess} / {num_samples} = {}",
+                (excess as f64) / f64::from(num_samples)
+            );
+        }
+
+        // modeling the distribution as Gaussian, what's the probability of
+        // having 4096 or more elements in one `Chunk`? The answer to this
+        // question could motivate using 12 bits to store its length.
+        let gauss = Normal::new(mean, stddev).unwrap();
+        // let overfull_probability = gauss.cdf(4096);
+        // Actually, we want the right tail, corresponding to 1 minus the above
+        // quantity.
+        // Computing 1 - that is not very precise -- so we compute the
+        // equivalent left tail instead.
+        let overfull_probability = gauss.cdf(-(4096.0 - mean) + mean);
+        println!("Pr[#elements in Chunk >= 4096] ≈ {overfull_probability:e}");
+
+        // note that underflow might send a negligible but nonzero probability
+        // to 0e0.
     }
 }

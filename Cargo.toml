@@ -148,6 +148,7 @@ proptest = { version = "1.5" }
 proptest-arbitrary-interop = { version = "0.1" }
 rand_distr = "0.4.3"
 rayon = "1.10"
+statrs = "0.18.0"
 test-strategy = "0.3"
 tokio-test = "0.4"
 
