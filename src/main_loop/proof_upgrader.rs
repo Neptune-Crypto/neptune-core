@@ -835,6 +835,8 @@ pub(super) fn get_upgrade_task_from_mempool(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::collections::HashSet;
+
     use macro_rules_attr::apply;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
@@ -869,7 +871,7 @@ mod tests {
             NativeCurrencyAmount::coins(1),
             rng.random(),
             receiving_address.into(),
-            false,
+            true,
         )]
         .into();
         let mut gsm = state.lock_guard_mut().await;
@@ -1162,6 +1164,15 @@ mod tests {
                 .mempool_insert(single_proof_tx.clone().into(), TransactionOrigin::Own)
                 .await;
             transactions.push(single_proof_tx);
+        }
+
+        // Test assumption: Transactions do not use overlapping inputs.
+        let mut hashset = HashSet::new();
+        for tx in &transactions {
+            for input in &tx.kernel.inputs {
+                let new_input = hashset.insert(input.absolute_indices.to_vec());
+                assert!(new_input);
+            }
         }
 
         let (merge_upgrade_job, _) = {
