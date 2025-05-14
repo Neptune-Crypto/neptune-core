@@ -17,8 +17,9 @@ use crate::prelude::twenty_first;
 /// returns human-readable-prefix for the given network
 pub(crate) fn network_hrp_char(network: Network) -> char {
     match network {
-        Network::Alpha | Network::Beta | Network::Main => 'm',
+        Network::Beta | Network::Main => 'm',
         Network::Testnet => 't',
+        Network::TestnetMock => 'z',
         Network::RegTest => 'r',
     }
 }

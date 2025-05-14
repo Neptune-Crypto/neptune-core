@@ -22,7 +22,6 @@ use tasm_lib::triton_vm::prelude::Digest;
 use super::block_height::BlockHeight;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
-use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
 const DIFFICULTY_NUM_LIMBS: usize = 5;
@@ -384,7 +383,7 @@ pub(crate) fn difficulty_control(
     new_timestamp: Timestamp,
     old_timestamp: Timestamp,
     mut old_difficulty: Difficulty,
-    target_block_interval: Option<Timestamp>,
+    target_block_interval: Timestamp,
     previous_block_height: BlockHeight,
 ) -> Difficulty {
     // no adjustment if the previous block is the genesis block
@@ -393,9 +392,6 @@ pub(crate) fn difficulty_control(
     }
 
     // otherwise, compute PID control signal
-
-    // target; signal to follow
-    let target_block_interval = target_block_interval.unwrap_or(TARGET_BLOCK_INTERVAL);
 
     // most recent observed block time
     let delta_t = new_timestamp - old_timestamp;
@@ -506,8 +502,8 @@ mod tests {
     use rand_distr::Geometric;
     use test_strategy::proptest;
 
-    use super::super::MINIMUM_BLOCK_TIME;
     use super::*;
+    use crate::models::blockchain::block::Network;
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {
@@ -671,7 +667,7 @@ mod tests {
                     new_timestamp,
                     old_timestamp,
                     difficulty,
-                    Some(target_block_interval),
+                    target_block_interval,
                     block_height,
                 );
                 block_height = block_height.next();
@@ -717,7 +713,7 @@ mod tests {
             new_timestamp,
             old_timestamp,
             old_difficulty,
-            Some(target_block_interval),
+            target_block_interval,
             previous_block_height,
         );
     }
@@ -804,6 +800,7 @@ mod tests {
     /// Determine the maximum possible cumulative proof-of-work after n blocks given
     /// the start conditions.
     fn max_cumulative_pow_after_iterative_test_impl(
+        network: Network,
         cumulative_pow_start: ProofOfWork,
         difficulty_start: Difficulty,
         num_blocks: usize,
@@ -816,9 +813,11 @@ mod tests {
         // let second_term = (MINIMUM_BLOCK_TIME.to_millis() - TARGET_BLOCK_INTERVAL.to_millis())
         //     as f64
         //     / TARGET_BLOCK_INTERVAL.to_millis() as f64;
+        let target_block_interval = network.target_block_interval();
         let f = (1.0_f64
-            + (TARGET_BLOCK_INTERVAL.to_millis() - MINIMUM_BLOCK_TIME.to_millis()) as f64
-                / TARGET_BLOCK_INTERVAL.to_millis() as f64
+            + (target_block_interval.to_millis() - network.minimum_block_time().to_millis())
+                as f64
+                / target_block_interval.to_millis() as f64
                 / 16.0)
             * (1u64 << 32) as f64;
         let f = f as u64;
@@ -840,34 +839,36 @@ mod tests {
 
     #[test]
     fn max_pow_after_doesnt_crash() {
+        let network = Network::Main;
         let init_cumpow = ProofOfWork::from_u64(200);
         let init_difficulty = Difficulty::from_u64(1000);
         let _calculated = max_cumulative_pow_after(
             init_cumpow,
             init_difficulty,
             1_000_000_000,
-            TARGET_BLOCK_INTERVAL,
-            MINIMUM_BLOCK_TIME,
+            network.target_block_interval(),
+            network.minimum_block_time(),
         );
         let _calculated_again = max_cumulative_pow_after(
             init_cumpow,
             init_difficulty,
             usize::MAX,
-            TARGET_BLOCK_INTERVAL,
-            MINIMUM_BLOCK_TIME,
+            network.target_block_interval(),
+            network.minimum_block_time(),
         );
     }
 
     #[test]
     fn max_pow_after_accepts_zero_num_blocks() {
+        let network = Network::Main;
         let init_cumpow = ProofOfWork::from_u64(200);
         let init_difficulty = Difficulty::from_u64(1000);
         let _calculated = max_cumulative_pow_after(
             init_cumpow,
             init_difficulty,
             0,
-            TARGET_BLOCK_INTERVAL,
-            MINIMUM_BLOCK_TIME,
+            network.target_block_interval(),
+            network.minimum_block_time(),
         );
     }
 
@@ -876,12 +877,13 @@ mod tests {
         #[strategy(arb())] init_pow: ProofOfWork,
         #[strategy(arb())] init_difficulty: Difficulty,
     ) {
+        let network = Network::Main;
         let max = max_cumulative_pow_after(
             init_pow,
             init_difficulty,
             0,
-            TARGET_BLOCK_INTERVAL,
-            MINIMUM_BLOCK_TIME,
+            network.target_block_interval(),
+            network.minimum_block_time(),
         );
         prop_assert!(
             max >= init_pow,
@@ -895,6 +897,7 @@ mod tests {
         #[strategy(0usize..1000)] num_blocks: usize,
         #[strategy(0u64..(u64::MAX << 1))] init_cumpow: u64,
     ) {
+        let network = Network::Main;
         // Captures a potential acceptable impresision when converting to f64 in
         // the `max_cumulative_pow_after` function.
         let init_cumpow_upper_bound = ProofOfWork::from_u64(init_cumpow + 1_000_000);
@@ -905,11 +908,12 @@ mod tests {
             init_cumpow,
             init_difficulty,
             num_blocks,
-            TARGET_BLOCK_INTERVAL,
-            MINIMUM_BLOCK_TIME,
+            network.target_block_interval(),
+            network.minimum_block_time(),
         );
 
         let approximation = max_cumulative_pow_after_iterative_test_impl(
+            network,
             init_cumpow_upper_bound,
             init_difficulty,
             num_blocks,
@@ -928,19 +932,24 @@ mod tests {
 
     #[test]
     fn test_sanity_max_pow_after_unit() {
+        let network = Network::Main;
         let init_cumpow = 100u64;
         let init_cumpow = ProofOfWork::from_u64(init_cumpow);
-        let init_difficulty = Difficulty::MINIMUM;
+        let init_difficulty = network.genesis_difficulty();
         let num_blocks = 1000;
         let calculated = max_cumulative_pow_after(
             init_cumpow,
             init_difficulty,
             num_blocks,
-            TARGET_BLOCK_INTERVAL,
-            MINIMUM_BLOCK_TIME,
+            network.target_block_interval(),
+            network.minimum_block_time(),
         );
-        let approximation =
-            max_cumulative_pow_after_iterative_test_impl(init_cumpow, init_difficulty, num_blocks);
+        let approximation = max_cumulative_pow_after_iterative_test_impl(
+            network,
+            init_cumpow,
+            init_difficulty,
+            num_blocks,
+        );
         let approximation_as_f64 = BigUint::from(approximation).to_f64().unwrap();
         let upper_bound = approximation_as_f64 * 1.01;
         let lower_bound = approximation_as_f64 * 0.99;

@@ -2158,6 +2158,7 @@ pub(crate) mod tests {
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block1, composer_expected_utxos) = make_mock_block(
+            network,
             genesis,
             Some(block_1_timestamp),
             alice_key,
@@ -2210,8 +2211,14 @@ pub(crate) mod tests {
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli.clone()).await;
 
         // `bob` both composes and guesses the PoW solution of this block.
-        let (block1, composer_fee_eutxos) =
-            make_mock_block(&Block::genesis(network), None, bob_key, rng.random()).await;
+        let (block1, composer_fee_eutxos) = make_mock_block(
+            network,
+            &Block::genesis(network),
+            None,
+            bob_key,
+            rng.random(),
+        )
+        .await;
 
         bob_global_lock
             .set_new_self_composed_tip(block1.clone(), composer_fee_eutxos)
@@ -2556,6 +2563,7 @@ pub(crate) mod tests {
         // `bob` both composes and guesses the PoW solution of this block.
         let (block_1a, expected_utxos_block_1a) =
             make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+                network,
                 &genesis_block,
                 vec![],
                 vec![],
@@ -2591,6 +2599,7 @@ pub(crate) mod tests {
         let guesser_preimage_1b: Digest = rng.random();
         let (block_1b, expected_utxos_block_1b) =
             make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+                network,
                 &genesis_block,
                 vec![],
                 vec![],
@@ -2655,7 +2664,7 @@ pub(crate) mod tests {
 
         let genesis_block = Block::genesis(network);
         let (block1, composer_utxos) =
-            make_mock_block(&genesis_block, None, bob_key, rng.random()).await;
+            make_mock_block(network, &genesis_block, None, bob_key, rng.random()).await;
 
         bob.wallet_state.add_expected_utxos(composer_utxos).await;
         assert!(
@@ -2757,7 +2766,7 @@ pub(crate) mod tests {
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo) =
-                make_mock_block(&latest_block, None, alice_key, rng.random()).await;
+                make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.mutator_set_accumulator_after(),
@@ -2789,8 +2798,14 @@ pub(crate) mod tests {
         );
 
         // Add block 3a with a coinbase UTXO for us
-        let (block_3a, composer_expected_utxos_3a) =
-            make_mock_block(&latest_block.clone(), None, bob_spending_key, rng.random()).await;
+        let (block_3a, composer_expected_utxos_3a) = make_mock_block(
+            network,
+            &latest_block.clone(),
+            None,
+            bob_spending_key,
+            rng.random(),
+        )
+        .await;
         bob.wallet_state
             .add_expected_utxos(composer_expected_utxos_3a)
             .await;
@@ -2819,7 +2834,7 @@ pub(crate) mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_exp) =
-            make_mock_block(&latest_block, None, alice_key, rng.random()).await;
+            make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
         bob.set_new_tip(block_3b.clone()).await.unwrap();
 
         assert!(
@@ -2843,7 +2858,7 @@ pub(crate) mod tests {
         latest_block = block_3b;
         for _ in 4..=11 {
             let (new_block, _new_block_exp) =
-                make_mock_block(&latest_block, None, alice_key, rng.random()).await;
+                make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
             bob.set_new_tip(new_block.clone()).await.unwrap();
 
             latest_block = new_block;
@@ -2867,7 +2882,8 @@ pub(crate) mod tests {
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
-        let (block_12, _) = make_mock_block(&latest_block, None, alice_key, rng.random()).await;
+        let (block_12, _) =
+            make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
         bob.set_new_tip(block_12.clone()).await.unwrap();
 
         assert!(
@@ -3001,6 +3017,7 @@ pub(crate) mod tests {
             let sleepy_guessing = false;
             let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
             guess_nonce(
+                network,
                 block1_proposal,
                 *genesis_block.header(),
                 guesser_tx,
@@ -3009,7 +3026,6 @@ pub(crate) mod tests {
                     sleepy_guessing,
                     num_guesser_threads: Some(2),
                 },
-                None,
             )
             .await;
 
@@ -3215,7 +3231,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-            let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx).await;
+            let block2 = fake_valid_block_proposal_from_tx(network, &block1, block2_tx).await;
             assert!(block2.is_valid(&block1, block2_timestamp, network).await);
 
             bob.set_new_self_composed_tip(block2.clone(), vec![])
@@ -3247,7 +3263,7 @@ pub(crate) mod tests {
             let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (mut incoming_block, _) =
-                make_mock_block(&genesis_block, None, composer_key, rng.random()).await;
+                make_mock_block(network, &genesis_block, None, composer_key, rng.random()).await;
 
             // other guesser -> no detection
             incoming_block.set_header_guesser_digest(rng.random());
@@ -3474,6 +3490,7 @@ pub(crate) mod tests {
             // Alice mines a block
             let (block, composer_expected_utxos) =
                 make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+                    network,
                     &genesis,
                     vec![],
                     vec![],
@@ -4014,8 +4031,8 @@ pub(crate) mod tests {
             .await;
 
             let block_1a = invalid_block_with_transaction(&genesis, spending_tx_1a.into());
-            let block_1b = invalid_empty_block(&genesis);
-            let block_2b = invalid_empty_block(&block_1b);
+            let block_1b = invalid_empty_block(network, &genesis);
+            let block_2b = invalid_empty_block(network, &block_1b);
             alice_global_lock
                 .global_state_lock
                 .lock_guard_mut()
@@ -4068,7 +4085,7 @@ pub(crate) mod tests {
             .await;
 
             // Go back to a-chain and verify that MUTXOs are considered spent again.
-            let block_2a = invalid_empty_block(&block_1a);
+            let block_2a = invalid_empty_block(network, &block_1a);
             alice_global_lock
                 .lock_guard_mut()
                 .await
@@ -4109,6 +4126,7 @@ pub(crate) mod tests {
             let guesser_fraction = 0.6f64;
             let (block_1a, composer_expected_utxos_1a) =
                 make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+                    network,
                     &genesis,
                     vec![],
                     vec![],
@@ -4138,7 +4156,7 @@ pub(crate) mod tests {
             assert!(wallet_status_1a.unsynced.is_empty());
 
             // Set tip to competing block with no reward for Alice.
-            let block_1b = invalid_empty_block(&genesis);
+            let block_1b = invalid_empty_block(network, &genesis);
             alice_global_lock
                 .lock_guard_mut()
                 .await
@@ -4875,7 +4893,6 @@ pub(crate) mod tests {
                 &genesis_block,
                 block_transaction,
                 now,
-                None,
                 dummy_queue.clone(),
                 TritonVmProofJobOptions::default(),
             )
@@ -4965,7 +4982,6 @@ pub(crate) mod tests {
                 &block_one,
                 block_two_transaction,
                 now + Timestamp::minutes(10),
-                None,
                 dummy_queue,
                 TritonVmProofJobOptions::default(),
             )

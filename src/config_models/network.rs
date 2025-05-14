@@ -8,17 +8,27 @@ use serde::Serialize;
 use strum::EnumIter;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
-use crate::models::blockchain::block::block_header;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
+// p2p warning: #[non_exhaustive] added after v0.2.2.  (probably in v0.3.0).
+// v0.2.2 and below are not able to deserialize this type if new variants are
+// added.
+//
+// therefore: new variants cannot be added until entire network has upgraded to
+// v0.3.0 or higher.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
+#[non_exhaustive]
 pub enum Network {
     /// Main net. Feature-complete. Fixed launch date.
     #[default]
     Main,
 
-    /// First iteration of testnet. Not feature-complete.
-    Alpha,
+    /// Public test network that utilizes mock proofs and difficulty resets so
+    /// that mining is possible without high-end hardware.  Intended for staging
+    /// of release candidates prior to release and for the community to try out
+    /// release candidates and report issues.
+    TestnetMock,
 
     /// 2nd iteration of integration testing. Not feature-complete either but
     /// more than Alpha.
@@ -53,38 +63,10 @@ impl Network {
                 Timestamp(BFieldElement::new(now_rounded))
             }
             // 11 Feb 2025, noon UTC
-            Network::Alpha | Network::Testnet | Network::Beta | Network::Main => {
+            Network::TestnetMock | Network::Testnet | Network::Beta | Network::Main => {
                 Timestamp(BFieldElement::new(1739275200000u64))
             }
         }
-    }
-
-    pub(crate) fn minimum_block_time(&self) -> Timestamp {
-        if self.is_regtest() {
-            block_header::MINIMUM_BLOCK_TIME_REGTEST
-        } else {
-            block_header::MINIMUM_BLOCK_TIME
-        }
-    }
-
-    pub(crate) fn target_block_interval(&self) -> Timestamp {
-        if self.is_regtest() {
-            block_header::TARGET_BLOCK_INTERVAL_REGTEST
-        } else {
-            block_header::TARGET_BLOCK_INTERVAL
-        }
-    }
-
-    pub fn is_mainnet(&self) -> bool {
-        matches!(self, Self::Main)
-    }
-
-    pub fn is_testnet(&self) -> bool {
-        matches!(self, Self::Testnet)
-    }
-
-    pub fn is_regtest(&self) -> bool {
-        matches!(self, Self::RegTest)
     }
 
     /// indicates if the network uses mock proofs
@@ -96,6 +78,90 @@ impl Network {
     /// change in the future so it is best use this method rather than checking
     /// for is_regtest().
     pub fn use_mock_proof(&self) -> bool {
+        matches!(self, Self::RegTest | Self::TestnetMock)
+    }
+
+    /// indicates max duration between blocks before difficulty reset, if any.
+    ///
+    /// The difficulty is reset to genesis difficulty on testnet network(s) any
+    /// time the duration between a block and the previous block is >= twice the
+    /// target interval ie 19.6 minutes.
+    ///
+    /// testnet, testnet-mock: Some(19.6 minutes)
+    /// mainnet, others: None
+    pub fn difficulty_reset_interval(&self) -> Option<Timestamp> {
+        match *self {
+            Self::Testnet | Self::TestnetMock => Some(self.target_block_interval() * 2),
+            _ => None,
+        }
+    }
+
+    /// indicates if peer discovery should be performed by nodes on this network
+    ///
+    /// regtest: false
+    /// mainnet and others: true
+    pub fn perform_peer_discovery(&self) -> bool {
+        // disable peer-discovery for regtest only (so far)
+        !self.is_regtest()
+    }
+
+    /// difficulty setting for the Genesis block
+    ///
+    /// regtest: [Difficulty::MINIMUM]
+    /// mainnet and others: 1,000,000,000
+    pub fn genesis_difficulty(&self) -> Difficulty {
+        match *self {
+            Self::RegTest => Difficulty::MINIMUM,
+            Self::Testnet | Self::TestnetMock => Difficulty::new([1_000_000, 0, 0, 0, 0]),
+            Self::Main | Self::Beta => Difficulty::new([1_000_000_000, 0, 0, 0, 0]),
+        }
+    }
+
+    /// minimum time between blocks.
+    ///
+    /// Blocks spaced apart by less than this amount of time are not valid.
+    ///
+    /// for regtest: 1 milli
+    /// for testnet-mock: 100 milli
+    /// for mainnet and others: 60 seconds
+    pub fn minimum_block_time(&self) -> Timestamp {
+        match *self {
+            Self::RegTest => Timestamp::millis(1),
+            Self::TestnetMock => Timestamp::millis(100),
+            Self::Main | Self::Beta | Self::Testnet => Timestamp::seconds(60),
+        }
+    }
+
+    /// desired/average time between blocks.
+    ///
+    /// for regtest: 100 milliseconds.
+    /// for mainnet and others: 588000 milliseconds equals 9.8 minutes.
+    pub fn target_block_interval(&self) -> Timestamp {
+        match *self {
+            Self::RegTest => Timestamp::millis(100),
+            Self::Main | Self::Beta | Self::Testnet | Self::TestnetMock => {
+                Timestamp::millis(588000)
+            }
+        }
+    }
+
+    /// indicates if mainnet
+    pub fn is_mainnet(&self) -> bool {
+        matches!(self, Self::Main)
+    }
+
+    /// indicates if testnet
+    pub fn is_testnet(&self) -> bool {
+        matches!(self, Self::Testnet)
+    }
+
+    /// indicates if testnet-mock
+    pub fn is_testnet_mock(&self) -> bool {
+        matches!(self, Self::TestnetMock)
+    }
+
+    /// indicates if regtest
+    pub fn is_regtest(&self) -> bool {
         matches!(self, Self::RegTest)
     }
 }
@@ -103,7 +169,7 @@ impl Network {
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let string = match self {
-            Network::Alpha => "alpha".to_string(),
+            Network::TestnetMock => "testnet-mock".to_string(),
             Network::Testnet => "testnet".to_string(),
             Network::RegTest => "regtest".to_string(),
             Network::Beta => "beta".to_string(),
@@ -117,7 +183,7 @@ impl FromStr for Network {
     type Err = String;
     fn from_str(input: &str) -> Result<Network, Self::Err> {
         match input {
-            "alpha" => Ok(Network::Alpha),
+            "testnet-mock" => Ok(Network::TestnetMock),
             "testnet" => Ok(Network::Testnet),
             "regtest" => Ok(Network::RegTest),
             "beta" => Ok(Network::Beta),

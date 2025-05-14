@@ -149,7 +149,7 @@ mod tests {
     use super::*;
     use crate::models::blockchain::block::tests::PREMINE_MAX_SIZE;
     use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::block::TARGET_BLOCK_INTERVAL;
+    use crate::models::blockchain::block::Network;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
@@ -163,7 +163,9 @@ mod tests {
 
     #[test]
     fn block_interval_times_generation_count_is_three_years() {
-        let calculated_halving_time = TARGET_BLOCK_INTERVAL * (BLOCKS_PER_GENERATION as usize);
+        let network = Network::Main;
+        let calculated_halving_time =
+            network.target_block_interval() * (BLOCKS_PER_GENERATION as usize);
         let calculated_halving_time = calculated_halving_time.to_millis();
         let three_years = Timestamp::years(3);
         let three_years = three_years.to_millis();

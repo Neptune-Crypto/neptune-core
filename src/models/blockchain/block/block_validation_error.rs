@@ -3,7 +3,7 @@
 ///
 /// Conversely, defines what it means for a block to be "valid".
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-pub(super) enum BlockValidationError {
+pub enum BlockValidationError {
     // 0. `previous_block` is consistent with current block
     ///   0.a) Block height is previous plus one
     #[error("block height must equal that of predecessor plus one")]

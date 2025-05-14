@@ -1617,8 +1617,8 @@ impl MainLoopHandler {
                     // because no regtest nodes attempt to discover eachother, so the only
                     // peers are those that are manually added.
                     // see: https://github.com/Neptune-Crypto/neptune-core/issues/539#issuecomment-2764701027
-                    if self.global_state_lock.cli().network.use_mock_proof() {
-                        debug!("peer discovery disabled when network uses mock proofs (eg regtest)")
+                    if !self.global_state_lock.cli().network.perform_peer_discovery() {
+                        debug!("peer discovery disabled for network {}", self.global_state_lock.cli().network);
                     } else {
                         self.prune_peers().await?;
                         self.reconnect(&mut main_loop_state).await?;
@@ -1966,7 +1966,7 @@ mod tests {
         let network = main_loop_handler.global_state_lock.cli().network;
         let mut mutable_main_loop_state = main_loop_handler.mutable();
 
-        let block1 = invalid_empty_block(&Block::genesis(network));
+        let block1 = invalid_empty_block(network, &Block::genesis(network));
 
         assert!(
             main_loop_handler

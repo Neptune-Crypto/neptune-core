@@ -3,6 +3,7 @@ use std::ops::Add;
 use std::ops::AddAssign;
 use std::ops::Mul;
 use std::ops::Sub;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -154,6 +155,63 @@ impl Timestamp {
             Some(dt) => dt.format(format_descriptor).to_string(),
             None => "".to_string(),
         }
+    }
+
+    pub fn as_duration(&self) -> Duration {
+        Duration::from_millis(self.to_millis())
+    }
+
+    pub fn format_human_duration(&self) -> String {
+        let duration = self.as_duration();
+        let total_seconds = duration.as_secs();
+
+        let weeks = total_seconds / (60 * 60 * 24 * 7);
+        let remaining_seconds = total_seconds % (60 * 60 * 24 * 7);
+
+        let days = remaining_seconds / (60 * 60 * 24);
+        let remaining_seconds = remaining_seconds % (60 * 60 * 24);
+
+        let hours = remaining_seconds / (60 * 60);
+        let remaining_seconds = remaining_seconds % (60 * 60);
+
+        let minutes = remaining_seconds / 60;
+        let seconds = remaining_seconds % 60;
+
+        let mut parts = Vec::new();
+
+        if weeks > 0 {
+            parts.push(format!(
+                "{} week{}",
+                weeks,
+                if weeks == 1 { "" } else { "s" }
+            ));
+        }
+        if days > 0 {
+            parts.push(format!("{} day{}", days, if days == 1 { "" } else { "s" }));
+        }
+        if hours > 0 {
+            parts.push(format!(
+                "{} hour{}",
+                hours,
+                if hours == 1 { "" } else { "s" }
+            ));
+        }
+        if minutes > 0 {
+            parts.push(format!(
+                "{} minute{}",
+                minutes,
+                if minutes == 1 { "" } else { "s" }
+            ));
+        }
+        if seconds > 0 || parts.is_empty() {
+            parts.push(format!(
+                "{} second{}",
+                seconds,
+                if seconds == 1 { "" } else { "s" }
+            ));
+        }
+
+        parts.join(", ")
     }
 
     pub fn standard_format(&self) -> String {

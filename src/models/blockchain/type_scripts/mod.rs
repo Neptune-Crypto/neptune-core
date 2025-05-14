@@ -119,7 +119,7 @@ impl TypeScriptAndWitness {
         ProofBuilder::new()
             .program(self.program.clone())
             .claim(claim)
-            .nondeterminism(self.nondeterminism())
+            .nondeterminism(|| self.nondeterminism())
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()

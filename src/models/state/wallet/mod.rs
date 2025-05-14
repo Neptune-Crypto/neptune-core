@@ -48,7 +48,6 @@ mod tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
-    use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
@@ -117,7 +116,8 @@ mod tests {
             for _ in 0..12 {
                 let previous_block = next_block;
                 let (nb, _) =
-                    make_mock_block(&previous_block, None, charlie_key, rng.random()).await;
+                    make_mock_block(network, &previous_block, None, charlie_key, rng.random())
+                        .await;
                 next_block = nb;
                 alice
                     .update_wallet_state_with_new_block(
@@ -169,7 +169,7 @@ mod tests {
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block_1, block1_composer_expected) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
+            make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
 
         alice_wallet
             .add_expected_utxos(block1_composer_expected.clone())
@@ -225,8 +225,8 @@ mod tests {
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let (block_2, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
-        let (block_3, _) = make_mock_block(&block_2, None, bob_key, rng.random()).await;
+        let (block_2, _) = make_mock_block(network, &block_1, None, bob_key, rng.random()).await;
+        let (block_3, _) = make_mock_block(network, &block_2, None, bob_key, rng.random()).await;
 
         // TODO: Is this assertion correct? Do we need to check if an auth path
         // is empty?
@@ -288,7 +288,7 @@ mod tests {
 
         let mut rng = rand::rng();
         let (block_1, expected_utxos) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
+            make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
         let liquid_expected_utxo = &expected_utxos[0];
         assert!(
             liquid_expected_utxo.utxo.release_date().is_none(),
@@ -378,7 +378,7 @@ mod tests {
             for _ in 0..21 {
                 let previous_block = next_block;
                 let (next_block_prime, expected) =
-                    make_mock_block(&previous_block, None, alice_key, rng.random()).await;
+                    make_mock_block(network, &previous_block, None, alice_key, rng.random()).await;
                 alice.wallet_state.add_expected_utxos(expected).await;
                 alice.set_new_tip(next_block_prime.clone()).await.unwrap();
                 next_block = next_block_prime;
@@ -458,7 +458,12 @@ mod tests {
             next_block.mutator_set_accumulator_after().hash(),
         );
 
-        let next_block = Block::block_template_invalid_proof(&next_block.clone(), tx, now, None);
+        let next_block = Block::block_template_invalid_proof(
+            &next_block.clone(),
+            tx,
+            now,
+            network.target_block_interval(),
+        );
         let final_block_height = Into::<BlockHeight>::into(23u64);
         assert_eq!(final_block_height, next_block.kernel.header.height);
 
@@ -657,8 +662,9 @@ mod tests {
         for i in 0..num_blocks_mined_by_alice {
             let previous_block = next_block;
             let (block, expected) = make_mock_block(
+                network,
                 &previous_block,
-                Some(in_seven_months + MINIMUM_BLOCK_TIME * i),
+                Some(in_seven_months + network.minimum_block_time() * i),
                 alice_key,
                 rng.random(),
             )
@@ -739,7 +745,7 @@ mod tests {
             .wallet_state
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
-        let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random()).await;
+        let (block_2_b, _) = make_mock_block(network, &block_1, None, bob_key, rng.random()).await;
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
         bob_global_lock
             .set_new_tip(block_2_b.clone())
@@ -772,8 +778,14 @@ mod tests {
 
         // Fork back again to the long chain and verify that the membership proofs
         // all work again
-        let (first_block_continuing_spree, _) =
-            make_mock_block(&first_block_after_spree, None, bob_key, rng.random()).await;
+        let (first_block_continuing_spree, _) = make_mock_block(
+            network,
+            &first_block_after_spree,
+            None,
+            bob_key,
+            rng.random(),
+        )
+        .await;
         alice
             .lock_guard_mut()
             .await
@@ -830,7 +842,7 @@ mod tests {
             .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 NativeCurrencyAmount::coins(4),
-                block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
+                block_2_b.header().timestamp + network.minimum_block_time(),
                 config_2b,
             )
             .await
@@ -847,7 +859,7 @@ mod tests {
                 .light_state()
                 .clone(),
             &alice,
-            block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
+            block_2_b.header().timestamp + network.minimum_block_time(),
             TritonVmJobPriority::Normal.into(),
         )
         .await
@@ -866,7 +878,6 @@ mod tests {
             &block_2_b,
             merged_tx,
             timestamp,
-            None,
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
@@ -952,8 +963,14 @@ mod tests {
         }
 
         // Then fork back to A-chain
-        let (second_block_continuing_spree, _) =
-            make_mock_block(&first_block_continuing_spree, None, bob_key, rng.random()).await;
+        let (second_block_continuing_spree, _) = make_mock_block(
+            network,
+            &first_block_continuing_spree,
+            None,
+            bob_key,
+            rng.random(),
+        )
+        .await;
         alice
             .lock_guard_mut()
             .await
@@ -1058,7 +1075,6 @@ mod tests {
             &genesis_block,
             tx_for_block,
             in_seven_months,
-            None,
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
@@ -1113,7 +1129,7 @@ mod tests {
         let address = spending_key.to_address();
         println!(
             "_authority_wallet address: {}",
-            address.to_bech32m(Network::Alpha).unwrap()
+            address.to_bech32m(Network::Beta).unwrap()
         );
         println!(
             "_authority_wallet spending_lock: {}",

@@ -66,15 +66,17 @@ mod tests {
     use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::block::Network;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn kernel_hash_calculation() {
+        let network = Network::Main;
         let block_primitive_witness = deterministic_block_primitive_witness();
         let invalid_block = Block::block_template_invalid_proof_from_witness(
             block_primitive_witness,
             Timestamp::now(),
-            None,
+            network.target_block_interval(),
         );
         let calculated = invalid_block.hash();
         let merkle_tree_leafs = [

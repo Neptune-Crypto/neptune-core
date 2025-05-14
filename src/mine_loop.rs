@@ -7,7 +7,6 @@ use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
 use block_header::BlockHeaderField;
-use block_header::MINIMUM_BLOCK_TIME;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
@@ -76,7 +75,10 @@ async fn compose_block(
     cancel_compose_rx: tokio::sync::watch::Receiver<()>,
     now: Timestamp,
 ) -> Result<()> {
-    let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
+    let timestamp = max(
+        now,
+        latest_block.header().timestamp + global_state_lock.cli().network.minimum_block_time(),
+    );
 
     let mut job_options = global_state_lock
         .cli()
@@ -95,7 +97,6 @@ async fn compose_block(
         &latest_block,
         transaction,
         timestamp,
-        None,
         vm_job_queue(),
         job_options,
     )
@@ -115,12 +116,12 @@ async fn compose_block(
 
 /// Attempt to mine a valid block for the network.
 pub(crate) async fn guess_nonce(
+    network: Network,
     block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
-    target_block_interval: Option<Timestamp>,
 ) {
     // We wrap mining loop with spawn_blocking() because it is a
     // very lengthy and CPU intensive task, which should execute
@@ -136,12 +137,15 @@ pub(crate) async fn guess_nonce(
     // note: there is no async code inside the mining loop.
     tokio::task::spawn_blocking(move || {
         guess_worker(
+            network,
             block,
             previous_block_header,
             sender,
             guesser_key,
             guessing_configuration,
-            target_block_interval,
+            Timestamp::now(),
+            #[cfg(test)]
+            None,
         )
     })
     .await
@@ -192,21 +196,63 @@ pub(crate) fn precalculate_block_auth_paths(
 }
 
 /// Guess the nonce in parallel until success.
+#[cfg_attr(test, expect(clippy::too_many_arguments))]
 fn guess_worker(
+    network: Network,
     mut block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
-    target_block_interval: Option<Timestamp>,
+    now: Timestamp,
+    #[cfg(test)] target_block_interval: Option<Timestamp>,
 ) {
+    #[cfg(test)]
+    let target_block_interval = target_block_interval.unwrap_or(network.target_block_interval());
+    #[cfg(not(test))]
+    let target_block_interval = network.target_block_interval();
+
     let GuessingConfiguration {
         sleepy_guessing,
         num_guesser_threads,
     } = guessing_configuration;
 
-    // This must match the rules in `[Block::has_proof_of_work]`.
-    let prev_difficulty = previous_block_header.difficulty;
+    // Following code must match the rules in `[Block::has_proof_of_work]`.
+
+    // a difficulty reset (to min difficulty) occurs on testnet(s)
+    // when the elapsed time between two blocks is greater than a
+    // max interval, defined by the network.  It never occurs for
+    // mainnet.
+    let should_difficulty_reset =
+        Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
+
+    info!(
+        "prev block height: {}, prev block time: {}, now: {}",
+        previous_block_header.height, previous_block_header.timestamp, now
+    );
+
+    let (prev_difficulty, new_difficulty) = if should_difficulty_reset {
+        let prev_difficulty = previous_block_header.difficulty;
+        let new_difficulty = network.genesis_difficulty();
+        // this is the difficulty reset
+        info!(
+            "resetting difficulty to genesis: {}. {} seconds elapsed since previous block",
+            new_difficulty,
+            (now - previous_block_header.timestamp).to_millis() / 1000
+        );
+        (prev_difficulty, new_difficulty)
+    } else {
+        let prev_difficulty = previous_block_header.difficulty;
+        let new_difficulty = difficulty_control(
+            now,
+            previous_block_header.timestamp,
+            previous_block_header.difficulty,
+            target_block_interval,
+            previous_block_header.height,
+        );
+        (prev_difficulty, new_difficulty)
+    };
+
     let threshold = prev_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
@@ -223,14 +269,6 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    let now = Timestamp::now();
-    let new_difficulty = difficulty_control(
-        now,
-        previous_block_header.timestamp,
-        previous_block_header.difficulty,
-        target_block_interval,
-        previous_block_header.height,
-    );
     block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
     block.set_header_guesser_digest(guesser_key.after_image());
@@ -266,12 +304,13 @@ fn guess_worker(
         GuessNonceResult::BlockNotFound => unreachable!(),
     };
 
-    info!("Found valid block with nonce: ({nonce}).");
+    info!("Found valid block with nonce ({nonce}).");
 
     block.set_header_nonce(nonce);
 
     let timestamp = block.header().timestamp;
     let timestamp_standard = timestamp.standard_format();
+    let elapsed_human = (timestamp - previous_block_header.timestamp).format_human_duration();
     let hash = block.hash();
     let hex = hash.to_hex();
     let height = block.kernel.header.height;
@@ -280,13 +319,14 @@ fn guess_worker(
     info!(
         r#"Newly mined block details:
               Height: {height}
-              Time  : {timestamp_standard} ({timestamp})
+                Time: {timestamp_standard} ({timestamp})
+Since previous block: {elapsed_human}
         Digest (Hex): {hex}
         Digest (Raw): {hash}
 Difficulty threshold: {threshold}
           Difficulty: {prev_difficulty}
-          #inputs   : {num_inputs}
-          #outputs  : {num_outputs}
+           #inputs  : {num_inputs}
+           #outputs : {num_outputs}
 "#
     );
 
@@ -693,6 +733,7 @@ pub(crate) async fn mine(
     }
 
     let cli_args = global_state_lock.cli().clone();
+    let network = cli_args.network;
 
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
     let infinite = Duration::from_secs(u32::MAX.into());
@@ -774,6 +815,7 @@ pub(crate) async fn mine(
                 .lock(|s| s.chain.light_state().header().to_owned())
                 .await;
             let guesser_task = guess_nonce(
+                network,
                 proposal.to_owned(),
                 latest_block_header,
                 guesser_tx,
@@ -782,7 +824,6 @@ pub(crate) async fn mine(
                     sleepy_guessing: cli_args.sleepy_guessing,
                     num_guesser_threads: cli_args.guesser_threads,
                 },
-                None, // use default TARGET_BLOCK_INTERVAL
             );
 
             // Only run for N seconds to allow for updating of block's timestamp
@@ -966,7 +1007,7 @@ pub(crate) async fn mine(
                             .lock(|s| s.chain.light_state().to_owned())
                             .await;
 
-                        if !new_block_found.block.has_proof_of_work(latest_block.header()) {
+                        if !new_block_found.block.has_proof_of_work(cli_args.network, latest_block.header()) {
                             error!("Own mined block did not have valid PoW Discarding.");
                         } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now(), global_state_lock.cli().network).await {
                                 // Block could be invalid if for instance the proof and proof-of-work
@@ -1040,6 +1081,7 @@ pub(crate) mod tests {
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::job_queue::errors::JobHandleError;
+    use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1110,7 +1152,7 @@ pub(crate) mod tests {
 
     /// Estimates the hash rate in number of hashes per milliseconds
     async fn estimate_own_hash_rate(
-        target_block_interval: Option<Timestamp>,
+        target_block_interval: Timestamp,
         sleepy_guessing: bool,
         num_outputs: usize,
     ) -> f64 {
@@ -1203,8 +1245,12 @@ pub(crate) mod tests {
         .unwrap();
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
-        let block =
-            Block::block_template_invalid_proof(&genesis_block, transaction, in_seven_months, None);
+        let block = Block::block_template_invalid_proof(
+            &genesis_block,
+            transaction,
+            in_seven_months,
+            network.target_block_interval(),
+        );
         let tock = tick.elapsed().unwrap().as_millis() as f64;
         black_box(block);
         tock
@@ -1321,7 +1367,6 @@ pub(crate) mod tests {
                 &genesis_block,
                 transaction_empty_mempool,
                 now,
-                None,
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::High.into(),
             )
@@ -1372,7 +1417,6 @@ pub(crate) mod tests {
                 &genesis_block,
                 transaction_non_empty_mempool,
                 now,
-                None,
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
             )
@@ -1486,14 +1530,19 @@ pub(crate) mod tests {
             .wallet_state
             .wallet_entropy
             .guesser_spending_key(tip_block_orig.hash());
-        let mut block =
-            Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None);
+        let mut block = Block::block_template_invalid_proof(
+            &tip_block_orig,
+            transaction,
+            launch_date,
+            network.target_block_interval(),
+        );
         block.set_header_guesser_digest(guesser_key.after_image());
 
         let sleepy_guessing = false;
         let num_guesser_threads = None;
 
         guess_worker(
+            network,
             block,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
@@ -1502,6 +1551,7 @@ pub(crate) mod tests {
                 sleepy_guessing,
                 num_guesser_threads,
             },
+            Timestamp::now(),
             None,
         );
 
@@ -1509,7 +1559,7 @@ pub(crate) mod tests {
 
         assert!(mined_block_info
             .block
-            .has_proof_of_work(tip_block_orig.header()));
+            .has_proof_of_work(network, tip_block_orig.header()));
     }
 
     /// This test mines a single block at height 1 on the main network
@@ -1562,7 +1612,7 @@ pub(crate) mod tests {
             &tip_block_orig,
             transaction,
             ten_seconds_ago,
-            None,
+            network.target_block_interval(),
         );
 
         // sanity check that our initial state is correct.
@@ -1573,6 +1623,7 @@ pub(crate) mod tests {
         let num_guesser_threads = None;
 
         guess_worker(
+            network,
             template,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
@@ -1581,6 +1632,7 @@ pub(crate) mod tests {
                 sleepy_guessing,
                 num_guesser_threads,
             },
+            Timestamp::now(),
             None,
         );
 
@@ -1662,7 +1714,7 @@ pub(crate) mod tests {
         let num_guesser_threads = None;
         let num_outputs = 0;
         let hash_rate =
-            estimate_own_hash_rate(Some(target_block_interval), sleepy_guessing, num_outputs).await;
+            estimate_own_hash_rate(target_block_interval, sleepy_guessing, num_outputs).await;
         println!("estimating hash rate at {} per millisecond", hash_rate);
         let prepare_time = estimate_block_preparation_time_invalid_proof().await;
         println!("estimating block preparation time at {prepare_time} ms");
@@ -1718,13 +1770,14 @@ pub(crate) mod tests {
                 &prev_block,
                 transaction,
                 start_time,
-                Some(target_block_interval),
+                target_block_interval,
             );
 
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
             let height = block.header().height;
 
             guess_worker(
+                network,
                 block,
                 *prev_block.header(),
                 worker_task_tx,
@@ -1733,19 +1786,16 @@ pub(crate) mod tests {
                     sleepy_guessing,
                     num_guesser_threads,
                 },
+                Timestamp::now(),
                 Some(target_block_interval),
             );
 
             let mined_block_info = worker_task_rx.await.unwrap();
 
             // note: this assertion often fails prior to fix for #154.
-            // Also note that `is_valid` is a wrapper around `is_valid_internal`
-            // which is the method we need here because it allows us to override
-            // default values for the target block interval and the minimum
-            // block interval.
             assert!(mined_block_info
                 .block
-                .has_proof_of_work(prev_block.header()));
+                .has_proof_of_work(network, prev_block.header()));
 
             prev_block = *mined_block_info.block;
 
@@ -1792,8 +1842,9 @@ pub(crate) mod tests {
 
     #[test]
     fn fast_kernel_mast_hash_agrees_with_mast_hash_function_invalid_block() {
-        let genesis = Block::genesis(Network::Main);
-        let block1 = invalid_empty_block(&genesis);
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(network, &genesis);
         for block in [genesis, block1] {
             let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
             assert_eq!(
@@ -1824,14 +1875,18 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn hash_rate_independent_of_tx_size() {
+        let network = Network::Main;
+
         // It's crucial that the hash rate is independent of the size of the
         // block, since miners are otherwise heavily incentivized to mine small
         // or empty blocks.
         let sleepy_guessing = false;
-        let hash_rate_empty_tx = estimate_own_hash_rate(None, sleepy_guessing, 0).await;
+        let hash_rate_empty_tx =
+            estimate_own_hash_rate(network.target_block_interval(), sleepy_guessing, 0).await;
         println!("hash_rate_empty_tx: {hash_rate_empty_tx}");
 
-        let hash_rate_big_tx = estimate_own_hash_rate(None, sleepy_guessing, 10000).await;
+        let hash_rate_big_tx =
+            estimate_own_hash_rate(network.target_block_interval(), sleepy_guessing, 10000).await;
         println!("hash_rate_big_tx: {hash_rate_big_tx}");
 
         assert!(
@@ -2023,6 +2078,7 @@ pub(crate) mod tests {
 
     #[test]
     fn block_hash_relates_to_predecessor_difficulty() {
+        let network = Network::Main;
         let difficulty = 100u32;
         // Difficulty X means we expect X trials before success.
         // Modeling the process as a geometric distribution gives the
@@ -2072,7 +2128,7 @@ pub(crate) mod tests {
         loop {
             successor_block.set_header_nonce(rng.random());
 
-            if successor_block.has_proof_of_work(predecessor_block.header()) {
+            if successor_block.has_proof_of_work(network, predecessor_block.header()) {
                 break;
             }
 
@@ -2251,6 +2307,140 @@ pub(crate) mod tests {
 
         // ensure mine-loop is gone.
         assert!(main_to_miner_tx.is_closed());
+
+        Ok(())
+    }
+
+    /// A test for difficulty reset logic, which occurs for the TestnetMock
+    /// network.
+    ///
+    /// note: or any future network that returns a Some value from
+    /// Network::difficulty_reset_interval()
+    ///
+    /// The test performs guessing (via guess_worker()) for 20 blocks
+    /// and simulates a random block interval between (most) blocks.
+    ///
+    /// Heights 1, 5, 10, and 15 use a block interval that is >= to
+    /// Network::difficulty_reset_interval(), which triggers a difficulty
+    /// reset within guess_worker(), under test.
+    ///
+    /// For each mined block:
+    ///  + asserts Block::has_proof_of_work() is true
+    ///  + asserts Block::validate().is_ok() is true
+    ///
+    /// For each block with difficulty reset:
+    ///  + asserts block difficulty matches Network::genesis_difficulty()
+    ///
+    /// For each normal block (without difficulty reset):
+    ///  + asserts block difficulty does NOT match Network::genesis_difficulty()
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn testnet_mock_reset_difficulty() -> anyhow::Result<()> {
+        // we are testing the TestnetMock network.
+        let network = Network::TestnetMock;
+
+        // basic setup
+        let mut rng = rand::rng();
+        let sleepy_guessing = false;
+        let num_guesser_threads = None;
+        let num_blocks = 20; // generate 20 blocks
+        let mut block_time = Timestamp::now();
+
+        // obtain global state
+        let global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+
+        // obtain previous (genesis) block
+        let mut prev_block = global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .clone();
+
+        // generate 20 blocks
+        for i in 1..=num_blocks {
+            // we simulate a block_interval since doing this in real-time would
+            // be too slow.
+
+            // height 1 resets because interval since genesis block is large.
+            // 5,10,15 we choose arbitrarily.
+            let (block_interval, should_reset) = if [1, 5, 10, 15].contains(&i) {
+                (network.difficulty_reset_interval().unwrap(), true)
+            } else {
+                // generate random interval between min_block_time and difficulty_reset_interval.
+                // this encourages difficulty_control() to modify the difficulty.
+                let interval_millis = rng.random_range(
+                    network.minimum_block_time().to_millis()
+                        ..=network.difficulty_reset_interval().unwrap().to_millis(),
+                );
+                (Timestamp::millis(interval_millis), false)
+            };
+            block_time += block_interval;
+
+            // create tx
+            let transaction = make_mock_transaction_with_mutator_set_hash(
+                vec![],
+                vec![],
+                prev_block.mutator_set_accumulator_after().hash(),
+            );
+
+            // gen guesser key
+            let guesser_key = HashLockKey::from_preimage(Digest::default());
+
+            // generate a block template / proposal
+            let block_template = MockBlockGenerator::mock_block_from_tx_without_pow(
+                prev_block.clone(),
+                transaction,
+                guesser_key,
+            );
+
+            // create channel to listen for guessing results.
+            let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+
+            // perform the guessing.
+            guess_worker(
+                network,
+                block_template,
+                *prev_block.header(),
+                worker_task_tx,
+                guesser_key,
+                GuessingConfiguration {
+                    sleepy_guessing,
+                    num_guesser_threads,
+                },
+                block_time,
+                None,
+            );
+
+            // await a mined block
+            let mined_block_info = worker_task_rx.await.unwrap();
+            let block = *mined_block_info.block;
+
+            // verify mined block has proof-of-work
+            assert!(block.has_proof_of_work(network, prev_block.header()));
+
+            // verify mined block validates
+            assert!(block
+                .validate(&prev_block, block_time, network)
+                .await
+                .is_ok());
+
+            if should_reset {
+                // verify difficulty matches genesis difficulty
+                assert_eq!(block.header().difficulty, network.genesis_difficulty());
+            } else {
+                // verify difficulty does NOT match genesis difficulty
+                assert_ne!(block.header().difficulty, network.genesis_difficulty());
+            }
+
+            prev_block = block;
+        }
 
         Ok(())
     }

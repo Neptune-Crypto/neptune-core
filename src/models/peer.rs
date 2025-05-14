@@ -710,7 +710,7 @@ impl SyncChallengeResponse {
 
     /// Determine whether the `SyncChallengeResponse` answers the given
     /// `IssuedSyncChallenge`, and not some other one.
-    pub(crate) fn matches(&self, issued_challenge: IssuedSyncChallenge) -> bool {
+    pub(crate) fn matches(&self, network: Network, issued_challenge: IssuedSyncChallenge) -> bool {
         let Ok(tip_parent) = Block::try_from(self.tip_parent.clone()) else {
             return false;
         };
@@ -727,7 +727,7 @@ impl SyncChallengeResponse {
             .all(|((_, child), challenge_height)| child.header.height == *challenge_height)
             && issued_challenge.challenge.tip_digest == tip.hash()
             && issued_challenge.accumulated_pow == tip.header().cumulative_proof_of_work
-            && tip.has_proof_of_work(tip_parent.header())
+            && tip.has_proof_of_work(network, tip_parent.header())
             && pow_witnesses_form_chain_from_tip
     }
 
@@ -741,7 +741,7 @@ impl SyncChallengeResponse {
             return false;
         };
         if !tip.is_valid(&tip_predecessor, now, network).await
-            || !tip.has_proof_of_work(tip_predecessor.header())
+            || !tip.has_proof_of_work(network, tip_predecessor.header())
         {
             return false;
         }
@@ -768,7 +768,7 @@ impl SyncChallengeResponse {
             };
 
             if !child.is_valid(&parent, now, network).await
-                || !child.has_proof_of_work(parent.header())
+                || !child.has_proof_of_work(network, parent.header())
             {
                 return false;
             }

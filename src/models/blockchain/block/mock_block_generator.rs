@@ -43,7 +43,7 @@ impl MockBlockGenerator {
 
         let body = primitive_witness.body().to_owned();
         let mut header =
-            primitive_witness.header(timestamp, Some(Network::RegTest.target_block_interval()));
+            primitive_witness.header(timestamp, Network::RegTest.target_block_interval());
         header.guesser_digest = guesser_key.after_image();
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
@@ -58,6 +58,7 @@ impl MockBlockGenerator {
     /// Create a block from a transaction without the hassle of proving but such
     /// that it appears valid.
     pub fn mock_block_from_tx(
+        network: Network,
         predecessor: Arc<Block>,
         tx: Transaction,
         guesser_key: HashLockKey,
@@ -69,7 +70,7 @@ impl MockBlockGenerator {
         let mut rng = StdRng::from_seed(seed);
 
         // mining (guessing) loop.
-        while !block.has_proof_of_work(predecessor.header()) {
+        while !block.has_proof_of_work(network, predecessor.header()) {
             let nonce = rng.random();
             block.set_header_nonce(nonce);
         }
@@ -196,7 +197,7 @@ impl MockBlockGenerator {
         let prev = predecessor.clone();
 
         let block = if with_valid_pow {
-            Self::mock_block_from_tx(predecessor, block_tx, guesser_key, rng.random())
+            Self::mock_block_from_tx(network, predecessor, block_tx, guesser_key, rng.random())
         } else {
             Self::mock_block_from_tx_without_pow((*predecessor).clone(), block_tx, guesser_key)
         };
