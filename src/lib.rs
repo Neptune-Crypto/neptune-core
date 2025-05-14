@@ -217,6 +217,21 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         rpc_server_to_main_tx.clone(),
     );
 
+    if let Some(bootstrap_directory) = global_state_lock.cli().bootstrap_from_directory.clone() {
+        info!(
+            "Bootstrapping from directory \"{}\"",
+            bootstrap_directory.to_string_lossy()
+        );
+
+        let validate_blocks = true;
+        let num_blocks_read = global_state_lock
+            .lock_guard_mut()
+            .await
+            .bootstrap_from_directory(&bootstrap_directory, validate_blocks)
+            .await?;
+        info!("Successfully bootstrapped {num_blocks_read} blocks.");
+    }
+
     // Check if we need to restore the wallet database, and if so, do it.
     info!("Checking if we need to restore UTXOs");
     global_state_lock
