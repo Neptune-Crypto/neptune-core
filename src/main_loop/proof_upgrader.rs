@@ -1075,7 +1075,8 @@ mod tests {
             // Before handle upgrade completes, a new block comes in. Making the
             // method have to do more work.
             let genesis_block = Block::genesis(network);
-            let block1 = invalid_empty_block_with_timestamp(&genesis_block, pwtx.kernel.timestamp);
+            let block1 =
+                invalid_empty_block_with_timestamp(network, &genesis_block, pwtx.kernel.timestamp);
             alice.set_new_tip(block1).await.unwrap();
 
             upgrade_job

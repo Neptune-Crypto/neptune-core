@@ -25,18 +25,6 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
-/// Desired/average time between blocks.
-///
-/// 588000 milliseconds equals 9.8 minutes.
-pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
-pub(crate) const TARGET_BLOCK_INTERVAL_REGTEST: Timestamp = Timestamp::millis(4);
-
-/// Minimum time between blocks.
-///
-/// Blocks spaced apart by less than this amount of time are not valid.
-pub(crate) const MINIMUM_BLOCK_TIME: Timestamp = Timestamp::seconds(60);
-pub(crate) const MINIMUM_BLOCK_TIME_REGTEST: Timestamp = Timestamp::millis(2);
-
 /// Controls how long to wait before the difficulty for the *next* block is
 /// reduced.
 ///
@@ -117,8 +105,6 @@ impl Display for BlockHeader {
 }
 
 impl BlockHeader {
-    pub(crate) const GENESIS_DIFFICULTY: Difficulty = Difficulty::new([1_000_000_000, 0, 0, 0, 0]);
-
     pub(crate) fn genesis(network: Network) -> Self {
         Self {
             version: BFieldElement::zero(),
@@ -136,11 +122,7 @@ impl BlockHeader {
             cumulative_proof_of_work: ProofOfWork::zero(),
 
             #[cfg(not(test))]
-            difficulty: if network.is_regtest() {
-                Difficulty::MINIMUM
-            } else {
-                Self::GENESIS_DIFFICULTY
-            },
+            difficulty: network.genesis_difficulty(),
 
             // Avoid setting this too high when running tests, otherwise CI
             // fails and tests take forever.
@@ -161,7 +143,7 @@ impl BlockHeader {
         predecessor_header: &BlockHeader,
         predecessor_digest: Digest,
         timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
+        target_block_interval: Timestamp,
     ) -> BlockHeader {
         let difficulty = difficulty_control(
             timestamp,
@@ -314,11 +296,12 @@ pub(crate) mod tests {
 
     #[test]
     fn witness_agrees_with_block_hash() {
+        let network = Network::Main;
         let block_primitive_witness = deterministic_block_primitive_witness();
         let block = Block::block_template_invalid_proof_from_witness(
             block_primitive_witness,
             Timestamp::now(),
-            None,
+            network.target_block_interval(),
         );
         let expected = block.hash();
         let witness: HeaderToBlockHashWitness = (&block).into();

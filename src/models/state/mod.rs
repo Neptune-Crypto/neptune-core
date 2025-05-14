@@ -1810,7 +1810,7 @@ impl GlobalState {
                         block_file_path.to_string_lossy()
                     );
                     ensure!(
-                        block.has_proof_of_work(predecessor.header()),
+                        block.has_proof_of_work(self.cli.network, predecessor.header()),
                         "Attempted to process a block from {} \
                         which does not have required PoW amount. \
                         Block height: {block_height}.",
@@ -1951,7 +1951,7 @@ mod tests {
         )
         .await;
         let mut bob = bob.global_state_lock.lock_guard_mut().await;
-        let block1 = invalid_empty_block(&Block::genesis(network));
+        let block1 = invalid_empty_block(network, &Block::genesis(network));
 
         bob.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone());
         bob.mining_state
@@ -2372,7 +2372,8 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-        let (mock_block_1a, _) = make_mock_block(&genesis_block, None, bob_key, rng.random()).await;
+        let (mock_block_1a, _) =
+            make_mock_block(network, &genesis_block, None, bob_key, rng.random()).await;
         {
             alice
                 .chain
@@ -2430,7 +2431,7 @@ mod tests {
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = alice.chain.archival_state().get_tip().await;
         let (mock_block_1a, composer_expected_utxos_1a) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
+            make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
         alice
             .wallet_state
             .add_expected_utxos(composer_expected_utxos_1a)
@@ -2459,7 +2460,8 @@ mod tests {
         let bob_key = bob_wallet_secret.nth_generation_spending_key(0);
         let mut parent_block = genesis_block;
         for _ in 0..5 {
-            let (next_block, _) = make_mock_block(&parent_block, None, bob_key, rng.random()).await;
+            let (next_block, _) =
+                make_mock_block(network, &parent_block, None, bob_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             parent_block = next_block;
         }
@@ -2512,6 +2514,7 @@ mod tests {
         ///
         /// Factored out to parallel function to make this test run faster.
         async fn make_3_branches(
+            network: Network,
             first_for_0_1: &Block,
             first_for_2: &Block,
             num_blocks_per_branch: usize,
@@ -2572,6 +2575,7 @@ mod tests {
 
                     // produce block
                     let (next_block, _) = make_mock_block_with_inputs_and_outputs(
+                        network,
                         &block,
                         inputs.clone(),
                         outputs.clone(),
@@ -2690,7 +2694,7 @@ mod tests {
         // 1. Create new block 1 where Alice receives two composer UTXOs, store it.
         let genesis_block = alice.chain.archival_state().get_tip().await;
         let (block_1, alice_composer_expected_utxos_1) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
+            make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
         {
             alice
                 .wallet_state
@@ -2711,7 +2715,7 @@ mod tests {
         }
 
         let [a_blocks, b_blocks, c_blocks] =
-            make_3_branches(&block_1, &genesis_block, 60, &bob_key).await;
+            make_3_branches(network, &block_1, &genesis_block, 60, &bob_key).await;
 
         println!(
             "a_blocks put counts: {}",
@@ -3020,7 +3024,6 @@ mod tests {
             &genesis_block,
             block_transaction,
             in_seven_months,
-            None,
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
@@ -3266,7 +3269,6 @@ mod tests {
             &block_1,
             block_transaction2,
             in_eight_months,
-            None,
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
         )
@@ -3339,7 +3341,12 @@ mod tests {
             .await
             .unwrap();
 
-            Block::block_template_invalid_proof(&genesis_block, cb, timestamp, None)
+            Block::block_template_invalid_proof(
+                &genesis_block,
+                cb,
+                timestamp,
+                global_state_lock.cli().network.target_block_interval(),
+            )
         }
 
         let network = Network::Main;
@@ -3578,7 +3585,8 @@ mod tests {
             let mut previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.random()).await;
+                    make_mock_block(network, &previous_block, None, spending_key, rng.random())
+                        .await;
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
@@ -3599,7 +3607,8 @@ mod tests {
             previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(&previous_block, None, spending_key, rng.random()).await;
+                    make_mock_block(network, &previous_block, None, spending_key, rng.random())
+                        .await;
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
                     .await
@@ -3648,7 +3657,8 @@ mod tests {
             assert_eq!(genesis_block.hash(), alice.chain.light_state().hash());
 
             let cb_key = WalletEntropy::new_random().nth_generation_spending_key(0);
-            let (block_1, _) = make_mock_block(&genesis_block, None, cb_key, rng.random()).await;
+            let (block_1, _) =
+                make_mock_block(network, &genesis_block, None, cb_key, rng.random()).await;
 
             alice.store_block_not_tip(block_1.clone()).await.unwrap();
             assert_eq!(
@@ -3676,7 +3686,8 @@ mod tests {
             let mut parent = Block::genesis(network);
             let mut chain = vec![];
             for _ in 0..length {
-                let (block, _) = make_mock_block(&parent, None, cb_key, rng.random()).await;
+                let (block, _) =
+                    make_mock_block(network, &parent, None, cb_key, rng.random()).await;
                 chain.push((block.clone(), parent.clone()));
                 parent = block;
             }
@@ -3806,11 +3817,11 @@ mod tests {
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1a, composer_expected_utxos_1a) =
-                make_mock_block(&genesis_block, None, spending_key, rng.random()).await;
+                make_mock_block(network, &genesis_block, None, spending_key, rng.random()).await;
             let (block_2a, composer_expected_utxos_2a) =
-                make_mock_block(&block_1a, None, spending_key, rng.random()).await;
+                make_mock_block(network, &block_1a, None, spending_key, rng.random()).await;
             let (block_3a, composer_expected_utxos_3a) =
-                make_mock_block(&block_2a, None, spending_key, rng.random()).await;
+                make_mock_block(network, &block_2a, None, spending_key, rng.random()).await;
 
             let cli_args = cli_args::Args {
                 number_of_mps_per_utxo: 30,
@@ -3866,7 +3877,7 @@ mod tests {
                 // Verify that we can also reorganize with last shared ancestor being
                 // the genesis block.
                 let (block_1b, _) =
-                    make_mock_block(&genesis_block, None, spending_key, random()).await;
+                    make_mock_block(network, &genesis_block, None, spending_key, random()).await;
                 global_state.set_new_tip(block_1b.clone()).await.unwrap();
                 assert_correct_global_state(
                     &global_state,
@@ -3881,7 +3892,8 @@ mod tests {
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
                     let (next_block, composer_expected_utxos) =
-                        make_mock_block(&previous_block, None, spending_key, rng.random()).await;
+                        make_mock_block(network, &previous_block, None, spending_key, rng.random())
+                            .await;
                     global_state
                         .wallet_state
                         .add_expected_utxos(composer_expected_utxos.clone())
@@ -3915,7 +3927,7 @@ mod tests {
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1, composer_expected_utxos_1) =
-                make_mock_block(&genesis_block, None, spend_key, rng.random()).await;
+                make_mock_block(network, &genesis_block, None, spend_key, rng.random()).await;
 
             for claim_cb in [false, true] {
                 let expected_num_mutxos = if claim_cb { 3 } else { 1 };
@@ -3963,7 +3975,7 @@ mod tests {
             // Ensure more than one file is used to store blocks.
             const MANY_BLOCKS: usize = 3;
             const BIG_PROOF_LEN: usize = 6_250_000; // ~= 50MB
-            let mut blocks = invalid_empty_blocks(&Block::genesis(network), MANY_BLOCKS);
+            let mut blocks = invalid_empty_blocks(network, &Block::genesis(network), MANY_BLOCKS);
             let big_bad_proof =
                 BlockProof::SingleProof(NeptuneProof::invalid_with_size(BIG_PROOF_LEN));
             for block in &mut blocks {
@@ -4301,7 +4313,6 @@ mod tests {
                     &genesis_block,
                     block_1_tx,
                     seven_months_post_launch,
-                    None,
                     TritonVmJobQueue::get_instance(),
                     TritonVmJobPriority::default().into(),
                 )

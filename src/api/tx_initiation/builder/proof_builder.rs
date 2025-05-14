@@ -1,6 +1,7 @@
 //! This module implements a builder for neptune proofs
 //!
 //! A neptune proof is a mockable triton-vm proof.
+use std::fmt;
 use std::sync::Arc;
 
 use crate::api::tx_initiation::error::CreateProofError;
@@ -40,24 +41,37 @@ use crate::triton_vm_job_queue::TritonVmJobQueue;
 ///     ProofBuilder::new()
 ///         .program(program)
 ///         .claim(claim)
-///         .nondeterminism(nondeterminism)
+///         .nondeterminism(|| nondeterminism)
 ///         .job_queue(vm_job_queue())
 ///         .proof_job_options(gsl.cli().into())
 ///         .build()
 ///         .await
 /// }
 /// ```
-#[derive(Debug, Default)]
-pub struct ProofBuilder {
+#[derive(Default)]
+pub struct ProofBuilder<'a> {
     program: Option<Program>,
     claim: Option<Claim>,
-    nondeterminism: Option<NonDeterminism>,
+    nondeterminism_callback: Option<Box<dyn FnOnce() -> NonDeterminism + Send + Sync + 'a>>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: Option<TritonVmProofJobOptions>,
     valid_mock: Option<bool>,
 }
 
-impl ProofBuilder {
+impl<'a> fmt::Debug for ProofBuilder<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProofBuilder")
+            .field("program", &self.program)
+            .field("claim", &self.claim)
+            // skip nondeterminism_callback
+            .field("job_queue", &self.job_queue)
+            .field("proof_job_options", &self.proof_job_options)
+            .field("valid_mock", &self.valid_mock)
+            .finish()
+    }
+}
+
+impl<'a> ProofBuilder<'a> {
     /// instantiate
     pub fn new() -> Self {
         Default::default()
@@ -75,9 +89,15 @@ impl ProofBuilder {
         self
     }
 
-    /// add nondeterminism (required)
-    pub fn nondeterminism(mut self, nondeterminism: NonDeterminism) -> Self {
-        self.nondeterminism = Some(nondeterminism);
+    /// add nondeterminism via callback or closure (required)
+    ///
+    /// when build() is called, the builder will invoke the callback for real
+    /// proofs but not for mock proofs.
+    pub fn nondeterminism<F>(mut self, callback: F) -> Self
+    where
+        F: FnOnce() -> NonDeterminism + Send + Sync + 'a,
+    {
+        self.nondeterminism_callback = Some(Box::new(callback));
         self
     }
 
@@ -154,7 +174,7 @@ impl ProofBuilder {
         let Self {
             program,
             claim,
-            nondeterminism,
+            nondeterminism_callback,
             job_queue,
             proof_job_options,
             valid_mock,
@@ -162,13 +182,19 @@ impl ProofBuilder {
 
         let program = program.ok_or(ProofRequirement::Program)?;
         let claim = claim.ok_or(ProofRequirement::Claim)?;
-        let nondeterminism = nondeterminism.ok_or(ProofRequirement::NonDeterminism)?;
+        let nondeterminism_callback =
+            nondeterminism_callback.ok_or(ProofRequirement::NonDeterminism)?;
         let proof_job_options = proof_job_options.ok_or(ProofRequirement::ProofJobOptions)?;
 
         if proof_job_options.job_settings.network.use_mock_proof() {
             let proof = Proof::mock(valid_mock.unwrap_or(true));
             return Ok(proof);
         }
+
+        // non-determinism cannot reliably be obtained for mock proofs, so
+        // we invoke a callback to obtain it here only once certain we are
+        // building a real proof.
+        let nondeterminism = nondeterminism_callback();
 
         let proof_type = proof_job_options.job_settings.proof_type;
         let capability = proof_job_options.job_settings.tx_proving_capability;

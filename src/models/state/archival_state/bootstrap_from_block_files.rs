@@ -167,7 +167,7 @@ mod tests {
     async fn get_blocks_directly_from_file_without_database() {
         let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
-        let blocks = invalid_empty_blocks(&archival_state.genesis_block, 10);
+        let blocks = invalid_empty_blocks(network, &archival_state.genesis_block, 10);
 
         for i in 0..10 {
             archival_state

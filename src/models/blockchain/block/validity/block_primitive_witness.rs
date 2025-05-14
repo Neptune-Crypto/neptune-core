@@ -62,7 +62,7 @@ impl BlockPrimitiveWitness {
     pub(crate) fn header(
         &self,
         timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
+        target_block_interval: Timestamp,
     ) -> BlockHeader {
         let parent_header = self.predecessor_block.header();
         let parent_digest = self.predecessor_block.hash();
@@ -137,7 +137,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::block_kernel::BlockKernel;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::BlockProof;
-    use crate::models::blockchain::block::TARGET_BLOCK_INTERVAL;
+    use crate::models::blockchain::block::Network;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -230,6 +230,8 @@ pub(crate) mod tests {
 
         pub(crate) fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
             const NUM_INPUTS: usize = 2;
+            let network = Network::Main;
+
             (
                 NativeCurrencyAmount::arbitrary_non_negative(),
                 vec(0f64..1f64, NUM_INPUTS - 1),
@@ -239,7 +241,7 @@ pub(crate) mod tests {
                 0..u64::MAX,
             )
                 .prop_flat_map(
-                    |(
+                    move |(
                         total_input,
                         input_distribution,
                         hash_lock_keys,
@@ -313,7 +315,7 @@ pub(crate) mod tests {
                                             predecessor_block.header().height.next(),
                                         );
                                         let timestamp = predecessor_block.header().timestamp
-                                            + TARGET_BLOCK_INTERVAL;
+                                            + network.target_block_interval();
 
                                         let miner_fee_records =
                                             predecessor_block.guesser_fee_addition_records();

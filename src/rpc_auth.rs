@@ -358,7 +358,7 @@ mod tests {
         ///  2. Cookie::auth() returns AuthError::InvalidCookie for invalid cookie
         #[apply(shared_tokio_runtime)]
         pub async fn auth() -> anyhow::Result<()> {
-            let data_dir = unit_test_data_directory(Network::Alpha)?;
+            let data_dir = unit_test_data_directory(Network::Beta)?;
 
             let valid_cookie = Cookie::try_new(&data_dir).await?;
             let valid_cookie_loaded = Cookie::try_load(&data_dir).await?;

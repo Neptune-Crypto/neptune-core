@@ -20,8 +20,6 @@ use block_body::BlockBody;
 use block_header::BlockHeader;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
-use block_header::MINIMUM_BLOCK_TIME;
-use block_header::TARGET_BLOCK_INTERVAL;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use block_validation_error::BlockValidationError;
@@ -200,12 +198,13 @@ impl Block {
     pub(crate) fn block_template_invalid_proof_from_witness(
         primitive_witness: BlockPrimitiveWitness,
         block_timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
+        target_block_interval: Timestamp,
     ) -> Block {
         let body = primitive_witness.body().to_owned();
         let header = primitive_witness.header(block_timestamp, target_block_interval);
         let proof = BlockProof::Invalid;
         let appendix = BlockAppendix::default();
+
         Block::new(header, body, appendix, proof)
     }
 
@@ -217,7 +216,7 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
+        target_block_interval: Timestamp,
     ) -> Block {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         Self::block_template_invalid_proof_from_witness(
@@ -230,22 +229,21 @@ impl Block {
     pub(crate) async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
+        let network = proof_job_options.job_settings.network;
         let body = primitive_witness.body().to_owned();
-        let header = primitive_witness.header(timestamp, target_block_interval);
+        let header = primitive_witness.header(timestamp, network.target_block_interval());
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
-            let nondeterminism = block_proof_witness.nondeterminism();
 
             let proof = ProofBuilder::new()
                 .program(BlockProgram.program())
                 .claim(claim)
-                .nondeterminism(nondeterminism)
+                .nondeterminism(|| block_proof_witness.nondeterminism())
                 .job_queue(triton_vm_job_queue)
                 .proof_job_options(proof_job_options)
                 .build()
@@ -261,16 +259,16 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
+        let network = proof_job_options.job_settings.network;
         let tx_claim = SingleProof::claim(transaction.kernel.mast_hash());
         assert!(
             verify(
                 tx_claim.clone(),
                 transaction.proof.clone().into_single_proof().clone(),
-                proof_job_options.job_settings.network,
+                network,
             )
             .await,
             "Transaction proof must be valid to generate a block"
@@ -283,7 +281,6 @@ impl Block {
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
             block_timestamp,
-            target_block_interval,
             triton_vm_job_queue,
             proof_job_options,
         )
@@ -297,7 +294,6 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
@@ -305,7 +301,6 @@ impl Block {
             predecessor,
             transaction,
             block_timestamp,
-            target_block_interval,
             triton_vm_job_queue,
             proof_job_options,
         )
@@ -707,16 +702,7 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> bool {
-        match self
-            .is_valid_internal(
-                previous_block,
-                now,
-                Some(network.target_block_interval()),
-                Some(network.minimum_block_time()),
-                network,
-            )
-            .await
-        {
+        match self.validate(previous_block, now, network).await {
             Ok(_) => true,
             Err(e) => {
                 warn!("{e}");
@@ -725,21 +711,17 @@ impl Block {
         }
     }
 
-    /// Verify a block.
+    /// Verify a block against previous block and return detailed error
     ///
-    /// Like `is_valid` but also allows specifying a custom
-    /// `target_block_interval` and `minimum_block_time`. If `None` is passed,
-    /// these variables take the default values.
+    /// This method assumes that the previous block is valid.
     ///
-    /// Also, unlike `is_valid`, this function returns a `Result` type whose
-    /// associated error type is a [`BlockValidationError`]. This error type gives
-    /// the caller feedback about why the block is invalid.
-    async fn is_valid_internal(
+    /// Note that this function does **not** check that the block has enough
+    /// proof of work; that must be done separately by the caller, for instance
+    /// by calling [`Self::has_proof_of_work`].
+    pub async fn validate(
         &self,
         previous_block: &Block,
         now: Timestamp,
-        target_block_interval: Option<Timestamp>,
-        minimum_block_time: Option<Timestamp>,
         network: Network,
     ) -> Result<(), BlockValidationError> {
         const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
@@ -765,23 +747,29 @@ impl Block {
         }
 
         // 0.d)
+        if previous_block.kernel.header.timestamp + network.minimum_block_time()
+            > self.kernel.header.timestamp
         {
-            let minimum_block_time = minimum_block_time.unwrap_or(MINIMUM_BLOCK_TIME);
-            if previous_block.kernel.header.timestamp + minimum_block_time
-                > self.kernel.header.timestamp
-            {
-                return Err(BlockValidationError::MinimumBlockTime);
-            }
+            return Err(BlockValidationError::MinimumBlockTime);
         }
 
         // 0.e)
-        let expected_difficulty = difficulty_control(
+        let expected_difficulty = if Self::should_reset_difficulty(
+            network,
             self.header().timestamp,
             previous_block.header().timestamp,
-            previous_block.header().difficulty,
-            target_block_interval,
-            previous_block.header().height,
-        );
+        ) {
+            network.genesis_difficulty()
+        } else {
+            difficulty_control(
+                self.header().timestamp,
+                previous_block.header().timestamp,
+                previous_block.header().difficulty,
+                network.target_block_interval(),
+                previous_block.header().height,
+            )
+        };
+
         if self.kernel.header.difficulty != expected_difficulty {
             return Err(BlockValidationError::Difficulty);
         }
@@ -923,6 +911,18 @@ impl Block {
         Ok(())
     }
 
+    pub(crate) fn should_reset_difficulty(
+        network: Network,
+        current_block_timestamp: Timestamp,
+        previous_block_timestamp: Timestamp,
+    ) -> bool {
+        if let Some(reset_interval) = network.difficulty_reset_interval() {
+            let elapsed_interval = current_block_timestamp - previous_block_timestamp;
+            return elapsed_interval >= reset_interval;
+        }
+        false
+    }
+
     /// Determine whether the proof-of-work puzzle was solved correctly.
     ///
     /// Specifically, compare the hash of the current block against the
@@ -931,7 +931,17 @@ impl Block {
     /// `TARGET_BLOCK_INTERVAL` by a factor `ADVANCE_DIFFICULTY_CORRECTION_WAIT`
     /// then the effective difficulty is reduced by a factor
     /// `ADVANCE_DIFFICULTY_CORRECTION_FACTOR`.
-    pub fn has_proof_of_work(&self, previous_block_header: &BlockHeader) -> bool {
+    pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
+        // enforce network difficulty-reset-interval if present.
+        if Self::should_reset_difficulty(
+            network,
+            self.header().timestamp,
+            previous_block_header.timestamp,
+        ) && self.header().difficulty == network.genesis_difficulty()
+        {
+            return true;
+        }
+
         let hash = self.hash();
         let threshold = previous_block_header.difficulty.target();
         if hash <= threshold {
@@ -939,10 +949,11 @@ impl Block {
         }
 
         let delta_t = self.header().timestamp - previous_block_header.timestamp;
-        let excess_multiple = usize::try_from(
-            delta_t.to_millis() / TARGET_BLOCK_INTERVAL.to_millis(),
-        )
-        .expect("excessive timestamp on incoming block should have been caught by peer loop");
+        let excess_multiple =
+            usize::try_from(delta_t.to_millis() / network.target_block_interval().to_millis())
+                .expect(
+                    "excessive timestamp on incoming block should have been caught by peer loop",
+                );
         let shift = usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()).unwrap()
             * (excess_multiple
                 >> usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()).unwrap());
@@ -1157,8 +1168,8 @@ pub(crate) mod tests {
         // Insert the real difficulty such that the block's hash can be
         // compared to the one found in block explorers and other real
         // instances, otherwise the hash would only be valid for test code.
-        let genesis_block =
-            Block::genesis(Network::Main).with_difficulty(BlockHeader::GENESIS_DIFFICULTY);
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
         assert_eq!(
             "3eeaed3acdd8765b9a3e689d74f745365d6a3de57fb4a9a19c46ac432ce419a92fb82d47dc0d3f54",
             genesis_block.hash().to_hex()
@@ -1217,7 +1228,7 @@ pub(crate) mod tests {
             let block_primitive_witness = BlockPrimitiveWitness::new(genesis.clone(), coinbase);
             let block_proof_witness = BlockProofWitness::produce(block_primitive_witness.clone());
             let block1 = Block::new(
-                block_primitive_witness.header(now, None),
+                block_primitive_witness.header(now, network.target_block_interval()),
                 block_primitive_witness.body().to_owned(),
                 block_proof_witness.appendix(),
                 BlockProof::Invalid,
@@ -1283,13 +1294,14 @@ pub(crate) mod tests {
                 let duration = i as u64 * multiplier;
                 now += Timestamp::millis(duration);
 
-                let (block, _) = make_mock_block(&block_prev, Some(now), a_key, rng.random()).await;
+                let (block, _) =
+                    make_mock_block(network, &block_prev, Some(now), a_key, rng.random()).await;
 
                 let control = difficulty_control(
                     block.kernel.header.timestamp,
                     block_prev.header().timestamp,
                     block_prev.header().difficulty,
-                    None, // target_block_interval
+                    network.target_block_interval(), // target_block_interval
                     block_prev.header().height,
                 );
                 assert_eq!(block.kernel.header.difficulty, control);
@@ -1381,7 +1393,7 @@ pub(crate) mod tests {
             let wallet_secret = WalletEntropy::new_random();
             let key = wallet_secret.nth_generation_spending_key_for_tests(0);
             let (new_block, _) =
-                make_mock_block(blocks.last().unwrap(), None, key, rng.random()).await;
+                make_mock_block(network, blocks.last().unwrap(), None, key, rng.random()).await;
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
@@ -1544,7 +1556,6 @@ pub(crate) mod tests {
                     &block1,
                     block2_tx,
                     plus_eight_months,
-                    None,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default(),
                 )
@@ -1603,7 +1614,6 @@ pub(crate) mod tests {
                     &block2_without_valid_pow,
                     block3_tx,
                     plus_nine_months,
-                    None,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default(),
                 )
@@ -1764,11 +1774,13 @@ pub(crate) mod tests {
             // Ensure that multiple ways of deriving guesser-fee addition
             // records are consistent.
 
+            let network = Network::Main;
             let mut rng = rand::rng();
-            let genesis_block = Block::genesis(Network::Main);
+            let genesis_block = Block::genesis(network);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
             let guesser_preimage = rng.random();
             let (block1, _) = make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+                network,
                 &genesis_block,
                 vec![],
                 vec![],
@@ -1869,7 +1881,7 @@ pub(crate) mod tests {
                 &genesis_block,
                 (*tx1).clone(),
                 in_seven_months,
-                None,
+                network.target_block_interval(),
             );
             alice.set_new_tip(block1.clone()).await.unwrap();
 
@@ -1884,8 +1896,12 @@ pub(crate) mod tests {
                 .unwrap()
                 .transaction;
 
-            let block2 =
-                Block::block_template_invalid_proof(&block1, (*tx2).clone(), in_eight_months, None);
+            let block2 = Block::block_template_invalid_proof(
+                &block1,
+                (*tx2).clone(),
+                in_eight_months,
+                network.target_block_interval(),
+            );
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
@@ -1946,7 +1962,7 @@ pub(crate) mod tests {
         let launch_date = network.launch_date();
         let mut now = launch_date + Timestamp::months(6);
         for i in 1..3 {
-            now += TARGET_BLOCK_INTERVAL;
+            now += network.target_block_interval();
 
             // create coinbase transaction
             let (mut transaction, _) = make_coinbase_transaction_from_state(
@@ -2016,16 +2032,13 @@ pub(crate) mod tests {
                 blocks.last().unwrap(),
                 transaction,
                 now,
-                None,
                 job_queue.clone(),
                 TritonVmProofJobOptions::default(),
             )
             .await
             .unwrap();
 
-            let block_is_valid = block
-                .is_valid_internal(blocks.last().unwrap(), now, None, None, network)
-                .await;
+            let block_is_valid = block.validate(blocks.last().unwrap(), now, network).await;
             println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));
             println!();
             assert!(block_is_valid.is_ok());

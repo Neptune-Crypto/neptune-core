@@ -1235,7 +1235,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn prune_stale_transactions() {
-        let network = Network::Alpha;
+        let network = Network::Beta;
         let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
         assert!(
@@ -1308,7 +1308,7 @@ mod tests {
         // mine a block.
         let genesis_block = Block::genesis(network);
         let (block_1, expected_1) =
-            make_mock_block(&genesis_block, None, alice_key, rng.random()).await;
+            make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
 
         // Update both states with block 1
         alice
@@ -1434,8 +1434,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let block_2 =
-            Block::block_template_invalid_proof(&block_1, block_transaction, in_eight_months, None);
+        let block_2 = Block::block_template_invalid_proof(
+            &block_1,
+            block_transaction,
+            in_eight_months,
+            network.target_block_interval(),
+        );
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
@@ -1468,7 +1472,7 @@ mod tests {
         let mut previous_block = block_2;
         for _ in 0..2 {
             let (next_block, _) =
-                make_mock_block(&previous_block, None, alice_key, rng.random()).await;
+                make_mock_block(network, &previous_block, None, alice_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
             let (_, update_jobs_n) = mempool.update_with_block_and_predecessor(
@@ -1516,7 +1520,7 @@ mod tests {
             &previous_block,
             block_tx_5,
             block_5_timestamp,
-            None,
+            network.target_block_interval(),
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
@@ -1712,8 +1716,14 @@ mod tests {
                 "The inserted tx must be in the mempool"
             );
 
-            let (next_block, _) =
-                make_mock_block(&current_block, Some(in_seven_years), bob_key, rng.random()).await;
+            let (next_block, _) = make_mock_block(
+                network,
+                &current_block,
+                Some(in_seven_years),
+                bob_key,
+                rng.random(),
+            )
+            .await;
             let update_jobs = alice.set_new_tip(next_block.clone()).await.unwrap();
             assert!(update_jobs.len().is_one(), "Must return exactly update-job");
             mocked_mempool_update_handler(update_jobs, &mut alice.lock_guard_mut().await.mempool)
@@ -1751,8 +1761,14 @@ mod tests {
         }
 
         // Now make a deep reorganization and verify that nothing crashes
-        let (block_1b, _) =
-            make_mock_block(&genesis_block, Some(in_seven_years), bob_key, rng.random()).await;
+        let (block_1b, _) = make_mock_block(
+            network,
+            &genesis_block,
+            Some(in_seven_years),
+            bob_key,
+            rng.random(),
+        )
+        .await;
         assert!(
             block_1b.header().height.previous().unwrap().is_genesis(),
             "Sanity check that new tip has height 1"

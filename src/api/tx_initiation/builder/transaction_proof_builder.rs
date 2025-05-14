@@ -253,20 +253,32 @@ impl<'a> TransactionProofBuilder<'a> {
         if proof_job_options.job_settings.proof_type.is_single_proof() {
             // claim, nondeterminism --> single proof
             if let Some((c, nd)) = claim_and_nondeterminism {
-                return gen_single(c, nd, job_queue, proof_job_options, valid_mock).await;
+                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
             }
             // single-proof-witness --> single proof
             else if let Some(w) = single_proof_witness {
                 let c = w.claim();
-                let nd = w.nondeterminism();
-                return gen_single(c, nd, job_queue, proof_job_options, valid_mock).await;
+                return gen_single(
+                    c,
+                    || w.nondeterminism(),
+                    job_queue,
+                    proof_job_options,
+                    valid_mock,
+                )
+                .await;
             }
             // proof-collection --> single proof
             else if let Some(pc) = proof_collection {
                 let w = SingleProofWitness::from_collection(pc);
                 let c = w.claim();
-                let nd = w.nondeterminism();
-                return gen_single(c, nd, job_queue, proof_job_options, valid_mock).await;
+                return gen_single(
+                    c,
+                    || w.nondeterminism(),
+                    job_queue,
+                    proof_job_options,
+                    valid_mock,
+                )
+                .await;
             }
         }
 
@@ -291,13 +303,16 @@ impl<'a> TransactionProofBuilder<'a> {
 // builds TransactionProof::SingleProof from Claim, NonDeterminism
 //
 // will generate a mock proof if Network::use_mock_proof() is true.
-async fn gen_single(
+async fn gen_single<'a, F>(
     claim: Claim,
-    nondeterminism: NonDeterminism,
+    nondeterminism: F,
     job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
     valid_mock: bool,
-) -> Result<TransactionProof, CreateProofError> {
+) -> Result<TransactionProof, CreateProofError>
+where
+    F: FnOnce() -> NonDeterminism + Send + Sync + 'a,
+{
     Ok(TransactionProof::SingleProof(
         ProofBuilder::new()
             .program(SingleProof.program())

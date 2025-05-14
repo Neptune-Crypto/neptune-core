@@ -89,13 +89,14 @@ mod tests {
 
     #[test]
     fn cannot_transfer_blocks_that_are_not_single_proof_supported() {
-        let genesis = Block::genesis(Network::Main);
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
         let tblock_genesis: Result<TransferBlock> = (&genesis).try_into();
         assert!(
             tblock_genesis.is_err(),
             "Transferring genesis block is disallowed"
         );
-        let invalid_block_1 = invalid_empty_block(&genesis);
+        let invalid_block_1 = invalid_empty_block(network, &genesis);
         let tblock_1 = TransferBlock::try_from(invalid_block_1);
         assert!(
             tblock_1.is_err(),
