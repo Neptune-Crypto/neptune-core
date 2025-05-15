@@ -1,10 +1,12 @@
 use std::ops::DerefMut;
+use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
+use regex::Regex;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
@@ -522,6 +524,48 @@ impl ArchivalState {
             .ammr_mut()
             .append(new_block.hash())
             .await;
+    }
+
+    /// Return a sorted list of the names of the files that store blocks in the
+    /// specified directory.
+    pub(super) fn read_block_file_names_from_directory(directory: &Path) -> Result<Vec<PathBuf>> {
+        let entries = directory.read_dir()?;
+
+        // Capture all indices from the block files, from the names
+        // "blk(d+).dat".
+        let blk_file_name_regex = Regex::new(r"^blk(\d+)\.dat$").unwrap();
+        let mut block_file_indices = vec![];
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let Ok(file_name) = entry.file_name().into_string() else {
+                bail!("Could not convert {entry:?} to file name");
+            };
+
+            if !blk_file_name_regex.is_match(&file_name) {
+                continue;
+            }
+
+            let caps = blk_file_name_regex.captures(&file_name).unwrap();
+            block_file_indices.push(caps[1].parse::<u32>()?);
+        }
+
+        // Sort to ensure blocks are applied in order, from file blk0.dat to
+        // blk{N}.dat, while avoiding to process e.g. blk10.dat before
+        // blk2.dat.
+        block_file_indices.sort_unstable();
+
+        // Convert indices back to paths
+        let directory = directory.to_path_buf();
+        Ok(block_file_indices
+            .into_iter()
+            .map(|blk_index| {
+                let mut file_name = directory.clone();
+                file_name.push(format!("blk{blk_index}.dat"));
+                file_name
+            })
+            .collect())
     }
 
     /// Attempt to deserialize a list of blocks from a file, without access to

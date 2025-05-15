@@ -41,7 +41,6 @@ use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::Zero;
-use regex::Regex;
 use tasm_lib::triton_vm::prelude::*;
 use tracing::debug;
 use tracing::info;
@@ -1756,40 +1755,11 @@ impl GlobalState {
             "Reading all blocks from directory '{}'",
             directory.to_string_lossy()
         );
-        let entries = directory.read_dir()?;
-
-        let blk_file_name_regex = Regex::new(r"^blk(\d+)\.dat$").unwrap();
-
-        let mut block_file_indices = vec![];
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let Ok(file_name) = entry.file_name().into_string() else {
-                bail!("Could not convert {entry:?} to file name");
-            };
-
-            if !blk_file_name_regex.is_match(&file_name) {
-                continue;
-            }
-
-            let caps = blk_file_name_regex.captures(&file_name).unwrap();
-            block_file_indices.push(caps[1].parse::<u32>()?);
-        }
-
-        // Sort to ensure blocks are applied in order, from file blk0.dat to
-        // blk\d\d.dat, while avoiding to process e.g. blk10.dat before
-        // blk2.dat.
-        block_file_indices.sort_unstable();
-
+        let block_file_paths = ArchivalState::read_block_file_names_from_directory(directory)?;
         let mut num_stored_blocks = 0;
-
         let mut predecessor = self.chain.light_state().clone();
-        for block_file_index in block_file_indices {
-            let mut file_path = directory.to_path_buf();
-            let block_file_name = format!("blk{block_file_index}.dat");
-            file_path.push(&block_file_name);
-            let blocks = ArchivalState::blocks_from_file_without_record(&file_path).await?;
+        for block_file_path in block_file_paths {
+            let blocks = ArchivalState::blocks_from_file_without_record(&block_file_path).await?;
 
             // Blocks are assumed to be stored in-order in the file.
             for block in blocks {
@@ -1802,8 +1772,9 @@ impl GlobalState {
                 let block_height = block.header().height;
                 if !block_is_new {
                     warn!(
-                        "Attempted to process a block from {block_file_name} \
-                        which was already known. Block height: {block_height}."
+                        "Attempted to process a block from {} \
+                        which was already known. Block height: {block_height}.",
+                        block_file_path.to_string_lossy()
                     );
                     continue;
                 }
@@ -1833,14 +1804,16 @@ impl GlobalState {
                         block
                             .is_valid(&predecessor, Timestamp::now(), self.cli.network)
                             .await,
-                        "Attempted to process a block from {block_file_name} \
-                        which is invalid. Block height: {block_height}."
+                        "Attempted to process a block from {} \
+                        which is invalid. Block height: {block_height}.",
+                        block_file_path.to_string_lossy()
                     );
                     ensure!(
                         block.has_proof_of_work(predecessor.header()),
-                        "Attempted to process a block from {block_file_name} \
+                        "Attempted to process a block from {} \
                         which does not have required PoW amount. \
-                        Block height: {block_height}."
+                        Block height: {block_height}.",
+                        block_file_path.to_string_lossy()
                     );
                 }
 
