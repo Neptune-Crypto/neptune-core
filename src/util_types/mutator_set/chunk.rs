@@ -315,6 +315,36 @@ mod tests {
         assert_eq!(chunk, decoded);
     }
 
+    /// Collect statistics about the typical number of elements in a `Chunk`.
+    ///
+    /// This information is relevant in the context of densly representing
+    /// `Chunk`s -- in particular, for answering the question, "how many bits
+    /// should we use to encode the length?". The simplest proposal is to use 12
+    /// bits -- the same as the bit length used for elements. However, there is
+    /// a nonzero probability that a `Chunk` becomes so full that 12 bits is not
+    /// enough to encode its length. We want to bound that probability to a
+    /// negligible quantity.
+    ///
+    /// Using the Chernoff bound for binomial distributions, it is possible to
+    /// bound this tail event probability to 2^-4367 [1]. However, this analysis
+    /// might be wrong somewhere, so it's useful to have an independent piece of
+    /// evidence (in the form of a unit test) supporting the viability of 12
+    /// bits.
+    ///
+    /// If these statistics are correct --
+    ///
+    /// ```notest
+    /// mean: 360.03576
+    /// variance: 359.3943412223999
+    /// stddev: 18.95769873224068
+    /// ```
+    ///
+    /// -- then heuristically bound the tail end of the probability distribution
+    /// by approximating it as a Gaussian. In fact, right off the bat, 4096 is
+    /// around 185 standard deviations away from the mean. This number is a far
+    /// cry from the standard 3-4-5 simgas in the 3-4-5 sigma rule. So maybe the
+    /// 4367 bits is not too far off. But let's try and compute this probability
+    /// anyway.
     #[ignore = "informative statistics"]
     #[test]
     fn chunk_length_statistics() {
