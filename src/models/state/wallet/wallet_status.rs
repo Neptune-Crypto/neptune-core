@@ -10,7 +10,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WalletStatusElement {
     pub aocl_leaf_index: u64,
     pub utxo: Utxo,

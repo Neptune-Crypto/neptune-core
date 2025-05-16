@@ -971,6 +971,18 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None)
 }
 
+/// Return a list of `n` invalid, empty blocks.
+pub(crate) fn invalid_empty_blocks(ancestor: &Block, n: usize) -> Vec<Block> {
+    let mut blocks = vec![];
+    let mut predecessor = ancestor;
+    for _ in 0..n {
+        blocks.push(invalid_empty_block(predecessor));
+        predecessor = blocks.last().unwrap();
+    }
+
+    blocks
+}
+
 pub(crate) fn invalid_empty_block_with_timestamp(
     predecessor: &Block,
     timestamp: Timestamp,
