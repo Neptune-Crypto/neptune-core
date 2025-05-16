@@ -1985,6 +1985,47 @@ mod tests {
             transaction
         }
 
+        #[apply(shared_tokio_runtime)]
+        async fn always_preserve_primitive_witness_if_available() {
+            let network = Network::Main;
+            let fee = NativeCurrencyAmount::coins(1);
+            let pw_tx =
+                tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee).await;
+            let txid = pw_tx.txid();
+
+            let genesis_block = Block::genesis(network);
+            let mut mempool = setup_mock_mempool(0, TransactionOrigin::Foreign, &genesis_block);
+            mempool.insert(pw_tx.into(), TransactionOrigin::Own);
+
+            let pc_tx =
+                tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee).await;
+            mempool.insert(pc_tx.into(), TransactionOrigin::Own);
+            assert_eq!(
+                1,
+                mempool.len(),
+                "assumption: original transaction replaced"
+            );
+
+            assert!(
+                mempool.tx_dictionary[&txid].primitive_witness.is_some(),
+                "proof collection may not delete primitive witness"
+            );
+
+            let sp_tx = tx_with_proof_type(TxProvingCapability::SingleProof, network, fee).await;
+            mempool.insert(sp_tx.into(), TransactionOrigin::Own);
+            assert_eq!(
+                1,
+                mempool.len(),
+                "assumption: original transaction replaced"
+            );
+
+            assert_eq!(1, mempool.len());
+            assert!(
+                mempool.tx_dictionary[&txid].primitive_witness.is_some(),
+                "single proof may not delete primitive witness"
+            );
+        }
+
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn single_proof_always_replaces_primitive_witness() {
