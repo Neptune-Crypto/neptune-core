@@ -5024,7 +5024,7 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(10_000_000, None, true);
+                .get_transactions_for_block_composition(10_000_000, None);
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
             let new_num_public_announcements =

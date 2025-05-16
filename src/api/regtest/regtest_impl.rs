@@ -118,11 +118,9 @@ impl RegTestPrivate {
             .guesser_spending_key(tip_block.hash());
 
         // retrieve selected tx from mempool for block inclusion.
-        let txs_from_mempool = gs.mempool.get_transactions_for_block(
-            SIZE_20MB_IN_BYTES,
-            Some(MAX_NUM_TXS_TO_MERGE),
-            true, //only_merge_single_proofs
-        );
+        let txs_from_mempool = gs
+            .mempool
+            .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, Some(MAX_NUM_TXS_TO_MERGE));
 
         drop(gs);
 

@@ -633,19 +633,17 @@ pub(crate) async fn create_block_transaction_from(
     .await?;
 
     // Get most valuable transactions from mempool.
-    let only_merge_single_proofs = true;
     let mut transactions_to_merge = match tx_merge_origin {
-        #[cfg(test)]
-        TxMergeOrigin::ExplicitList(transactions) => transactions,
         TxMergeOrigin::Mempool => global_state_lock
             .lock_guard()
             .await
             .mempool
-            .get_transactions_for_block(
+            .get_transactions_for_block_composition(
                 block_capacity_for_transactions,
                 Some(MAX_NUM_TXS_TO_MERGE),
-                only_merge_single_proofs,
             ),
+        #[cfg(test)]
+        TxMergeOrigin::ExplicitList(transactions) => transactions,
     };
 
     // If necessary, populate list with nop-tx.
