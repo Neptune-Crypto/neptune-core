@@ -668,7 +668,7 @@ impl GlobalState {
         let mempool = Mempool::new(
             cli.max_mempool_size,
             cli.max_mempool_num_tx,
-            chain.light_state().hash(),
+            chain.light_state(),
         );
 
         Ok(Self::new(wallet_state, chain, net, cli, mempool))

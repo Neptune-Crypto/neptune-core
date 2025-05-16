@@ -122,7 +122,6 @@ impl RegTestPrivate {
             SIZE_20MB_IN_BYTES,
             Some(MAX_NUM_TXS_TO_MERGE),
             true, //only_merge_single_proofs
-            tip_block.mutator_set_accumulator_after().unwrap().hash(),
         );
 
         drop(gs);

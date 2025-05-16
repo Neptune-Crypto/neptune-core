@@ -645,7 +645,6 @@ pub(crate) async fn create_block_transaction_from(
                 block_capacity_for_transactions,
                 Some(MAX_NUM_TXS_TO_MERGE),
                 only_merge_single_proofs,
-                mutator_set_hash,
             ),
     };
 
