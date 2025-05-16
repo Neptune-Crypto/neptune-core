@@ -2139,7 +2139,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .tx_pool
-                .get_sorted_iter()
+                .iter()
                 .next_back()
                 .expect("mempool should contain one item here");
 

@@ -1691,6 +1691,7 @@ mod tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
+    use crate::api::export::Transaction;
     use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
@@ -4028,7 +4029,7 @@ mod tests {
                     &charlie_state_lock,
                     seven_months_post_launch,
                     (TritonVmJobPriority::Normal, None).into(),
-                    TxMergeOrigin::Explicit(vec![Arc::into_inner(alice_to_bob_tx).unwrap()]),
+                    TxMergeOrigin::Explicit(Arc::into_inner(alice_to_bob_tx)),
                 )
                 .await
                 .unwrap();

@@ -66,7 +66,7 @@ pub(crate) struct GuessingConfiguration {
     pub(crate) num_guesser_threads: Option<usize>,
 }
 
-async fn upgrade_transaction() {
+async fn upgrade_transaction() -> Result<()> {
     todo!("get the first step of 3-step mining going")
 }
 
@@ -795,14 +795,13 @@ pub(crate) async fn mine(
 
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
-        let compose = cli_args.compose;
-        let mut composer_task = if !wait_for_confirmation
-            && compose
+        let compose = !wait_for_confirmation
+            && cli_args.compose
             && guesser_task.is_none()
             && !is_syncing
             && !pause_mine
-            && is_connected
-        {
+            && is_connected;
+        let mut composer_task = if compose {
             global_state_lock.set_mining_status_to_composing().await;
 
             let latest_block = global_state_lock
@@ -816,12 +815,20 @@ pub(crate) async fn mine(
                 Timestamp::now(),
             );
 
-            let task = tokio::task::Builder::new()
+            tokio::task::Builder::new()
                 .name("composer")
                 .spawn(compose_task)
-                .expect("Failed to spawn composer task.");
+                .expect("Failed to spawn composer task.")
+        } else {
+            tokio::spawn(async { Ok(()) })
+        };
 
-            task
+        let do_upgrades = cli_args.upgrade && !compose && guesser_task.is_none();
+        let mut upgrader_task = if do_upgrades {
+            tokio::task::Builder::new()
+                .name("upgrade")
+                .spawn(upgrade_transaction())
+                .expect("Failed to spawn upgrade task.")
         } else {
             tokio::spawn(async { Ok(()) })
         };
@@ -837,6 +844,7 @@ pub(crate) async fn mine(
             _ = &mut guess_restart_timer => {
                 restart_guessing = true;
             }
+            _ = &mut upgrader_task => todo!("Error handling, I guess?"),
             Ok(Err(e)) = &mut composer_task => {
 
                 match e.root_cause().downcast_ref::<CreateProofError>() {

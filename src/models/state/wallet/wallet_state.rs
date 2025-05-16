@@ -4611,7 +4611,6 @@ pub(crate) mod tests {
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-        use crate::models::state::mempool::TransactionOrigin;
         use crate::MainToPeerTask;
         use crate::PEER_CHANNEL_CAPACITY;
 

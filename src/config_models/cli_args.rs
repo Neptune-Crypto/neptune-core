@@ -102,17 +102,30 @@ pub struct Args {
     #[clap(long, alias = "notx")]
     pub(crate) no_transaction_initiation: bool,
 
-    /// Whether to produce block proposals, which is the first step of two-step
-    /// mining. Note that composing block proposals involves the computationally
-    /// expensive task of producing STARK proofs. You should have plenty of
-    /// cores and probably at least 128 GB of RAM.
+    /// Whether to upgrade transactions that are stored in the mempool such that
+    /// they can be included in a block. This is the first step in three-step
+    /// mining.
+    ///
+    /// Upgrading work means producing STARK proofs. This requires powerful
+    /// hardware. We recommend at least 128 GiB of RAM and at least 64 CPU
+    /// cores.
+    ///
+    /// For one machine, it makes only sense to perform at most one of the
+    /// three mining tasks.
+    #[clap(long)]
+    pub(crate) upgrade: bool,
+
+    /// Whether to produce block proposals, which is the second step of three-
+    /// step mining. Note that composing block proposals involves the
+    /// computationally expensive task of producing STARK proofs. You should
+    /// have plenty of cores and probably at least 128 GB of RAM.
     #[clap(long)]
     pub(crate) compose: bool,
 
-    /// Whether to engage in guess-nonce-and-hash, which is the second step in
-    /// two-step mining. If this flag is set and the `compose` flag is not set,
-    /// then the client will rely on block proposals from other nodes. In this
-    /// case, it will always pick the most profitable block proposal.
+    /// Whether to engage in guess-nonce-and-hash, which is the third step in
+    /// three-step mining. If this flag is set and the `compose` flag is not
+    /// set, then the client will rely on block proposals from other nodes. In
+    /// this case, it will always pick the most profitable block proposal.
     ///
     /// If this flag is set and the `compose` flag is set, then the client will
     /// always guess on their own block proposal.
