@@ -202,7 +202,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let mempool = Mempool::new(
         cli_args.max_mempool_size,
         cli_args.max_mempool_num_tx,
-        blockchain_state.light_state().hash(),
+        blockchain_state.light_state(),
     );
 
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =

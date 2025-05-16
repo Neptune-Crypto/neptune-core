@@ -4832,8 +4832,6 @@ pub(crate) mod tests {
             let rando_cli_args = cli_args::Args {
                 fee_notification: upgrade_fee_notification_policy,
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
-                // necessary to allow proof-collection -> single-proof upgrades for foreign transactions
-                compose: true,
                 ..Default::default()
             };
             let mut rando =
@@ -4860,6 +4858,15 @@ pub(crate) mod tests {
                 )
                 .await;
             drop(nowhere_one); // drop must occur after message is sent
+
+            // Get the "raised" transaction, which must now be in rando's
+            // mempool.
+            let single_proof_transaction = rando
+                .lock_guard()
+                .await
+                .mempool
+                .get_transactions_for_block_composition(1_000_000_000, None)[0]
+                .clone();
 
             // create block ignoring that transaction. Rando has upgraded tx
             // in mempool, alice does not. Alice composes block.
@@ -4897,12 +4904,6 @@ pub(crate) mod tests {
             // upgrade transaction again
             // this time mutator set data
             let genesis_mutator_set = genesis_block.mutator_set_accumulator_after();
-            let single_proof_transaction = rando
-                .lock_guard()
-                .await
-                .mempool
-                .get_transactions_for_block(10_000_000, None, true, genesis_mutator_set.hash())[0]
-                .clone();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
@@ -4923,12 +4924,11 @@ pub(crate) mod tests {
             drop(nowhere_two); // drop must occur after message is sent
 
             // get upgraded transaction
-            let block_one_mutator_set = block_one.mutator_set_accumulator_after();
             let transactions_for_block = rando
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(10_000_000, None, true, block_one_mutator_set.hash());
+                .get_transactions_for_block(10_000_000, None, true);
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
             let new_num_public_announcements =
