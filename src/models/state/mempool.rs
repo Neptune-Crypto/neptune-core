@@ -50,6 +50,7 @@ use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -114,9 +115,14 @@ impl std::fmt::Display for TransactionOrigin {
 }
 
 #[derive(Debug, GetSize, Clone, Serialize, Deserialize)]
-pub(crate) struct MempoolTransaction {
-    pub(crate) transaction: Transaction,
-    pub(crate) origin: TransactionOrigin,
+struct MempoolTransaction {
+    transaction: Transaction,
+    origin: TransactionOrigin,
+
+    /// Primitive witness of the transaction. Can be used to update proof-
+    /// collection backed transactions. If set, indicates that the transaction
+    /// originated on this node.
+    primitive_witness: Option<PrimitiveWitness>,
 }
 
 /// Unpersisted view of valid transactions that have not been confirmed yet.
@@ -391,8 +397,6 @@ impl Mempool {
             }
         }
 
-        let mut events = vec![];
-
         // If transaction to be inserted conflicts with transactions already in
         // the mempool, we replace them -- but only if the new transaction has a
         // higher fee-density than the ones already in mempool, or if it has
@@ -404,11 +408,28 @@ impl Mempool {
         // merged.
         let conflicts = self.transaction_conflicts_with(&new_tx);
 
-        // do not insert an existing transaction again
-        if conflicts.contains(&(new_tx.kernel.txid(), &new_tx)) {
+        // Do not insert an existing transaction again, if its an exact copy.
+        let txid = new_tx.txid();
+        if conflicts.contains(&(txid, &new_tx)) {
             return vec![];
         }
 
+        // Ensure we never throw away a primitive witness if we have one. This
+        // must happen before conflicting transactions are removed.
+        let primitive_witness = if let TransactionProof::Witness(pw) = &new_tx.proof {
+            Some(pw.to_owned())
+        } else {
+            self.tx_dictionary
+                .get(&txid)
+                .and_then(|tx| tx.primitive_witness.clone())
+        };
+        let as_mempool_transaction = MempoolTransaction {
+            transaction: new_tx.clone(),
+            origin,
+            primitive_witness,
+        };
+
+        let mut events = vec![];
         let new_tx_has_higher_proof_quality = new_tx_has_higher_proof_quality(&new_tx, &conflicts);
         let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
@@ -431,14 +452,7 @@ impl Mempool {
             }
         }
 
-        let txid = new_tx.kernel.txid();
-
         self.queue.push(txid, new_tx.fee_density());
-
-        let as_mempool_transaction = MempoolTransaction {
-            transaction: new_tx.clone(),
-            origin,
-        };
         self.tx_dictionary.insert(txid, as_mempool_transaction);
         events.push(MempoolEvent::AddTx(new_tx));
 
