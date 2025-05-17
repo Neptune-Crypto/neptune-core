@@ -14,7 +14,7 @@ use crate::config_models::network::Network;
 /// exceptions to this rule exist. For instance: scan mode can be activated by
 /// importing a wallet, even without CLI arguments.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct WalletConfiguration {
+pub struct WalletConfiguration {
     /// Whether we are in scan mode and, if so, how many future keys to scan
     /// with and the range of block heights where the scanning step is done.
     pub(crate) scan_mode: Option<ScanModeConfiguration>,
@@ -34,7 +34,7 @@ impl WalletConfiguration {
     ///
     /// Best used in combination with self-consuming constructor-helper
     /// [`Self::absorb_options`].
-    pub(crate) fn new(data_dir: &DataDirectory) -> Self {
+    pub fn new(data_dir: &DataDirectory) -> Self {
         Self {
             scan_mode: None,
             num_mps_per_utxo: 0,
@@ -47,7 +47,7 @@ impl WalletConfiguration {
     ///
     /// Extract those configuration options from the CLI arguments that are
     /// relevant for wallet state management.
-    pub(crate) fn absorb_options(mut self, cli_args: &cli_args::Args) -> Self {
+    pub fn absorb_options(mut self, cli_args: &cli_args::Args) -> Self {
         self.num_mps_per_utxo = cli_args.number_of_mps_per_utxo;
 
         self.scan_mode = match (&cli_args.scan_blocks, cli_args.scan_keys) {
