@@ -136,26 +136,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync
-    let block_index_db = ArchivalState::initialize_block_index_database(&data_directory).await?;
-    info!("Got block index database");
 
     let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
     info!("Got peer database");
 
-    let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_directory).await?;
-    info!("Got archival mutator set");
-
-    let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_directory).await?;
-    info!("Got archival block MMR");
-
-    let archival_state = ArchivalState::new(
-        data_directory.clone(),
-        block_index_db,
-        archival_mutator_set,
-        archival_block_mmr,
-        cli_args.network,
-    )
-    .await;
+    let genesis = Block::genesis(cli_args.network);
+    let archival_state = ArchivalState::new(data_directory.clone(), genesis).await;
+    info!("Got archival state");
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
     let latest_block: Block = archival_state.get_tip().await;

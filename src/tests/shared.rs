@@ -49,7 +49,6 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
-use crate::database::NeptuneLevelDb;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
@@ -81,8 +80,6 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
-use crate::models::database::BlockIndexKey;
-use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
 use crate::models::peer::handshake_data::VersionString;
 use crate::models::peer::peer_info::PeerConnectionInfo;
@@ -119,23 +116,6 @@ use crate::VERSION;
 /// Return an empty peer map
 pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
     HashMap::new()
-}
-
-// Return empty database objects, and root directory for this unit test instantiation's
-/// data directory.
-pub async fn unit_test_databases(
-    network: Network,
-) -> Result<(
-    NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
-    PeerDatabases,
-    DataDirectory,
-)> {
-    let data_dir: DataDirectory = unit_test_data_directory(network)?;
-
-    let block_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
-    let peer_db = NetworkingState::initialize_peer_databases(&data_dir).await?;
-
-    Ok((block_db, peer_db, data_dir))
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
@@ -909,24 +889,13 @@ pub async fn mock_genesis_wallet_state_with_data_dir(
 pub(crate) async fn mock_genesis_archival_state(
     network: Network,
 ) -> (ArchivalState, PeerDatabases, DataDirectory) {
-    let (block_index_db, peer_db, data_dir) = unit_test_databases(network).await.unwrap();
+    let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
 
-    let ams = ArchivalState::initialize_mutator_set(&data_dir)
+    let genesis = Block::genesis(network);
+    let archival_state = ArchivalState::new(data_dir.clone(), genesis).await;
+    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)
         .await
         .unwrap();
-
-    let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir)
-        .await
-        .unwrap();
-
-    let archival_state = ArchivalState::new(
-        data_dir.clone(),
-        block_index_db,
-        ams,
-        archival_block_mmr,
-        network,
-    )
-    .await;
 
     (archival_state, peer_db, data_dir)
 }
