@@ -132,16 +132,20 @@ impl<'a> Arbitrary<'a> for Chunk {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
+    use std::collections::HashSet;
 
     use num_traits::Zero;
-    use rand::{rng, RngCore};
-    use statrs::distribution::{ContinuousCDF, Normal};
+    use rand::rng;
+    use rand::RngCore;
+    use statrs::distribution::ContinuousCDF;
+    use statrs::distribution::Normal;
     use twenty_first::math::b_field_element::BFieldElement;
 
-    use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS, WINDOW_SIZE};
-
     use super::*;
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
     #[test]
     fn chunk_is_reversible_bloom_filter() {
