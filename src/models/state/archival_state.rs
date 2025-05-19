@@ -1,12 +1,10 @@
 use std::ops::DerefMut;
-use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
-use regex::Regex;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
@@ -14,6 +12,8 @@ use tokio::io::SeekFrom;
 use tracing::debug;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
+
+pub(crate) mod bootstrap_from_block_files;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
@@ -524,74 +524,6 @@ impl ArchivalState {
             .ammr_mut()
             .append(new_block.hash())
             .await;
-    }
-
-    /// Return a sorted list of the names of the files that store blocks in the
-    /// specified directory.
-    pub(super) fn read_block_file_names_from_directory(directory: &Path) -> Result<Vec<PathBuf>> {
-        let entries = directory.read_dir()?;
-
-        // Capture all indices from the block files, from the names
-        // "blk(d+).dat".
-        let blk_file_name_regex = Regex::new(r"^blk(\d+)\.dat$").unwrap();
-        let mut block_file_indices = vec![];
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let Ok(file_name) = entry.file_name().into_string() else {
-                bail!("Could not convert {entry:?} to file name");
-            };
-
-            if !blk_file_name_regex.is_match(&file_name) {
-                continue;
-            }
-
-            let caps = blk_file_name_regex.captures(&file_name).unwrap();
-            block_file_indices.push(caps[1].parse::<u32>()?);
-        }
-
-        // Sort to ensure blocks are applied in order, from file blk0.dat to
-        // blk{N}.dat, while avoiding to process e.g. blk10.dat before
-        // blk2.dat.
-        block_file_indices.sort_unstable();
-
-        // Convert indices back to paths
-        let directory = directory.to_path_buf();
-        Ok(block_file_indices
-            .into_iter()
-            .map(|blk_index| {
-                let mut file_name = directory.clone();
-                file_name.push(format!("blk{blk_index}.dat"));
-                file_name
-            })
-            .collect())
-    }
-
-    /// Attempt to deserialize a list of blocks from a file, without access to
-    /// a database to provide indexing and pointers. Assumes the same
-    /// file-encoding for blocks as is used in the rest of this module.
-    ///
-    /// Use this to extract a list of blocks from a file without having access
-    /// to a database.
-    ///
-    /// Provides no validation that the blocks are valid, have enough PoW, or
-    /// are stored in order in the file.
-    pub(super) async fn blocks_from_file_without_record(path: &PathBuf) -> Result<Vec<Block>> {
-        let block_file = tokio::fs::OpenOptions::new().read(true).open(path).await?;
-        let file_size = block_file.metadata().await?.len();
-
-        let mut offset = 0;
-        let mut blocks = vec![];
-        while offset < file_size {
-            let mmap = unsafe { MmapOptions::new().offset(offset).map(&block_file)? };
-            let block: Block = bincode::deserialize(&mmap)?;
-            offset += bincode::serialized_size(&block)?;
-
-            blocks.push(block);
-        }
-
-        Ok(blocks)
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
@@ -1223,7 +1155,7 @@ impl ArchivalState {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub(super) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::random;
@@ -1255,7 +1187,6 @@ mod tests {
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::invalid_block_with_transaction;
-    use crate::tests::shared::invalid_empty_blocks;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_archival_state;
     use crate::tests::shared::mock_genesis_global_state;
@@ -1266,7 +1197,7 @@ mod tests {
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::test_shared::mutator_set::random_removal_record;
 
-    async fn make_test_archival_state(network: Network) -> ArchivalState {
+    pub(super) async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();
 
         let ams = ArchivalState::initialize_mutator_set(&data_dir)
@@ -2476,28 +2407,6 @@ mod tests {
         }
 
         Ok(())
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn get_blocks_directly_from_file_without_database() {
-        let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network).await;
-        let blocks = invalid_empty_blocks(&archival_state.genesis_block, 10);
-
-        for i in 0..10 {
-            archival_state
-                .write_block_internal(&blocks[i], true)
-                .await
-                .unwrap();
-
-            let assumed_block_file = archival_state.data_dir.block_file_path(0);
-            let returned = ArchivalState::blocks_from_file_without_record(&assumed_block_file)
-                .await
-                .unwrap();
-
-            assert_eq!(blocks[0..=i], returned[..]);
-        }
     }
 
     #[traced_test]

@@ -1763,13 +1763,14 @@ impl GlobalState {
 
             // Blocks are assumed to be stored in-order in the file.
             for block in blocks {
+                let block_height = block.header().height;
+
                 let block_is_new = self
                     .chain
                     .archival_state()
                     .get_block_header(block.hash())
                     .await
                     .is_none();
-                let block_height = block.header().height;
                 if !block_is_new {
                     warn!(
                         "Attempted to process a block from {} \
@@ -3955,68 +3956,109 @@ mod tests {
         }
     }
 
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn can_restore_state_from_block_directory() {
-        // Ensure more than one file is used to store blocks.
-        const BIG_PROOF_LEN: usize = 6_250_000; // ~= 50MB
-        const MANY_BLOCKS: usize = 3;
+    mod bootstrap_from_raw_block_files {
+        use super::*;
 
-        let network = Network::Main;
-        let mut old_state = mock_genesis_global_state(
-            network,
-            3,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
-        let mut old_state = old_state.lock_guard_mut().await;
-        let stored_blocks = invalid_empty_blocks(&Block::genesis(network), MANY_BLOCKS);
-        let big_bad_proof = BlockProof::SingleProof(NeptuneProof::invalid_with_size(BIG_PROOF_LEN));
-        for mut block in stored_blocks {
-            block.set_proof(big_bad_proof.clone());
-            old_state.set_new_tip_internal(block).await.unwrap();
+        async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
+            // Ensure more than one file is used to store blocks.
+            const MANY_BLOCKS: usize = 3;
+            const BIG_PROOF_LEN: usize = 6_250_000; // ~= 50MB
+            let mut blocks = invalid_empty_blocks(&Block::genesis(network), MANY_BLOCKS);
+            let big_bad_proof =
+                BlockProof::SingleProof(NeptuneProof::invalid_with_size(BIG_PROOF_LEN));
+            for block in &mut blocks {
+                block.set_proof(big_bad_proof.clone());
+            }
+
+            let peer_count = 0;
+            let mut state = mock_genesis_global_state(
+                network,
+                peer_count,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default(),
+            )
+            .await;
+            {
+                let mut state = state.lock_guard_mut().await;
+                for block in blocks {
+                    state.set_new_tip_internal(block).await.unwrap();
+                }
+            }
+
+            state
         }
 
-        assert!(
-            old_state.chain.archival_state().num_block_files().await > 1,
-            "Test assumption: More than one file must exist"
-        );
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn validation_fails_on_invalid_blocks() {
+            let network = Network::Main;
+            let old_state = state_with_three_big_mocked_blocks(network).await;
+            let old_state = old_state.lock_guard().await;
 
-        // Build the new state from the block directory of old state.
-        let block_dir = old_state.chain.archival_state().block_dir_path();
-        let mut new_state = mock_genesis_global_state(
-            network,
-            3,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
-        let mut new_state = new_state.lock_guard_mut().await;
-        let validate_blocks = false;
-        new_state
-            .bootstrap_from_directory(&block_dir, validate_blocks)
-            .await
-            .unwrap();
+            let mut new_state = mock_genesis_global_state(
+                network,
+                0,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let mut new_state = new_state.lock_guard_mut().await;
 
-        assert_eq!(old_state.chain.light_state(), new_state.chain.light_state());
-        let tip = old_state.chain.light_state();
-        assert_eq!(*tip, new_state.chain.archival_state().get_tip().await);
-        assert_eq!(*tip, old_state.chain.archival_state().get_tip().await);
-        let msa = tip.mutator_set_accumulator_after();
-        assert_eq!(
-            old_state
-                .wallet_state
-                .get_wallet_status(tip.hash(), &msa)
+            let block_dir = old_state.chain.archival_state().block_dir_path();
+            let validate_blocks = true;
+            assert!(new_state
+                .bootstrap_from_directory(&block_dir, validate_blocks)
                 .await
-                .synced_unspent,
+                .is_err());
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn can_restore_state_from_block_directory() {
+            let network = Network::Main;
+            let old_state = state_with_three_big_mocked_blocks(network).await;
+            let old_state = old_state.lock_guard().await;
+            assert!(
+                old_state.chain.archival_state().num_block_files().await > 1,
+                "Test assumption: More than one file must exist"
+            );
+
+            // Build the new state from the block directory of old state.
+            let mut new_state = mock_genesis_global_state(
+                network,
+                0,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let mut new_state = new_state.lock_guard_mut().await;
+
+            let block_dir = old_state.chain.archival_state().block_dir_path();
+            let validate_blocks = false;
             new_state
-                .wallet_state
-                .get_wallet_status(tip.hash(), &msa)
+                .bootstrap_from_directory(&block_dir, validate_blocks)
                 .await
-                .synced_unspent,
-            "Restored wallet state must agree with original state"
-        );
+                .unwrap();
+
+            assert_eq!(old_state.chain.light_state(), new_state.chain.light_state());
+            let tip = old_state.chain.light_state();
+            assert_eq!(*tip, new_state.chain.archival_state().get_tip().await);
+            assert_eq!(*tip, old_state.chain.archival_state().get_tip().await);
+            let msa = tip.mutator_set_accumulator_after();
+            assert_eq!(
+                old_state
+                    .wallet_state
+                    .get_wallet_status(tip.hash(), &msa)
+                    .await
+                    .synced_unspent,
+                new_state
+                    .wallet_state
+                    .get_wallet_status(tip.hash(), &msa)
+                    .await
+                    .synced_unspent,
+                "Restored wallet state must agree with original state"
+            );
+        }
     }
 
     // note: removed test have_to_specify_change_policy()
