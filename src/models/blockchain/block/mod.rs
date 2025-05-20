@@ -1156,7 +1156,7 @@ pub(crate) mod tests {
 
     #[cfg(test)]
     impl Block {
-        fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
+        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
             self.kernel.header.difficulty = difficulty;
             self.unset_digest();
             self

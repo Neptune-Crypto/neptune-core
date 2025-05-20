@@ -3993,7 +3993,13 @@ mod tests {
     }
 
     mod bootstrap_from_raw_block_files {
+        use std::fs::File;
+        use std::io::Write;
+
         use super::*;
+        use crate::tests::shared::mock_genesis_global_state_with_block;
+        use crate::tests::shared::test_helper_data_dir;
+        use crate::tests::shared::try_fetch_file_from_server;
 
         async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
             // Ensure more than one file is used to store blocks.
@@ -4090,6 +4096,75 @@ mod tests {
                     .await
                     .synced_unspent,
                 "Restored wallet state must agree with original state"
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn can_restore_from_real_mainnet_data_with_reorganizations() {
+            let expected_blk_files = ["blk0.dat"];
+            let network = Network::Main;
+
+            // We need to override difficulty since it's different when the
+            // test flag is set. We need the real main net block.
+            let mainnets_real_genesis_block =
+                Block::genesis(network).with_difficulty(network.genesis_difficulty());
+
+            // Use at least four MPs per UTXO, otherwise they get unsynced.
+            let cli = cli_args::Args {
+                network,
+                number_of_mps_per_utxo: 4,
+                ..Default::default()
+            };
+            let peer_count = 0;
+
+            let mut state = mock_genesis_global_state_with_block(
+                peer_count,
+                WalletEntropy::devnet_wallet(),
+                cli,
+                mainnets_real_genesis_block,
+            )
+            .await;
+            let mut state = state.lock_guard_mut().await;
+
+            // Are the required blk files present on disk? If not, fetch them
+            // from a server.
+            let test_data_dir = test_helper_data_dir();
+            for blk_file_name in expected_blk_files {
+                let mut path = test_data_dir.clone();
+                path.push(blk_file_name);
+                if File::open(&path).is_err() {
+                    // Try fetching file from server and write it to disk.
+                    let (file, _server) = try_fetch_file_from_server(blk_file_name.to_owned())
+                        .unwrap_or_else(|| {
+                            panic!("File {blk_file_name} must be available from a server")
+                        });
+                    let mut f = File::create_new(&path).unwrap();
+                    f.write_all(&file).unwrap();
+                }
+            }
+
+            let validate_blocks = true;
+            state
+                .bootstrap_from_directory(&test_data_dir, validate_blocks)
+                .await
+                .unwrap();
+            let restored_block_height = state.chain.light_state().header().height;
+            assert_eq!(
+                BlockHeight::new(bfe!(113)),
+                restored_block_height,
+                "Expected block height not reached in state-recovery"
+            );
+
+            let wallet_status = state.get_wallet_status_for_tip().await;
+            let balance = state.wallet_state.confirmed_available_balance(
+                &wallet_status,
+                network.launch_date() + Timestamp::months(7),
+            );
+            assert_eq!(
+                NativeCurrencyAmount::coins(20),
+                balance,
+                "Expected balance must be available after state-recovery"
             );
         }
     }

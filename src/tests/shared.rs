@@ -106,6 +106,7 @@ use crate::models::state::wallet::address::generation_address::GenerationReceivi
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::wallet::wallet_configuration::WalletConfiguration;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::GlobalState;
@@ -188,17 +189,15 @@ pub(crate) fn get_dummy_peer_connection_data_genesis(
     (handshake, socket_address)
 }
 
-/// Get a global state object for unit test purposes. This global state
-/// populated with state from the genesis block, e.g. in the archival mutator
-/// set and the wallet.
-///
+/// Get a global state object for unit test purposes. This global state is
+/// populated with state from a caller-defined genesis block.
 /// All contained peers represent outgoing connections.
-pub(crate) async fn mock_genesis_global_state(
+pub(crate) async fn mock_genesis_global_state_with_block(
     peer_count: u8,
     wallet: WalletEntropy,
     cli: cli_args::Args,
+    genesis_block: Block,
 ) -> GlobalStateLock {
-    let genesis_block = Block::genesis(cli.network);
     let data_dir: DataDirectory = unit_test_data_directory(cli.network).unwrap();
     let archival_state = ArchivalState::new(data_dir.clone(), genesis_block.clone()).await;
 
@@ -228,7 +227,10 @@ pub(crate) async fn mock_genesis_global_state(
         genesis_block.hash(),
     );
 
-    let wallet_state = WalletState::new_from_wallet_entropy(&data_dir, wallet, &cli).await;
+    let configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);
+    let wallet_state = WalletState::try_new(configuration, wallet, &genesis_block)
+        .await
+        .unwrap();
 
     // dummy channel
     let (rpc_to_main_tx, mut rpc_to_main_rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(5);
@@ -241,6 +243,20 @@ pub(crate) async fn mock_genesis_global_state(
     let global_state = GlobalState::new(wallet_state, chain, net, cli, mempool);
 
     GlobalStateLock::from_global_state(global_state, rpc_to_main_tx)
+}
+
+/// Get a global state object for unit test purposes. This global state is
+/// populated with state from the genesis block, e.g. in the archival mutator
+/// set and the wallet.
+///
+/// All contained peers represent outgoing connections.
+pub(crate) async fn mock_genesis_global_state(
+    peer_count: u8,
+    wallet: WalletEntropy,
+    cli: cli_args::Args,
+) -> GlobalStateLock {
+    let genesis_block = Block::genesis(cli.network);
+    mock_genesis_global_state_with_block(peer_count, wallet, cli, genesis_block).await
 }
 
 /// A state with a premine UTXO and self-mined blocks. Both composing and
