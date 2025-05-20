@@ -496,10 +496,9 @@ pub(crate) mod tests {
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
         let alice_wallet = WalletEntropy::devnet_wallet();
         let alice = mock_genesis_global_state(
-            network,
             3,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
 

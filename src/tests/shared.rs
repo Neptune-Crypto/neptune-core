@@ -187,14 +187,17 @@ pub(crate) fn get_dummy_peer_connection_data_genesis(
 ///
 /// All contained peers represent outgoing connections.
 pub(crate) async fn mock_genesis_global_state(
-    // TODO: Remove network and read it from CLI arguments instead
-    network: Network,
     peer_count: u8,
     wallet: WalletEntropy,
     cli: cli_args::Args,
 ) -> GlobalStateLock {
-    let (archival_state, peer_db, _data_dir) = mock_genesis_archival_state(network).await;
+    let genesis_block = Block::genesis(cli.network);
+    let data_dir: DataDirectory = unit_test_data_directory(cli.network).unwrap();
+    let archival_state = ArchivalState::new(data_dir.clone(), genesis_block.clone()).await;
 
+    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)
+        .await
+        .unwrap();
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
@@ -202,16 +205,12 @@ pub(crate) async fn mock_genesis_global_state(
         peer_map.insert(peer_address, get_dummy_peer_outgoing(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db);
-    let genesis_block = archival_state.get_tip().await;
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
+    assert_eq!(archival_state.get_tip().await.hash(), genesis_block.hash());
 
     let light_state: LightState = LightState::from(genesis_block.to_owned());
-    println!(
-        "Genesis light state MSA hash: {}",
-        light_state.mutator_set_accumulator_after().hash()
-    );
     let blockchain_state = BlockchainState::Archival(Box::new(BlockchainArchivalState {
         light_state,
         archival_state,
@@ -222,7 +221,7 @@ pub(crate) async fn mock_genesis_global_state(
         genesis_block.hash(),
     );
 
-    let wallet_state = mock_genesis_wallet_state(wallet, network, &cli).await;
+    let wallet_state = WalletState::new_from_wallet_entropy(&data_dir, wallet, &cli).await;
 
     // dummy channel
     let (rpc_to_main_tx, mut rpc_to_main_rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(5);
@@ -232,7 +231,7 @@ pub(crate) async fn mock_genesis_global_state(
         }
     });
 
-    GlobalStateLock::new(
+    GlobalStateLock::new_internal(
         wallet_state,
         blockchain_state,
         networking_state,
@@ -250,11 +249,11 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
     rng: &mut T,
     num_blocks_mined: usize,
 ) -> GlobalStateLock {
+    let network = cli_args.network;
     let wallet = WalletEntropy::devnet_wallet();
     let own_key = wallet.nth_generation_spending_key_for_tests(0);
-    let network = cli_args.network;
     let mut global_state_lock =
-        mock_genesis_global_state(network, 2, wallet.clone(), cli_args).await;
+        mock_genesis_global_state(2, wallet.clone(), cli_args.clone()).await;
     let mut previous_block = Block::genesis(network);
 
     for _ in 0..num_blocks_mined {
@@ -304,7 +303,7 @@ pub(crate) async fn get_test_genesis_setup(
     let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
     let devnet_wallet = WalletEntropy::devnet_wallet();
-    let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
+    let state = mock_genesis_global_state(peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx,
@@ -866,23 +865,12 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
     .await
 }
 
-/// Return a dummy-wallet used for testing. The returned wallet is populated with
-/// whatever UTXOs are present in the genesis block.
-pub async fn mock_genesis_wallet_state(
+pub(crate) async fn mock_genesis_wallet_state(
     wallet_entropy: WalletEntropy,
-    network: Network,
     cli_args: &cli_args::Args,
 ) -> WalletState {
-    let data_dir = unit_test_data_directory(network).unwrap();
-    mock_genesis_wallet_state_with_data_dir(wallet_entropy, &data_dir, cli_args).await
-}
-
-pub async fn mock_genesis_wallet_state_with_data_dir(
-    wallet_entropy: WalletEntropy,
-    data_dir: &DataDirectory,
-    cli_args: &cli_args::Args,
-) -> WalletState {
-    WalletState::new_from_wallet_entropy(data_dir, wallet_entropy, cli_args).await
+    let data_dir = unit_test_data_directory(cli_args.network).unwrap();
+    WalletState::new_from_wallet_entropy(&data_dir, wallet_entropy, cli_args).await
 }
 
 /// Return an archival state populated with the genesis block

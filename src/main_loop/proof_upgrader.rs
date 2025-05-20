@@ -901,12 +901,11 @@ mod tests {
         // expiry of timelock). Rando is not premine recipient.
         let cli_args = cli_args::Args {
             min_gobbling_fee: NativeCurrencyAmount::from_nau(5),
-            network: Network::Main,
+            network,
             ..Default::default()
         };
         let alice =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone())
-                .await;
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
         let pc_tx_low_fee = transaction_from_state(
             alice.clone(),
             512777439428,
@@ -916,13 +915,8 @@ mod tests {
         .await;
 
         for tx_origin in [TransactionOrigin::Own, TransactionOrigin::Foreign] {
-            let mut rando = mock_genesis_global_state(
-                network,
-                2,
-                WalletEntropy::new_random(),
-                cli_args.clone(),
-            )
-            .await;
+            let mut rando =
+                mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args.clone()).await;
             let mut rando = rando.lock_guard_mut().await;
             rando
                 .mempool_insert(pc_tx_low_fee.clone().into(), tx_origin)

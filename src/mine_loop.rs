@@ -1156,10 +1156,9 @@ pub(crate) mod tests {
         let mut rng = rand::rng();
         let network = Network::RegTest;
         let global_state_lock = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
 
@@ -1224,11 +1223,12 @@ pub(crate) mod tests {
         let guesser_fee_fraction = 0.0;
         let cli_args = cli_args::Args {
             guesser_fraction: guesser_fee_fraction,
+            network,
             ..Default::default()
         };
 
         let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
         let tick = std::time::SystemTime::now();
         let (transaction, _coinbase_utxo_info) = make_coinbase_transaction_from_state(
             &genesis_block,
@@ -1259,10 +1259,9 @@ pub(crate) mod tests {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let genesis_block = Block::genesis(network);
@@ -1439,11 +1438,11 @@ pub(crate) mod tests {
         // force SingleProof capability.
         let cli = cli_args::Args {
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            network,
             ..Default::default()
         };
 
-        let mut alice =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli).await;
+        let mut alice = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
         let genesis_block = Block::genesis(network);
         let mocked_now = genesis_block.header().timestamp + Timestamp::months(7);
 
@@ -1502,10 +1501,11 @@ pub(crate) mod tests {
         let network = Network::Main;
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
+            network,
             ..Default::default()
         };
         let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
         let tip_block_orig = Block::genesis(network);
         let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -1574,10 +1574,11 @@ pub(crate) mod tests {
         let network = Network::Main;
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
+            network,
             ..Default::default()
         };
         let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let tip_block_orig = global_state_lock
@@ -1682,10 +1683,9 @@ pub(crate) mod tests {
     ) -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
 
@@ -1905,11 +1905,11 @@ pub(crate) mod tests {
             let cli_args = cli_args::Args {
                 guesser_fraction: 0.0,
                 fee_notification: notification_policy,
+                network,
                 ..Default::default()
             };
             let global_state_lock =
-                mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args)
-                    .await;
+                mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
             let genesis_block = Block::genesis(network);
             let launch_date = genesis_block.header().timestamp;
 
@@ -2035,12 +2035,13 @@ pub(crate) mod tests {
                 let cli_args = cli_args::Args {
                     guesser_fraction,
                     fee_notification: notification_policy,
+                    network,
                     ..Default::default()
                 };
                 let global_state_lock =
-                    mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args)
+                    mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args.clone())
                         .await;
-                let genesis_block = Block::genesis(network);
+                let genesis_block = Block::genesis(cli_args.network);
                 let launch_date = genesis_block.header().timestamp;
 
                 let (transaction, expected_utxos) = make_coinbase_transaction_from_state(
@@ -2150,11 +2151,11 @@ pub(crate) mod tests {
         let network = Network::Main;
         let cli_args = cli_args::Args {
             compose: true,
+            network,
             ..Default::default()
         };
         let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone())
-                .await;
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
 
         let (cancel_job_tx, cancel_job_rx) = tokio::sync::watch::channel(());
 
@@ -2221,10 +2222,11 @@ pub(crate) mod tests {
         let network = Network::Main;
         let cli_args = cli_args::Args {
             compose: true,
+            network,
             ..Default::default()
         };
         let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
 
         let (miner_to_main_tx, _miner_to_main_rx) =
             mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
@@ -2345,10 +2347,9 @@ pub(crate) mod tests {
 
         // obtain global state
         let global_state_lock = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
 

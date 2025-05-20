@@ -86,7 +86,7 @@ mod tests {
         for network in Network::iter() {
             let cli_args = cli_args::Args::default_with_network(network);
             let mut alice =
-                mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
+                mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
             let alice_wallet = get_monitored_utxos(&alice).await;
             assert_eq!(
                 1,
@@ -101,7 +101,7 @@ mod tests {
             );
 
             let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
-            let bob_wallet = mock_genesis_wallet_state(bob_wallet, network, &cli_args).await;
+            let bob_wallet = mock_genesis_wallet_state(bob_wallet, &cli_args).await;
             let bob_mutxos = get_monitored_utxos(&bob_wallet).await;
             assert!(
                 bob_mutxos.is_empty(),
@@ -152,10 +152,9 @@ mod tests {
     async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
         let mut rng = rand::rng();
         let network = Network::RegTest;
-        let cli_args = cli_args::Args::default();
+        let cli_args = cli_args::Args::default_with_network(network);
         let alice_wallet = WalletEntropy::new_random();
-        let mut alice_wallet =
-            mock_genesis_wallet_state(alice_wallet.clone(), network, &cli_args).await;
+        let mut alice_wallet = mock_genesis_wallet_state(alice_wallet.clone(), &cli_args).await;
         let bob_wallet = WalletEntropy::new_random();
         let bob_key = bob_wallet.nth_generation_spending_key_for_tests(0);
 
@@ -275,9 +274,8 @@ mod tests {
 
         let network = Network::Main;
         let alice_wallet_secret = WalletEntropy::new_random();
-        let mut alice =
-            mock_genesis_global_state(network, 1, alice_wallet_secret, cli_args::Args::default())
-                .await;
+        let cli_args = cli_args::Args::default_with_network(network);
+        let mut alice = mock_genesis_global_state(1, alice_wallet_secret, cli_args).await;
         let alice_key = alice
             .lock_guard()
             .await
@@ -518,12 +516,12 @@ mod tests {
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
             number_of_mps_per_utxo: 20,
+            network,
             ..Default::default()
         };
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
         let alice_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
-        let mut alice =
-            mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args.clone()).await;
+        let mut alice = mock_genesis_global_state(2, alice_wallet_secret, cli_args.clone()).await;
         let alice_key = alice
             .lock_guard()
             .await
@@ -532,12 +530,11 @@ mod tests {
             .nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let genesis_block = Block::genesis(network);
-        let bob_wallet =
-            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args)
-                .await
-                .wallet_entropy;
+        let bob_wallet = mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args)
+            .await
+            .wallet_entropy;
         let mut bob_global_lock =
-            mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args.clone()).await;
+            mock_genesis_global_state(2, bob_wallet.clone(), cli_args.clone()).await;
         let mut tx_initiator_internal = bob_global_lock.api().tx_initiator_internal();
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
@@ -1020,11 +1017,11 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let bob = mock_genesis_global_state(
-            network,
             42,
             WalletEntropy::devnet_wallet(),
             cli_args::Args {
                 guesser_fraction: 0.0,
+                network,
                 ..Default::default()
             },
         )
@@ -1261,14 +1258,14 @@ mod tests {
         #[apply(shared_tokio_runtime)]
         async fn verify_premine_receipt_works_with_test_addresses() {
             let network = Network::Main;
-            let cli = cli_args::Args::default();
+            let cli = cli_args::Args::default_with_network(network);
             let genesis_block = Block::genesis(network);
             let seven_months_after_launch = genesis_block.header().timestamp + Timestamp::months(7);
             for seed_phrase in worker::test_seed_phrases() {
                 let wallet_secret = WalletEntropy::from_phrase(&seed_phrase)
                     .expect("legacy seed phrase must still be valid");
                 let premine_recipient =
-                    mock_genesis_global_state(network, 0, wallet_secret, cli.clone()).await;
+                    mock_genesis_global_state(0, wallet_secret, cli.clone()).await;
                 let gs = premine_recipient.global_state_lock.lock_guard().await;
                 let wallet_status = gs
                     .wallet_state
