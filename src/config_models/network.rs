@@ -17,7 +17,9 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 //
 // therefore: new variants cannot be added until entire network has upgraded to
 // v0.3.0 or higher.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter, strum::EnumIs,
+)]
 #[non_exhaustive]
 pub enum Network {
     /// Main net. Feature-complete. Fixed launch date.
@@ -71,12 +73,8 @@ impl Network {
 
     /// indicates if the network uses mock proofs
     ///
-    /// mock proofs enable transactions and blocks to be created quickly
-    /// but must only be used for testing purposes.
-    ///
-    /// note: for now only the RegTest network uses mock proofs, but that could
-    /// change in the future so it is best use this method rather than checking
-    /// for is_regtest().
+    /// mock proofs enable transactions and blocks to be created quickly but
+    /// must only be used for testing purposes.
     pub fn use_mock_proof(&self) -> bool {
         matches!(self, Self::RegTest | Self::TestnetMock)
     }
@@ -87,8 +85,8 @@ impl Network {
     /// time the duration between a block and the previous block is >= twice the
     /// target interval ie 19.6 minutes.
     ///
-    /// testnet, testnet-mock: Some(19.6 minutes)
-    /// mainnet, others: None
+    /// - testnet, testnet-mock: Some(19.6 minutes)
+    /// - mainnet, others: None
     pub fn difficulty_reset_interval(&self) -> Option<Timestamp> {
         match *self {
             Self::Testnet | Self::TestnetMock => Some(self.target_block_interval() * 2),
@@ -98,17 +96,17 @@ impl Network {
 
     /// indicates if peer discovery should be performed by nodes on this network
     ///
-    /// regtest: false
-    /// mainnet and others: true
-    pub fn perform_peer_discovery(&self) -> bool {
+    /// - regtest: false
+    /// - mainnet and others: true
+    pub fn performs_peer_discovery(&self) -> bool {
         // disable peer-discovery for regtest only (so far)
-        !self.is_regtest()
+        !self.is_reg_test()
     }
 
     /// difficulty setting for the Genesis block
     ///
-    /// regtest: [Difficulty::MINIMUM]
-    /// mainnet and others: 1,000,000,000
+    /// - regtest: [Difficulty::MINIMUM]
+    /// - mainnet and others: 1,000,000,000
     pub fn genesis_difficulty(&self) -> Difficulty {
         match *self {
             Self::RegTest => Difficulty::MINIMUM,
@@ -121,9 +119,9 @@ impl Network {
     ///
     /// Blocks spaced apart by less than this amount of time are not valid.
     ///
-    /// for regtest: 1 milli
-    /// for testnet-mock: 100 milli
-    /// for mainnet and others: 60 seconds
+    /// - for regtest: 1 milli
+    /// - for testnet-mock: 100 milli
+    /// - for mainnet and others: 60 seconds
     pub fn minimum_block_time(&self) -> Timestamp {
         match *self {
             Self::RegTest => Timestamp::millis(1),
@@ -134,8 +132,8 @@ impl Network {
 
     /// desired/average time between blocks.
     ///
-    /// for regtest: 100 milliseconds.
-    /// for mainnet and others: 588000 milliseconds equals 9.8 minutes.
+    /// - for regtest: 100 milliseconds.
+    /// - for mainnet and others: 588000 milliseconds equals 9.8 minutes.
     pub fn target_block_interval(&self) -> Timestamp {
         match *self {
             Self::RegTest => Timestamp::millis(100),
@@ -145,24 +143,20 @@ impl Network {
         }
     }
 
-    /// indicates if mainnet
-    pub fn is_mainnet(&self) -> bool {
-        matches!(self, Self::Main)
-    }
-
-    /// indicates if testnet
-    pub fn is_testnet(&self) -> bool {
-        matches!(self, Self::Testnet)
-    }
-
-    /// indicates if testnet-mock
-    pub fn is_testnet_mock(&self) -> bool {
-        matches!(self, Self::TestnetMock)
-    }
-
-    /// indicates if regtest
-    pub fn is_regtest(&self) -> bool {
-        matches!(self, Self::RegTest)
+    /// indicates if automated mining should be performed by this network
+    ///
+    /// note: we disable auto-mining in regtest mode because it generates blocks
+    /// very quickly and that is not a good fit when mining is enabled for
+    /// duration of the neptune-core process as blockchain grows very quickly.
+    ///
+    /// instead developers are encouraged to use [crate::api::regtest] module to
+    /// generate any number of blocks in a controlled, deterministic fashion.
+    //
+    // bitcoin-core does not use cli flags, but rather RPC commands to
+    // enable/disable mining in controlled fashion. We might consider moving to
+    // that model before enabling automated mining for RegTest.
+    pub fn performs_automated_mining(&self) -> bool {
+        !self.is_reg_test()
     }
 }
 

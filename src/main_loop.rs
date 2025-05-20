@@ -1617,12 +1617,12 @@ impl MainLoopHandler {
                     // because no regtest nodes attempt to discover eachother, so the only
                     // peers are those that are manually added.
                     // see: https://github.com/Neptune-Crypto/neptune-core/issues/539#issuecomment-2764701027
-                    if !self.global_state_lock.cli().network.perform_peer_discovery() {
-                        debug!("peer discovery disabled for network {}", self.global_state_lock.cli().network);
-                    } else {
+                    if self.global_state_lock.cli().network.performs_peer_discovery() {
                         self.prune_peers().await?;
                         self.reconnect(&mut main_loop_state).await?;
                         self.discover_peers(&mut main_loop_state).await?;
+                    } else {
+                        debug!("peer discovery disabled for network {}", self.global_state_lock.cli().network);
                     }
                 }
 

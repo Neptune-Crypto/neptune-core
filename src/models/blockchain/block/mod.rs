@@ -911,16 +911,23 @@ impl Block {
         Ok(())
     }
 
+    /// indicates if a difficulty reset should be performed.
+    ///
+    /// Reset only occurs for network(s) that define a difficulty-reset-interval,
+    /// typically testnet(s).
+    ///
+    /// A reset should be performed any time the interval between a block
+    /// and its parent block is >= the network's reset interval.
     pub(crate) fn should_reset_difficulty(
         network: Network,
         current_block_timestamp: Timestamp,
         previous_block_timestamp: Timestamp,
     ) -> bool {
-        if let Some(reset_interval) = network.difficulty_reset_interval() {
-            let elapsed_interval = current_block_timestamp - previous_block_timestamp;
-            return elapsed_interval >= reset_interval;
-        }
-        false
+        let Some(reset_interval) = network.difficulty_reset_interval() else {
+            return false;
+        };
+        let elapsed_interval = current_block_timestamp - previous_block_timestamp;
+        elapsed_interval >= reset_interval
     }
 
     /// Determine whether the proof-of-work puzzle was solved correctly.
@@ -1301,7 +1308,7 @@ pub(crate) mod tests {
                     block.kernel.header.timestamp,
                     block_prev.header().timestamp,
                     block_prev.header().difficulty,
-                    network.target_block_interval(), // target_block_interval
+                    network.target_block_interval(),
                     block_prev.header().height,
                 );
                 assert_eq!(block.kernel.header.difficulty, control);

@@ -113,18 +113,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         tokio::spawn(fut);
     }
 
-    if cli_args.mine() && cli_args.network.is_regtest() {
-        // note: disable auto-mining in regtest mode because it doesn't work
-        // (yet) once it is working, we can remove the bail!() and uncomment the
-        // warning below.
-        anyhow::bail!("Automatic mining in regtest mode is not supported.  Try again without --compose or --guess flags.");
-
-        //        tracing::warn!(
-        //            "Automatic mining in regtest mode is generally not recommended.
-        //This mode provides APIs for generating blocks programmatically in a controlled fashion.
-        //Automatic mining adds randomly generated blocks which makes the blockchain non-deterministic.
-        //"
-        //        );
+    // see comment for Network::performs_automated_mining()
+    if cli_args.mine() && !cli_args.network.performs_automated_mining() {
+        anyhow::bail!("Automatic mining is not supported for network {}.  Try again without --compose or --guess flags.", cli_args.network);
     }
 
     info!("Starting neptune-core node on {}.", cli_args.network);
