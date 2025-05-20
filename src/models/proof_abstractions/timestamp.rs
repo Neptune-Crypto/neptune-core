@@ -184,10 +184,12 @@ impl Timestamp {
     /// # Examples
     ///
     /// ```
-    /// let timestamp = Timestamp::millis(1234567*1000); // Roughly 2 weeks, 1 day, 2 hours, 56 minutes, 7 seconds
-    /// assert_eq!(timestamp.format_human_duration(), "2 weeks, 1 day, 2 hours, 56 minutes, 7 seconds");
+    /// use neptune_cash::api::export::Timestamp;
     ///
-    /// let short_ts = Timestamp::millis(65*1000); // 1 minute, 5 seconds
+    /// let timestamp = Timestamp::millis(1234567*1000);
+    /// assert_eq!(timestamp.format_human_duration(), "2 weeks, 6 hours, 56 minutes, 7 seconds");
+    ///
+    /// let short_ts = Timestamp::millis(65*1000);
     /// assert_eq!(short_ts.format_human_duration(), "1 minute, 5 seconds");
     ///
     /// let zero_ts = Timestamp::millis(150);
