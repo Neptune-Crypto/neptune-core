@@ -58,7 +58,7 @@ pub struct ProofBuilder<'a> {
     valid_mock: Option<bool>,
 }
 
-impl<'a> fmt::Debug for ProofBuilder<'a> {
+impl fmt::Debug for ProofBuilder<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProofBuilder")
             .field("program", &self.program)

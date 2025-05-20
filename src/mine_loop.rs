@@ -223,7 +223,7 @@ fn guess_worker(
     // when the elapsed time between two blocks is greater than a
     // max interval, defined by the network.  It never occurs for
     // mainnet.
-    let should_difficulty_reset =
+    let should_reset_difficulty =
         Block::should_reset_difficulty(network, now, previous_block_header.timestamp);
 
     info!(
@@ -231,26 +231,23 @@ fn guess_worker(
         previous_block_header.height, previous_block_header.timestamp, now
     );
 
-    let (prev_difficulty, new_difficulty) = if should_difficulty_reset {
-        let prev_difficulty = previous_block_header.difficulty;
+    let prev_difficulty = previous_block_header.difficulty;
+    let new_difficulty = if should_reset_difficulty {
         let new_difficulty = network.genesis_difficulty();
-        // this is the difficulty reset
         info!(
             "resetting difficulty to genesis: {}. {} seconds elapsed since previous block",
             new_difficulty,
             (now - previous_block_header.timestamp).to_millis() / 1000
         );
-        (prev_difficulty, new_difficulty)
+        new_difficulty
     } else {
-        let prev_difficulty = previous_block_header.difficulty;
-        let new_difficulty = difficulty_control(
+        difficulty_control(
             now,
             previous_block_header.timestamp,
             previous_block_header.difficulty,
             target_block_interval,
             previous_block_header.height,
-        );
-        (prev_difficulty, new_difficulty)
+        )
     };
 
     let threshold = prev_difficulty.target();
@@ -2370,14 +2367,14 @@ pub(crate) mod tests {
 
             // height 1 resets because interval since genesis block is large.
             // 5,10,15 we choose arbitrarily.
+            let reset_interval = network.difficulty_reset_interval().unwrap();
             let (block_interval, should_reset) = if [1, 5, 10, 15].contains(&i) {
-                (network.difficulty_reset_interval().unwrap(), true)
+                (reset_interval, true)
             } else {
                 // generate random interval between min_block_time and difficulty_reset_interval.
                 // this encourages difficulty_control() to modify the difficulty.
                 let interval_millis = rng.random_range(
-                    network.minimum_block_time().to_millis()
-                        ..=network.difficulty_reset_interval().unwrap().to_millis(),
+                    network.minimum_block_time().to_millis()..reset_interval.to_millis(),
                 );
                 (Timestamp::millis(interval_millis), false)
             };

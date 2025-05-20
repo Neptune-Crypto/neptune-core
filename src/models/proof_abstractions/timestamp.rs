@@ -14,6 +14,7 @@ use chrono::Local;
 use chrono::NaiveDateTime;
 use chrono::Utc;
 use get_size2::GetSize;
+use num_traits::Euclid;
 use num_traits::Zero;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use proptest::strategy::BoxedStrategy;
@@ -46,6 +47,12 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct Timestamp(pub BFieldElement);
+
+impl From<Timestamp> for Duration {
+    fn from(timestamp: Timestamp) -> Self {
+        timestamp.as_duration()
+    }
+}
 
 impl PartialOrd for Timestamp {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -157,58 +164,67 @@ impl Timestamp {
         }
     }
 
+    /// converts `Timestamp` to a [`Duration`]
     pub fn as_duration(&self) -> Duration {
         Duration::from_millis(self.to_millis())
     }
 
+    /// Formats the `Timestamp` into a human-readable duration string.
+    ///
+    /// This method converts the `Timestamp` into its equivalent `std::time::Duration`
+    /// and then breaks it down into weeks, days, hours, minutes, and seconds.
+    /// The result is a string representing the duration, with units
+    /// displayed only if their value is greater than zero (except for seconds,
+    /// which is always shown), e.g., "1 week, 2 days, 3 hours", or "5 seconds".
+    ///
+    /// plural/singular forms are taken into account.
+    ///
+    /// sub-second values are not displayed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let timestamp = Timestamp::millis(1234567*1000); // Roughly 2 weeks, 1 day, 2 hours, 56 minutes, 7 seconds
+    /// assert_eq!(timestamp.format_human_duration(), "2 weeks, 1 day, 2 hours, 56 minutes, 7 seconds");
+    ///
+    /// let short_ts = Timestamp::millis(65*1000); // 1 minute, 5 seconds
+    /// assert_eq!(short_ts.format_human_duration(), "1 minute, 5 seconds");
+    ///
+    /// let zero_ts = Timestamp::millis(150);
+    /// assert_eq!(zero_ts.format_human_duration(), "0 seconds");
+    /// ```
     pub fn format_human_duration(&self) -> String {
-        let duration = self.as_duration();
-        let total_seconds = duration.as_secs();
+        const SECS_IN_MINUTE: u64 = 60;
+        const SECS_IN_HOUR: u64 = 60 * SECS_IN_MINUTE;
+        const SECS_IN_DAY: u64 = 24 * SECS_IN_HOUR;
+        const SECS_IN_WEEK: u64 = 7 * SECS_IN_DAY;
 
-        let weeks = total_seconds / (60 * 60 * 24 * 7);
-        let remaining_seconds = total_seconds % (60 * 60 * 24 * 7);
+        // if `div_rem_euclid` is too obscure
+        let div_rem = |n: u64, d: u64| (n / d, n % d);
 
-        let days = remaining_seconds / (60 * 60 * 24);
-        let remaining_seconds = remaining_seconds % (60 * 60 * 24);
-
-        let hours = remaining_seconds / (60 * 60);
-        let remaining_seconds = remaining_seconds % (60 * 60);
-
-        let minutes = remaining_seconds / 60;
-        let seconds = remaining_seconds % 60;
+        let secs = self.as_duration().as_secs();
+        let (weeks, secs) = secs.div_rem_euclid(&SECS_IN_WEEK);
+        let (days, secs) = secs.div_rem_euclid(&SECS_IN_DAY);
+        let (hours, secs) = div_rem(secs, SECS_IN_HOUR);
+        let (mins, secs) = div_rem(secs, SECS_IN_MINUTE);
 
         let mut parts = Vec::new();
+        let maybe_plural_s = |i: u64| if i == 1 { "" } else { "s" };
 
         if weeks > 0 {
-            parts.push(format!(
-                "{} week{}",
-                weeks,
-                if weeks == 1 { "" } else { "s" }
-            ));
+            parts.push(format!("{weeks} week{}", maybe_plural_s(weeks)));
         }
         if days > 0 {
-            parts.push(format!("{} day{}", days, if days == 1 { "" } else { "s" }));
+            parts.push(format!("{days} day{}", maybe_plural_s(days)));
         }
         if hours > 0 {
-            parts.push(format!(
-                "{} hour{}",
-                hours,
-                if hours == 1 { "" } else { "s" }
-            ));
+            parts.push(format!("{hours} hour{}", maybe_plural_s(hours)));
         }
-        if minutes > 0 {
-            parts.push(format!(
-                "{} minute{}",
-                minutes,
-                if minutes == 1 { "" } else { "s" }
-            ));
+        if mins > 0 {
+            parts.push(format!("{mins} minute{}", maybe_plural_s(mins)));
         }
-        if seconds > 0 || parts.is_empty() {
-            parts.push(format!(
-                "{} second{}",
-                seconds,
-                if seconds == 1 { "" } else { "s" }
-            ));
+        if secs > 0 || parts.is_empty() {
+            parts.push(format!("{secs} second{}", maybe_plural_s(secs)));
         }
 
         parts.join(", ")
