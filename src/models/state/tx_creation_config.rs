@@ -5,7 +5,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use super::tx_proving_capability::TxProvingCapability;
+use super::vm_proving_capability::VmProvingCapability;
 use super::wallet::address::SpendingKey;
 use super::wallet::change_policy::ChangePolicy;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
@@ -46,10 +46,12 @@ impl TxCreationConfig {
     }
 
     /// Configure the proving capacity.
-    pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {
+    pub(crate) fn with_prover_capability(
+        mut self,
+        prover_capability: impl Into<VmProvingCapability>,
+    ) -> Self {
         // note: legacy tests consider prover_capability and target proof_type to be the same thing
-        self.proof_job_options.job_settings.tx_proving_capability = prover_capability;
-        self.proof_job_options.job_settings.proof_type = prover_capability.into();
+        self.proof_job_options.job_settings.vm_proving_capability = prover_capability.into();
         self
     }
 

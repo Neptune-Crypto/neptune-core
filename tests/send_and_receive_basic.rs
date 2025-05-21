@@ -6,7 +6,8 @@ use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::SymmetricKey;
 use neptune_cash::api::export::Timestamp;
-use neptune_cash::api::export::TxProvingCapability;
+use neptune_cash::api::export::TransactionProofType;
+use neptune_cash::api::export::VmProvingCapability;
 use num_traits::ops::checked::CheckedSub;
 
 /// test: alice sends funds to herself onchain
@@ -80,7 +81,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
 pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
         &GenesisNode::cluster_id(),
-        TxProvingCapability::PrimitiveWitness,
+        TransactionProofType::PrimitiveWitness,
     )
     .await
 }
@@ -92,7 +93,7 @@ pub async fn alice_sends_to_bob_with_primitive_witness_capability() -> anyhow::R
 pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
         &GenesisNode::cluster_id(),
-        TxProvingCapability::PrimitiveWitness,
+        TransactionProofType::PrimitiveWitness,
     )
     .await
 }
@@ -104,7 +105,7 @@ pub async fn alice_sends_to_bob_with_proof_collection_capability() -> anyhow::Re
 pub async fn alice_sends_to_bob_with_single_proof_capability() -> anyhow::Result<()> {
     alice_sends_to_bob(
         &GenesisNode::cluster_id(),
-        TxProvingCapability::PrimitiveWitness,
+        TransactionProofType::PrimitiveWitness,
     )
     .await
 }
@@ -128,13 +129,13 @@ pub async fn alice_sends_to_bob_with_single_proof_capability() -> anyhow::Result
 /// 6. bob verifies the unconfirmed balance matches payment amount.
 pub async fn alice_sends_to_bob(
     cluster_id: &str,
-    proving_capability: TxProvingCapability,
+    proving_capability: impl Into<VmProvingCapability>,
 ) -> anyhow::Result<()> {
     logging::tracing_logger();
     let timeout_secs = 5;
 
     let mut base_args = GenesisNode::default_args();
-    base_args.tx_proving_capability = Some(proving_capability);
+    base_args.vm_proving_capability = Some(proving_capability.into());
 
     // alice and bob start 2 peer cluster (regtest)
     let [mut alice, mut bob] =

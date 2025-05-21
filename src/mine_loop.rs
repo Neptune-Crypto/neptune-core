@@ -30,7 +30,6 @@ use twenty_first::math::digest::Digest;
 use crate::api::export::TxInputList;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
 use crate::job_queue::errors::JobHandleError;
@@ -90,6 +89,7 @@ async fn compose_block(
         &global_state_lock,
         timestamp,
         job_options.clone(),
+        TransactionProofType::SingleProof,
     )
     .await?;
 
@@ -414,6 +414,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     timestamp: Timestamp,
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
+    transaction_proof_type: TransactionProofType,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
         latest_block,
@@ -436,6 +437,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     let proof = TransactionProofBuilder::new()
         .transaction_details(&transaction_details)
         .primitive_witness(witness)
+        .transaction_proof_type(transaction_proof_type)
         .job_queue(vm_job_queue)
         .proof_job_options(job_options)
         .build()
@@ -580,6 +582,7 @@ pub(crate) async fn create_block_transaction(
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
+    transaction_proof_type: TransactionProofType,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     create_block_transaction_from(
         predecessor_block,
@@ -587,6 +590,7 @@ pub(crate) async fn create_block_transaction(
         timestamp,
         job_options,
         TxMergeOrigin::Mempool,
+        transaction_proof_type,
     )
     .await
 }
@@ -597,6 +601,7 @@ pub(crate) async fn create_block_transaction_from(
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
+    transaction_proof_type: TransactionProofType,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
@@ -621,6 +626,7 @@ pub(crate) async fn create_block_transaction_from(
         timestamp,
         vm_job_queue.clone(),
         job_options.clone(),
+        transaction_proof_type,
     )
     .await?;
 
@@ -651,16 +657,11 @@ pub(crate) async fn create_block_transaction_from(
         );
         let nop = PrimitiveWitness::from_transaction_details(&nop);
 
-        // ensure that proof-type is SingleProof
-        let options = TritonVmProofJobOptionsBuilder::new()
-            .template(&job_options)
-            .proof_type(TransactionProofType::SingleProof)
-            .build();
-
         let proof = TransactionProofBuilder::new()
             .primitive_witness_ref(&nop)
+            .transaction_proof_type(TransactionProofType::SingleProof)
             .job_queue(vm_job_queue.clone())
-            .proof_job_options(options)
+            .proof_job_options(job_options.clone())
             .build()
             .await?;
         let nop = Transaction {
@@ -1080,6 +1081,7 @@ pub(crate) mod tests {
     use crate::job_queue::errors::JobHandleError;
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -1087,7 +1089,6 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::verifier::verify;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
@@ -1111,6 +1112,7 @@ pub(crate) mod tests {
         global_state_lock: &GlobalStateLock,
         timestamp: Timestamp,
         job_options: TritonVmProofJobOptions,
+        transaction_proof_type: TransactionProofType,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
         // It's important to use the input `latest_block` here instead of
         // reading it from state, since that could, because of a race condition
@@ -1129,6 +1131,7 @@ pub(crate) mod tests {
             timestamp,
             vm_job_queue,
             job_options,
+            transaction_proof_type,
         )
         .await?;
 
@@ -1234,9 +1237,8 @@ pub(crate) mod tests {
             &genesis_block,
             &global_state_lock,
             network.launch_date(),
-            global_state_lock
-                .cli()
-                .proof_job_options_primitive_witness(),
+            global_state_lock.cli().into(),
+            TransactionProofType::PrimitiveWitness,
         )
         .await
         .unwrap();
@@ -1293,7 +1295,7 @@ pub(crate) mod tests {
         );
         let config = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let tx_from_alice = alice
             .api()
             .tx_initiator_internal()
@@ -1322,7 +1324,8 @@ pub(crate) mod tests {
                     &genesis_block,
                     &alice,
                     now,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmJobPriority::Normal.into(),
+                    TransactionProofType::SingleProof,
                 )
                 .await
                 .unwrap()
@@ -1389,7 +1392,8 @@ pub(crate) mod tests {
                     &genesis_block,
                     &alice,
                     now,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmJobPriority::Normal.into(),
+                    TransactionProofType::SingleProof,
                 )
                 .await
                 .unwrap()
@@ -1437,7 +1441,7 @@ pub(crate) mod tests {
 
         // force SingleProof capability.
         let cli = cli_args::Args {
-            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
             network,
             ..Default::default()
         };
@@ -1514,9 +1518,8 @@ pub(crate) mod tests {
             &tip_block_orig,
             &global_state_lock,
             launch_date,
-            global_state_lock
-                .cli()
-                .proof_job_options_primitive_witness(),
+            global_state_lock.cli().into(),
+            TransactionProofType::PrimitiveWitness,
         )
         .await
         .unwrap();
@@ -1597,9 +1600,8 @@ pub(crate) mod tests {
             &tip_block_orig,
             &global_state_lock,
             ten_seconds_ago,
-            global_state_lock
-                .cli()
-                .proof_job_options_primitive_witness(),
+            global_state_lock.cli().into(),
+            TransactionProofType::PrimitiveWitness,
         )
         .await
         .unwrap();
@@ -1917,9 +1919,8 @@ pub(crate) mod tests {
                 &genesis_block,
                 &global_state_lock,
                 launch_date,
-                global_state_lock
-                    .cli()
-                    .proof_job_options_primitive_witness(),
+                global_state_lock.cli().into(),
+                TransactionProofType::PrimitiveWitness,
             )
             .await
             .unwrap();
@@ -2048,9 +2049,8 @@ pub(crate) mod tests {
                     &genesis_block,
                     &global_state_lock,
                     launch_date,
-                    global_state_lock
-                        .cli()
-                        .proof_job_options_primitive_witness(),
+                    global_state_lock.cli().into(),
+                    TransactionProofType::PrimitiveWitness,
                 )
                 .await
                 .unwrap();
@@ -2162,8 +2162,7 @@ pub(crate) mod tests {
         let compose_task = async move {
             let genesis_block = Block::genesis(network);
             let gsl = global_state_lock.clone();
-            let cli = &cli_args;
-            let mut job_options: TritonVmProofJobOptions = cli.into();
+            let mut job_options: TritonVmProofJobOptions = TritonVmJobPriority::Normal.into();
             job_options.cancel_job_rx = Some(cancel_job_rx);
             create_block_transaction_from(
                 &genesis_block,
@@ -2171,12 +2170,24 @@ pub(crate) mod tests {
                 Timestamp::now(),
                 job_options,
                 TxMergeOrigin::Mempool,
+                TransactionProofType::SingleProof,
             )
             .await
         };
 
+        // ensure that the compose_task will end after 10 secs
+        // even if cancellation msg is not received somehow.
+        let compose_task_or_timeout = async move {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                    panic!("job timed out instead of cancelling")
+                },
+                r = compose_task => r,
+            }
+        };
+
         // start the task running
-        let jh = tokio::task::spawn(compose_task);
+        let jh = tokio::task::spawn(compose_task_or_timeout);
 
         // wait a little while for a job to get added to the queue.
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -2223,6 +2234,7 @@ pub(crate) mod tests {
         let cli_args = cli_args::Args {
             compose: true,
             network,
+            vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
             ..Default::default()
         };
         let global_state_lock =
