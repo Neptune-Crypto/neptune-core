@@ -61,6 +61,7 @@ use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::handshake_data::HandshakeData;
 use models::state::wallet::wallet_file::WalletFileContext;
+use models::state::GlobalState;
 use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
@@ -120,13 +121,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let genesis = Block::genesis(cli_args.network);
-    let mut global_state_lock = GlobalStateLock::new(
-        data_directory.clone(),
-        genesis,
-        cli_args.clone(),
-        rpc_server_to_main_tx.clone(),
-    )
-    .await?;
+    let global_state =
+        GlobalState::try_new(data_directory.clone(), genesis, cli_args.clone()).await?;
+    let mut global_state_lock =
+        GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
 
     // Construct the broadcast channel to communicate from the main task to peer tasks
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =

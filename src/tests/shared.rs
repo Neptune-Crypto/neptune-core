@@ -102,6 +102,7 @@ use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::wallet::wallet_state::WalletState;
+use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
@@ -204,14 +205,14 @@ pub(crate) async fn mock_genesis_global_state(
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
         peer_map.insert(peer_address, get_dummy_peer_outgoing(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db);
+    let net = NetworkingState::new(peer_map, peer_db);
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
     assert_eq!(archival_state.get_tip().await.hash(), genesis_block.hash());
 
     let light_state: LightState = LightState::from(genesis_block.to_owned());
-    let blockchain_state = BlockchainState::Archival(Box::new(BlockchainArchivalState {
+    let chain = BlockchainState::Archival(Box::new(BlockchainArchivalState {
         light_state,
         archival_state,
     }));
@@ -231,14 +232,9 @@ pub(crate) async fn mock_genesis_global_state(
         }
     });
 
-    GlobalStateLock::new_internal(
-        wallet_state,
-        blockchain_state,
-        networking_state,
-        cli.clone(),
-        mempool,
-        rpc_to_main_tx,
-    )
+    let global_state = GlobalState::new(wallet_state, chain, net, cli, mempool);
+
+    GlobalStateLock::from_global_state(global_state, rpc_to_main_tx)
 }
 
 /// A state with a premine UTXO and self-mined blocks. Both composing and

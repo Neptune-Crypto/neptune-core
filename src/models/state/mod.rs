@@ -166,81 +166,22 @@ pub struct GlobalStateLock {
 }
 
 impl GlobalStateLock {
-    pub(crate) fn new_internal(
-        wallet_state: WalletState,
-        chain: BlockchainState,
-        net: NetworkingState,
-        cli: cli_args::Args,
-        mempool: Mempool,
+    pub fn from_global_state(
+        global_state: GlobalState,
         rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
     ) -> Self {
-        let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool);
+        let cli = global_state.cli.clone();
         let global_state_lock = sync_tokio::AtomicRw::from((
             global_state,
             Some("GlobalState"),
             Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
         ));
+
         Self {
             global_state_lock,
             cli,
             rpc_server_to_main_tx,
         }
-    }
-
-    /// the key to the watery kingdom.
-    pub async fn new(
-        data_directory: DataDirectory,
-        genesis: Block,
-        cli_args: cli_args::Args,
-        rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
-    ) -> Result<Self> {
-        // Get wallet object, create various wallet secret files
-        let wallet_dir = data_directory.wallet_directory_path();
-        DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-        let wallet_file_context =
-            WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
-        debug!("Now getting wallet state. This may take a while if the database needs pruning.");
-        let wallet_state = WalletState::try_new_from_context(
-            &data_directory,
-            wallet_file_context,
-            &cli_args,
-            &genesis,
-        )
-        .await?;
-        debug!("Got wallet state.");
-
-        let archival_state = ArchivalState::new(data_directory.clone(), genesis).await;
-        debug!("Got archival state");
-
-        // Get latest block. Use hardcoded genesis block if nothing is in database.
-        let latest_block: Block = archival_state.get_tip().await;
-
-        let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
-        let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
-        debug!("Got peer databases");
-
-        let networking_state = NetworkingState::new(peer_map, peer_databases);
-
-        let light_state: LightState = LightState::from(latest_block);
-        let blockchain_archival_state = BlockchainArchivalState {
-            light_state,
-            archival_state,
-        };
-        let blockchain_state = BlockchainState::Archival(Box::new(blockchain_archival_state));
-        let mempool = Mempool::new(
-            cli_args.max_mempool_size,
-            cli_args.max_mempool_num_tx,
-            blockchain_state.light_state().hash(),
-        );
-
-        Ok(GlobalStateLock::new_internal(
-            wallet_state,
-            blockchain_state,
-            networking_state,
-            cli_args,
-            mempool,
-            rpc_server_to_main_tx.clone(),
-        ))
     }
 
     // check if mining
@@ -676,6 +617,49 @@ impl Drop for GlobalState {
 }
 
 impl GlobalState {
+    pub async fn try_new(
+        data_directory: DataDirectory,
+        genesis: Block,
+        cli: cli_args::Args,
+    ) -> Result<Self> {
+        // Get wallet object, create various wallet secret files
+        let wallet_dir = data_directory.wallet_directory_path();
+        DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
+        let wallet_file_context =
+            WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
+        debug!("Now getting wallet state. This may take a while if the database needs pruning.");
+        let wallet_state =
+            WalletState::try_new_from_context(&data_directory, wallet_file_context, &cli, &genesis)
+                .await?;
+        debug!("Got wallet state.");
+
+        let archival_state = ArchivalState::new(data_directory.clone(), genesis).await;
+        debug!("Got archival state");
+
+        // Get latest block. Use hardcoded genesis block if nothing is in database.
+        let latest_block: Block = archival_state.get_tip().await;
+
+        let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
+        let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
+        debug!("Got peer databases");
+
+        let net = NetworkingState::new(peer_map, peer_databases);
+
+        let light_state: LightState = LightState::from(latest_block);
+        let chain = BlockchainArchivalState {
+            light_state,
+            archival_state,
+        };
+        let chain = BlockchainState::Archival(Box::new(chain));
+        let mempool = Mempool::new(
+            cli.max_mempool_size,
+            cli.max_mempool_num_tx,
+            chain.light_state().hash(),
+        );
+
+        Ok(Self::new(wallet_state, chain, net, cli, mempool))
+    }
+
     pub fn new(
         wallet_state: WalletState,
         chain: BlockchainState,
