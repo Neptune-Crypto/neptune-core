@@ -12,19 +12,31 @@ use crate::models::blockchain::transaction::SingleProof;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::verifier::verify;
+use crate::models::state::vm_proving_capability::VmProvingCapability;
 
 /// represents available types of transaction proofs
 ///
 /// the types are ordered (asc) by proof-generation complexity.
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, strum::Display)]
-#[repr(u8)]
+#[derive(
+    Clone,
+    Debug,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    strum::Display,
+    strum::EnumIs,
+)]
 pub enum TransactionProofType {
     /// a primitive-witness.  exposes secrets (keys).  this proof must not be shared.
-    PrimitiveWitness = 1,
+    /// note: not a real TritonVm proof.
+    PrimitiveWitness,
     /// a weak proof that does not expose secrets. can be shared with peers, but cannot be confirmed into a block.
-    ProofCollection = 2,
+    ProofCollection,
     /// a strong proof.  required for confirming a transaction into a block.
-    SingleProof = 3,
+    SingleProof,
 }
 
 impl From<&TransactionProof> for TransactionProofType {
@@ -37,14 +49,50 @@ impl From<&TransactionProof> for TransactionProofType {
     }
 }
 
+impl From<VmProvingCapability> for TransactionProofType {
+    fn from(c: VmProvingCapability) -> Self {
+        let max: u8 = c.into();
+
+        if max >= TransactionProofType::SingleProof.log2_padded_height() {
+            TransactionProofType::SingleProof
+        } else if max >= TransactionProofType::ProofCollection.log2_padded_height() {
+            TransactionProofType::ProofCollection
+        } else {
+            TransactionProofType::PrimitiveWitness
+        }
+    }
+}
+
+impl From<TransactionProofType> for VmProvingCapability {
+    fn from(proof_type: TransactionProofType) -> Self {
+        proof_type.log2_padded_height().into()
+    }
+}
+
+impl From<TransactionProofType> for u8 {
+    fn from(proof_type: TransactionProofType) -> Self {
+        proof_type.log2_padded_height()
+    }
+}
+
+impl From<TransactionProofType> for u32 {
+    fn from(proof_type: TransactionProofType) -> Self {
+        proof_type.log2_padded_height().into()
+    }
+}
+
 impl TransactionProofType {
     /// indicates if the proof executes in triton-vm.
     pub fn executes_in_vm(&self) -> bool {
         matches!(self, Self::ProofCollection | Self::SingleProof)
     }
 
-    pub fn is_single_proof(&self) -> bool {
-        *self == TransactionProofType::SingleProof
+    pub(crate) fn log2_padded_height(&self) -> u8 {
+        match *self {
+            Self::PrimitiveWitness => 0,
+            Self::ProofCollection => 15,
+            Self::SingleProof => 22,
+        }
     }
 }
 
@@ -52,6 +100,7 @@ impl TransactionProofType {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum TransactionProof {
     /// a primitive-witness.  exposes secrets (keys).  this proof must not be shared.
+    /// note: not a real TritonVm proof.
     Witness(PrimitiveWitness),
     /// a strong proof.  required for confirming a transaction into a block.
     SingleProof(Proof),

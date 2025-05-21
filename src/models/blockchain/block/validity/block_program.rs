@@ -348,6 +348,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TritonVmProofJobOptions;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::builtins::verify_stark;
@@ -356,7 +357,6 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::mock_genesis_global_state;
@@ -477,6 +477,7 @@ pub(crate) mod tests {
                 timestamp,
                 TritonVmProofJobOptions::default(),
                 TxMergeOrigin::ExplicitList(vec![tx]),
+                TransactionProofType::SingleProof,
             )
             .await
             .unwrap();
@@ -515,7 +516,7 @@ pub(crate) mod tests {
         let now = genesis_block.header().timestamp + Timestamp::months(12);
         let config = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let tx: Transaction = alice
             .api()
             .tx_initiator_internal()

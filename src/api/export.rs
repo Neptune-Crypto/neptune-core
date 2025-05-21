@@ -18,7 +18,7 @@ pub use crate::models::proof_abstractions::timestamp::Timestamp;
 pub use crate::models::state::transaction_details::TransactionDetails;
 pub use crate::models::state::transaction_kernel_id::TransactionKernelId;
 pub use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
-pub use crate::models::state::tx_proving_capability::TxProvingCapability;
+pub use crate::models::state::vm_proving_capability::VmProvingCapability;
 pub use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
 pub use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
 pub use crate::models::state::wallet::address::KeyType;
