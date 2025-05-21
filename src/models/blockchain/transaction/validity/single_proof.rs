@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::prelude::*;
 use itertools::Itertools;
@@ -50,7 +52,7 @@ const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
 const MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR: i128 = 1_000_052;
 
 #[derive(Debug, Clone, BFieldCodec)]
-pub enum SingleProofWitness {
+pub enum SingleProofWitness<const VERSION: usize> {
     Collection(Box<ProofCollection>),
     Update(UpdateWitness),
     Merger(MergeWitness),
@@ -58,7 +60,7 @@ pub enum SingleProofWitness {
     // IntegralMempool(IntegralMempoolMembershipWitness)
 }
 
-impl SingleProofWitness {
+impl<const VERSION: usize> SingleProofWitness<VERSION> {
     pub fn from_collection(proof_collection: ProofCollection) -> Self {
         Self::Collection(Box::new(proof_collection))
     }
@@ -74,7 +76,7 @@ impl SingleProofWitness {
 
 // This implementation of `TasmObject` is required for `decode_iter` and the
 // method `decode_from_memory` that relies on it.
-impl TasmObject for SingleProofWitness {
+impl<const VERSION: usize> TasmObject for SingleProofWitness<VERSION> {
     fn label_friendly_name() -> String {
         "SingleProofWitness".to_string()
     }
@@ -114,7 +116,7 @@ impl TasmObject for SingleProofWitness {
     }
 }
 
-impl SecretWitness for SingleProofWitness {
+impl<const VERSION: usize> SecretWitness for SingleProofWitness<VERSION> {
     fn standard_input(&self) -> PublicInput {
         let kernel_mast_hash = match self {
             Self::Collection(pc) => pc.kernel_mast_hash,
@@ -129,7 +131,7 @@ impl SecretWitness for SingleProofWitness {
     }
 
     fn program(&self) -> Program {
-        SingleProof.program()
+        SingleProof::<VERSION>.program()
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
@@ -143,6 +145,7 @@ impl SecretWitness for SingleProofWitness {
 
         let mut nondeterminism = NonDeterminism::default().with_ram(memory);
         let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
+        let single_proof_program_hash = SingleProof::<VERSION>.hash();
 
         match self {
             SingleProofWitness::Collection(proof_collection) => {
@@ -205,10 +208,11 @@ impl SecretWitness for SingleProofWitness {
                 }
             }
             SingleProofWitness::Update(witness) => {
-                witness.populate_nd_streams(&mut nondeterminism);
+                witness.populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
             }
             SingleProofWitness::Merger(witness_of_merge) => {
-                witness_of_merge.populate_nd_streams(&mut nondeterminism);
+                witness_of_merge
+                    .populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
             }
         }
 
@@ -217,19 +221,26 @@ impl SecretWitness for SingleProofWitness {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct SingleProof;
+pub struct SingleProof<const VERSION: usize>;
 
-impl SingleProof {
+pub type GenesisSingleProof = SingleProof<{ MergeVersion::Genesis as usize }>;
+pub type HardFork2SingleProof = SingleProof<{ MergeVersion::HardFork2 as usize }>;
+
+impl<const VERSION: usize> SingleProof<VERSION> {
     /// Not to be confused with SingleProofWitness::claim
-    pub(crate) fn claim(tx_kernel_mast_hash: Digest) -> Claim {
-        Claim::about_program(&Self.program()).with_input(tx_kernel_mast_hash.reversed().values())
+    fn claim(tx_kernel_mast_hash: Digest) -> Claim {
+        Claim::about_program(&SingleProof::<VERSION>.program())
+            .with_input(tx_kernel_mast_hash.reversed().values())
     }
 
     /// Generate a [SingleProof] for the transaction, given its primitive
     /// witness.
     ///
     /// This involves generating a [ProofCollection] as an intermediate step.
-    pub(crate) async fn produce(
+    ///
+    /// Use [produce_single_proof] to automatically select the right merge
+    /// version.
+    async fn produce(
         primitive_witness: &PrimitiveWitness,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
@@ -240,14 +251,14 @@ impl SingleProof {
             proof_job_options.clone(),
         )
         .await?;
-        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
+        let single_proof_witness = SingleProofWitness::<VERSION>::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
 
         let nondeterminism = single_proof_witness.nondeterminism();
         info!("Start: generate single proof from proof collection");
 
         let proof = ProofBuilder::new()
-            .program(SingleProof.program())
+            .program(SingleProof::<VERSION>.program())
             .claim(claim)
             .nondeterminism(|| nondeterminism)
             .job_queue(triton_vm_job_queue)
@@ -258,18 +269,60 @@ impl SingleProof {
 
         Ok(proof)
     }
+}
 
-    pub(crate) fn produce_mock(valid_mock: bool) -> Proof {
-        let claim = Claim::new(Digest::default());
-        if valid_mock {
-            Proof::valid_mock(claim)
-        } else {
-            Proof::invalid_mock(claim)
+/// Generate a [SingleProof] for the transaction, given its primitive
+/// witness.
+///
+/// This involves generating a [ProofCollection] as an intermediate step.
+//
+// This function calls SingleProof::produce but with the correct merge
+// version.
+pub(crate) async fn produce_single_proof(
+    primitive_witness: &PrimitiveWitness,
+    triton_vm_job_queue: Arc<TritonVmJobQueue>,
+    proof_job_options: TritonVmProofJobOptions,
+    consensus_rule_set: ConsensusRuleSet,
+) -> Result<Proof, CreateProofError> {
+    type GenesisSingleProof = SingleProof<{ MergeVersion::Genesis as usize }>;
+    type HardFork2SingleProof = SingleProof<{ MergeVersion::HardFork2 as usize }>;
+    match consensus_rule_set.merge_version() {
+        MergeVersion::Genesis => {
+            GenesisSingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options)
+                .await
+        }
+        MergeVersion::HardFork2 => {
+            HardFork2SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options)
+                .await
         }
     }
 }
 
-impl ConsensusProgram for SingleProof {
+/// Not to be confused with SingleProofWitness::claim
+///
+/// Consensus rule set refers to the rule set for which the claim must be valid.
+//
+// This function calls SingleProof::claim but with the correct merge version.
+pub(crate) fn single_proof_claim(
+    tx_kernel_mast_hash: Digest,
+    consensus_rule_set: ConsensusRuleSet,
+) -> Claim {
+    match consensus_rule_set.merge_version() {
+        MergeVersion::Genesis => GenesisSingleProof::claim(tx_kernel_mast_hash),
+        MergeVersion::HardFork2 => HardFork2SingleProof::claim(tx_kernel_mast_hash),
+    }
+}
+
+pub(crate) fn produce_single_proof_mock(valid_mock: bool) -> Proof {
+    let claim = Claim::new(Digest::default());
+    if valid_mock {
+        Proof::valid_mock(claim)
+    } else {
+        Proof::invalid_mock(claim)
+    }
+}
+
+impl<const VERSION: usize> ConsensusProgram for SingleProof<VERSION> {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
@@ -298,7 +351,7 @@ impl ConsensusProgram for SingleProof {
         let proof_collection_field_type_scripts_halt = field!(ProofCollection::type_scripts_halt);
 
         let update_branch = library.import(Box::new(UpdateBranch));
-        let merge_branch = library.import(Box::new(MergeBranch));
+        let merge_branch = library.import(Box::new(MergeBranch::<VERSION>));
 
         let audit_witness_of_proof_collection =
             library.import(Box::new(VerifyNdSiIntegrity::<ProofCollection>::default()));
@@ -710,7 +763,7 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub(crate) mod tests {
     use assert2::let_assert;
     use macro_rules_attr::apply;
     use proptest::prelude::Strategy;
@@ -735,13 +788,40 @@ mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
 
-    impl ConsensusProgramSpecification for SingleProof {
+    macro_rules! for_each {
+        ($var:ident in [$($const_val:ident),*] $body:block) => {
+            $(
+                {
+                    const $var: usize = $const_val;
+                    $body
+                }
+            )*
+        };
+    }
+
+    /// Repeats the given code while substituting all merge versions for the
+    /// const `VERSION`.
+    macro_rules! for_each_version {
+        ($body: block) => {
+            const GENESIS_VERSION: usize = MergeVersion::Genesis as usize;
+            const HARD_FORK_2_VERSION: usize = MergeVersion::HardFork2 as usize;
+            for_each!( VERSION in [GENESIS_VERSION, HARD_FORK_2_VERSION]  {
+                $body
+            });
+        }
+    }
+
+    pub(crate) use for_each_version;
+
+    impl<const VERSION: usize> ConsensusProgramSpecification for SingleProof<VERSION> {
         fn source(&self) {
             let stark: Stark = Stark::default();
             let own_program_digest: Digest = tasm::own_program_digest();
             let txk_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
 
-            match tasm::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS) {
+            match tasm::decode_from_memory::<SingleProofWitness<VERSION>>(
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            ) {
                 SingleProofWitness::Collection(pc) => {
                     assert_eq!(txk_digest, pc.kernel_mast_hash);
 
@@ -810,7 +890,7 @@ mod tests {
         }
     }
 
-    impl SingleProofWitness {
+    impl<const VERSION: usize> SingleProofWitness<VERSION> {
         pub(crate) fn into_update(self) -> UpdateWitness {
             let SingleProofWitness::Update(witness) = self else {
                 panic!("Expected update witness.");
@@ -832,20 +912,24 @@ mod tests {
             .collect();
 
             let nondeterminism = NonDeterminism::default().with_ram(init_ram);
-            let consensus_err = SingleProof.run_tasm(&pub_input, nondeterminism);
 
-            let_assert!(Err(ConsensusError::TritonVMPanic(_, instruction_err)) = consensus_err);
-            let_assert!(InstructionError::AssertionFailed(assertion_err) = instruction_err);
-            let_assert!(Some(err_id) = assertion_err.id);
-            assert_eq!(INVALID_WITNESS_DISCRIMINANT_ERROR, err_id);
+            for_each_version!({
+                let consensus_err =
+                    SingleProof::<VERSION>.run_tasm(&pub_input, nondeterminism.clone());
+
+                let_assert!(Err(ConsensusError::TritonVMPanic(_, instruction_err)) = consensus_err);
+                let_assert!(InstructionError::AssertionFailed(assertion_err) = instruction_err);
+                let_assert!(Some(err_id) = assertion_err.id);
+                assert_eq!(INVALID_WITNESS_DISCRIMINANT_ERROR, err_id);
+            });
         }
     }
 
-    fn positive_prop(witness: SingleProofWitness) {
+    fn positive_prop<const VERSION: usize>(witness: SingleProofWitness<VERSION>) {
         let claim = witness.claim();
         let public_input = PublicInput::new(claim.input);
-        let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
-        let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+        let rust_result = SingleProof::<VERSION>.run_rust(&public_input, witness.nondeterminism());
+        let tasm_result = SingleProof::<VERSION>.run_tasm(&public_input, witness.nondeterminism());
         assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
@@ -871,37 +955,46 @@ mod tests {
             .await
             .unwrap();
 
-            let good_witness = SingleProofWitness::from_collection(good_proof_collection);
-            positive_prop(good_witness);
+            for_each_version!({
+                let good_witness =
+                    SingleProofWitness::<VERSION>::from_collection(good_proof_collection.clone());
+                positive_prop(good_witness);
 
-            // Setting the `merge_bit` must make program crash, as this bit may
-            // only be set to true through the execution of the merge branch.
-            let bad_primitive_witness =
-                PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(Some(6), 6, 7, true)
+                // Setting the `merge_bit` must make program crash, as this bit may
+                // only be set to true through the execution of the merge branch.
+                let bad_primitive_witness =
+                    PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(
+                        Some(6),
+                        6,
+                        7,
+                        true,
+                    )
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();
 
-            let bad_proof_collection = ProofCollection::produce(
-                &bad_primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
-
-            let bad_witness = SingleProofWitness::from_collection(bad_proof_collection);
-
-            // This witness fails with a Merkle auth path error since the never
-            // reads the actual bit but rather just verifies that it is set to
-            // false in this execution path.
-            SingleProof
-                .test_assertion_failure(
-                    bad_witness.standard_input(),
-                    bad_witness.nondeterminism(),
-                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+                let bad_proof_collection = ProofCollection::produce(
+                    &bad_primitive_witness,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmJobPriority::default().into(),
                 )
+                .await
                 .unwrap();
+
+                let bad_witness =
+                    SingleProofWitness::<VERSION>::from_collection(bad_proof_collection);
+
+                // This witness fails with a Merkle auth path error since the never
+                // reads the actual bit but rather just verifies that it is set to
+                // false in this execution path.
+                SingleProof::<VERSION>
+                    .test_assertion_failure(
+                        bad_witness.standard_input(),
+                        bad_witness.nondeterminism(),
+                        &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+                    )
+                    .unwrap();
+            });
         }
 
         #[apply(shared_tokio_runtime)]
@@ -923,19 +1016,24 @@ mod tests {
             .unwrap();
             assert!(proof_collection.verify(txk_mast_hash, network).await);
 
-            let witness = SingleProofWitness::from_collection(proof_collection);
-            let claim = witness.claim();
-            let public_input = PublicInput::new(claim.input);
-            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
-            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            for_each_version!({
+                let witness =
+                    SingleProofWitness::<VERSION>::from_collection(proof_collection.clone());
+                let claim = witness.claim();
+                let public_input = PublicInput::new(claim.input);
+                let rust_result =
+                    SingleProof::<VERSION>.run_rust(&public_input, witness.nondeterminism());
+                let tasm_result =
+                    SingleProof::<VERSION>.run_tasm(&public_input, witness.nondeterminism());
+                assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
 
-            // Verify equivalence of claim functions
-            assert_eq!(
-                witness.claim(),
-                SingleProof::claim(txk_mast_hash),
-                "Claim functions must agree"
-            );
+                // Verify equivalence of claim functions
+                assert_eq!(
+                    witness.claim(),
+                    SingleProof::<VERSION>::claim(txk_mast_hash),
+                    "Claim functions must agree"
+                );
+            });
         }
 
         #[traced_test]
@@ -963,44 +1061,66 @@ mod tests {
             .unwrap();
             assert!(proof_collection.verify(txk_mast_hash, network).await);
 
-            let witness = SingleProofWitness::from_collection(proof_collection);
-            let claim = witness.claim();
-            let public_input = PublicInput::new(claim.input);
-            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
-            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            for_each_version!({
+                let witness =
+                    SingleProofWitness::<VERSION>::from_collection(proof_collection.clone());
+                let claim = witness.claim();
+                let public_input = PublicInput::new(claim.input);
+                let rust_result =
+                    SingleProof::<VERSION>.run_rust(&public_input, witness.nondeterminism());
+                let tasm_result =
+                    SingleProof::<VERSION>.run_tasm(&public_input, witness.nondeterminism());
+                assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            });
         }
     }
 
     mod merge_tests {
         use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase;
+        use crate::api::export::BlockHeight;
 
         use super::*;
 
         #[apply(shared_tokio_runtime)]
         async fn can_verify_transaction_merger_without_coinbase() {
-            let merge_witness = deterministic_merge_witness((2, 2, 2), (2, 2, 2)).await;
-            let merge_witness = SingleProofWitness::Merger(merge_witness);
+            let network = Network::Main;
+            let block_height = BlockHeight::new(bfe!(100000));
+            let merge_witness =
+                deterministic_merge_witness((2, 2, 2), (2, 2, 2), block_height, network).await;
 
-            let claim = merge_witness.claim();
-            let public_input = PublicInput::new(claim.input);
-            let rust_result = SingleProof.run_rust(&public_input, merge_witness.nondeterminism());
-            let tasm_result = SingleProof.run_tasm(&public_input, merge_witness.nondeterminism());
+            for_each_version!({
+                let merge_witness = SingleProofWitness::<VERSION>::Merger(merge_witness.clone());
 
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+                let claim = merge_witness.claim();
+                let public_input = PublicInput::new(claim.input);
+                let rust_result =
+                    SingleProof::<VERSION>.run_rust(&public_input, merge_witness.nondeterminism());
+                let tasm_result =
+                    SingleProof::<VERSION>.run_tasm(&public_input, merge_witness.nondeterminism());
+
+                assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            });
         }
 
         #[apply(shared_tokio_runtime)]
         async fn can_verify_transaction_merger_with_coinbase() {
-            let merge_witness = deterministic_merge_witness_with_coinbase(3, 3, 3).await;
-            let merge_witness = SingleProofWitness::Merger(merge_witness);
+            let network = Network::Main;
+            let block_height = BlockHeight::new(bfe!(100000));
 
-            let claim = merge_witness.claim();
-            let public_input = PublicInput::new(claim.input);
-            let rust_result = SingleProof.run_rust(&public_input, merge_witness.nondeterminism());
-            let tasm_result = SingleProof.run_tasm(&public_input, merge_witness.nondeterminism());
+            for_each_version!({
+                let merge_witness =
+                    deterministic_merge_witness_with_coinbase(3, 3, 3, block_height, network).await;
+                let merge_witness = SingleProofWitness::<VERSION>::Merger(merge_witness.clone());
 
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+                let claim = merge_witness.claim();
+                let public_input = PublicInput::new(claim.input);
+                let rust_result =
+                    SingleProof::<VERSION>.run_rust(&public_input, merge_witness.nondeterminism());
+                let tasm_result =
+                    SingleProof::<VERSION>.run_tasm(&public_input, merge_witness.nondeterminism());
+
+                assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            });
         }
     }
 
@@ -1016,51 +1136,71 @@ mod tests {
 
         use super::*;
 
-        fn positive_prop(witness: UpdateWitness) {
-            let witness = SingleProofWitness::from_update(witness);
+        fn positive_prop<const VERSION: usize>(witness: UpdateWitness) {
+            let witness = SingleProofWitness::<VERSION>::from_update(witness);
             let claim = witness.claim();
             let input = PublicInput::new(claim.input.clone());
             let nondeterminism = witness.nondeterminism();
 
-            let rust_result = SingleProof.run_rust(&input, nondeterminism.clone());
+            let rust_result = SingleProof::<VERSION>.run_rust(&input, nondeterminism.clone());
 
-            let tasm_result = SingleProof.run_tasm(&input, nondeterminism);
+            let tasm_result = SingleProof::<VERSION>.run_tasm(&input, nondeterminism);
 
             assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
         }
 
         #[apply(shared_tokio_runtime)]
         async fn only_additions_small() {
-            positive_prop(
-                deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await,
-            );
+            for_each_version!({
+                positive_prop::<VERSION>(
+                    deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await,
+                );
+            });
         }
 
         #[apply(shared_tokio_runtime)]
         async fn only_additions_medium() {
-            positive_prop(
-                deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await,
-            );
+            for_each_version!({
+                positive_prop::<VERSION>(
+                    deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await,
+                );
+            });
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_tiny() {
-            positive_prop(deterministic_update_witness_additions_and_removals(1, 1, 1).await);
+            for_each_version!({
+                positive_prop::<VERSION>(
+                    deterministic_update_witness_additions_and_removals(1, 1, 1).await,
+                );
+            });
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_small() {
-            positive_prop(deterministic_update_witness_additions_and_removals(2, 2, 2).await);
+            for_each_version!({
+                positive_prop::<VERSION>(
+                    deterministic_update_witness_additions_and_removals(2, 2, 2).await,
+                );
+            });
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_midi() {
-            positive_prop(deterministic_update_witness_additions_and_removals(3, 3, 3).await);
+            for_each_version!({
+                positive_prop::<VERSION>(
+                    deterministic_update_witness_additions_and_removals(3, 3, 3).await,
+                );
+            });
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_medium() {
-            positive_prop(deterministic_update_witness_additions_and_removals(4, 4, 4).await);
+            for_each_version!({
+                positive_prop::<VERSION>(
+                    deterministic_update_witness_additions_and_removals(4, 4, 4).await,
+                );
+            });
         }
 
         fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
@@ -1071,70 +1211,80 @@ mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            let bad_witness = SingleProofWitness::from_update(bad_witness);
-            let claim = bad_witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = bad_witness.nondeterminism();
-            let test_result = SingleProof.test_assertion_failure(
-                input,
-                nondeterminism,
-                &[UpdateBranch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
-            );
-            test_result.unwrap();
+            for_each_version!({
+                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
+                let claim = bad_witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = bad_witness.nondeterminism();
+                let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[UpdateBranch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
+                );
+                test_result.unwrap();
+            });
         }
 
         fn bad_new_aocl(good_witness: &UpdateWitness) {
-            let good_witness = SingleProofWitness::from_update(good_witness.to_owned());
-            let claim = good_witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let mut nondeterminism = good_witness.nondeterminism();
+            for_each_version!({
+                let good_witness =
+                    SingleProofWitness::<VERSION>::from_update(good_witness.to_owned());
+                let claim = good_witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let mut nondeterminism = good_witness.nondeterminism();
 
-            let witness_again: SingleProofWitness = *SingleProofWitness::decode_from_memory(
-                &nondeterminism.ram,
-                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            )
-            .unwrap();
-            let mut witness_again = witness_again.into_update();
-            witness_again.new_aocl.append(random());
-            let witness_again = SingleProofWitness::from_update(witness_again);
-            encode_to_memory(
-                &mut nondeterminism.ram,
-                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                &witness_again,
-            );
-            let test_result = SingleProof.test_assertion_failure(
-                input,
-                nondeterminism,
-                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-            );
-            test_result.unwrap();
+                let witness_again: SingleProofWitness<VERSION> =
+                    *SingleProofWitness::<VERSION>::decode_from_memory(
+                        &nondeterminism.ram,
+                        FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    )
+                    .unwrap();
+                let mut witness_again = witness_again.into_update();
+                witness_again.new_aocl.append(random());
+                let witness_again = SingleProofWitness::<VERSION>::from_update(witness_again);
+                encode_to_memory(
+                    &mut nondeterminism.ram,
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    &witness_again,
+                );
+                let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+                );
+                test_result.unwrap();
+            });
         }
 
         fn bad_old_aocl(good_witness: &UpdateWitness) {
-            let good_witness = SingleProofWitness::from_update(good_witness.to_owned());
-            let claim = good_witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let mut nondeterminism = good_witness.nondeterminism();
+            for_each_version!({
+                let good_witness =
+                    SingleProofWitness::<VERSION>::from_update(good_witness.to_owned());
+                let claim = good_witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let mut nondeterminism = good_witness.nondeterminism();
 
-            let witness_again: SingleProofWitness = *SingleProofWitness::decode_from_memory(
-                &nondeterminism.ram,
-                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            )
-            .unwrap();
-            let mut witness_again = witness_again.into_update();
-            witness_again.old_aocl.append(random());
-            let witness_again = SingleProofWitness::from_update(witness_again);
-            encode_to_memory(
-                &mut nondeterminism.ram,
-                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                &witness_again,
-            );
-            let test_result = SingleProof.test_assertion_failure(
-                input,
-                nondeterminism,
-                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-            );
-            test_result.unwrap();
+                let witness_again: SingleProofWitness<VERSION> =
+                    *SingleProofWitness::<VERSION>::decode_from_memory(
+                        &nondeterminism.ram,
+                        FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    )
+                    .unwrap();
+                let mut witness_again = witness_again.into_update();
+                witness_again.old_aocl.append(random());
+                let witness_again = SingleProofWitness::<VERSION>::from_update(witness_again);
+                encode_to_memory(
+                    &mut nondeterminism.ram,
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    &witness_again,
+                );
+                let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+                );
+                test_result.unwrap();
+            });
         }
 
         fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
@@ -1150,16 +1300,18 @@ mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            let bad_witness = SingleProofWitness::from_update(bad_witness);
-            let claim = bad_witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = bad_witness.nondeterminism();
-            let test_result = SingleProof.test_assertion_failure(
-                input,
-                nondeterminism,
-                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
-            );
-            test_result.unwrap();
+            for_each_version!({
+                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
+                let claim = bad_witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = bad_witness.nondeterminism();
+                let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
+                );
+                test_result.unwrap();
+            });
         }
 
         fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
@@ -1172,16 +1324,18 @@ mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            let bad_witness = SingleProofWitness::from_update(bad_witness);
-            let claim = bad_witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = bad_witness.nondeterminism();
-            let test_result = SingleProof.test_assertion_failure(
-                input,
-                nondeterminism,
-                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
-            );
-            test_result.unwrap();
+            for_each_version!({
+                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
+                let claim = bad_witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = bad_witness.nondeterminism();
+                let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
+                );
+                test_result.unwrap();
+            });
         }
 
         fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness, rr: RemovalRecord) {
@@ -1195,16 +1349,18 @@ mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            let bad_witness = SingleProofWitness::from_update(bad_witness);
-            let claim = bad_witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = bad_witness.nondeterminism();
-            let test_result = SingleProof.test_assertion_failure(
-                input,
-                nondeterminism,
-                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
-            );
-            test_result.unwrap();
+            for_each_version!({
+                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
+                let claim = bad_witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = bad_witness.nondeterminism();
+                let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
+                );
+                test_result.unwrap();
+            });
         }
 
         #[apply(shared_tokio_runtime)]
@@ -1213,7 +1369,9 @@ mod tests {
             // multiple tests
             let good_witness =
                 deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await;
-            positive_prop(good_witness.clone());
+            for_each_version!({
+                positive_prop::<VERSION>(good_witness.clone());
+            });
             new_timestamp_older_than_old(&good_witness);
             bad_new_aocl(&good_witness);
             bad_old_aocl(&good_witness);
@@ -1235,27 +1393,29 @@ mod tests {
                 deterministic_update_witness_only_additions_to_mutator_set(0, 2, 2).await;
             let new_additions_and_removals_2_outputs =
                 deterministic_update_witness_additions_and_removals(0, 2, 2).await;
-            for bad_witness in [
-                only_new_additions_0_outputs,
-                only_new_additions_2_outputs,
-                new_additions_and_removals_2_outputs,
-            ] {
-                let bad_witness = SingleProofWitness::from_update(bad_witness);
-                let claim = bad_witness.claim();
-                let input = PublicInput::new(claim.input.clone());
-                let nondeterminism = bad_witness.nondeterminism();
-                let test_result = SingleProof.test_assertion_failure(
-                    input,
-                    nondeterminism,
-                    &[UpdateBranch::INPUT_SET_IS_EMPTY_ERROR],
-                );
-                test_result.unwrap();
-            }
+            for_each_version!({
+                for bad_witness in [
+                    only_new_additions_0_outputs.clone(),
+                    only_new_additions_2_outputs.clone(),
+                    new_additions_and_removals_2_outputs.clone(),
+                ] {
+                    let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness);
+                    let claim = bad_witness.claim();
+                    let input = PublicInput::new(claim.input.clone());
+                    let nondeterminism = bad_witness.nondeterminism();
+                    let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                        input,
+                        nondeterminism,
+                        &[UpdateBranch::INPUT_SET_IS_EMPTY_ERROR],
+                    );
+                    test_result.unwrap();
+                }
+            });
         }
     }
 
     test_program_snapshot!(
-        SingleProof,
+        SingleProof::<{ MergeVersion::Genesis as usize }>,
         // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
         "c0f8cbc73a844ab6c3586d8891e29b677a3aa08f25f9aec0f854a72bf2e2f84c2a48c9dd1bbe0a66"
     );

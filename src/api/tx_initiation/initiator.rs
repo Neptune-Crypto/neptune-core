@@ -22,6 +22,7 @@ use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPol
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
@@ -225,6 +226,8 @@ impl TransactionInitiator {
     ) -> Result<(), error::UpgradeProofError> {
         let network = self.global_state_lock.cli().network;
         let mut gsm = self.global_state_lock.lock_guard_mut().await;
+        let block_height = gsm.chain.light_state().header().height;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
         let Some(tx) = gsm.mempool.get_mut(transaction_id) else {
             return Err(error::UpgradeProofError::TxNotInMempool);
@@ -241,7 +244,7 @@ impl TransactionInitiator {
         // we could obtain tx with a read-lock first, verify,
         // then obtain again with write-lock to mutate it.
         if !transaction_proof
-            .verify(tx.kernel.mast_hash(), network)
+            .verify(tx.kernel.mast_hash(), network, consensus_rule_set)
             .await
         {
             return Err(error::UpgradeProofError::InvalidProof);

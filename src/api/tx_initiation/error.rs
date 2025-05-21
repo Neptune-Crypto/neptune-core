@@ -52,6 +52,7 @@ pub enum ProofRequirement {
     NonDeterminism,
     ProofJobOptions,
     TransactionProofInput,
+    ConsensusRuleSet,
 }
 
 /// enumerates possible proof generation errors

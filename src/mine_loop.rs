@@ -39,6 +39,7 @@ use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -413,11 +414,12 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, TxOutputList)> {
+    let network = job_options.job_settings.network;
     let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
         latest_block,
         composer_parameters,
         timestamp,
-        job_options.job_settings.network,
+        network,
     );
 
     let witness = PrimitiveWitness::from_transaction_details(&transaction_details);
@@ -431,7 +433,10 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 
     let kernel = witness.kernel.clone();
 
+    let target_block_height = latest_block.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, target_block_height);
     let proof = TransactionProofBuilder::new()
+        .consensus_rule_set(consensus_rule_set)
         .transaction_details(&transaction_details)
         .primitive_witness(witness)
         .job_queue(vm_job_queue)
@@ -617,6 +622,9 @@ pub(crate) async fn create_block_transaction_from(
         .lock_guard()
         .await
         .composer_parameters(predecessor_block.header().height.next());
+    let block_height = predecessor_block.header().height.next();
+    let network = global_state_lock.cli().network;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
@@ -662,6 +670,7 @@ pub(crate) async fn create_block_transaction_from(
             .build();
 
         let proof = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
             .primitive_witness_ref(&nop)
             .job_queue(vm_job_queue.clone())
             .proof_job_options(options)
@@ -691,6 +700,7 @@ pub(crate) async fn create_block_transaction_from(
             rng.random(),
             vm_job_queue.clone(),
             job_options.clone(),
+            consensus_rule_set,
         )
         .await?; // fix #579.  propagate error up.
     }
@@ -1087,6 +1097,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
+    use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -1158,8 +1169,8 @@ pub(crate) mod tests {
         sleepy_guessing: bool,
         num_outputs: usize,
     ) -> f64 {
-        let mut rng = rand::rng();
         let network = Network::RegTest;
+        let mut rng = rand::rng();
         let global_state_lock = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -1195,7 +1206,8 @@ pub(crate) mod tests {
             &previous_block,
             transaction,
             start_time,
-            target_block_interval,
+            Some(target_block_interval),
+            network,
         );
         let threshold = previous_block.header().difficulty.target();
         let num_iterations_launched = 1_000_000;
@@ -1254,7 +1266,8 @@ pub(crate) mod tests {
             &genesis_block,
             transaction,
             in_seven_months,
-            network.target_block_interval(),
+            None,
+            network,
         );
         let tock = tick.elapsed().unwrap().as_millis() as f64;
         black_box(block);
@@ -1266,6 +1279,7 @@ pub(crate) mod tests {
     async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let mut alice = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -1311,6 +1325,7 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(1),
                 now,
                 config,
+                consensus_rule_set,
             )
             .await
             .unwrap()
@@ -1331,7 +1346,7 @@ pub(crate) mod tests {
                     &genesis_block,
                     &alice,
                     now,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap()
@@ -1343,10 +1358,10 @@ pub(crate) mod tests {
             );
 
             let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
-            let cb_tx_claim = SingleProof::claim(cb_txkmh);
+            let cb_tx_claim = single_proof_claim(cb_txkmh, consensus_rule_set);
             assert!(
                 verify(
-                    cb_tx_claim.clone(),
+                    cb_tx_claim,
                     transaction_empty_mempool
                         .proof
                         .clone()
@@ -1471,7 +1486,8 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
-        assert!(block_1.is_valid(&genesis_block, mocked_now, network).await);
+        let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
+        assert!(validation_result.is_ok(), "{:?}", validation_result);
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
@@ -1540,7 +1556,8 @@ pub(crate) mod tests {
             &tip_block_orig,
             transaction,
             launch_date,
-            network.target_block_interval(),
+            None,
+            network,
         );
         block.set_header_guesser_digest(guesser_key.after_image());
 
@@ -1619,7 +1636,8 @@ pub(crate) mod tests {
             &tip_block_orig,
             transaction,
             ten_seconds_ago,
-            network.target_block_interval(),
+            None,
+            network,
         );
 
         // sanity check that our initial state is correct.
@@ -1776,7 +1794,8 @@ pub(crate) mod tests {
                 &prev_block,
                 transaction,
                 start_time,
-                target_block_interval,
+                Some(target_block_interval),
+                network,
             );
 
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -1850,7 +1869,7 @@ pub(crate) mod tests {
     fn fast_kernel_mast_hash_agrees_with_mast_hash_function_invalid_block() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
-        let block1 = invalid_empty_block(network, &genesis);
+        let block1 = invalid_empty_block(&genesis, network);
         for block in [genesis, block1] {
             let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
             assert_eq!(
@@ -2413,6 +2432,7 @@ pub(crate) mod tests {
                 prev_block.clone(),
                 transaction,
                 guesser_key,
+                network,
             );
 
             // create channel to listen for guessing results.

@@ -120,7 +120,6 @@ pub(crate) fn invalid_block_with_transaction(
 /// Returns (block, composer's expected UTXOs).
 #[expect(clippy::too_many_arguments)]
 pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-    network: Network,
     previous_block: &Block,
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
@@ -128,6 +127,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
     composer_key: generation_address::GenerationSpendingKey,
     coinbase_sender_randomness: Digest,
     guesser_parameters: (f64, Digest),
+    network: Network,
 ) -> (Block, Vec<ExpectedUtxo>) {
     let (guesser_fraction, guesser_preimage) = guesser_parameters;
 
@@ -174,7 +174,8 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         previous_block,
         transaction,
         block_timestamp,
-        network.target_block_interval(),
+        None,
+        network,
     );
     block.set_header_guesser_digest(guesser_preimage.hash());
 
@@ -198,20 +199,20 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
 ///
 /// Returns (block, composer-utxos).
 pub(crate) async fn make_mock_block(
-    network: Network,
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
     coinbase_sender_randomness: Digest,
+    network: Network,
 ) -> (Block, Vec<ExpectedUtxo>) {
     make_mock_block_with_inputs_and_outputs(
-        network,
         previous_block,
         vec![],
         vec![],
         block_timestamp,
         composer_key,
         coinbase_sender_randomness,
+        network,
     )
     .await
 }
@@ -221,16 +222,15 @@ pub(crate) async fn make_mock_block(
 ///
 /// Returns (block, composer-utxos).
 pub(crate) async fn make_mock_block_with_inputs_and_outputs(
-    network: Network,
     previous_block: &Block,
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
     coinbase_sender_randomness: Digest,
+    network: Network,
 ) -> (Block, Vec<ExpectedUtxo>) {
     make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-        network,
         previous_block,
         inputs,
         outputs,
@@ -238,6 +238,7 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
         composer_key,
         coinbase_sender_randomness,
         (0f64, Digest::default()),
+        network,
     )
     .await
 }
@@ -275,12 +276,9 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .wallet_state
         .wallet_entropy
         .guesser_preimage(tip_block.hash());
-    let mut block = Block::block_template_invalid_proof(
-        &tip_block,
-        transaction,
-        timestamp,
-        global_state_lock.cli().network.target_block_interval(),
-    );
+    let network = global_state_lock.cli().network;
+    let mut block =
+        Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None, network);
     block.set_header_guesser_digest(guesser_preimage.hash());
 
     global_state_lock
@@ -290,22 +288,22 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     Ok(block)
 }
 
-pub(crate) fn invalid_empty_block(network: Network, predecessor: &Block) -> Block {
+pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
     let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
         vec![],
         vec![],
         predecessor.mutator_set_accumulator_after().unwrap().hash(),
     );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, network.target_block_interval())
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
 /// Return a list of `n` invalid, empty blocks.
-pub(crate) fn invalid_empty_blocks(network: Network, ancestor: &Block, n: usize) -> Vec<Block> {
+pub(crate) fn invalid_empty_blocks(ancestor: &Block, n: usize, network: Network) -> Vec<Block> {
     let mut blocks = vec![];
     let mut predecessor = ancestor;
     for _ in 0..n {
-        blocks.push(invalid_empty_block(network, predecessor));
+        blocks.push(invalid_empty_block(predecessor, network));
         predecessor = blocks.last().unwrap();
     }
 
@@ -313,9 +311,9 @@ pub(crate) fn invalid_empty_blocks(network: Network, ancestor: &Block, n: usize)
 }
 
 pub(crate) fn invalid_empty_block_with_timestamp(
-    network: Network,
     predecessor: &Block,
     timestamp: Timestamp,
+    network: Network,
 ) -> Block {
     let tx = super::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
         vec![],
@@ -323,19 +321,19 @@ pub(crate) fn invalid_empty_block_with_timestamp(
         predecessor.mutator_set_accumulator_after().unwrap().hash(),
         timestamp,
     );
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, network.target_block_interval())
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
 /// Create a fake block proposal; will pass `is_valid` but fail pow-check. Will
 /// be a valid block except for proof and PoW.
 pub(crate) async fn fake_valid_block_proposal_from_tx(
-    network: Network,
     predecessor: &Block,
     tx: Transaction,
+    network: Network,
 ) -> Block {
     let timestamp = tx.kernel.timestamp;
 
-    let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx);
+    let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx, network);
 
     let body = primitive_witness.body().to_owned();
     let header = primitive_witness.header(timestamp, network.target_block_interval());
@@ -353,12 +351,12 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 /// Create a block from a transaction without the hassle of proving but such
 /// that it appears valid.
 pub(crate) async fn fake_valid_block_from_tx_for_tests(
-    network: Network,
     predecessor: &Block,
     tx: Transaction,
     seed: [u8; 32],
+    network: Network,
 ) -> Block {
-    let mut block = fake_valid_block_proposal_from_tx(network, predecessor, tx).await;
+    let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
 
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
     while !block.has_proof_of_work(network, predecessor.header()) {
@@ -428,14 +426,14 @@ pub async fn fake_block_successor_with_merged_tx(
 
     if with_valid_pow {
         fake_valid_block_from_tx_for_tests(
-            network,
             predecessor,
             block_tx,
             seed_bytes.pop().unwrap(),
+            network,
         )
         .await
     } else {
-        fake_valid_block_proposal_from_tx(network, predecessor, block_tx).await
+        fake_valid_block_proposal_from_tx(predecessor, block_tx, network).await
     }
 }
 

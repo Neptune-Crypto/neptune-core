@@ -8,10 +8,10 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::prelude::twenty_first;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 pub mod lock_script;
+pub mod merge_version;
 pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod transaction_proof;
@@ -35,8 +35,6 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorPr
 use tracing::info;
 pub(crate) use transaction_proof::TransactionProof;
 use validity::proof_collection::ProofCollection;
-use validity::single_proof::SingleProof;
-use validity::single_proof::SingleProofWitness;
 use validity::tasm::single_proof::merge_branch::MergeWitness;
 use validity::tasm::single_proof::update_branch::UpdateWitness;
 
@@ -44,6 +42,7 @@ use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
 use self::transaction_kernel::TransactionKernelModifier;
 use self::transaction_kernel::TransactionKernelProxy;
+use super::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::proof::Claim;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -130,6 +129,7 @@ impl Transaction {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<Transaction> {
         ensure!(
             old_transaction_kernel.mutator_set_hash == previous_mutator_set_accumulator.hash(),
@@ -188,11 +188,12 @@ impl Transaction {
         //     .await?;
         // info!("done.");
 
-        let new_single_proof_witness = SingleProofWitness::from_update(update_witness);
+        // let new_single_proof_witness = SingleProofWitness::from_update(update_witness);
 
         info!("starting single proof via update ...");
         let proof = TransactionProofBuilder::new()
-            .single_proof_witness(&new_single_proof_witness)
+            .consensus_rule_set(consensus_rule_set)
+            .update_witness(&update_witness)
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
@@ -208,9 +209,11 @@ impl Transaction {
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
-    pub async fn is_valid(&self, network: Network) -> bool {
+    pub async fn is_valid(&self, network: Network, consensus_rule_set: ConsensusRuleSet) -> bool {
         let kernel_hash = self.kernel.mast_hash();
-        self.proof.verify(kernel_hash, network).await
+        self.proof
+            .verify(kernel_hash, network, consensus_rule_set)
+            .await
     }
 
     /// Merge two transactions. Both input transactions must have a valid
@@ -229,6 +232,7 @@ impl Transaction {
         shuffle_seed: [u8; 32],
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Result<Transaction> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
@@ -240,7 +244,9 @@ impl Transaction {
             "Cannot merge two coinbase transactions"
         );
 
-        let merge_witness = MergeWitness::from_transactions(self, other, shuffle_seed);
+        let merge_version = consensus_rule_set.merge_version();
+        let merge_witness =
+            MergeWitness::from_transactions(self, other, shuffle_seed, merge_version);
         MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await
     }
 
@@ -270,14 +276,6 @@ impl Transaction {
             .is_confirmable_relative_to(mutator_set_accumulator)
             .is_ok()
     }
-
-    /// verifies the transaction proof is valid
-    ///
-    /// ... which also means the transaction is valid.
-    // maybe this should just be called verify()  or validate()?
-    pub async fn verify_proof(&self, network: Network) -> bool {
-        self.proof.verify(self.kernel.mast_hash(), network).await
-    }
 }
 
 #[cfg(test)]
@@ -288,6 +286,7 @@ pub(crate) mod tests {
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::random;
+    use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
     use tasm_lib::triton_vm::prelude::Tip5;
     use tests::primitive_witness::SaltedUtxos;
@@ -296,6 +295,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::blocks::mock_block_from_transaction_and_msa;
@@ -379,12 +379,17 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn update_single_proof_works() {
-        async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
+        async fn prop(
+            to_be_updated: PrimitiveWitness,
+            mined: PrimitiveWitness,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
             let network = Network::Main;
-            let as_single_proof = SingleProof::produce(
+            let as_single_proof = produce_single_proof(
                 &to_be_updated,
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
+                consensus_rule_set,
             )
             .await
             .unwrap();
@@ -392,7 +397,7 @@ pub(crate) mod tests {
                 kernel: to_be_updated.kernel,
                 proof: TransactionProof::SingleProof(as_single_proof),
             };
-            assert!(original_tx.is_valid(network).await);
+            assert!(original_tx.is_valid(network, consensus_rule_set).await);
 
             let mutator_set_update =
                 MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone());
@@ -404,11 +409,12 @@ pub(crate) mod tests {
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
                 None,
+                consensus_rule_set,
             )
             .await
             .unwrap();
 
-            assert!(updated_tx.is_valid(network).await)
+            assert!(updated_tx.is_valid(network, consensus_rule_set).await)
         }
 
         for (to_be_updated_params, mined_params) in [
@@ -429,7 +435,10 @@ pub(crate) mod tests {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-            prop(to_be_updated, mined).await;
+
+            for consensus_rule_set in ConsensusRuleSet::iter() {
+                prop(to_be_updated.clone(), mined.clone(), consensus_rule_set).await;
+            }
         }
     }
 

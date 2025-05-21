@@ -28,6 +28,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
+use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
@@ -51,6 +52,7 @@ use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
 // Dictated by the witness type of SingleProof
 const MERGE_WITNESS_ADDRESS: BFieldElement = BFieldElement::new(2);
@@ -62,6 +64,10 @@ pub struct MergeWitness {
     pub(crate) new_kernel: TransactionKernel,
     pub(crate) left_proof: Proof,
     pub(crate) right_proof: Proof,
+
+    #[bfield_codec(ignore)]
+    #[tasm_object(ignore)]
+    pub(crate) merge_version: MergeVersion,
 }
 
 impl MergeWitness {
@@ -72,6 +78,7 @@ impl MergeWitness {
         left: Transaction,
         right: Transaction,
         shuffle_seed: [u8; 32],
+        merge_version: MergeVersion,
     ) -> Self {
         let left_kernel = left.kernel;
         let right_kernel = right.kernel;
@@ -83,7 +90,7 @@ impl MergeWitness {
             panic!("cannot merge transactions that are not supported by singleproof");
         };
 
-        let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed);
+        let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed, merge_version);
 
         Self {
             left_kernel,
@@ -91,6 +98,7 @@ impl MergeWitness {
             new_kernel,
             left_proof,
             right_proof,
+            merge_version,
         }
     }
 
@@ -102,23 +110,54 @@ impl MergeWitness {
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
         let new_kernel = self.new_kernel.clone();
-        let new_single_proof_witness = SingleProofWitness::from_merge(self);
-        let new_single_proof_claim = new_single_proof_witness.claim();
-        info!("Start: creating new single proof through merge");
-        let new_single_proof = SingleProof
-            .prove(
-                new_single_proof_claim,
-                new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
-            .await?;
-        info!("Done: creating new single proof through merge");
+        match self.merge_version {
+            MergeVersion::Genesis => {
+                type GenesisSingleProofWitness =
+                    SingleProofWitness<{ MergeVersion::Genesis as usize }>;
+                let genesis_single_proof = SingleProof::<{ MergeVersion::Genesis as usize }>;
+                let new_single_proof_witness = GenesisSingleProofWitness::from_merge(self);
+                let new_single_proof_claim = new_single_proof_witness.claim();
+                info!("Start: creating new single proof through merge");
+                let new_single_proof = genesis_single_proof
+                    .prove(
+                        new_single_proof_claim,
+                        new_single_proof_witness.nondeterminism(),
+                        triton_vm_job_queue,
+                        proof_job_options,
+                    )
+                    .await?;
 
-        Ok(Transaction {
-            kernel: new_kernel,
-            proof: TransactionProof::SingleProof(new_single_proof),
-        })
+                info!("Done: creating new single proof through merge");
+
+                Ok(Transaction {
+                    kernel: new_kernel,
+                    proof: TransactionProof::SingleProof(new_single_proof),
+                })
+            }
+            MergeVersion::HardFork2 => {
+                type HardFork2SingleProofWitness =
+                    SingleProofWitness<{ MergeVersion::HardFork2 as usize }>;
+                let hard_fork_2_single_proof = SingleProof::<{ MergeVersion::HardFork2 as usize }>;
+                let new_single_proof_witness = HardFork2SingleProofWitness::from_merge(self);
+                let new_single_proof_claim = new_single_proof_witness.claim();
+                info!("Start: creating new single proof through merge");
+                let new_single_proof = hard_fork_2_single_proof
+                    .prove(
+                        new_single_proof_claim,
+                        new_single_proof_witness.nondeterminism(),
+                        triton_vm_job_queue,
+                        proof_job_options,
+                    )
+                    .await?;
+
+                info!("Done: creating new single proof through merge");
+
+                Ok(Transaction {
+                    kernel: new_kernel,
+                    proof: TransactionProof::SingleProof(new_single_proof),
+                })
+            }
+        }
     }
 
     /// Generate a new transaction kernel from two transactions.
@@ -130,6 +169,7 @@ impl MergeWitness {
         left_kernel: &TransactionKernel,
         right_kernel: &TransactionKernel,
         shuffle_seed: [u8; 32],
+        merge_version: MergeVersion,
     ) -> TransactionKernel {
         assert_eq!(
             left_kernel.mutator_set_hash, right_kernel.mutator_set_hash,
@@ -140,8 +180,25 @@ impl MergeWitness {
             "attempting to merge with RHS transaction whose fee is negative; negative fees only allowed on LHS"
         );
         let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed);
-        let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
-        inputs.shuffle(&mut rng);
+
+        let inputs = match merge_version {
+            MergeVersion::Genesis => {
+                let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
+                inputs.shuffle(&mut rng);
+                inputs
+            }
+            MergeVersion::HardFork2 => {
+                let left_unpacked_inputs =
+                    RemovalRecordList::try_unpack(left_kernel.inputs.clone())
+                        .expect("data is trusted, so unpacking must work for left tx.");
+                let right_unpacked_inputs =
+                    RemovalRecordList::try_unpack(right_kernel.inputs.clone())
+                        .expect("data is trusted, so unpacking must work for right tx.");
+                let mut unpacked = [left_unpacked_inputs, right_unpacked_inputs].concat();
+                unpacked.shuffle(&mut rng);
+                RemovalRecordList::pack(unpacked)
+            }
+        };
         let mut outputs = [left_kernel.outputs.clone(), right_kernel.outputs.clone()].concat();
         outputs.shuffle(&mut rng);
         let mut public_announcements = [
@@ -166,7 +223,11 @@ impl MergeWitness {
         .into_kernel()
     }
 
-    pub(crate) fn populate_nd_streams(&self, nondeterminism: &mut NonDeterminism) {
+    pub(crate) fn populate_nd_streams(
+        &self,
+        nondeterminism: &mut NonDeterminism,
+        single_proof_program_hash: Digest,
+    ) {
         // txk digests come from secin / individual tokens
         nondeterminism.individual_tokens.extend(
             [
@@ -178,8 +239,11 @@ impl MergeWitness {
 
         // update nondeterminism in accordance with proof-verification
         let verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
-        let left_claim = SingleProof::claim(self.left_kernel.mast_hash());
-        let right_claim = SingleProof::claim(self.right_kernel.mast_hash());
+        let left_claim = Claim::new(single_proof_program_hash)
+            .with_input(self.left_kernel.mast_hash().reversed().values());
+        let right_claim = Claim::new(single_proof_program_hash)
+            .with_input(self.right_kernel.mast_hash().reversed().values());
+
         verify_snippet.update_nondeterminism(nondeterminism, &self.left_proof, &left_claim);
         verify_snippet.update_nondeterminism(nondeterminism, &self.right_proof, &right_claim);
 
@@ -228,14 +292,14 @@ impl MergeWitness {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MergeBranch;
+pub(crate) struct MergeBranch<const VERSION: usize>;
 
-impl MergeBranch {
+impl<const VERSION: usize> MergeBranch<VERSION> {
     const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_070;
     const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_071;
 }
 
-impl BasicSnippet for MergeBranch {
+impl<const VERSION: usize> BasicSnippet for MergeBranch<VERSION> {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "single_proof_program_digest".to_owned()),
@@ -955,9 +1019,12 @@ pub(crate) mod tests {
     use strum::EnumCount;
 
     use super::*;
+    use crate::api::export::BlockHeight;
+    use crate::api::export::Network;
+    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+    use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -1130,6 +1197,8 @@ pub(crate) mod tests {
     pub(crate) async fn deterministic_merge_witness(
         params_left: (usize, usize, usize),
         params_right: (usize, usize, usize),
+        block_height: BlockHeight,
+        network: Network,
     ) -> MergeWitness {
         let mut test_runner = TestRunner::deterministic();
         let [primitive_witness_1, primitive_witness_2] =
@@ -1148,32 +1217,40 @@ pub(crate) mod tests {
             .unwrap()
             .current();
 
-        let single_proof_1 = SingleProof::produce(
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+        let left_proof = produce_single_proof(
             &primitive_witness_1,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
+            consensus_rule_set,
         )
         .await
         .unwrap();
-        let single_proof_2 = SingleProof::produce(
+        let right_proof = produce_single_proof(
             &primitive_witness_2,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
+            consensus_rule_set,
         )
         .await
         .unwrap();
 
-        let left_tx = Transaction::new_single_proof(primitive_witness_1.kernel, single_proof_1);
-        let right_tx = Transaction::new_single_proof(primitive_witness_2.kernel, single_proof_2);
+        let left_tx = Transaction::new_single_proof(primitive_witness_1.kernel, left_proof);
+        let right_tx = Transaction::new_single_proof(primitive_witness_2.kernel, right_proof);
 
-        MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed)
+        let merge_version = consensus_rule_set.merge_version();
+        MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed, merge_version)
     }
 
     pub(crate) async fn deterministic_merge_witness_with_coinbase(
         num_total_inputs: usize,
         num_total_outputs: usize,
         num_pub_announcements: usize,
+        block_height: BlockHeight,
+        network: Network,
     ) -> MergeWitness {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+
         let mut test_runner = TestRunner::deterministic();
 
         let (left, right) = PrimitiveWitness::arbitrary_pair_with_inputs_and_coinbase_respectively(
@@ -1190,24 +1267,27 @@ pub(crate) mod tests {
             .unwrap()
             .current();
 
-        let left_proof = SingleProof::produce(
+        let left_proof = produce_single_proof(
             &left,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
+            consensus_rule_set,
         )
         .await
         .unwrap();
-        let right_proof = SingleProof::produce(
+        let right_proof = produce_single_proof(
             &right,
             TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
+            TritonVmProofJobOptions::default_with_network(network),
+            consensus_rule_set,
         )
         .await
         .unwrap();
 
-        let left_tx = Transaction::new_single_proof(left.kernel, left_proof);
-        let right_tx = Transaction::new_single_proof(right.kernel, right_proof);
+        let left = Transaction::new_single_proof(left.kernel, left_proof);
+        let right = Transaction::new_single_proof(right.kernel, right_proof);
 
-        MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed)
+        let merge_version = consensus_rule_set.merge_version();
+        MergeWitness::from_transactions(left, right, shuffle_seed, merge_version)
     }
 }

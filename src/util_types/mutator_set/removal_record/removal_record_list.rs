@@ -18,8 +18,6 @@ use twenty_first::util_types::merkle_tree::MerkleTreeNodeIndex;
 use super::chunk::Chunk;
 use super::chunk::ChunkUnpackError;
 use super::chunk_dictionary::ChunkDictionary;
-use super::dense_absolute_index_set::AbsoluteIndexSetUnpackError;
-use super::dense_absolute_index_set::DenseAbsoluteIndexSet;
 use super::AbsoluteIndexSet;
 use super::RemovalRecord;
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
@@ -38,7 +36,7 @@ pub(crate) struct RemovalRecordList {
 }
 
 #[derive(Debug, Error)]
-pub(super) enum RemovalRecordListUnpackError {
+pub(crate) enum RemovalRecordListUnpackError {
     #[error("inner decoding error: {0}")]
     InnerDecodingFailure(#[from] Box<dyn core::error::Error + Send + Sync>),
     #[error("Absolute index value cannot exceed 74 bits")]
@@ -375,13 +373,13 @@ impl RemovalRecordList {
 
     /// Compress a [`Vec`] of [`RemovalRecord`]s densely by packing the same
     /// information into another, *smaller*, [`Vec`] of [`RemovalRecord`]s.
-    pub(super) fn pack(removal_records: Vec<RemovalRecord>) -> Vec<RemovalRecord> {
+    pub(crate) fn pack(removal_records: Vec<RemovalRecord>) -> Vec<RemovalRecord> {
         Self::convert_from_vec(removal_records).encode_as_vec()
     }
 
     /// Decompress a [`Vec`] of [`RemovalRecord`]s as packed by [`Self::pack`].
     /// Returns an error if the packing is invalid.
-    pub(super) fn try_unpack(
+    pub(crate) fn try_unpack(
         removal_records: Vec<RemovalRecord>,
     ) -> Result<Vec<RemovalRecord>, RemovalRecordListUnpackError> {
         let as_removal_record_list = RemovalRecordList::decode_from_vec(removal_records)?;

@@ -45,11 +45,7 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
     // security: we do not accept mock proofs unless we ourselves
     // are running a network that accepts mock-proofs, eg regtest.
     if network.use_mock_proof() {
-        if proof.is_valid_mock() {
-            return true;
-        } else if proof.is_invalid_mock() {
-            return false;
-        }
+        return proof.is_valid_mock();
     }
 
     // presently this is used by certain unit tests.

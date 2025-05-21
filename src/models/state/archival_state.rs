@@ -1245,6 +1245,7 @@ pub(super) mod tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1289,7 +1290,7 @@ pub(super) mod tests {
         let some_wallet_secret = WalletEntropy::new_random();
         let some_key = some_wallet_secret.nth_generation_spending_key_for_tests(0);
 
-        let (block_1, _) = make_mock_block(network, &b, None, some_key, rng.random()).await;
+        let (block_1, _) = make_mock_block(&b, None, some_key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state0, block_1.clone())
             .await
             .unwrap();
@@ -1364,13 +1365,13 @@ pub(super) mod tests {
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
         let (mock_block_1, _) = make_mock_block(
-            network,
             &archival_state.genesis_block,
             None,
             genesis_wallet_state
                 .wallet_entropy
                 .nth_generation_spending_key_for_tests(0),
             rng.random(),
+            network,
         )
         .await;
         archival_state
@@ -1414,7 +1415,7 @@ pub(super) mod tests {
 
         let genesis_block = Block::genesis(network);
         let (block1, _) =
-            make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
+            make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
 
         alice.set_new_tip(block1.clone()).await.unwrap();
         let num_aocl_leafs = alice
@@ -1443,6 +1444,8 @@ pub(super) mod tests {
         let config = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let block_height_1 = block1.header().height;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height_1);
         let sender_tx = alice
             .api()
             .tx_initiator_internal()
@@ -1451,6 +1454,7 @@ pub(super) mod tests {
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
                 config,
+                consensus_rule_set,
             )
             .await
             .unwrap()
@@ -1460,7 +1464,8 @@ pub(super) mod tests {
             &block1,
             (*sender_tx).clone(),
             in_seven_months,
-            network.target_block_interval(),
+            None,
+            network,
         );
 
         // Remove an element from the mutator set, verify that the active window DB is updated.
@@ -1491,11 +1496,11 @@ pub(super) mod tests {
 
         // 1. Create new block 1 and store it to the DB
         let (mock_block_1a, _) = make_mock_block(
-            network,
             &archival_state.genesis_block,
             None,
             own_key,
             rng.random(),
+            network,
         )
         .await;
         archival_state.write_block_as_tip(&mock_block_1a).await?;
@@ -1508,11 +1513,11 @@ pub(super) mod tests {
 
         // 3. Create competing block 1 and store it to DB
         let (mock_block_1b, _) = make_mock_block(
-            network,
             &archival_state.genesis_block,
             None,
             own_key,
             rng.random(),
+            network,
         )
         .await;
         archival_state.write_block_as_tip(&mock_block_1b).await?;
@@ -1540,6 +1545,7 @@ pub(super) mod tests {
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks.
         let network = Network::RegTest;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let mut rng = rand::rng();
         let alice_wallet = WalletEntropy::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
@@ -1569,7 +1575,13 @@ pub(super) mod tests {
         let big_tx = alice
             .api()
             .tx_initiator_internal()
-            .create_transaction(outputs.clone().into(), fee, in_seven_months, config_1a)
+            .create_transaction(
+                outputs.clone().into(),
+                fee,
+                in_seven_months,
+                config_1a,
+                consensus_rule_set,
+            )
             .await
             .unwrap()
             .transaction;
@@ -1586,6 +1598,7 @@ pub(super) mod tests {
                 fee,
                 in_seven_months,
                 config_1b,
+                consensus_rule_set,
             )
             .await
             .unwrap()
@@ -1664,10 +1677,18 @@ pub(super) mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let previous_block_height = previous_block.header().height;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, previous_block_height);
             let tx = alice
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(outputs.clone().into(), fee, timestamp, config)
+                .create_transaction(
+                    outputs.clone().into(),
+                    fee,
+                    timestamp,
+                    config,
+                    consensus_rule_set,
+                )
                 .await
                 .unwrap()
                 .transaction;
@@ -1745,7 +1766,7 @@ pub(super) mod tests {
         {
             // 3. Create competing block 1 and treat it as new tip
             let (mock_block_1b, _) =
-                make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
+                make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
             expected_num_utxos += mock_block_1b.body().transaction_kernel.outputs.len()
                 + mock_block_1b.guesser_fee_addition_records().unwrap().len();
 
@@ -1903,6 +1924,7 @@ pub(super) mod tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
+        let consensus_rule_set_0 = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let artifacts_alice_and_bob = premine_rec
             .api()
             .tx_initiator_internal()
@@ -1916,6 +1938,7 @@ pub(super) mod tests {
                 fee,
                 in_seven_months,
                 config,
+                consensus_rule_set_0,
             )
             .await
             .unwrap();
@@ -1943,6 +1966,7 @@ pub(super) mod tests {
                 Default::default(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
+                consensus_rule_set_0,
             )
             .await
             .unwrap();
@@ -2104,6 +2128,7 @@ pub(super) mod tests {
         let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof);
+        let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_1.header().height);
         let artifacts_alice = alice
             .api()
             .tx_initiator_internal()
@@ -2112,6 +2137,7 @@ pub(super) mod tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 config_alice,
+                consensus_rule_set_1,
             )
             .await
             .unwrap();
@@ -2160,6 +2186,7 @@ pub(super) mod tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 config_bob,
+                consensus_rule_set_1,
             )
             .await
             .unwrap();
@@ -2195,6 +2222,7 @@ pub(super) mod tests {
                 Default::default(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
+                consensus_rule_set_1,
             )
             .await
             .unwrap()
@@ -2203,6 +2231,7 @@ pub(super) mod tests {
                 Default::default(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
+                consensus_rule_set_1,
             )
             .await
             .unwrap();
@@ -2350,7 +2379,7 @@ pub(super) mod tests {
             let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
             let genesis = *archival_state.genesis_block.clone();
             let (mock_block_1, _) =
-                make_mock_block(network, &genesis, None, own_key, rng.random()).await;
+                make_mock_block(&genesis, None, own_key, rng.random(), network).await;
             add_block_to_archival_state(&mut archival_state, mock_block_1.clone())
                 .await
                 .unwrap();
@@ -2368,7 +2397,7 @@ pub(super) mod tests {
 
             // Add a 2nd block and verify that this new block is now returned
             let (mock_block_2, _) =
-                make_mock_block(network, &mock_block_1, None, own_key, rng.random()).await;
+                make_mock_block(&mock_block_1, None, own_key, rng.random(), network).await;
             add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
                 .await
                 .unwrap();
@@ -2420,7 +2449,7 @@ pub(super) mod tests {
         let own_wallet = WalletEntropy::new_random();
         let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
         let (mock_block_1, _) =
-            make_mock_block(network, &genesis.clone(), None, own_key, rng.random()).await;
+            make_mock_block(&genesis.clone(), None, own_key, rng.random(), network).await;
 
         // Lookup a block in an empty database, expect None to be returned
         assert!(
@@ -2443,7 +2472,7 @@ pub(super) mod tests {
 
         // Inserted a new block and verify that both blocks can be found
         let (mock_block_2, _) =
-            make_mock_block(network, &mock_block_1.clone(), None, own_key, rng.random()).await;
+            make_mock_block(&mock_block_1.clone(), None, own_key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_2.clone()).await?;
         let fetched2 = archival_state
             .get_block(mock_block_2.hash())
@@ -2467,7 +2496,7 @@ pub(super) mod tests {
         let mut blocks = vec![genesis, mock_block_1, mock_block_2];
         for _ in 0..(rand::rng().next_u32() % 20) {
             let (new_block, _) =
-                make_mock_block(network, &last_block, None, own_key, rng.random()).await;
+                make_mock_block(&last_block, None, own_key, rng.random(), network).await;
             add_block_to_archival_state(&mut archival_state, new_block.clone()).await?;
             blocks.push(new_block.clone());
             last_block = new_block;
@@ -2540,11 +2569,11 @@ pub(super) mod tests {
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
         for _block_height in 1..=5 {
             let next_block = make_mock_block(
-                network,
                 &current_block,
                 None,
                 compose_beneficiary,
                 rng.random(),
+                network,
             )
             .await
             .0;
@@ -2591,11 +2620,11 @@ pub(super) mod tests {
         let mut min_aocl_index = 0u64;
         for _block_height in 1..=5 {
             let (next_block, _) = make_mock_block(
-                network,
                 &current_block,
                 None,
                 compose_beneficiary,
                 rng.random(),
+                network,
             )
             .await;
             add_block_to_archival_state(&mut archival_state, next_block.clone())
@@ -2731,20 +2760,20 @@ pub(super) mod tests {
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
 
         let block_1a = make_mock_block(
-            network,
             &genesis_block,
             None,
             compose_beneficiary,
             rng.random(),
+            network,
         )
         .await
         .0;
         let block_1b = make_mock_block(
-            network,
             &genesis_block,
             None,
             compose_beneficiary,
             rng.random(),
+            network,
         )
         .await
         .0;
@@ -2786,16 +2815,16 @@ pub(super) mod tests {
         let genesis_msa = &genesis_block.mutator_set_accumulator_after().unwrap();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
 
-        let block_1a = make_mock_block(network, &genesis_block, None, cb_beneficiary, rng.random())
+        let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary, rng.random(), network)
             .await
             .0;
-        let block_2a = make_mock_block(network, &block_1a, None, cb_beneficiary, rng.random())
+        let block_2a = make_mock_block(&block_1a, None, cb_beneficiary, rng.random(), network)
             .await
             .0;
-        let block_1b = make_mock_block(network, &genesis_block, None, cb_beneficiary, rng.random())
+        let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary, rng.random(), network)
             .await
             .0;
-        let block_2b = make_mock_block(network, &block_1b, None, cb_beneficiary, rng.random())
+        let block_2b = make_mock_block(&block_1b, None, cb_beneficiary, rng.random(), network)
             .await
             .0;
         let block_1a_msa = &block_1a.mutator_set_accumulator_after().unwrap();
@@ -2893,11 +2922,11 @@ pub(super) mod tests {
         let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
         let (mock_block_1_a, _) =
-            make_mock_block(network, &genesis.clone(), None, key, rng.random()).await;
+            make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_1_a.clone()).await?;
 
         let (mock_block_1_b, _) =
-            make_mock_block(network, &genesis.clone(), None, key, rng.random()).await;
+            make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_1_b.clone()).await?;
 
         // Test 1a
@@ -3033,7 +3062,7 @@ pub(super) mod tests {
         // Insert a block that is descendant from genesis block and verify that it is canonical
         let wallet = WalletEntropy::new_random();
         let key = wallet.nth_generation_spending_key_for_tests(0);
-        let (block1, _) = make_mock_block(network, &genesis.clone(), None, key, rng.random()).await;
+        let (block1, _) = make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, block1.clone()).await?;
         assert!(
             archival_state
@@ -3050,13 +3079,13 @@ pub(super) mod tests {
 
         // Insert three more blocks and verify that all are part of the canonical chain
         let (mock_block_2_a, _) =
-            make_mock_block(network, &block1.clone(), None, key, rng.random()).await;
+            make_mock_block(&block1.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_2_a.clone()).await?;
         let (mock_block_3_a, _) =
-            make_mock_block(network, &mock_block_2_a.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_2_a.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_3_a.clone()).await?;
         let (mock_block_4_a, _) =
-            make_mock_block(network, &mock_block_3_a.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_3_a.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_4_a.clone()).await?;
         for (i, block) in [
             genesis.clone(),
@@ -3089,16 +3118,16 @@ pub(super) mod tests {
         // Make a tree and verify that the correct parts of the tree are identified as
         // belonging to the canonical chain
         let (mock_block_2_b, _) =
-            make_mock_block(network, &block1.clone(), None, key, rng.random()).await;
+            make_mock_block(&block1.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_2_b.clone()).await?;
         let (mock_block_3_b, _) =
-            make_mock_block(network, &mock_block_2_b.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_2_b.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_3_b.clone()).await?;
         let (mock_block_4_b, _) =
-            make_mock_block(network, &mock_block_3_b.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_3_b.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_4_b.clone()).await?;
         let (mock_block_5_b, _) =
-            make_mock_block(network, &mock_block_4_b.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_4_b.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_5_b.clone()).await?;
         for (i, block) in [
             genesis.clone(),
@@ -3156,47 +3185,47 @@ pub(super) mod tests {
 
         // Prior to this line, block 4a is tip.
         let (mock_block_3_c, _) =
-            make_mock_block(network, &mock_block_2_a.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_2_a.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_3_c.clone()).await?;
         let (mock_block_4_c, _) =
-            make_mock_block(network, &mock_block_3_c.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_3_c.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_4_c.clone()).await?;
         let (mock_block_5_c, _) =
-            make_mock_block(network, &mock_block_4_c.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_4_c.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_5_c.clone()).await?;
         let (mock_block_6_c, _) =
-            make_mock_block(network, &mock_block_5_c.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_5_c.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_6_c.clone()).await?;
         let (mock_block_7_c, _) =
-            make_mock_block(network, &mock_block_6_c.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_6_c.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_7_c.clone()).await?;
         let (mock_block_8_c, _) =
-            make_mock_block(network, &mock_block_7_c.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_7_c.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_8_c.clone()).await?;
         let (mock_block_5_a, _) =
-            make_mock_block(network, &mock_block_4_a.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_4_a.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_5_a.clone()).await?;
         let (mock_block_3_d, _) =
-            make_mock_block(network, &mock_block_2_a.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_2_a.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_3_d.clone()).await?;
 
         let (mock_block_4_e, _) =
-            make_mock_block(network, &mock_block_3_d.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_3_d.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_4_e.clone()).await?;
         let (mock_block_5_e, _) =
-            make_mock_block(network, &mock_block_4_e.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_4_e.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_5_e.clone()).await?;
 
         let (mock_block_4_d, _) =
-            make_mock_block(network, &mock_block_3_d.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_3_d.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_4_d.clone()).await?;
         let (mock_block_5_d, _) =
-            make_mock_block(network, &mock_block_4_d.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_4_d.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_5_d.clone()).await?;
 
         // This is the most canonical block in the known set
         let (mock_block_6_d, _) =
-            make_mock_block(network, &mock_block_5_d.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_5_d.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_6_d.clone()).await?;
 
         for (i, block) in [
@@ -3255,7 +3284,7 @@ pub(super) mod tests {
 
         // Make a new block, 6b, canonical and verify that all checks work
         let (mock_block_6_b, _) =
-            make_mock_block(network, &mock_block_5_b.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_5_b.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_6_b.clone()).await?;
         for (i, block) in [
             mock_block_3_c.clone(),
@@ -3399,22 +3428,22 @@ pub(super) mod tests {
 
         // Insert blocks and verify that the same result is returned
         let (mock_block_1, _) =
-            make_mock_block(network, &genesis.clone(), None, key, rng.random()).await;
+            make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_1.clone())
             .await
             .unwrap();
         let (mock_block_2, _) =
-            make_mock_block(network, &mock_block_1.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_1.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
             .await
             .unwrap();
         let (mock_block_3, _) =
-            make_mock_block(network, &mock_block_2.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_2.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_3.clone())
             .await
             .unwrap();
         let (mock_block_4, _) =
-            make_mock_block(network, &mock_block_3.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_3.clone(), None, key, rng.random(), network).await;
         add_block_to_archival_state(&mut archival_state, mock_block_4.clone())
             .await
             .unwrap();
@@ -3486,7 +3515,7 @@ pub(super) mod tests {
         let key = wallet.nth_generation_spending_key_for_tests(0);
 
         let (mock_block_1, _) =
-            make_mock_block(network, &genesis.clone(), None, key, rng.random()).await;
+            make_mock_block(&genesis.clone(), None, key, rng.random(), network).await;
         archival_state.write_block_as_tip(&mock_block_1).await?;
 
         // Verify that `LastFile` value is stored correctly
@@ -3569,7 +3598,7 @@ pub(super) mod tests {
 
         // Store another block and verify that this block is appended to disk
         let (mock_block_2, _) =
-            make_mock_block(network, &mock_block_1.clone(), None, key, rng.random()).await;
+            make_mock_block(&mock_block_1.clone(), None, key, rng.random(), network).await;
         archival_state.write_block_as_tip(&mock_block_2).await?;
 
         // Verify that `LastFile` value is updated correctly, unchanged

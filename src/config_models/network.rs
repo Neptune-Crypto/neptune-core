@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumIter;
@@ -18,7 +19,17 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 // therefore: new variants cannot be added until entire network has upgraded to
 // v0.3.0 or higher.
 #[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter, strum::EnumIs,
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Default,
+    EnumIter,
+    strum::EnumIs,
+    GetSize,
 )]
 #[non_exhaustive]
 pub enum Network {

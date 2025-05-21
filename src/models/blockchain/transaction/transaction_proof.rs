@@ -3,12 +3,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
+use super::validity::single_proof::single_proof_claim;
 use crate::api::export::NeptuneProof;
 use crate::config_models::network::Network;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::ProofCollection;
-use crate::models::blockchain::transaction::SingleProof;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::verifier::verify;
@@ -116,16 +117,23 @@ impl TransactionProof {
         }
     }
 
-    /// verify this proof is valid for a provided transaction id
-    pub async fn verify(&self, kernel_mast_hash: Digest, network: Network) -> bool {
+    /// verify this proof is valid for a provided transaction id.
+    ///
+    /// Block height is the height of the block that matches the transaction's
+    /// mutator set accumulator.
+    pub async fn verify(
+        &self,
+        kernel_mast_hash: Digest,
+        network: Network,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> bool {
         match self {
             TransactionProof::Witness(primitive_witness) => {
-                !primitive_witness.kernel.merge_bit
-                    && primitive_witness.validate().await.is_ok()
+                primitive_witness.validate().await.is_ok()
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
             }
             TransactionProof::SingleProof(single_proof) => {
-                let claim = SingleProof::claim(kernel_mast_hash);
+                let claim = single_proof_claim(kernel_mast_hash, consensus_rule_set);
                 verify(claim, single_proof.clone(), network).await
             }
             TransactionProof::ProofCollection(proof_collection) => {

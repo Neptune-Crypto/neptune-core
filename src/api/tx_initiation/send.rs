@@ -42,6 +42,7 @@ use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPol
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
@@ -120,6 +121,10 @@ impl TransactionSender {
             .change_policy(change_policy)
             .build(&mut state_lock)
             .await?;
+
+        let block_height = state_lock.gs().chain.light_state().header().height;
+        let network = state_lock.cli().network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         drop(state_lock); // release lock asap.
 
         tracing::info!("send: proving tx:\n{}", tx_details);
@@ -135,6 +140,7 @@ impl TransactionSender {
 
         // generate proof
         let proof = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
             .transaction_details(&tx_details)
             .primitive_witness(witness)
             .job_queue(vm_job_queue())

@@ -79,6 +79,7 @@ use crate::locks::tokio::AtomicRwWriteGuard;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
@@ -296,18 +297,24 @@ impl GlobalStateLock {
         &mut self,
         tx_artifacts: &TxCreationArtifacts,
     ) -> std::result::Result<(), RecordTransactionError> {
+        //
         // verifies that:
         //  1. Self::network matches provided Network.
         //  2. Transaction and TransactionDetails match.
         //  3. Transaction proof is valid, and thus the Tx itself is valid.
-        tx_artifacts.verify(self.cli().network).await?;
+
+        // acquire write-lock
+        let mut gsm = self.lock_guard_mut().await;
+        let block_height = gsm.chain.light_state().header().height;
+        let network = gsm.cli().network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+        tx_artifacts
+            .verify(gsm.cli().network, consensus_rule_set)
+            .await?;
 
         // clone is cheap as fields are Arc<T>
         let transaction = tx_artifacts.transaction.clone();
         let details = tx_artifacts.details.clone();
-
-        // acquire write-lock
-        let mut gsm = self.lock_guard_mut().await;
 
         let utxos_sent_to_self = gsm
             .wallet_state
@@ -708,6 +715,11 @@ impl GlobalState {
         self.wallet_state
             .get_wallet_status(tip_digest, &mutator_set_accumulator)
             .await
+    }
+
+    pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
+        let tip_height = self.chain.light_state().header().height;
+        ConsensusRuleSet::infer_from(self.cli().network, tip_height)
     }
 
     /// The block height in which the latest UTXO was either spent or received.
@@ -1682,7 +1694,7 @@ impl GlobalState {
         // performed by this client.
         let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_block)?;
 
-        // update wallet state with relevant UTXOs from this block
+        // update wallet state with relevant UTXOs from this block``
         self.wallet_state
             .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
             .await?;
@@ -2154,7 +2166,7 @@ mod tests {
         )
         .await;
         let mut bob = bob.global_state_lock.lock_guard_mut().await;
-        let block1 = invalid_empty_block(network, &Block::genesis(network));
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
 
         bob.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone());
         bob.mining_state
@@ -2221,6 +2233,8 @@ mod tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
+        let block_height = BlockHeight::genesis();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         assert!(bob
             .api()
             .tx_initiator_internal()
@@ -2229,6 +2243,7 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
                 config.clone(),
+                consensus_rule_set,
             )
             .await
             .is_err());
@@ -2242,11 +2257,12 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
                 config.clone(),
+                consensus_rule_set,
             )
             .await
             .unwrap()
             .transaction;
-        assert!(tx.is_valid(network).await);
+        assert!(tx.is_valid(network, consensus_rule_set).await);
 
         assert_eq!(
             2,
@@ -2280,11 +2296,12 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
                 config,
+                consensus_rule_set,
             )
             .await
             .unwrap()
             .transaction;
-        assert!(new_tx.is_valid(network).await);
+        assert!(new_tx.is_valid(network, consensus_rule_set).await);
         assert_eq!(
             4,
             new_tx.kernel.outputs.len(),
@@ -2596,7 +2613,7 @@ mod tests {
                 // 1. Create new block 1 and store it, but do not update wallet
                 // with the new block.
                 let (mock_block_1a, _) =
-                    make_mock_block(network, &genesis_block, None, bob_key, rng.random()).await;
+                    make_mock_block(&genesis_block, None, bob_key, rng.random(), network).await;
                 {
                     alice
                         .chain
@@ -2666,7 +2683,7 @@ mod tests {
                 // 1. Create new block 1a where we receive a coinbase UTXO, store it
                 let genesis_block = alice.chain.archival_state().get_tip().await;
                 let (mock_block_1a, composer_expected_utxos_1a) =
-                    make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
+                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
                 alice
                     .wallet_state
                     .add_expected_utxos(composer_expected_utxos_1a)
@@ -2696,7 +2713,7 @@ mod tests {
                 let mut parent_block = genesis_block;
                 for _ in 0..5 {
                     let (next_block, _) =
-                        make_mock_block(network, &parent_block, None, bob_key, rng.random()).await;
+                        make_mock_block(&parent_block, None, bob_key, rng.random(), network).await;
                     alice.set_new_tip(next_block.clone()).await.unwrap();
                     parent_block = next_block;
                 }
@@ -2818,13 +2835,13 @@ mod tests {
 
                         // produce block
                         let (next_block, _) = make_mock_block_with_inputs_and_outputs(
-                            network,
                             &block,
                             inputs.clone(),
                             outputs.clone(),
                             None,
                             coinbase_recipient.to_owned(),
                             rng.random(),
+                            network,
                         )
                         .await;
                         ret.push(next_block.clone());
@@ -2946,7 +2963,7 @@ mod tests {
                 // 1. Create new block 1 where Alice receives two composer UTXOs, store it.
                 let genesis_block = alice.chain.archival_state().get_tip().await;
                 let (block_1, alice_composer_expected_utxos_1) =
-                    make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
+                    make_mock_block(&genesis_block, None, alice_key, rng.random(), network).await;
                 {
                     alice
                         .wallet_state
@@ -3196,7 +3213,13 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(coinbase_transaction.is_valid(network).await);
+        let block_height = BlockHeight::genesis();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+        assert!(
+            coinbase_transaction
+                .is_valid(network, consensus_rule_set)
+                .await
+        );
         assert!(coinbase_transaction
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
 
@@ -3245,6 +3268,7 @@ mod tests {
             .with_prover_capability(TxProvingCapability::SingleProof);
         let tx_outputs_for_alice_and_bob =
             [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()].concat();
+
         let artifacts_alice_and_bob = premine_receiver
             .api()
             .tx_initiator_internal()
@@ -3253,6 +3277,7 @@ mod tests {
                 fee,
                 in_seven_months,
                 config_alice_and_bob,
+                consensus_rule_set,
             )
             .await
             .unwrap();
@@ -3267,7 +3292,11 @@ mod tests {
             .pop()
             .unwrap();
 
-        assert!(tx_to_alice_and_bob.is_valid(network).await);
+        assert!(
+            tx_to_alice_and_bob
+                .is_valid(network, consensus_rule_set)
+                .await
+        );
         assert!(tx_to_alice_and_bob
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
 
@@ -3291,10 +3320,15 @@ mod tests {
                 Default::default(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
+                consensus_rule_set,
             )
             .await
             .unwrap();
-        assert!(block_transaction.is_valid(network).await);
+        assert!(
+            block_transaction
+                .is_valid(network, consensus_rule_set)
+                .await
+        );
         assert!(block_transaction
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
 
@@ -3441,6 +3475,7 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 config_alice,
+                consensus_rule_set,
             )
             .await
             .unwrap();
@@ -3451,7 +3486,7 @@ mod tests {
             "No change for Alice as she spent it all"
         );
 
-        assert!(tx_from_alice.is_valid(network).await);
+        assert!(tx_from_alice.is_valid(network, consensus_rule_set).await);
         assert!(tx_from_alice
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
@@ -3487,6 +3522,7 @@ mod tests {
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 config_bob,
+                consensus_rule_set,
             )
             .await
             .unwrap();
@@ -3498,7 +3534,7 @@ mod tests {
             "No change for Bob as he spent it all"
         );
 
-        assert!(tx_from_bob.is_valid(network).await);
+        assert!(tx_from_bob.is_valid(network, consensus_rule_set).await);
         assert!(tx_from_bob
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
@@ -3519,7 +3555,11 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(coinbase_transaction2.is_valid(network).await);
+        assert!(
+            coinbase_transaction2
+                .is_valid(network, consensus_rule_set)
+                .await
+        );
         assert!(coinbase_transaction2
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
@@ -3529,6 +3569,7 @@ mod tests {
                 Default::default(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
+                consensus_rule_set,
             )
             .await
             .unwrap()
@@ -3537,10 +3578,15 @@ mod tests {
                 Default::default(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),
+                consensus_rule_set,
             )
             .await
             .unwrap();
-        assert!(block_transaction2.is_valid(network).await);
+        assert!(
+            block_transaction2
+                .is_valid(network, consensus_rule_set)
+                .await
+        );
         assert!(block_transaction2
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
@@ -3605,7 +3651,8 @@ mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn favor_incoming_block_proposal_test() {
-        async fn block1_proposal(global_state_lock: &GlobalStateLock) -> Block {
+        let network = Network::Main;
+        async fn block1_proposal(global_state_lock: &GlobalStateLock, network: Network) -> Block {
             let genesis_block = Block::genesis(global_state_lock.cli().network);
             let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
             let (cb, _) = make_coinbase_transaction_from_state(
@@ -3619,15 +3666,9 @@ mod tests {
             .await
             .unwrap();
 
-            Block::block_template_invalid_proof(
-                &genesis_block,
-                cb,
-                timestamp,
-                global_state_lock.cli().network.target_block_interval(),
-            )
+            Block::block_template_invalid_proof(&genesis_block, cb, timestamp, None, network)
         }
 
-        let network = Network::Main;
         let mut global_state_lock_small = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -3648,9 +3689,9 @@ mod tests {
             },
         )
         .await;
-        let small_guesser_fraction = block1_proposal(&global_state_lock_small).await;
+        let small_guesser_fraction = block1_proposal(&global_state_lock_small, network).await;
         let small_prev_block_digest = small_guesser_fraction.header().prev_block_digest;
-        let big_guesser_fraction = block1_proposal(&global_state_lock_big).await;
+        let big_guesser_fraction = block1_proposal(&global_state_lock_big, network).await;
         let big_prev_block_digest = big_guesser_fraction.header().prev_block_digest;
 
         let mut state = global_state_lock_small
@@ -3865,7 +3906,7 @@ mod tests {
             let mut previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(network, &previous_block, None, spending_key, rng.random())
+                    make_mock_block(&previous_block, None, spending_key, rng.random(), network)
                         .await;
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
@@ -3887,7 +3928,7 @@ mod tests {
             previous_block = genesis_block.clone();
             for block_height in 1..60 {
                 let (next_block, expected) =
-                    make_mock_block(network, &previous_block, None, spending_key, rng.random())
+                    make_mock_block(&previous_block, None, spending_key, rng.random(), network)
                         .await;
                 global_state_lock
                     .set_new_self_composed_tip(next_block.clone(), expected)
@@ -3937,7 +3978,7 @@ mod tests {
 
             let cb_key = WalletEntropy::new_random().nth_generation_spending_key(0);
             let (block_1, _) =
-                make_mock_block(network, &genesis_block, None, cb_key, rng.random()).await;
+                make_mock_block(&genesis_block, None, cb_key, rng.random(), network).await;
 
             alice.store_block_not_tip(block_1.clone()).await.unwrap();
             assert_eq!(
@@ -3966,7 +4007,7 @@ mod tests {
             let mut chain = vec![];
             for _ in 0..length {
                 let (block, _) =
-                    make_mock_block(network, &parent, None, cb_key, rng.random()).await;
+                    make_mock_block(&parent, None, cb_key, rng.random(), network).await;
                 chain.push((block.clone(), parent.clone()));
                 parent = block;
             }
@@ -4094,11 +4135,11 @@ mod tests {
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1a, composer_expected_utxos_1a) =
-                make_mock_block(network, &genesis_block, None, spending_key, rng.random()).await;
+                make_mock_block(&genesis_block, None, spending_key, rng.random(), network).await;
             let (block_2a, composer_expected_utxos_2a) =
-                make_mock_block(network, &block_1a, None, spending_key, rng.random()).await;
+                make_mock_block(&block_1a, None, spending_key, rng.random(), network).await;
             let (block_3a, composer_expected_utxos_3a) =
-                make_mock_block(network, &block_2a, None, spending_key, rng.random()).await;
+                make_mock_block(&block_2a, None, spending_key, rng.random(), network).await;
 
             let cli_args = cli_args::Args {
                 number_of_mps_per_utxo: 30,
@@ -4153,7 +4194,7 @@ mod tests {
                 // Verify that we can also reorganize with last shared ancestor being
                 // the genesis block.
                 let (block_1b, _) =
-                    make_mock_block(network, &genesis_block, None, spending_key, random()).await;
+                    make_mock_block(&genesis_block, None, spending_key, random(), network).await;
                 global_state.set_new_tip(block_1b.clone()).await.unwrap();
                 assert_correct_global_state(
                     &global_state,
@@ -4168,7 +4209,7 @@ mod tests {
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
                     let (next_block, composer_expected_utxos) =
-                        make_mock_block(network, &previous_block, None, spending_key, rng.random())
+                        make_mock_block(&previous_block, None, spending_key, rng.random(), network)
                             .await;
                     global_state
                         .wallet_state
@@ -4203,7 +4244,7 @@ mod tests {
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1, composer_expected_utxos_1) =
-                make_mock_block(network, &genesis_block, None, spend_key, rng.random()).await;
+                make_mock_block(&genesis_block, None, spend_key, rng.random(), network).await;
 
             for claim_cb in [false, true] {
                 let expected_num_mutxos = if claim_cb { 3 } else { 1 };
@@ -4256,7 +4297,7 @@ mod tests {
             // Ensure more than one file is used to store blocks.
             const MANY_BLOCKS: usize = 3;
             const BIG_PROOF_LEN: usize = 6_250_000; // ~= 50MB
-            let mut blocks = invalid_empty_blocks(network, &Block::genesis(network), MANY_BLOCKS);
+            let mut blocks = invalid_empty_blocks(&Block::genesis(network), MANY_BLOCKS, network);
             let big_bad_proof =
                 BlockProof::SingleProof(NeptuneProof::invalid_with_size(BIG_PROOF_LEN));
             for block in &mut blocks {
@@ -4604,6 +4645,8 @@ mod tests {
                 let config = TxCreationConfig::default()
                     .recover_to_provided_key(Arc::new(alice_change_key), change_notification_medium)
                     .with_prover_capability(TxProvingCapability::SingleProof);
+                let block_height = BlockHeight::genesis();
+                let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
                 let artifacts = alice_state_lock
                     .api()
                     .tx_initiator_internal()
@@ -4612,6 +4655,7 @@ mod tests {
                         alice_to_bob_fee,
                         seven_months_post_launch,
                         config,
+                        consensus_rule_set,
                     )
                     .await
                     .unwrap();

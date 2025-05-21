@@ -23,6 +23,7 @@ use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
@@ -193,8 +194,11 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         network,
     );
 
+    let block_height = predecessor_block.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height.next());
     let coinbase_transaction =
-        fake_create_transaction_from_details_for_tests(transaction_details).await;
+        fake_create_transaction_from_details_for_tests(transaction_details, consensus_rule_set)
+            .await;
 
     let mut block_transaction = coinbase_transaction;
     if selected_mempool_txs.is_empty() {
@@ -205,7 +209,8 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
             timestamp,
             network,
         );
-        let nop_transaction = fake_create_transaction_from_details_for_tests(nop_details).await;
+        let nop_transaction =
+            fake_create_transaction_from_details_for_tests(nop_details, consensus_rule_set).await;
 
         selected_mempool_txs = vec![nop_transaction];
     }
@@ -215,6 +220,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
             block_transaction,
             tx_to_include,
             shuffle_seed,
+            consensus_rule_set,
         )
         .await
         .expect("Must be able to merge transactions in mining context");

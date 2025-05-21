@@ -147,6 +147,9 @@ impl TransactionKernel {
     ) -> Result<(), TransactionConfirmabilityError> {
         // check validity of removal records
         //       ^^^^^^^^
+
+        // TODO: Try to unpack
+
         // meaning: a) all required membership proofs exist; and b) are valid.
         let maybe_invalid_removal_record = self
             .inputs

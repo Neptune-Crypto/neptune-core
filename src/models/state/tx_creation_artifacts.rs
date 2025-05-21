@@ -5,6 +5,7 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::config_models::network::Network;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 use crate::models::blockchain::transaction::Transaction;
@@ -71,8 +72,8 @@ impl TxCreationArtifacts {
     /// verifies that artifacts are consistent and valid.
     ///
     /// this is a wrapper for `verify` that just returns bool
-    pub async fn is_valid(&self, network: Network) -> bool {
-        self.verify(network).await.is_ok()
+    pub async fn is_valid(&self, network: Network, consensus_rule_set: ConsensusRuleSet) -> bool {
+        self.verify(network, consensus_rule_set).await.is_ok()
     }
 
     /// verifies that artifacts are consistent and valid.
@@ -99,7 +100,11 @@ impl TxCreationArtifacts {
     //    returns a bool
     // 2. it keeps the implementation the same regardless whether the network
     //    uses mock proofs or not.
-    pub async fn verify(&self, network: Network) -> Result<(), TxCreationArtifactsError> {
+    pub async fn verify(
+        &self,
+        network: Network,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Result<(), TxCreationArtifactsError> {
         // tbd: maybe we should get rid of the network arg.  it's present
         // out of abundance of caution.
 
@@ -127,7 +132,7 @@ impl TxCreationArtifacts {
         self.details.validate().await?;
 
         // 4. validate that transaction (proof) is valid.
-        if !self.transaction.verify_proof(network).await {
+        if !self.transaction.is_valid(network, consensus_rule_set).await {
             return Err(TxCreationArtifactsError::InvalidProof);
         }
 

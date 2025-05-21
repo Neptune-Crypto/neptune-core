@@ -124,7 +124,6 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
     for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) =
             super::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-                network,
                 &previous_block,
                 vec![],
                 vec![],
@@ -132,6 +131,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
                 own_key,
                 coinbase_sender_randomness,
                 (0.5, wallet.guesser_preimage(previous_block.hash())),
+                network,
             )
             .await;
 

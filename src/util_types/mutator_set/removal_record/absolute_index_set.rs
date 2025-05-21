@@ -16,17 +16,14 @@ use serde::Deserialize;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
+use super::super::mutator_set_accumulator::MutatorSetAccumulator;
+use super::super::shared::NUM_TRIALS;
+use super::MutatorSetError;
 use crate::util_types::mutator_set::shared::indices_to_hash_map;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-
-use super::super::mutator_set_accumulator::MutatorSetAccumulator;
-use super::super::shared::NUM_TRIALS;
-use super::dense_absolute_index_set::AbsoluteIndexSetUnpackError;
-use super::dense_absolute_index_set::DenseAbsoluteIndexSet;
-use super::MutatorSetError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Hash)]
 pub struct AbsoluteIndexSet(pub(super) [u128; NUM_TRIALS as usize]);

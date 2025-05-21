@@ -3,6 +3,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::bfe;
 
+use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::Network;
 use crate::api::export::Timestamp;
@@ -10,9 +11,10 @@ use crate::api::export::Transaction;
 use crate::api::export::TxProvingCapability;
 use crate::config_models::cli_args;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -115,10 +117,11 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
 /// `triton_vm::verify` will be by-passed.
 pub(super) async fn fake_create_transaction_from_details_for_tests(
     transaction_details: crate::api::export::TransactionDetails,
+    consensus_rule_set: ConsensusRuleSet,
 ) -> Transaction {
     let kernel = PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
 
-    let claim = SingleProof::claim(kernel.mast_hash());
+    let claim = single_proof_claim(kernel.mast_hash(), consensus_rule_set);
     cache_true_claim(claim.clone()).await;
 
     Transaction {
@@ -133,11 +136,13 @@ pub(super) async fn fake_merge_transactions_for_tests(
     lhs: Transaction,
     rhs: Transaction,
     shuffle_seed: [u8; 32],
+    consensus_rule_set: ConsensusRuleSet,
 ) -> anyhow::Result<Transaction> {
-    let merge_witness = MergeWitness::from_transactions(lhs, rhs, shuffle_seed);
+    let merge_witness =
+        MergeWitness::from_transactions(lhs, rhs, shuffle_seed, consensus_rule_set.merge_version());
     let new_kernel = merge_witness.new_kernel.clone();
 
-    let claim = SingleProof::claim(new_kernel.mast_hash());
+    let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
     cache_true_claim(claim).await;
 
     Ok(Transaction {
@@ -167,12 +172,20 @@ pub(crate) async fn genesis_tx_with_proof_type(
         .recover_change_on_chain(bob_spending_key.into())
         .with_prover_capability(proof_type);
 
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+
     // Clippy is wrong here. You can *not* eliminate the binding.
     #[allow(clippy::let_and_return)]
     let transaction = bob
         .api()
         .tx_initiator_internal()
-        .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
+        .create_transaction(
+            Vec::<TxOutput>::new().into(),
+            fee,
+            in_seven_months,
+            config,
+            consensus_rule_set,
+        )
         .await
         .unwrap()
         .transaction;
