@@ -2004,10 +2004,12 @@ pub(crate) mod tests {
     use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -2040,6 +2042,47 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
         }
+    }
+
+    /// Create an outgoing transaction. Helper function.
+    ///
+    /// Panics on insufficient balance.
+    async fn outgoing_transaction(
+        alice_global_lock: &mut GlobalStateLock,
+        amount: NativeCurrencyAmount,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+        change_key: SpendingKey,
+    ) -> Result<Arc<Transaction>> {
+        let mut rng = rand::rng();
+        let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+        let tx_output =
+            TxOutput::onchain_native_currency(amount, rng.random(), an_address.into(), false);
+
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(change_key)
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let block_height = alice_global_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height;
+        let network = alice_global_lock.cli().network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+        alice_global_lock
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                vec![tx_output].into(),
+                fee,
+                timestamp,
+                config,
+                consensus_rule_set,
+            )
+            .await
+            .map(|tx| tx.transaction)
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2161,11 +2204,11 @@ pub(crate) mod tests {
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
         let (block1, composer_expected_utxos) = make_mock_block(
-            network,
             genesis,
             Some(block_1_timestamp),
             alice_key,
             Default::default(),
+            network,
         )
         .await;
 
@@ -2215,11 +2258,11 @@ pub(crate) mod tests {
 
         // `bob` both composes and guesses the PoW solution of this block.
         let (block1, composer_fee_eutxos) = make_mock_block(
-            network,
             &Block::genesis(network),
             None,
             bob_key,
             rng.random(),
+            network,
         )
         .await;
 
@@ -2262,6 +2305,8 @@ pub(crate) mod tests {
         let config2 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let block_height_1 = block1.header().height;
+        let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_height_1);
         let tx_block2 = bob
             .api()
             .tx_initiator_internal()
@@ -2270,6 +2315,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 config2,
+                consensus_rule_set_1,
             )
             .await
             .unwrap()
@@ -2310,6 +2356,7 @@ pub(crate) mod tests {
         let config3 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block2.header().height);
         let tx_block3 = bob
             .api()
             .tx_initiator_internal()
@@ -2318,6 +2365,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(22),
                 config3,
+                consensus_rule_set_2,
             )
             .await
             .unwrap()
@@ -2374,6 +2422,7 @@ pub(crate) mod tests {
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block1.header().height);
         let mut tx_block2: Transaction = bob
             .api()
             .tx_initiator_internal()
@@ -2382,6 +2431,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 config,
+                consensus_rule_set_1,
             )
             .await
             .unwrap()
@@ -2479,6 +2529,7 @@ pub(crate) mod tests {
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
         let mut tx_block2: Transaction = bob
             .api()
             .tx_initiator_internal()
@@ -2487,6 +2538,7 @@ pub(crate) mod tests {
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
                 config,
+                consensus_rule_set,
             )
             .await
             .unwrap()
@@ -2576,7 +2628,6 @@ pub(crate) mod tests {
         // `bob` both composes and guesses the PoW solution of this block.
         let (block_1a, expected_utxos_block_1a) =
             make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-                network,
                 &genesis_block,
                 vec![],
                 vec![],
@@ -2587,6 +2638,7 @@ pub(crate) mod tests {
                     guesser_fraction,
                     bob_wallet_secret.guesser_preimage(genesis_block.hash()),
                 ),
+                network,
             )
             .await;
 
@@ -2614,7 +2666,6 @@ pub(crate) mod tests {
         // solution. `bob` did *not* find the PoW-solution for this block.
         let (block_1b, expected_utxos_block_1b) =
             make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-                network,
                 &genesis_block,
                 vec![],
                 vec![],
@@ -2622,6 +2673,7 @@ pub(crate) mod tests {
                 bob_key,
                 mock_block_seed,
                 (guesser_fraction, rng.random()),
+                network,
             )
             .await;
 
@@ -2685,7 +2737,7 @@ pub(crate) mod tests {
 
         let genesis_block = Block::genesis(network);
         let (block1, composer_utxos) =
-            make_mock_block(network, &genesis_block, None, bob_key, rng.random()).await;
+            make_mock_block(&genesis_block, None, bob_key, rng.random(), network).await;
 
         bob.wallet_state.add_expected_utxos(composer_utxos).await;
         assert!(
@@ -2790,7 +2842,7 @@ pub(crate) mod tests {
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo) =
-                make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.mutator_set_accumulator_after().unwrap(),
@@ -2823,11 +2875,11 @@ pub(crate) mod tests {
 
         // Add block 3a with a coinbase UTXO for us
         let (block_3a, composer_expected_utxos_3a) = make_mock_block(
-            network,
             &latest_block.clone(),
             None,
             bob_spending_key,
             rng.random(),
+            network,
         )
         .await;
         bob.wallet_state
@@ -2858,7 +2910,7 @@ pub(crate) mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_exp) =
-            make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
+            make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
         bob.set_new_tip(block_3b.clone()).await.unwrap();
 
         assert!(
@@ -2882,7 +2934,7 @@ pub(crate) mod tests {
         latest_block = block_3b;
         for _ in 4..=11 {
             let (new_block, _new_block_exp) =
-                make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
+                make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
             bob.set_new_tip(new_block.clone()).await.unwrap();
 
             latest_block = new_block;
@@ -2907,7 +2959,7 @@ pub(crate) mod tests {
 
         // Mine *one* more block. Verify that MUTXO is pruned
         let (block_12, _) =
-            make_mock_block(network, &latest_block, None, alice_key, rng.random()).await;
+            make_mock_block(&latest_block, None, alice_key, rng.random(), network).await;
         bob.set_new_tip(block_12.clone()).await.unwrap();
 
         assert!(
@@ -3227,16 +3279,25 @@ pub(crate) mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(a_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
             let mut tx_spending_guesser_fee: Transaction = bob
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(Vec::<TxOutput>::new().into(), fee, block2_timestamp, config)
+                .create_transaction(
+                    Vec::<TxOutput>::new().into(),
+                    fee,
+                    block2_timestamp,
+                    config,
+                    consensus_rule_set,
+                )
                 .await
                 .unwrap()
                 .transaction
                 .into();
             assert!(
-                tx_spending_guesser_fee.is_valid(network).await,
+                tx_spending_guesser_fee
+                    .is_valid(network, consensus_rule_set)
+                    .await,
                 "Tx spending guesser-fee UTXO must be valid."
             );
 
@@ -3261,7 +3322,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-            let block2 = fake_valid_block_proposal_from_tx(network, &block1, block2_tx).await;
+            let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx, network).await;
             assert!(block2.is_valid(&block1, block2_timestamp, network).await);
 
             bob.set_new_self_composed_tip(block2.clone(), vec![])
@@ -3296,7 +3357,7 @@ pub(crate) mod tests {
             let composer_key = wallet_state.wallet_entropy.nth_generation_spending_key(0);
             let genesis_block = Block::genesis(network);
             let (mut incoming_block, _) =
-                make_mock_block(network, &genesis_block, None, composer_key, rng.random()).await;
+                make_mock_block(&genesis_block, None, composer_key, rng.random(), network).await;
 
             // other guesser -> no detection
             incoming_block.set_header_guesser_digest(rng.random());
@@ -3417,10 +3478,18 @@ pub(crate) mod tests {
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                let consensus_rule_set =
+                    ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
                 global_state_lock
                     .api()
                     .tx_initiator_internal()
-                    .create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, config)
+                    .create_transaction(
+                        tx_outputs,
+                        NativeCurrencyAmount::zero(),
+                        timestamp,
+                        config,
+                        consensus_rule_set,
+                    )
                     .await?
                     .transaction
             };
@@ -3489,33 +3558,6 @@ pub(crate) mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn do_not_attempt_to_spend_utxos_already_spent_in_mempool_txs() {
-            async fn outgoing_transaction(
-                alice_global_lock: &mut GlobalStateLock,
-                amount: NativeCurrencyAmount,
-                fee: NativeCurrencyAmount,
-                timestamp: Timestamp,
-                change_key: SpendingKey,
-            ) -> Result<Arc<Transaction>> {
-                let mut rng = rand::rng();
-                let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
-                let tx_output = TxOutput::onchain_native_currency(
-                    amount,
-                    rng.random(),
-                    an_address.into(),
-                    false,
-                );
-
-                let config = TxCreationConfig::default()
-                    .recover_change_off_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-                alice_global_lock
-                    .api()
-                    .tx_initiator_internal()
-                    .create_transaction(vec![tx_output].into(), fee, timestamp, config)
-                    .await
-                    .map(|tx| tx.transaction)
-            }
-
             let network = Network::Main;
             let mut rng = rand::rng();
             let alice_wallet = WalletEntropy::new_pseudorandom(rng.random());
@@ -3534,7 +3576,6 @@ pub(crate) mod tests {
             // Alice mines a block
             let (block, composer_expected_utxos) =
                 make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-                    network,
                     &genesis,
                     vec![],
                     vec![],
@@ -3542,6 +3583,7 @@ pub(crate) mod tests {
                     alice_wallet.nth_generation_spending_key(0),
                     rng.random(),
                     (guesser_fraction, guesser_preimage),
+                    network,
                 )
                 .await;
 
@@ -3997,35 +4039,6 @@ pub(crate) mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn mutxos_spent_in_orphaned_blocks_are_still_spendable() {
-            /// Crate an outgoing transaction. Panics on insufficient balance.
-            async fn outgoing_transaction(
-                alice_global_lock: &mut GlobalStateLock,
-                amount: NativeCurrencyAmount,
-                fee: NativeCurrencyAmount,
-                timestamp: Timestamp,
-                change_key: SpendingKey,
-            ) -> std::sync::Arc<Transaction> {
-                let mut rng = rand::rng();
-                let an_address = GenerationReceivingAddress::derive_from_seed(rng.random());
-                let tx_output = TxOutput::onchain_native_currency(
-                    amount,
-                    rng.random(),
-                    an_address.into(),
-                    false,
-                );
-
-                let config = TxCreationConfig::default()
-                    .recover_change_off_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
-                alice_global_lock
-                    .api()
-                    .tx_initiator_internal()
-                    .create_transaction(vec![tx_output].into(), fee, timestamp, config)
-                    .await
-                    .unwrap()
-                    .transaction
-            }
-
             // Verify that monitored UTXOs spent in blocks that do not belong
             // to the canonical chain are spendable and count towards positive
             // balance.
@@ -4072,11 +4085,12 @@ pub(crate) mod tests {
                 timestamp,
                 change_key,
             )
-            .await;
+            .await
+            .unwrap();
 
             let block_1a = invalid_block_with_transaction(&genesis, spending_tx_1a.into());
-            let block_1b = invalid_empty_block(network, &genesis);
-            let block_2b = invalid_empty_block(network, &block_1b);
+            let block_1b = invalid_empty_block(&genesis, network);
+            let block_2b = invalid_empty_block(&block_1b, network);
             alice_global_lock
                 .global_state_lock
                 .lock_guard_mut()
@@ -4135,7 +4149,7 @@ pub(crate) mod tests {
             .await;
 
             // Go back to a-chain and verify that MUTXOs are considered spent again.
-            let block_2a = invalid_empty_block(network, &block_1a);
+            let block_2a = invalid_empty_block(&block_1a, network);
             alice_global_lock
                 .lock_guard_mut()
                 .await
@@ -4178,7 +4192,6 @@ pub(crate) mod tests {
             let guesser_fraction = 0.6f64;
             let (block_1a, composer_expected_utxos_1a) =
                 make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-                    network,
                     &genesis,
                     vec![],
                     vec![],
@@ -4186,6 +4199,7 @@ pub(crate) mod tests {
                     alice_wallet.nth_generation_spending_key(14),
                     rng.random(),
                     (guesser_fraction, guesser_preimage),
+                    network,
                 )
                 .await;
 
@@ -4211,7 +4225,7 @@ pub(crate) mod tests {
             assert!(wallet_status_1a.unsynced.is_empty());
 
             // Set tip to competing block with no reward for Alice.
-            let block_1b = invalid_empty_block(network, &genesis);
+            let block_1b = invalid_empty_block(&genesis, network);
             alice_global_lock
                 .lock_guard_mut()
                 .await
@@ -4296,6 +4310,7 @@ pub(crate) mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(premine_change_key)
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let transaction = premine_receiver
                 .api()
                 .tx_initiator_internal()
@@ -4304,6 +4319,7 @@ pub(crate) mod tests {
                     NativeCurrencyAmount::coins(0),
                     now,
                     config,
+                    consensus_rule_set,
                 )
                 .await
                 .unwrap()
@@ -4912,10 +4928,11 @@ pub(crate) mod tests {
                 .recover_change_on_chain(change_key.into())
                 .with_prover_capability(TxProvingCapability::ProofCollection);
 
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let proof_collection_transaction = alice
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(tx_outputs.into(), fee, now, config)
+                .create_transaction(tx_outputs.into(), fee, now, config, consensus_rule_set)
                 .await
                 .unwrap()
                 .transaction;
@@ -5002,6 +5019,7 @@ pub(crate) mod tests {
                 genesis_mutator_set,
                 block_one.mutator_set_update().unwrap(),
                 upgrade_incentive,
+                consensus_rule_set,
             ));
             let (channel_to_nowhere_two, nowhere_two) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
@@ -5037,12 +5055,15 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
+            let consensus_rule_set_one =
+                ConsensusRuleSet::infer_from(network, block_one.header().height);
             let block_two_transaction = some_other_transaction
                 .merge_with(
                     upgraded_transaction,
                     rng.random(),
                     dummy_queue.clone(),
                     TritonVmProofJobOptions::default(),
+                    consensus_rule_set_one,
                 )
                 .await
                 .unwrap();

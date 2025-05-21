@@ -4734,7 +4734,7 @@ mod tests {
         fn pow_puzzle_is_consistent_with_block_hash() {
             let network = Network::Main;
             let genesis = Block::genesis(network);
-            let mut block1 = invalid_empty_block(network, &genesis);
+            let mut block1 = invalid_empty_block(&genesis, network);
             let hash_lock_key = HashLockKey::from_preimage(random());
             block1.set_header_guesser_digest(hash_lock_key.after_image());
 
@@ -4793,7 +4793,7 @@ mod tests {
             .await;
 
             let genesis = Block::genesis(network);
-            let block1 = invalid_empty_block(network, &genesis);
+            let block1 = invalid_empty_block(&genesis, network);
             bob.state
                 .lock_mut(|x| {
                     x.mining_state.block_proposal =
@@ -4859,7 +4859,7 @@ mod tests {
             let bob_token = cookie_token(&bob).await;
 
             let genesis = Block::genesis(network);
-            let mut block1 = invalid_empty_block(network, &genesis);
+            let mut block1 = invalid_empty_block(&genesis, network);
             bob.state
                 .lock_mut(|x| {
                     x.mining_state.block_proposal =
@@ -5088,7 +5088,7 @@ mod tests {
 
                     let cb_key = wallet_entropy.nth_generation_spending_key(0);
                     let (block1, composer_expected_utxos) =
-                        make_mock_block(network, &genesis_block, None, cb_key, Default::default())
+                        make_mock_block(&genesis_block, None, cb_key, Default::default(), network)
                             .await;
                     blocks.push(block1.clone());
 
@@ -5117,7 +5117,7 @@ mod tests {
                         &block1,
                         tx_artifacts.transaction.clone().into(),
                     );
-                    let block3 = invalid_empty_block(network, &block2);
+                    let block3 = invalid_empty_block(&block2, network);
 
                     // mine two blocks, the first will include the transaction
                     blocks.push(block2);
@@ -5235,7 +5235,7 @@ mod tests {
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
                 let genesis_block = Block::genesis(network);
                 let (block1, composer_expected_utxos) =
-                    make_mock_block(network, &genesis_block, None, bob_key, Default::default())
+                    make_mock_block(&genesis_block, None, bob_key, Default::default(), network)
                         .await;
 
                 bob.state
@@ -5289,7 +5289,7 @@ mod tests {
                     &block1,
                     tx_artifacts.transaction.clone().into(),
                 );
-                let block3 = invalid_empty_block(network, &block2);
+                let block3 = invalid_empty_block(&block2, network);
 
                 if claim_after_mined {
                     // bob applies the blocks before claiming utxos.
@@ -5578,7 +5578,7 @@ mod tests {
                 // wallet ---
                 let timestamp = network.launch_date() + Timestamp::days(1);
                 let (block_1, composer_utxos) =
-                    make_mock_block(network, &genesis_block, Some(timestamp), key, rng.random())
+                    make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network)
                         .await;
 
                 {

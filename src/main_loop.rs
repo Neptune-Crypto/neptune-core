@@ -40,6 +40,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
@@ -534,26 +535,34 @@ impl MainLoopHandler {
                     old_kernel,
                     old_single_proof,
                 } => {
-                    let msa_lookup_result = global_state_lock
-                        .lock_guard_mut()
-                        .await
-                        .chain
-                        .archival_state_mut()
-                        .old_mutator_set_and_mutator_set_update_to_tip(
-                            old_kernel.mutator_set_hash,
-                            SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
-                        )
-                        .await;
+                    let (msa_lookup_result, tip_height) = {
+                        let mut state = global_state_lock.lock_guard_mut().await;
+                        let msa_lookup_result = state
+                            .chain
+                            .archival_state_mut()
+                            .old_mutator_set_and_mutator_set_update_to_tip(
+                                old_kernel.mutator_set_hash,
+                                SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+                            )
+                            .await;
+                        let tip_height = state.chain.light_state().header().height;
+
+                        (msa_lookup_result, tip_height)
+                    };
                     let Some((old_mutator_set, mutator_set_update)) = msa_lookup_result else {
                         result.push(MempoolUpdateJobResult::Failure(txid));
                         continue;
                     };
+                    let network = global_state_lock.cli().network;
+                    // let block_height = global_state_lock.
+                    let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip_height);
                     let update_job = UpdateMutatorSetDataJob::new(
                         old_kernel.to_owned(),
                         old_single_proof.to_owned(),
                         old_mutator_set,
                         mutator_set_update,
                         UpgradeIncentive::Critical,
+                        consensus_rule_set,
                     );
 
                     // No locks may be held here!
@@ -2077,7 +2086,7 @@ mod tests {
         let network = main_loop_handler.global_state_lock.cli().network;
         let mut mutable_main_loop_state = main_loop_handler.mutable();
 
-        let block1 = invalid_empty_block(network, &Block::genesis(network));
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
 
         assert!(
             main_loop_handler
@@ -2373,6 +2382,7 @@ mod tests {
 
     mod proof_upgrader {
         use super::*;
+        use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -2385,6 +2395,7 @@ mod tests {
             global_state_lock: &mut GlobalStateLock,
             tx_proof_type: TxProvingCapability,
             fee: NativeCurrencyAmount,
+            consensus_rule_set: ConsensusRuleSet,
         ) -> Arc<Transaction> {
             let change_key = global_state_lock
                 .lock_guard()
@@ -2407,7 +2418,13 @@ mod tests {
             global_state_lock
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
+                .create_transaction(
+                    Vec::<TxOutput>::new().into(),
+                    fee,
+                    in_seven_months,
+                    config,
+                    consensus_rule_set,
+                )
                 .await
                 .unwrap()
                 .transaction
@@ -2440,7 +2457,7 @@ mod tests {
 
             main_loop_handler
                 .global_state_lock
-                .set_cli(mocked_cli)
+                .set_cli(mocked_cli.clone())
                 .await;
             let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
             let mut mutable_main_loop_state = main_loop_handler.mutable();
@@ -2453,11 +2470,14 @@ mod tests {
                 "Scheduled task returns OK when run on empty mempool"
             );
 
+            let consensus_rule_set =
+                ConsensusRuleSet::infer_from(mocked_cli.network, BlockHeight::genesis());
             let fee = NativeCurrencyAmount::coins(1);
             let proof_collection_tx = tx_no_outputs(
                 &mut main_loop_handler.global_state_lock,
                 TxProvingCapability::ProofCollection,
                 fee,
+                consensus_rule_set,
             )
             .await;
 

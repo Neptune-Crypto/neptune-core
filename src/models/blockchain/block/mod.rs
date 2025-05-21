@@ -50,10 +50,10 @@ use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -63,25 +63,23 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-use crate::prelude::twenty_first;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// Block height for 1st hardfork that increases block size limit to allow for
-/// more inputs per transaction.
+/// more inputs per transaction. Specifies the 1st block under which the new
+/// rules apply.
 pub(crate) const BLOCK_HEIGHT_HF_1: BlockHeight = BlockHeight::new(BFieldElement::new(6_000));
 
-/// Old maximum block size in number of `BFieldElement`s.
-pub(crate) const MAX_BLOCK_SIZE_BEFORE_HF_1: usize = 250_000;
+/// Specifies the 1st block under which the new rules apply.
+pub(crate) const BLOCK_HEIGHT_HF_2_MAINNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(16_000));
 
-/// New maximum block size in number of `BFieldElement`s.
-///
-/// This size is 8MB which should keep it feasible to run archival nodes for
-/// many years without requiring excessive disk space. With an SWBF MMR of
-/// height 20, this limit allows for 150-200 inputs per block.
-pub(crate) const MAX_BLOCK_SIZE_AFTER_HF_1: usize = 1_000_000;
+/// Specifies the 1st block under which the new rules apply.
+pub(crate) const BLOCK_HEIGHT_HF_2_NOT_MAINNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(1000));
 
 /// With removal records only represented by their absolute index set, the block
 /// size limit of 1.000.000 `BFieldElement`s allows for a "balanced" block
@@ -91,7 +89,7 @@ pub(crate) const MAX_BLOCK_SIZE_AFTER_HF_1: usize = 1_000_000;
 /// this limit is enforced for inputs, outputs, and public announcements. This
 /// restriction on the number of public announcements also makes it feasible for
 /// wallets to scan through all.
-const MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
+pub(crate) const MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
 
 /// Duration of timelock for half of all mining rewards.
 ///
@@ -192,40 +190,6 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
-    /// Create a block template with an invalid block proof, from a block
-    /// primitive witness.
-    #[cfg(test)]
-    pub(crate) fn block_template_invalid_proof_from_witness(
-        primitive_witness: BlockPrimitiveWitness,
-        block_timestamp: Timestamp,
-        target_block_interval: Timestamp,
-    ) -> Block {
-        let body = primitive_witness.body().to_owned();
-        let header = primitive_witness.header(block_timestamp, target_block_interval);
-        let proof = BlockProof::Invalid;
-        let appendix = BlockAppendix::default();
-
-        Block::new(header, body, appendix, proof)
-    }
-
-    /// Create a block template with an invalid block proof.
-    ///
-    /// To be used in tests where you don't care about block validity.
-    #[cfg(test)]
-    pub(crate) fn block_template_invalid_proof(
-        predecessor: &Block,
-        transaction: Transaction,
-        block_timestamp: Timestamp,
-        target_block_interval: Timestamp,
-    ) -> Block {
-        let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
-        Self::block_template_invalid_proof_from_witness(
-            primitive_witness,
-            block_timestamp,
-            target_block_interval,
-        )
-    }
-
     pub(crate) async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
@@ -262,22 +226,29 @@ impl Block {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
+        let next_block_height = predecessor.header().height.next();
         let network = proof_job_options.job_settings.network;
-        let tx_claim = SingleProof::claim(transaction.kernel.mast_hash());
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+        let tx_claim = BlockAppendix::transaction_validity_claim(
+            transaction.kernel.mast_hash(),
+            consensus_rule_set,
+        );
         assert!(
             verify(
                 tx_claim.clone(),
-                transaction.proof.clone().into_single_proof().clone(),
-                network,
+                transaction.proof.clone().into_single_proof(),
+                network
             )
             .await,
             "Transaction proof must be valid to generate a block"
         );
+
         assert!(
             transaction.kernel.merge_bit,
             "Merge-bit must be set in transactions before they can be included in blocks."
         );
-        let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
+        let primitive_witness =
+            BlockPrimitiveWitness::new(predecessor.to_owned(), transaction, network);
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
             block_timestamp,
@@ -733,6 +704,8 @@ impl Block {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+
         // 0.a)
         if previous_block.kernel.header.height.next() != self.kernel.header.height {
             return Err(BlockValidationError::BlockHeight);
@@ -792,7 +765,7 @@ impl Block {
         }
 
         // 1.a)
-        for required_claim in BlockAppendix::consensus_claims(self.body()) {
+        for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
             if !self.appendix().contains(&required_claim) {
                 return Err(BlockValidationError::AppendixMissingClaim);
             }
@@ -814,11 +787,7 @@ impl Block {
         }
 
         // 1.e)
-        if self.header().height < BLOCK_HEIGHT_HF_1 && self.size() > MAX_BLOCK_SIZE_BEFORE_HF_1 {
-            return Err(BlockValidationError::MaxSize);
-        }
-
-        if self.header().height >= BLOCK_HEIGHT_HF_1 && self.size() > MAX_BLOCK_SIZE_AFTER_HF_1 {
+        if self.size() > consensus_rule_set.max_block_size() {
             return Err(BlockValidationError::MaxSize);
         }
 
@@ -887,27 +856,28 @@ impl Block {
             return Err(BlockValidationError::NegativeFee);
         }
 
-        if self.header().height >= BLOCK_HEIGHT_HF_1 {
-            // 2.i)
-            if self.body().transaction_kernel.inputs.len()
-                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
-            {
-                return Err(BlockValidationError::TooManyInputs);
-            }
+        // 2.i)
+        if consensus_rule_set
+            .max_num_inputs()
+            .is_some_and(|max| self.body().transaction_kernel.inputs.len() > max)
+        {
+            return Err(BlockValidationError::TooManyInputs);
+        }
 
-            // 2.j)
-            if self.body().transaction_kernel.outputs.len()
-                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
-            {
-                return Err(BlockValidationError::TooManyOutputs);
-            }
+        // 2.j)
+        if consensus_rule_set
+            .max_num_outputs()
+            .is_some_and(|max| self.body().transaction_kernel.outputs.len() > max)
+        {
+            return Err(BlockValidationError::TooManyOutputs);
+        }
 
-            // 2.k)
-            if self.body().transaction_kernel.public_announcements.len()
-                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
-            {
-                return Err(BlockValidationError::TooManyPublicAnnouncements);
-            }
+        // 2.k)
+        if consensus_rule_set
+            .max_num_public_announcements()
+            .is_some_and(|max| self.body().transaction_kernel.public_announcements.len() > max)
+        {
+            return Err(BlockValidationError::TooManyPublicAnnouncements);
         }
 
         Ok(())
@@ -1155,6 +1125,44 @@ pub(crate) mod tests {
 
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
+    impl Block {
+        /// Create a block template with an invalid block proof.
+        ///
+        /// To be used in tests where you don't care about block validity.
+        pub(crate) fn block_template_invalid_proof(
+            predecessor: &Block,
+            transaction: Transaction,
+            block_timestamp: Timestamp,
+            override_target_block_interval: Option<Timestamp>,
+            network: Network,
+        ) -> Block {
+            let primitive_witness =
+                BlockPrimitiveWitness::new(predecessor.to_owned(), transaction, network);
+            let target_block_interval =
+                override_target_block_interval.unwrap_or(network.target_block_interval());
+            Self::block_template_invalid_proof_from_witness(
+                primitive_witness,
+                block_timestamp,
+                target_block_interval,
+            )
+        }
+
+        /// Create a block template with an invalid block proof, from a block
+        /// primitive witness.
+        pub(crate) fn block_template_invalid_proof_from_witness(
+            primitive_witness: BlockPrimitiveWitness,
+            block_timestamp: Timestamp,
+            target_block_interval: Timestamp,
+        ) -> Block {
+            let body = primitive_witness.body().to_owned();
+            let header = primitive_witness.header(block_timestamp, target_block_interval);
+            let proof = BlockProof::Invalid;
+            let appendix = BlockAppendix::default();
+
+            Block::new(header, body, appendix, proof)
+        }
+    }
+
     #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {
         let mutator_set_hash = |network| {
@@ -1262,7 +1270,8 @@ pub(crate) mod tests {
                 .iter()
                 .map(|tx_output| tx_output.utxo().get_native_currency_amount())
                 .sum();
-            let block_primitive_witness = BlockPrimitiveWitness::new(genesis.clone(), coinbase);
+            let block_primitive_witness =
+                BlockPrimitiveWitness::new(genesis.clone(), coinbase, network);
             let block_proof_witness = BlockProofWitness::produce(block_primitive_witness.clone());
             let block1 = Block::new(
                 block_primitive_witness.header(now, network.target_block_interval()),
@@ -1332,7 +1341,7 @@ pub(crate) mod tests {
                 now += Timestamp::millis(duration);
 
                 let (block, _) =
-                    make_mock_block(network, &block_prev, Some(now), a_key, rng.random()).await;
+                    make_mock_block(&block_prev, Some(now), a_key, rng.random(), network).await;
 
                 let control = difficulty_control(
                     block.kernel.header.timestamp,
@@ -1432,16 +1441,14 @@ pub(crate) mod tests {
         let mut mmra = MmrAccumulator::new_from_leafs(vec![genesis_block.hash()]);
 
         for i in 0..55 {
-            let key = wallet_secret_vec
-                .pop()
-                .unwrap()
-                .nth_generation_spending_key_for_tests(0);
+            let wallet_secret = wallet_secret_vec.pop().unwrap();
+            let key = wallet_secret.nth_generation_spending_key_for_tests(0);
             let (new_block, _) = make_mock_block(
-                network,
                 blocks.last().unwrap(),
                 None,
                 key,
                 sender_randomness_vec.pop().unwrap(),
+                network,
             )
             .await;
             if i != 54 {
@@ -1658,10 +1665,12 @@ pub(crate) mod tests {
                 &block1,
                 &alice,
                 plus_eight_months,
-                (TritonVmJobPriority::Normal, None).into(),
+                TritonVmProofJobOptions::default_with_network(network),
             )
             .await
             .unwrap();
+            let block_height = block1.header().height;
+            let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_height);
             let fee = NativeCurrencyAmount::coins(1);
             let plus_nine_months = plus_eight_months + Timestamp::months(1);
             for i in 0..10 {
@@ -1680,7 +1689,13 @@ pub(crate) mod tests {
                 let tx2 = alice
                     .api()
                     .tx_initiator_internal()
-                    .create_transaction(outputs.into(), fee, plus_eight_months, config2)
+                    .create_transaction(
+                        outputs.into(),
+                        fee,
+                        plus_eight_months,
+                        config2,
+                        consensus_rule_set_1,
+                    )
                     .await
                     .unwrap()
                     .transaction;
@@ -1690,7 +1705,8 @@ pub(crate) mod tests {
                         (*tx2).clone(),
                         rng.random(),
                         TritonVmJobQueue::get_instance(),
-                        TritonVmProofJobOptions::default(),
+                        TritonVmProofJobOptions::default_with_network(network),
+                        consensus_rule_set_1,
                     )
                     .await
                     .unwrap();
@@ -1699,7 +1715,7 @@ pub(crate) mod tests {
                     block2_tx,
                     plus_eight_months,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmProofJobOptions::default(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap();
@@ -1719,10 +1735,13 @@ pub(crate) mod tests {
                     &block2_without_valid_pow,
                     &alice,
                     plus_nine_months,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap();
+
+                let block_height2 = block2_without_valid_pow.header().height;
+                let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block_height2);
                 let config3 = TxCreationConfig::default()
                     .recover_change_on_chain(alice_key)
                     .with_prover_capability(TxProvingCapability::SingleProof);
@@ -1734,6 +1753,7 @@ pub(crate) mod tests {
                         fee,
                         plus_nine_months,
                         config3,
+                        consensus_rule_set_2,
                     )
                     .await
                     .unwrap()
@@ -1744,7 +1764,8 @@ pub(crate) mod tests {
                         (*tx3).clone(),
                         rng.random(),
                         TritonVmJobQueue::get_instance(),
-                        TritonVmProofJobOptions::default(),
+                        TritonVmProofJobOptions::default_with_network(network),
+                        consensus_rule_set_2,
                     )
                     .await
                     .unwrap();
@@ -1757,7 +1778,7 @@ pub(crate) mod tests {
                     block3_tx,
                     plus_nine_months,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmProofJobOptions::default(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap();
@@ -1922,7 +1943,6 @@ pub(crate) mod tests {
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
             let guesser_preimage = rng.random();
             let (block1, _) = make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
-                network,
                 &genesis_block,
                 vec![],
                 vec![],
@@ -1930,6 +1950,7 @@ pub(crate) mod tests {
                 a_key,
                 rng.random(),
                 (0.4, guesser_preimage),
+                network,
             )
             .await;
             let ars = block1.guesser_fee_addition_records().unwrap();
@@ -2015,10 +2036,18 @@ pub(crate) mod tests {
             let config1 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let consensus_rule_set_0 =
+                ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let tx1 = alice
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(vec![output.clone()].into(), fee, in_seven_months, config1)
+                .create_transaction(
+                    vec![output.clone()].into(),
+                    fee,
+                    in_seven_months,
+                    config1,
+                    consensus_rule_set_0,
+                )
                 .await
                 .unwrap()
                 .transaction;
@@ -2027,17 +2056,26 @@ pub(crate) mod tests {
                 &genesis_block,
                 (*tx1).clone(),
                 in_seven_months,
-                network.target_block_interval(),
+                None,
+                network,
             );
             alice.set_new_tip(block1.clone()).await.unwrap();
 
             let config2 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            let block_height1 = BlockHeight::genesis().next();
+            let consensus_rule_set_1 = ConsensusRuleSet::infer_from(network, block_height1);
             let tx2 = alice
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(vec![output].into(), fee, in_eight_months, config2)
+                .create_transaction(
+                    vec![output].into(),
+                    fee,
+                    in_eight_months,
+                    config2,
+                    consensus_rule_set_1,
+                )
                 .await
                 .unwrap()
                 .transaction;
@@ -2046,7 +2084,8 @@ pub(crate) mod tests {
                 &block1,
                 (*tx2).clone(),
                 in_eight_months,
-                network.target_block_interval(),
+                None,
+                network,
             );
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
@@ -2124,6 +2163,9 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
+            let block_height = blocks.last().unwrap().header().height;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+
             // for all own UTXOs, spend to self
             for _ in 0..i {
                 // create a transaction spending it to self
@@ -2155,7 +2197,13 @@ pub(crate) mod tests {
                 let transaction_creation_artifacts = alice
                     .api()
                     .tx_initiator_internal()
-                    .create_transaction(tx_outputs, NativeCurrencyAmount::coins(0), now, config)
+                    .create_transaction(
+                        tx_outputs,
+                        NativeCurrencyAmount::coins(0),
+                        now,
+                        config,
+                        consensus_rule_set,
+                    )
                     .await
                     .unwrap();
                 let self_spending_transaction = transaction_creation_artifacts.transaction;
@@ -2166,7 +2214,8 @@ pub(crate) mod tests {
                         (*self_spending_transaction).clone(),
                         rng.random(),
                         job_queue.clone(),
-                        TritonVmProofJobOptions::default(),
+                        TritonVmProofJobOptions::default_with_network(network),
+                        consensus_rule_set,
                     )
                     .await
                     .unwrap();

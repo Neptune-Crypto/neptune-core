@@ -37,6 +37,10 @@ impl BlockHeight {
         Self(value)
     }
 
+    pub const fn value(&self) -> u64 {
+        self.0.value()
+    }
+
     pub fn get_generation(&self) -> u64 {
         self.0.value() / BLOCKS_PER_GENERATION
     }

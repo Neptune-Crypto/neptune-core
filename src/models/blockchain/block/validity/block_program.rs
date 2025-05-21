@@ -333,6 +333,7 @@ pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use strum::IntoEnumIterator;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::Program;
@@ -348,6 +349,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TritonVmProofJobOptions;
+    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::builtins::verify_stark;
@@ -492,60 +494,63 @@ pub(crate) mod tests {
             .unwrap()
         }
 
-        let network = Network::Main;
-        let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-        let alice_wallet = WalletEntropy::devnet_wallet();
-        let alice = mock_genesis_global_state(
-            3,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default_with_network(network),
-        )
-        .await;
+        for consensus_rule_set in ConsensusRuleSet::iter() {
+            let network = Network::Main;
+            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+            let alice_wallet = WalletEntropy::devnet_wallet();
+            let alice = mock_genesis_global_state(
+                3,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default(),
+            )
+            .await;
 
-        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let fee = NativeCurrencyAmount::coins(1);
-        let tx_output = TxOutput::offchain_native_currency(
-            NativeCurrencyAmount::coins(1),
-            rng.random(),
-            alice_key.to_address().into(),
-            false,
-        );
+            let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+            let fee = NativeCurrencyAmount::coins(1);
+            let tx_output = TxOutput::offchain_native_currency(
+                NativeCurrencyAmount::coins(1),
+                rng.random(),
+                alice_key.to_address().into(),
+                false,
+            );
 
-        let genesis_block = Block::genesis(network);
-        let now = genesis_block.header().timestamp + Timestamp::months(12);
-        let config = TxCreationConfig::default()
-            .recover_change_off_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx: Transaction = alice
-            .api()
-            .tx_initiator_internal()
-            .create_transaction(vec![tx_output].into(), fee, now, config)
+            let genesis_block = Block::genesis(network);
+            let now = genesis_block.header().timestamp + Timestamp::months(12);
+            let config = TxCreationConfig::default()
+                .recover_change_off_chain(alice_key.into())
+                .with_prover_capability(TxProvingCapability::SingleProof);
+            let tx: Transaction = alice
+                .api()
+                .tx_initiator_internal()
+                .create_transaction(vec![tx_output].into(), fee, now, config, consensus_rule_set)
+                .await
+                .unwrap()
+                .transaction
+                .into();
+            let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
+
+            // Update transaction, stick it into block 2, and verify that block 2
+            // is invalid.
+            let later = now + Timestamp::months(1);
+            let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
+                tx.kernel,
+                &genesis_block.mutator_set_accumulator_after().unwrap(),
+                &block1.mutator_set_update().unwrap(),
+                tx.proof.into_single_proof(),
+                TritonVmJobQueue::get_instance(),
+                TritonVmJobPriority::default().into(),
+                Some(later),
+                consensus_rule_set,
+            )
             .await
-            .unwrap()
-            .transaction
-            .into();
-        let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
+            .unwrap();
 
-        // Update transaction, stick it into block 2, and verify that block 2
-        // is invalid.
-        let later = now + Timestamp::months(1);
-        let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
-            tx.kernel,
-            &genesis_block.mutator_set_accumulator_after().unwrap(),
-            &block1.mutator_set_update().unwrap(),
-            tx.proof.into_single_proof(),
-            TritonVmJobQueue::get_instance(),
-            TritonVmJobPriority::default().into(),
-            Some(later),
-        )
-        .await
-        .unwrap();
-
-        let block2 = mine_tx(&alice, tx, &block1, later).await;
-        assert!(
-            !block2.is_valid(&block1, later, network).await,
-            "Block doing a double-spend must be invalid."
-        );
+            let block2 = mine_tx(&alice, tx, &block1, later).await;
+            assert!(
+                !block2.is_valid(&block1, later, network).await,
+                "Block doing a double-spend must be invalid."
+            );
+        }
     }
 
     #[test]

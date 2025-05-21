@@ -19,9 +19,10 @@ use super::block_program::BlockProgram;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -73,7 +74,14 @@ impl BlockProofWitness {
             .transaction_kernel
             .mast_hash();
 
-        let tx_claim = SingleProof::claim(txk_mast_hash);
+        let block_height = block_primitive_witness
+            .predecessor_block
+            .header()
+            .height
+            .next();
+        let consensus_rule_set =
+            ConsensusRuleSet::infer_from(block_primitive_witness.network, block_height);
+        let tx_claim = single_proof_claim(txk_mast_hash, consensus_rule_set);
         let tx_proof = match &block_primitive_witness.transaction().proof {
             TransactionProof::SingleProof(proof) => proof.clone(),
             _ => {
@@ -89,7 +97,7 @@ impl BlockProofWitness {
             Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
 
         assert_eq!(
-            BlockAppendix::consensus_claims(block_primitive_witness.body()),
+            BlockAppendix::consensus_claims(block_primitive_witness.body(), consensus_rule_set),
             witness.claims,
             "appendix witness must attest to expected claims",
         );

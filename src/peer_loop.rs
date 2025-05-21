@@ -34,6 +34,7 @@ use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
@@ -1246,11 +1247,25 @@ impl PeerLoopHandler {
 
                 let transaction: Transaction = (*transaction).into();
 
+                let (tip, mutator_set_accumulator_after, current_block_height) = {
+                    let state = self.global_state_lock.lock_guard().await;
+
+                    (
+                        state.chain.light_state().hash(),
+                        state
+                            .chain
+                            .light_state()
+                            .mutator_set_accumulator_after()
+                            .expect("Block from state must have mutator set after"),
+                        state.chain.light_state().header().height,
+                    )
+                };
+
                 // 1. If transaction is invalid, punish.
-                if !transaction
-                    .is_valid(self.global_state_lock.cli().network)
-                    .await
-                {
+                let network = self.global_state_lock.cli().network;
+                let consensus_rule_set =
+                    ConsensusRuleSet::infer_from(network, current_block_height);
+                if !transaction.is_valid(network, consensus_rule_set).await {
                     warn!("Received invalid tx");
                     self.punish(NegativePeerSanction::InvalidTransaction)
                         .await?;
@@ -1295,18 +1310,6 @@ impl PeerLoopHandler {
                 }
 
                 // 5. if transaction is not confirmable, punish.
-                let (tip, mutator_set_accumulator_after) = {
-                    let state = self.global_state_lock.lock_guard().await;
-
-                    (
-                        state.chain.light_state().hash(),
-                        state
-                            .chain
-                            .light_state()
-                            .mutator_set_accumulator_after()
-                            .expect("Block from state must have mutator set after"),
-                    )
-                };
                 if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
                     warn!(
                         "Received unconfirmable transaction with TXID {}. Unconfirmable because:",
@@ -1360,6 +1363,8 @@ impl PeerLoopHandler {
                 // If transaction cannot be applied to mutator set, punish.
                 // I don't think this can happen when above checks pass but we include
                 // the check to ensure that transaction can be applied.
+
+                // TODO: Try unpacking tx-inputs
                 let ms_update = MutatorSetUpdate::new(
                     transaction.kernel.inputs.clone(),
                     transaction.kernel.outputs.clone(),
@@ -3525,6 +3530,7 @@ mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(spending_key.into())
                 .with_prover_capability(TxProvingCapability::ProofCollection);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let transaction_1: Transaction = state_lock
                 .api()
                 .tx_initiator_internal()
@@ -3533,6 +3539,7 @@ mod tests {
                     NativeCurrencyAmount::coins(0),
                     now,
                     config,
+                    consensus_rule_set,
                 )
                 .await
                 .unwrap()
@@ -3610,6 +3617,7 @@ mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(spending_key.into())
                 .with_prover_capability(TxProvingCapability::ProofCollection);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let transaction_1: Transaction = state_lock
                 .api()
                 .tx_initiator_internal()
@@ -3618,6 +3626,7 @@ mod tests {
                     NativeCurrencyAmount::coins(0),
                     now,
                     config,
+                    consensus_rule_set,
                 )
                 .await
                 .unwrap()
@@ -3691,18 +3700,24 @@ mod tests {
 
             for proof_type in [ProofType::ProofCollection, ProofType::SingleProof] {
                 let proof_job_options = TritonVmProofJobOptions::default();
-                let upgrade = async |primitive_witness: PrimitiveWitness| match proof_type {
-                    ProofType::ProofCollection => {
-                        PrimitiveWitnessToProofCollection { primitive_witness }
-                            .upgrade(vm_job_queue(), &proof_job_options)
-                            .await
-                            .unwrap()
-                    }
-                    ProofType::SingleProof => PrimitiveWitnessToSingleProof { primitive_witness }
-                        .upgrade(vm_job_queue(), &proof_job_options)
-                        .await
-                        .unwrap(),
-                };
+                let upgrade =
+                    async |primitive_witness: PrimitiveWitness,
+                           consensus_rule_set: ConsensusRuleSet| {
+                        match proof_type {
+                            ProofType::ProofCollection => {
+                                PrimitiveWitnessToProofCollection { primitive_witness }
+                                    .upgrade(vm_job_queue(), &proof_job_options)
+                                    .await
+                                    .unwrap()
+                            }
+                            ProofType::SingleProof => {
+                                PrimitiveWitnessToSingleProof { primitive_witness }
+                                    .upgrade(vm_job_queue(), &proof_job_options, consensus_rule_set)
+                                    .await
+                                    .unwrap()
+                            }
+                        }
+                    };
 
                 let (
                     _peer_broadcast_tx,
@@ -3714,6 +3729,8 @@ mod tests {
                 ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
                     .await
                     .unwrap();
+                let consensus_rule_set =
+                    ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
                 let fee = NativeCurrencyAmount::from_nau(500);
                 let pw_genesis =
                     genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
@@ -3722,7 +3739,7 @@ mod tests {
                         .clone()
                         .into_primitive_witness();
 
-                let tx_synced_to_genesis = upgrade(pw_genesis.clone()).await;
+                let tx_synced_to_genesis = upgrade(pw_genesis.clone(), consensus_rule_set).await;
 
                 let genesis_block = Block::genesis(network);
                 let block1 = fake_deterministic_successor(&genesis_block, network).await;
@@ -3742,7 +3759,7 @@ mod tests {
                 // Mempool should now contain the unsynced transaction. Tip is block 1.
                 let pw_block1 =
                     pw_genesis.update_with_new_ms_data(block1.mutator_set_update().unwrap());
-                let tx_synced_to_block1 = upgrade(pw_block1).await;
+                let tx_synced_to_block1 = upgrade(pw_block1, consensus_rule_set).await;
 
                 let tx_notification: TransactionNotification =
                     (&tx_synced_to_block1).try_into().unwrap();
@@ -3936,6 +3953,8 @@ mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(alice_key.into())
                 .with_prover_capability(prover_capability);
+            let block_height = genesis_block.header().height;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
             alice_gsl
                 .api()
                 .tx_initiator_internal()
@@ -3944,6 +3963,7 @@ mod tests {
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,
                     config,
+                    consensus_rule_set,
                 )
                 .await
                 .unwrap()

@@ -435,6 +435,12 @@ impl PrimitiveWitness {
             return Err(error);
         }
 
+        if self.kernel.merge_bit {
+            let error = WitnessValidationError::MergeBitSet;
+            warn!("{} - {:#?}", error, error);
+            return Err(error);
+        }
+
         // public announcements: there isn't anything to verify
 
         Ok(())
@@ -546,6 +552,9 @@ pub enum WitnessValidationError {
         witness_mutator_set_hash: Digest,
         transaction_mutator_set_hash: Digest,
     },
+
+    #[error("Primitive-witness backed transaction cannot have a set merge bit")]
+    MergeBitSet,
 
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]
@@ -1091,16 +1100,13 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::network::Network;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
@@ -1710,15 +1716,9 @@ mod tests {
     ))]
         pws: [PrimitiveWitness; 2],
     ) {
-        let network = Network::Main;
         let [own_pw, mined_pw] = pws;
 
-        let kernel_hash = own_pw.kernel.mast_hash();
-        prop_assert!(
-            TransactionProof::Witness(own_pw.clone())
-                .verify(kernel_hash, network)
-                .await
-        );
+        prop_assert!(own_pw.validate().await.is_ok());
 
         let ms_update = MutatorSetUpdate::new(
             mined_pw.kernel.inputs.clone(),
@@ -1726,18 +1726,12 @@ mod tests {
         );
         let updated_pw = PrimitiveWitness::update_with_new_ms_data(own_pw, ms_update);
 
-        let new_kernel_hash = updated_pw.kernel.mast_hash();
-        prop_assert!(
-            TransactionProof::Witness(updated_pw)
-                .verify(new_kernel_hash, network)
-                .await
-        );
+        prop_assert!(updated_pw.validate().await.is_ok());
     }
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn arb_is_valid_unit_test_small() {
-        let network = Network::Main;
         for num_inputs in 0..=2 {
             for num_outputs in 0..=2 {
                 for num_public_announcements in 0..=2 {
@@ -1750,12 +1744,7 @@ mod tests {
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();
-                    let kernel_hash = primitive_witness.kernel.mast_hash();
-                    assert!(
-                        TransactionProof::Witness(primitive_witness)
-                            .verify(kernel_hash, network)
-                            .await
-                    );
+                    assert!(primitive_witness.validate().await.is_ok());
                 }
             }
         }
@@ -1772,17 +1761,11 @@ mod tests {
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
-        let network = Network::Main;
         // Assumes that the witness for lock scripts live in `nd_tokens`
         transaction_primitive_witness.lock_scripts_and_witnesses[mutated_lockscript_witness]
             .set_nd_tokens(bad_preimage.values().to_vec());
 
-        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
-        prop_assert!(
-            !TransactionProof::Witness(transaction_primitive_witness)
-                .verify(kernel_hash, network)
-                .await
-        );
+        prop_assert!(transaction_primitive_witness.validate().await.is_err());
     }
 
     #[proptest(cases = 5, async = "tokio")]
@@ -1795,18 +1778,12 @@ mod tests {
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
-        let network = Network::Main;
         // Mess up witness data for one of the type scripts, assumed to be the
         // native currency type script. But actually doesn't matter which one it
         // is as the goal is simply to get one of the type scripts to fail.
         transaction_primitive_witness.type_scripts_and_witnesses[0]
             .scramble_non_determinism(rng_seed);
-        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
-        prop_assert!(
-            !TransactionProof::Witness(transaction_primitive_witness)
-                .verify(kernel_hash, network)
-                .await
-        );
+        prop_assert!(transaction_primitive_witness.validate().await.is_err());
     }
 
     #[proptest(cases = 5, async = "tokio")]
@@ -1818,13 +1795,7 @@ mod tests {
         ))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {
-        let network = Network::Main;
-        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
-        prop_assert!(
-            TransactionProof::Witness(transaction_primitive_witness)
-                .verify(kernel_hash, network)
-                .await
-        );
+        prop_assert!(transaction_primitive_witness.validate().await.is_ok());
     }
 
     #[proptest]

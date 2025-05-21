@@ -5,13 +5,15 @@ use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::block_body::BlockBody;
 use crate::models::blockchain::block::Claim;
 use crate::models::blockchain::block::Tip5;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 
 pub(crate) const MAX_NUM_CLAIMS: usize = 500;
@@ -45,11 +47,24 @@ impl BlockAppendix {
 
     /// Return the list of claims that this node requires for a block to be
     /// considered valid.
-    pub(crate) fn consensus_claims(block_body: &BlockBody) -> Vec<Claim> {
-        // Add more claims here when softforking.
-        let tx_is_valid = SingleProof::claim(block_body.transaction_kernel.mast_hash());
+    pub(crate) fn consensus_claims(
+        block_body: &BlockBody,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Vec<Claim> {
+        // Add more claims here when softforking.ion::HardFork2 as usize }>;
+        let tx_is_valid = Self::transaction_validity_claim(
+            block_body.transaction_kernel.mast_hash(),
+            consensus_rule_set,
+        );
 
         vec![tx_is_valid]
+    }
+
+    pub(crate) fn transaction_validity_claim(
+        transaction_kernel_mast_hash: Digest,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Claim {
+        single_proof_claim(transaction_kernel_mast_hash, consensus_rule_set)
     }
 
     pub(crate) fn _claims(&self) -> &Vec<Claim> {

@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use tasm_lib::twenty_first::prelude::Mmr;
 
+use crate::api::export::Network;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -40,18 +41,25 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 // PartialEq should be derived manually to ignore maybe_body.
 #[derive(Clone, Debug)]
 pub(crate) struct BlockPrimitiveWitness {
-    predecessor_block: Block,
+    pub(super) predecessor_block: Block,
     transaction: Transaction,
 
     maybe_body: OnceLock<BlockBody>,
+
+    pub(super) network: Network,
 }
 
 impl BlockPrimitiveWitness {
-    pub(crate) fn new(predecessor_block: Block, transaction: Transaction) -> Self {
+    pub(crate) fn new(
+        predecessor_block: Block,
+        transaction: Transaction,
+        network: Network,
+    ) -> Self {
         Self {
             predecessor_block,
             transaction,
             maybe_body: OnceLock::new(),
+            network,
         }
     }
 
@@ -134,30 +142,38 @@ pub(crate) mod tests {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::Tip5;
+    use tasm_lib::twenty_first::bfe;
 
     use super::BlockPrimitiveWitness;
+    use crate::api::export::BlockHeight;
+    use crate::api::export::Network;
     use crate::models::blockchain::block::block_appendix::BlockAppendix;
     use crate::models::blockchain::block::block_body::BlockBody;
     use crate::models::blockchain::block::block_header::BlockHeader;
     use crate::models::blockchain::block::block_kernel::BlockKernel;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::BlockProof;
-    use crate::models::blockchain::block::Network;
+    use crate::models::blockchain::block::BLOCK_HEIGHT_HF_2_MAINNET;
+    use crate::models::blockchain::block::BLOCK_HEIGHT_HF_2_NOT_MAINNET;
+    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+    use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     fn arbitrary_block_transaction_from_msa_and_records(
@@ -168,7 +184,10 @@ pub(crate) mod tests {
         lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
         coinbase_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
+        block_height: BlockHeight,
     ) -> BoxedStrategy<Transaction> {
+        let network = Network::Main; // explicit assumption
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         (
             PrimitiveWitness::arbitrary_pair_with_inputs_and_coinbase_respectively_from_msa_and_records(
                 num_outputs,
@@ -185,11 +204,14 @@ pub(crate) mod tests {
                 let rt = crate::tests::tokio_runtime();
                 let _guard = rt.enter();
 
+                let proof_job_options = TritonVmProofJobOptions::from(TritonVmJobPriority::default());
+
                 let single_proof_inputs = rt
-                    .block_on(SingleProof::produce(
+                    .block_on(produce_single_proof(
                         &primwit_inputs,
                         TritonVmJobQueue::get_instance(),
-                        TritonVmJobPriority::default().into(),
+                        proof_job_options.clone(),
+                        consensus_rule_set,
                     ))
                     .unwrap();
 
@@ -198,10 +220,11 @@ pub(crate) mod tests {
                     proof: TransactionProof::SingleProof(single_proof_inputs),
                 };
                 let single_proof_coinbase = rt
-                    .block_on(SingleProof::produce(
+                    .block_on(produce_single_proof(
                         &primwit_coinbase,
                         TritonVmJobQueue::get_instance(),
-                        TritonVmJobPriority::default().into(),
+                        proof_job_options.clone(),
+                        consensus_rule_set
                     ))
                     .unwrap();
                 let tx_coinbase = Transaction {
@@ -213,7 +236,8 @@ pub(crate) mod tests {
                     tx_coinbase,
                     shuffle_seed,
                     TritonVmJobQueue::get_instance(),
-                    TritonVmJobPriority::default().into(),
+                    proof_job_options.clone(),
+                    consensus_rule_set,
                 ))
                 .unwrap()
             })
@@ -235,6 +259,17 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
+            (1..BFieldElement::MAX)
+                .prop_flat_map(|block_height_as_u64| {
+                    let block_height = BlockHeight::new(bfe!(block_height_as_u64));
+                    Self::arbitrary_with_block_height(block_height)
+                })
+                .boxed()
+        }
+
+        pub(crate) fn arbitrary_with_block_height(
+            block_height: BlockHeight,
+        ) -> BoxedStrategy<BlockPrimitiveWitness> {
             const NUM_INPUTS: usize = 2;
             let network = Network::Main;
 
@@ -348,10 +383,22 @@ pub(crate) mod tests {
                                                 .add(addition_record);
                                         }
 
+                                        let do_packing = if network == Network::Main {
+                                            block_height >= BLOCK_HEIGHT_HF_2_MAINNET
+                                        } else {
+                                            block_height >= BLOCK_HEIGHT_HF_2_NOT_MAINNET
+                                        };
+                                        let packed_removal_records =
+                                            RemovalRecordList::pack(removal_records.clone());
+
                                         let msa_and_records_after_block = MsaAndRecords {
                                             mutator_set_accumulator:
                                                 mutator_set_accumulator_after_block,
-                                            removal_records,
+                                            removal_records: if do_packing {
+                                                packed_removal_records
+                                            } else {
+                                                removal_records
+                                            },
                                             membership_proofs,
                                         };
                                         arbitrary_block_transaction_from_msa_and_records(
@@ -362,12 +409,14 @@ pub(crate) mod tests {
                                             lock_scripts_and_witnesses.clone(),
                                             coinbase_amount,
                                             timestamp,
+                                            block_height,
                                         )
                                         .prop_map(
                                             move |block_tx| {
                                                 BlockPrimitiveWitness::new(
                                                     predecessor_block.clone(),
                                                     block_tx.clone(),
+                                                    network,
                                                 )
                                             },
                                         )

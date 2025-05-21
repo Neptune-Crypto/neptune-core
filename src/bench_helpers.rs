@@ -133,7 +133,7 @@ pub async fn next_block_incoming_utxos(
         fee,
         timestamp,
         msa,
-        Network::Main,
+        network,
     );
 
     let kernel = PrimitiveWitness::from_transaction_details(&tx_details).kernel;
@@ -143,7 +143,7 @@ pub async fn next_block_incoming_utxos(
         proof: TransactionProof::SingleProof(NeptuneProof::invalid()),
     };
 
-    let block_primitive_witness = BlockPrimitiveWitness::new(parent.to_owned(), tx);
+    let block_primitive_witness = BlockPrimitiveWitness::new(parent.to_owned(), tx, network);
     let body = block_primitive_witness.body().to_owned();
     let header = block_primitive_witness.header(timestamp, network.target_block_interval());
     let (appendix, proof) = {
