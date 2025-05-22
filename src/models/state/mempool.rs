@@ -37,8 +37,10 @@ use itertools::Itertools;
 /// TransactionC }.
 use num_rational::BigRational as FeeDensity;
 use num_traits::Zero;
-use priority_queue::double_priority_queue::iterators::IntoSortedIter;
+use priority_queue::double_priority_queue::iterators::IntoSortedIter as DoubleEndedIterator;
+use priority_queue::priority_queue::iterators::IntoSortedIter as SingleEndedIterator;
 use priority_queue::DoublePriorityQueue;
+use priority_queue::PriorityQueue;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::debug;
@@ -70,6 +72,7 @@ pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 type LookupItem<'a> = (TransactionKernelId, &'a Transaction);
+type TransactionValue = NativeCurrencyAmount;
 
 /// Represents a mempool state change.
 ///
@@ -88,36 +91,12 @@ pub enum MempoolEvent {
     UpdateTxMutatorSet(TransactionKernelId, Transaction),
 }
 
-/// Used to mark origin of transaction. To determine if transaction was
-/// initiated locally or not.
-#[derive(Debug, GetSize, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
-pub(crate) enum TransactionOrigin {
-    Foreign,
-    Own,
-}
-
-impl TransactionOrigin {
-    fn is_own(self) -> bool {
-        self == Self::Own
-    }
-}
-
-impl std::fmt::Display for TransactionOrigin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let output = match self {
-            TransactionOrigin::Foreign => "third-party",
-            TransactionOrigin::Own => "own",
-        };
-
-        write!(f, "{output}")
-    }
-}
-
 #[derive(Debug, GetSize, Clone, Serialize, Deserialize)]
 struct MempoolTransaction {
     transaction: Transaction,
-    origin: TransactionOrigin,
+
+    /// The value of a transaction for the node operator.
+    value: TransactionValue,
 
     /// Primitive witness of the transaction. Can be used to update proof-
     /// collection backed transactions. If set, indicates that the transaction
@@ -144,6 +123,13 @@ struct MempoolTransaction {
 /// reorganization has occurred), and b) because single-proof backed
 /// transactions are more likely to be picked for inclusion in the next block.
 ///
+/// The mempool also keeps a view of how "valuable" a transaction is, from the
+/// perspective the the caller inserting the transaction. However, this value
+/// is not used to determine which transactions gets to stay in the mempool in
+/// the case of a full mempool, since such a value is subjective, and a goal is
+/// to have different nodes running with the same mempool policy to agree on the
+/// content of the mempool at any time.
+///
 /// The mempool does not attempt to confirm validity or confirmability of its
 /// transactions, that must be handled by the caller. It does, however,
 /// guarantee that no conflicting transactions can be contained in the mempool.
@@ -164,8 +150,16 @@ pub struct Mempool {
 
     /// Allows the mempool to report transactions sorted by [`FeeDensity`] in
     /// both descending and ascending order.
-    #[get_size(ignore)] // This is relatively small compared to `tx_dictionary`
-    queue: DoublePriorityQueue<TransactionKernelId, FeeDensity>,
+    // This is relatively small compared to `tx_dictionary`
+    #[get_size(ignore)]
+    fee_densities: DoublePriorityQueue<TransactionKernelId, FeeDensity>,
+
+    /// Allows the mempool to report transactions sorted by value in descending
+    /// order. Only transactions with a positive transaction value are stored in
+    /// this priority queue.
+    // This is relatively small compared to `tx_dictionary`
+    #[get_size(ignore)]
+    values: PriorityQueue<TransactionKernelId, TransactionValue>,
 
     /// The digest of the chain's tip. Used to discover reorganizations.
     tip_digest: Digest,
@@ -185,7 +179,8 @@ impl Mempool {
     /// instantiate a new, empty `Mempool`
     pub fn new(max_total_size: ByteSize, max_num_transactions: Option<usize>, tip: &Block) -> Self {
         let table = Default::default();
-        let queue = Default::default();
+        let fee_densities = Default::default();
+        let values = Default::default();
         let max_total_size = max_total_size.0.try_into().unwrap();
         let tip_digest = tip.hash();
         let tip_mutator_set_hash = tip.mutator_set_accumulator_after().hash();
@@ -194,14 +189,15 @@ impl Mempool {
             max_total_size,
             max_length: max_num_transactions,
             tx_dictionary: table,
-            queue,
+            fee_densities,
+            values,
             tip_digest,
             tip_mutator_set_hash,
         }
     }
 
-    /// Update the block digest to which all transactions are synced.
-    pub(super) fn set_tip_digest_sync_label(&mut self, tip: &Block) {
+    /// Update mempool with chain information.
+    pub(super) fn set_sync_labels(&mut self, tip: &Block) {
         self.tip_digest = tip.hash();
         self.tip_mutator_set_hash = tip.mutator_set_accumulator_after().hash();
     }
@@ -237,13 +233,21 @@ impl Mempool {
         }
     }
 
-    /// Return the proof collection-supported transaction with highest
-    /// fee-density if mempool contains any such transactions. Otherwise, None.
-    pub(crate) fn most_dense_proof_collection(
+    /// Return the preferred proof collection for proof upgrading. Will always
+    /// prioritize transactions with a positive value first, then transactions
+    /// with higher fee density. This means that transactions initialized by
+    /// this node's wallet will always be targeted for proof-upgrading first.
+    ///
+    /// Also returns the value of this transactions, for the node operator.
+    pub(crate) fn preferred_proof_collection(
         &self,
         num_proofs_threshold: usize,
-    ) -> Option<(&TransactionKernel, &ProofCollection, TransactionOrigin)> {
-        for (txid, _fee_density) in self.get_sorted_iter() {
+    ) -> Option<(&TransactionKernel, &ProofCollection, TransactionValue)> {
+        for txid in self
+            .value_iter()
+            .map(|(txid, _)| txid)
+            .chain(self.fee_density_iter().map(|(txid, _)| txid))
+        {
             let candidate = self.tx_dictionary.get(&txid).unwrap();
             if let TransactionProof::ProofCollection(proof_collection) =
                 &candidate.transaction.proof
@@ -252,7 +256,7 @@ impl Mempool {
                     return Some((
                         &candidate.transaction.kernel,
                         proof_collection,
-                        candidate.origin,
+                        candidate.value,
                     ));
                 }
             }
@@ -265,14 +269,14 @@ impl Mempool {
     /// no such pair exists in the mempool.
     pub(crate) fn most_dense_single_proof_pair(
         &self,
-    ) -> Option<([(&TransactionKernel, &Proof); 2], TransactionOrigin)> {
+    ) -> Option<([(&TransactionKernel, &Proof); 2], TransactionPriority)> {
         let mut ret = vec![];
         let mut own_tx = false;
-        for (txid, _fee_density) in self.get_sorted_iter() {
+        for (txid, _fee_density) in self.fee_density_iter() {
             let candidate = self.tx_dictionary.get(&txid).unwrap();
             if let TransactionProof::SingleProof(proof) = &candidate.transaction.proof {
                 ret.push((&candidate.transaction.kernel, proof));
-                own_tx = own_tx || candidate.origin.is_own();
+                own_tx = own_tx || candidate.value.is_own();
             }
 
             let origin = match own_tx {
@@ -419,7 +423,7 @@ impl Mempool {
         };
         let as_mempool_transaction = MempoolTransaction {
             transaction: new_tx.clone(),
-            origin,
+            value: origin,
             primitive_witness,
         };
 
@@ -446,20 +450,20 @@ impl Mempool {
             }
         }
 
-        self.queue.push(txid, new_tx.fee_density());
+        self.fee_density.push(txid, new_tx.fee_density());
         self.tx_dictionary.insert(txid, as_mempool_transaction);
         events.push(MempoolEvent::AddTx(new_tx));
 
         assert_eq!(
             self.tx_dictionary.len(),
-            self.queue.len(),
+            self.fee_density.len(),
             "mempool's table and queue length must agree prior to shrink"
         );
         self.shrink_to_max_size();
         self.shrink_to_max_length();
         assert_eq!(
             self.tx_dictionary.len(),
-            self.queue.len(),
+            self.fee_density.len(),
             "mempool's table and queue length must agree after shrink"
         );
 
@@ -469,8 +473,9 @@ impl Mempool {
     /// remove a transaction from the `Mempool`
     pub(super) fn remove(&mut self, transaction_id: TransactionKernelId) -> Option<MempoolEvent> {
         self.tx_dictionary.remove(&transaction_id).map(|tx| {
-            self.queue.remove(&transaction_id);
-            debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
+            self.fee_densities.remove(&transaction_id);
+            self.values.remove(&transaction_id);
+            debug_assert_eq!(self.tx_dictionary.len(), self.fee_densities.len());
             MempoolEvent::RemoveTx(tx.transaction)
         })
     }
@@ -502,7 +507,7 @@ impl Mempool {
     pub(crate) fn num_own_txs(&self) -> usize {
         self.tx_dictionary
             .values()
-            .filter(|x| x.origin.is_own())
+            .filter(|x| x.value.is_own())
             .count()
     }
 
@@ -529,7 +534,7 @@ impl Mempool {
         let mut transactions = vec![];
         let mut fee_acc = NativeCurrencyAmount::zero();
 
-        for (transaction_digest, _fee_density) in self.get_sorted_iter() {
+        for (transaction_digest, _fee_density) in self.fee_density_iter() {
             // No more transactions can possibly be packed
             if remaining_storage == 0 || max_num_txs.is_some_and(|max| transactions.len() == max) {
                 break;
@@ -563,32 +568,16 @@ impl Mempool {
         transactions
     }
 
-    /// Removes the transaction with the highest [`FeeDensity`] from the mempool.
-    /// Returns the removed value.
-    ///
-    /// Computes in θ(lg N)
-    #[expect(dead_code)]
-    fn pop_max(&mut self) -> Option<(MempoolEvent, FeeDensity)> {
-        if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
-            if let Some(tx) = self.tx_dictionary.remove(&transaction_digest) {
-                debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
-
-                let event = MempoolEvent::RemoveTx(tx.transaction);
-
-                return Some((event, fee_density));
-            }
-        }
-        None
-    }
-
     /// Removes the transaction with the lowest [`FeeDensity`] from the mempool.
     /// Returns the removed value.
     ///
     /// Computes in θ(lg N)
     fn pop_min(&mut self) -> Option<(MempoolEvent, FeeDensity)> {
-        if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
-            if let Some(tx) = self.tx_dictionary.remove(&transaction_digest) {
-                debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
+        if let Some((txkid, fee_density)) = self.fee_densities.pop_min() {
+            if let Some(tx) = self.tx_dictionary.remove(&txkid) {
+                self.values.remove(&txkid);
+
+                debug_assert_eq!(self.tx_dictionary.len(), self.fee_densities.len());
 
                 let event = MempoolEvent::RemoveTx(tx.transaction);
 
@@ -609,7 +598,7 @@ impl Mempool {
     {
         let mut victims = vec![];
 
-        for (&transaction_id, _fee_density) in &self.queue {
+        for (&transaction_id, _fee_density) in &self.fee_densities {
             let transaction = self.get(transaction_id).unwrap();
             if !predicate((transaction_id, transaction)) {
                 victims.push(transaction_id);
@@ -623,7 +612,7 @@ impl Mempool {
             }
         }
 
-        debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
+        debug_assert_eq!(self.tx_dictionary.len(), self.fee_densities.len());
         self.shrink_to_fit();
 
         events
@@ -663,7 +652,7 @@ impl Mempool {
     ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
         // If the mempool is empty, there is nothing to do.
         if self.is_empty() {
-            self.set_tip_digest_sync_label(new_block);
+            self.set_sync_labels(new_block);
             return (vec![], vec![]);
         }
 
@@ -730,7 +719,7 @@ impl Mempool {
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];
         for (tx_id, tx) in &mut self.tx_dictionary {
-            if !(composing || tx.origin.is_own()) {
+            if !(composing || tx.value.is_own()) {
                 debug!(
                     "Not updating transaction {tx_id} since it's not \
                     initiated by us, and client is not composing."
@@ -791,7 +780,7 @@ impl Mempool {
             if !can_update {
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
-                if tx.origin.is_own() {
+                if tx.value.is_own() {
                     warn!("Unable to update own transaction to new mutator set. You may need to create this transaction again. Removing {tx_id} from mempool.");
                 }
             }
@@ -805,7 +794,7 @@ impl Mempool {
         self.shrink_to_max_size();
 
         // Update the sync-label to keep track of reorganizations
-        self.set_tip_digest_sync_label(new_block);
+        self.set_sync_labels(new_block);
 
         (events, update_jobs)
     }
@@ -832,8 +821,9 @@ impl Mempool {
     /// Shrinks internal data structures as much as possible.
     /// Computes in O(n) (Likely)
     fn shrink_to_fit(&mut self) {
-        self.queue.shrink_to_fit();
-        self.tx_dictionary.shrink_to_fit()
+        self.fee_densities.shrink_to_fit();
+        self.tx_dictionary.shrink_to_fit();
+        self.values.shrink_to_fit();
     }
 
     /// Produce a sorted iterator over a snapshot of the Double-Ended Priority Queue.
@@ -860,11 +850,19 @@ impl Mempool {
     /// Yields the `transaction_digest` in order of descending `fee_density`, since
     /// users (miner or transaction merger) will likely only care about the most valuable transactions
     /// Computes in O(N lg N)
-    pub fn get_sorted_iter(
+    pub fn fee_density_iter(
         &self,
-    ) -> Rev<IntoSortedIter<TransactionKernelId, FeeDensity, RandomState>> {
-        let dpq_clone = self.queue.clone();
+    ) -> Rev<DoubleEndedIterator<TransactionKernelId, FeeDensity, RandomState>> {
+        let dpq_clone = self.fee_densities.clone();
         dpq_clone.into_sorted_iter().rev()
+    }
+
+    /// Yields the transaction kernel IDs in order of descending value.
+    pub fn value_iter(
+        &self,
+    ) -> SingleEndedIterator<TransactionKernelId, NativeCurrencyAmount, RandomState> {
+        let dpq_clone = self.values.clone();
+        dpq_clone.into_sorted_iter()
     }
 }
 
@@ -1085,7 +1083,7 @@ mod tests {
         // No candidate when mempool is empty
         assert!(
             mempool
-                .most_dense_proof_collection(bob.cli.max_num_proofs)
+                .preferred_proof_collection(bob.cli.max_num_proofs)
                 .is_none(),
             "No proof collection when mempool is empty"
         );
@@ -1094,7 +1092,7 @@ mod tests {
         mempool.insert(tx_by_bob.into(), TransactionOrigin::Foreign);
         assert_eq!(
             mempool
-                .most_dense_proof_collection(bob.cli.max_num_proofs)
+                .preferred_proof_collection(bob.cli.max_num_proofs)
                 .unwrap()
                 .0
                 .txid(),
@@ -1113,7 +1111,7 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for (_transaction_id, curr_fee_density) in mempool.get_sorted_iter() {
+        for (_transaction_id, curr_fee_density) in mempool.fee_density_iter() {
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
         }
@@ -1335,7 +1333,7 @@ mod tests {
         {
             // Verify that `most_dense_single_proof_pair` returns expected value
             // now that two single proofs are in the mempool.
-            let densest_txs = mempool.get_sorted_iter().map(|x| x.0).collect_vec();
+            let densest_txs = mempool.fee_density_iter().map(|x| x.0).collect_vec();
             assert_eq!(
                 densest_txs,
                 mempool
@@ -1536,7 +1534,7 @@ mod tests {
 
         // Verify that `most_dense_single_proof_pair` returns expected value
         // now that two single proofs are in the mempool.
-        let densest_txs = mempool.get_sorted_iter().map(|x| x.0).collect_vec();
+        let densest_txs = mempool.fee_density_iter().map(|x| x.0).collect_vec();
         assert_eq!(
             densest_txs,
             mempool
@@ -1875,7 +1873,7 @@ mod tests {
 
             let expected_txs = expected_txs.iter().take(i).cloned().collect_vec();
 
-            let mut mempool_iter = mempool.get_sorted_iter();
+            let mut mempool_iter = mempool.fee_density_iter();
             for expected_tx in &expected_txs {
                 let (txid, fee_density) = mempool_iter.next().unwrap();
                 assert_eq!(expected_tx, mempool.get(txid).unwrap());

@@ -748,7 +748,7 @@ pub(super) fn get_upgrade_task_from_mempool(
     // Do we have any `ProofCollection`s?
     let proof_collection_job = if let Some((kernel, proof, tx_origin)) = global_state
         .mempool
-        .most_dense_proof_collection(num_proofs_threshold)
+        .preferred_proof_collection(num_proofs_threshold)
     {
         if kernel.mutator_set_hash != tip_mutator_set.hash() {
             error!("Deprecated transaction found in mempool. Has ProofCollection in need of updating. Consider clearing mempool.");

@@ -1755,7 +1755,7 @@ impl MainLoopHandler {
             RPCServerToMain::BroadcastMempoolTransactions => {
                 info!("Broadcasting transaction notifications for all shareable transactions in mempool");
                 let state = self.global_state_lock.lock_guard().await;
-                let txs = state.mempool.get_sorted_iter().collect_vec();
+                let txs = state.mempool.fee_density_iter().collect_vec();
                 for (txid, _) in txs {
                     // Since a read-lock is held over global state, the
                     // transaction must exist in the mempool.
@@ -2251,7 +2251,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_sorted_iter()
+                .fee_density_iter()
                 .next_back()
                 .expect("mempool should contain one item here");
 
