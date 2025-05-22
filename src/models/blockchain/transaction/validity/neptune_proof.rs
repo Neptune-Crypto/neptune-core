@@ -114,8 +114,7 @@ impl From<VmProof> for NeptuneProof {
 
 impl NeptuneProof {
     /// creates an invalid standard proof (not a mock proof)
-    #[cfg(test)]
-    pub fn invalid() -> Self {
+    pub(crate) fn invalid() -> Self {
         Self {
             proof: VmProof(vec![]),
         }

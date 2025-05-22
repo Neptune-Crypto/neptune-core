@@ -374,7 +374,7 @@ impl Block {
     ///
     /// Includes the guesser-fee UTXOs which are not included by the
     /// `mutator_set_accumulator` field on the block body.
-    pub(crate) fn mutator_set_accumulator_after(&self) -> MutatorSetAccumulator {
+    pub fn mutator_set_accumulator_after(&self) -> MutatorSetAccumulator {
         let mut msa = self.kernel.body.mutator_set_accumulator.clone();
         let mutator_set_update = MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records());
         mutator_set_update.apply_to_accumulator(&mut msa)

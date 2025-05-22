@@ -1344,7 +1344,7 @@ impl WalletState {
     ///
     /// Assume the given block is valid and that the wallet state is not synced
     /// with the new block yet but is synced with the previous block (if any).
-    pub(crate) async fn update_wallet_state_with_new_block(
+    pub async fn update_wallet_state_with_new_block(
         &mut self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         new_block: &Block,
@@ -1423,6 +1423,7 @@ impl WalletState {
                 all_existing_mutxos,
             )
         }
+
         let tx_kernel = new_block.kernel.body.transaction_kernel.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =

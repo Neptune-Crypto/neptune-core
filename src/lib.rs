@@ -44,6 +44,9 @@ pub mod util_types;
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub mod bench_helpers;
+
 use std::env;
 use std::path::PathBuf;
 
