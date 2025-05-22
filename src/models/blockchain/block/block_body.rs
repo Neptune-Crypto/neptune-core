@@ -114,6 +114,11 @@ impl BlockBody {
             merkle_tree: OnceLock::default(), // calc'd in merkle_tree()
         }
     }
+
+    /// The kernel of the transaction contained in the block.
+    pub fn transaction_kernel(&self) -> &TransactionKernel {
+        &self.transaction_kernel
+    }
 }
 
 impl MastHash for BlockBody {
