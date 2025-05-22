@@ -14,7 +14,6 @@ use chrono::Local;
 use chrono::NaiveDateTime;
 use chrono::Utc;
 use get_size2::GetSize;
-use num_traits::Euclid;
 use num_traits::Zero;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use proptest::strategy::BoxedStrategy;
@@ -201,12 +200,11 @@ impl Timestamp {
         const SECS_IN_DAY: u64 = 24 * SECS_IN_HOUR;
         const SECS_IN_WEEK: u64 = 7 * SECS_IN_DAY;
 
-        // if `div_rem_euclid` is too obscure
         let div_rem = |n: u64, d: u64| (n / d, n % d);
 
         let secs = self.as_duration().as_secs();
-        let (weeks, secs) = secs.div_rem_euclid(&SECS_IN_WEEK);
-        let (days, secs) = secs.div_rem_euclid(&SECS_IN_DAY);
+        let (weeks, secs) = div_rem(secs, SECS_IN_WEEK);
+        let (days, secs) = div_rem(secs, SECS_IN_DAY);
         let (hours, secs) = div_rem(secs, SECS_IN_HOUR);
         let (mins, secs) = div_rem(secs, SECS_IN_MINUTE);
 
