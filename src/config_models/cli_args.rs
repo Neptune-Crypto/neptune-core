@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU64;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -120,17 +121,47 @@ pub struct Args {
     #[clap(long, alias = "notx")]
     pub(crate) no_transaction_initiation: bool,
 
-    /// Whether to produce block proposals, which is the first step of two-step
+    /// Whether to expend computational resources on upgrading proofs for 3rd
+    /// party transactions, i.e. for transactions that this node is not party
+    /// to. This is the 1st step of three-step mining. Transaction fees can be
+    /// collected through this process. Note that upgrading transaction proofs
+    /// involves the computationally expensive task of producing STARK proofs.
+    /// You should have plenty of cores and probably at least 128 GB of RAM.
+    #[clap(long)]
+    pub(crate) tx_proof_upgrading: bool,
+
+    /// The number of seconds between each attempt to upgrade transactions in
+    /// the mempool to proofs of a higher quality. Ignored unless proof
+    /// upgrading is activated.
+    ///
+    /// Regardless of what this value is set to, two transaction proof upgrades
+    /// will never be performed simultaneously.
+    #[structopt(long, default_value = "10")]
+    pub(crate) tx_proof_upgrade_interval: NonZeroU64,
+
+    /// Determines the fraction of the transaction fee consumed by this node as
+    /// a reward either for upgrading transaction proofs. Ignored unless
+    /// proof upgrading is activated.
+    #[clap(long, default_value = "0.2", value_parser = fraction_validator)]
+    pub(crate) gobbling_fraction: f64,
+
+    /// Determines the minimum fee to take as a reward for upgrading 3rd party
+    /// transaction proofs. Foreign transactions where a fee below this
+    /// threshold cannot be collected by proof upgrading will not be upgraded.
+    #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
+    pub(crate) min_gobbling_fee: NativeCurrencyAmount,
+
+    /// Whether to produce block proposals, which is the 2nd step of three-step
     /// mining. Note that composing block proposals involves the computationally
     /// expensive task of producing STARK proofs. You should have plenty of
     /// cores and probably at least 128 GB of RAM.
     #[clap(long)]
     pub(crate) compose: bool,
 
-    /// Whether to engage in guess-nonce-and-hash, which is the second step in
-    /// two-step mining. If this flag is set and the `compose` flag is not set,
-    /// then the client will rely on block proposals from other nodes. In this
-    /// case, it will always pick the most profitable block proposal.
+    /// Whether to engage in guess-nonce-and-hash, which is the 3rd step in
+    /// three-step mining. If this flag is set and the `compose` flag is not
+    /// set, then the client will rely on block proposals from other nodes. In
+    /// this case, it will always pick the most profitable block proposal.
     ///
     /// If this flag is set and the `compose` flag is set, then the client will
     /// always guess on their own block proposal.
@@ -159,18 +190,6 @@ pub struct Args {
     /// the number is set to the number of available cores.
     #[clap(long)]
     pub(crate) guesser_threads: Option<usize>,
-
-    /// Determines the fraction of the transaction fee consumed by this node as
-    /// a reward either for upgrading a `ProofCollection` to `SingleProof`, or
-    /// for merging two `SingleProof`s.
-    #[clap(long, default_value = "0.2", value_parser = fraction_validator)]
-    pub(crate) gobbling_fraction: f64,
-
-    /// Determines the minimum fee to take as a reward for upgrading foreign
-    /// transaction proofs. Foreign transactions where a fee below this
-    /// threshold cannot be collected by proof upgrading will not be upgraded.
-    #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
-    pub(crate) min_gobbling_fee: NativeCurrencyAmount,
 
     /// Whether to keep the UTXO notifications for composer fees and
     /// proof-upgrader fees off chain.
@@ -275,14 +294,6 @@ pub struct Args {
     /// ignores it.
     #[clap(skip)]
     pub(crate) tx_proving_capability_cache: OnceLock<TxProvingCapability>,
-
-    /// The number of seconds between each attempt to upgrade transactions in
-    /// the mempool to proofs of a higher quality. Will only run if the machine
-    /// on which the client runs is powerful enough to produce `SingleProof`s.
-    ///
-    /// Set to 0 to never perform this task.
-    #[structopt(long, default_value = "1800")]
-    pub(crate) tx_proof_upgrade_interval: u64,
 
     /// Enable tokio tracing for consumption by the tokio-console application
     /// note: this will attempt to connect to localhost:6669
@@ -509,14 +520,6 @@ impl Args {
         }
     }
 
-    /// Returns how often we should attempt to upgrade transaction proofs.
-    pub(crate) fn tx_upgrade_interval(&self) -> Option<Duration> {
-        match self.tx_proof_upgrade_interval {
-            0 => None,
-            n => Some(Duration::from_secs(n)),
-        }
-    }
-
     /// Whether to engage in mining (composing or guessing or both)
     pub(crate) fn mine(&self) -> bool {
         self.guess || self.compose
@@ -605,6 +608,7 @@ impl From<&Args> for TritonVmProofJobOptions {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::net::Ipv6Addr;
+    use std::num::NonZero;
     use std::ops::RangeBounds;
 
     use super::*;
@@ -646,16 +650,10 @@ mod tests {
             default_args.listen_addr
         );
         assert_eq!(None, default_args.max_mempool_num_tx);
-        assert_eq!(1800, default_args.tx_proof_upgrade_interval);
-    }
-
-    #[test]
-    fn sane_tx_upgrade_interval_value() {
-        let args = Args {
-            tx_proof_upgrade_interval: 900,
-            ..Default::default()
-        };
-        assert_eq!(900, args.tx_upgrade_interval().unwrap().as_secs());
+        assert_eq!(
+            NonZero::new(10u64).unwrap(),
+            default_args.tx_proof_upgrade_interval
+        );
     }
 
     #[test]

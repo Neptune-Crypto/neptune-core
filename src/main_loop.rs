@@ -66,11 +66,6 @@ const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
 const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
 
-/// Interval for when transaction-upgrade checker is run. Note that this does
-/// *not* define how often a transaction-proof upgrade is actually performed.
-/// Only how often we check if we're ready to perform an upgrade.
-const TRANSACTION_UPGRADE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
-
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
 
 /// Number of seconds within which an individual peer is expected to respond
@@ -1315,32 +1310,24 @@ impl MainLoopHandler {
     async fn proof_upgrader(&mut self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         fn attempt_upgrade(
             global_state: &GlobalState,
-            now: SystemTime,
-            tx_upgrade_interval: Option<Duration>,
             main_loop_state: &MutableMainLoopState,
-        ) -> Result<bool> {
-            let duration_since_last_upgrade =
-                now.duration_since(global_state.net.last_tx_proof_upgrade_attempt)?;
+        ) -> bool {
             let previous_upgrade_task_is_still_running = main_loop_state
                 .proof_upgrader_task
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
-            Ok(global_state.net.sync_anchor.is_none()
+            global_state.net.sync_anchor.is_none()
                 && global_state.proving_capability() == TxProvingCapability::SingleProof
                 && !previous_upgrade_task_is_still_running
-                && tx_upgrade_interval
-                    .is_some_and(|upgrade_interval| duration_since_last_upgrade > upgrade_interval))
         }
 
         trace!("Running proof upgrader scheduled task");
 
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
-        let tx_upgrade_interval = self.global_state_lock.cli().tx_upgrade_interval();
         let (upgrade_candidate, tx_origin) = {
             let global_state = self.global_state_lock.lock_guard().await;
-            let now = self.now();
-            if !attempt_upgrade(&global_state, now, tx_upgrade_interval, main_loop_state)? {
+            if !attempt_upgrade(&global_state, main_loop_state) {
                 trace!("Not attempting upgrade.");
                 return Ok(());
             }
@@ -1470,7 +1457,16 @@ impl MainLoopHandler {
         let mut mp_resync_interval = time::interval(MP_RESYNC_INTERVAL);
         mp_resync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut tx_proof_upgrade_interval = time::interval(TRANSACTION_UPGRADE_CHECK_INTERVAL);
+        let mut tx_proof_upgrade_interval = if self.global_state_lock.cli().tx_proof_upgrading {
+            let tx_proof_upgrade_interval =
+                Duration::from_secs(self.global_state_lock.cli().tx_proof_upgrade_interval.get());
+            time::interval(tx_proof_upgrade_interval)
+        } else {
+            // Use a large but safe duration (1.000.000 years). If this value is
+            // too big (like Duration::MAX), the code can panic as it overflows
+            // when adding duration to instant.
+            time::interval(Duration::from_secs(60 * 60 * 24 * 365 * 1_000_000))
+        };
         tx_proof_upgrade_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
@@ -2194,6 +2190,7 @@ mod tests {
         async fn upgrade_proof_collection_to_single_proof_foreign_tx() {
             let num_outgoing_connections = 0;
             let num_incoming_connections = 0;
+
             let TestSetup {
                 mut main_loop_handler,
                 mut main_to_peer_rx,
@@ -2204,7 +2201,7 @@ mod tests {
             // weak machines fail.
             let mocked_cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
-                tx_proof_upgrade_interval: 100, // seconds
+                tx_proof_upgrading: true,
                 ..Default::default()
             };
 
@@ -2237,34 +2234,6 @@ mod tests {
                 .await
                 .mempool_insert((*proof_collection_tx).clone(), TransactionOrigin::Foreign)
                 .await;
-
-            assert!(
-                main_loop_handler
-                    .proof_upgrader(&mut mutable_main_loop_state)
-                    .await
-                    .is_ok(),
-                "Scheduled task returns OK when it's not yet time to upgrade"
-            );
-
-            assert!(
-                matches!(
-                    main_loop_handler
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .mempool
-                        .get(proof_collection_tx.kernel.txid())
-                        .unwrap()
-                        .proof,
-                    TransactionProof::ProofCollection(_)
-                ),
-                "Proof in mempool must still be of type proof collection"
-            );
-
-            // Mock that enough time has passed to perform the upgrade. Then
-            // perform the upgrade.
-            let mut main_loop_handler =
-                main_loop_handler.with_mocked_time(SystemTime::now() + Duration::from_secs(300));
             assert!(
                 main_loop_handler
                     .proof_upgrader(&mut mutable_main_loop_state)
@@ -2285,7 +2254,6 @@ mod tests {
             // transaction inserted above and one of the upgrader's fee
             // gobblers. The point is that this transaction is a SingleProof
             // transaction, so test that.
-
             let (merged_txid, _) = main_loop_handler
                 .global_state_lock
                 .lock_guard()
