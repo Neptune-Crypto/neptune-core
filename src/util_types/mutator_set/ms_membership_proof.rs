@@ -98,7 +98,7 @@ impl MsMembershipProof {
             "Function must be called with same number of membership proofs and items. Got {} items and {} membership proofs", own_items.len(), membership_proofs.len()
         );
 
-        assert!(membership_proofs
+        debug_assert!(membership_proofs
             .iter()
             .all(|msmp| msmp
                 .target_chunks
