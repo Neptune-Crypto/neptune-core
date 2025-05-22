@@ -297,3 +297,7 @@ required-features = ["arbitrary-impls"]
 [[bench]]
 name = "fast_kernel_mast_hash"
 harness = false
+
+[[bench]]
+name = "wallet_state"
+harness = false
