@@ -79,6 +79,7 @@ use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
@@ -605,6 +606,12 @@ pub trait RPC {
         token: rpc_auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockInfo>>;
+
+    /// Return the block kernel if block is known.
+    async fn block_kernel(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<BlockKernel>>;
 
     /// Return the public announements contained in a specified block.
     ///
@@ -1160,6 +1167,12 @@ pub trait RPC {
         start_index: usize,
         number: usize,
     ) -> RpcResult<Vec<MempoolTransactionInfo>>;
+
+    /// Return transaction kernel by id if found in mempool.
+    async fn mempool_tx_kernel(
+        token: rpc_auth::Token,
+        tx_kernel_id: TransactionKernelId,
+    ) -> RpcResult<Option<TransactionKernel>>;
 
     /// Return the information used on the dashboard's overview tab
     ///
@@ -2363,6 +2376,32 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn block_kernel(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<BlockKernel>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+
+        let block = state
+            .chain
+            .archival_state()
+            .get_block(digest)
+            .await
+            .expect("Program must be able to read archival state data.");
+        let block_kernel = block.map(|block| block.kernel.clone());
+
+        Ok(block_kernel)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn public_announcements_in_block(
         self,
         _context: tarpc::context::Context,
@@ -3537,6 +3576,26 @@ impl RPC for NeptuneRPCServer {
 
         Ok(mempool_transactions)
     }
+
+    // documented in trait. do not add doc-comment.
+    async fn mempool_tx_kernel(
+        self,
+        _context: ::tarpc::context::Context,
+        token: rpc_auth::Token,
+        tx_kernel_id: TransactionKernelId,
+    ) -> RpcResult<Option<TransactionKernel>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .get(tx_kernel_id)
+            .map(|tx| &tx.kernel)
+            .cloned())
+    }
 }
 
 pub mod error {
@@ -3675,6 +3734,7 @@ mod tests {
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::random_transaction_kernel;
     use crate::tests::shared::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
     use crate::Block;
@@ -3772,6 +3832,10 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
+            .block_kernel(ctx, token, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
             .public_announcements_in_block(ctx, token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
@@ -3823,6 +3887,10 @@ mod tests {
             .broadcast_all_mempool_txs(ctx, token)
             .await;
         let _ = rpc_server.clone().mempool_overview(ctx, token, 0, 20).await;
+        let _ = rpc_server
+            .clone()
+            .mempool_tx_kernel(ctx, token, random_transaction_kernel().txid())
+            .await;
         let _ = rpc_server.clone().clear_all_standings(ctx, token).await;
         let _ = rpc_server
             .clone()
@@ -4220,6 +4288,40 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn block_kernel_test() {
+        let network = Network::Main;
+        let rpc_server = test_rpc_server(
+            WalletEntropy::new_random(),
+            2,
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let token = cookie_token(&rpc_server).await;
+        let ctx = context::current();
+
+        assert!(
+            rpc_server
+                .clone()
+                .block_kernel(ctx, token, BlockSelector::Digest(Digest::default()))
+                .await
+                .unwrap()
+                .is_none(),
+            "Must return none on bad digest"
+        );
+        assert_eq!(
+            Block::genesis(network).hash(),
+            rpc_server
+                .block_kernel(ctx, token, BlockSelector::Genesis)
+                .await
+                .expect("RPC call must pass")
+                .expect("Must find genesis block")
+                .mast_hash(),
+            "Must know genesis block and must match genesis hash"
+        );
     }
 
     #[traced_test]
