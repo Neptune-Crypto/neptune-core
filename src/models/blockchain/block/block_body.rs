@@ -115,8 +115,8 @@ impl BlockBody {
         }
     }
 
-    pub fn kernel(&self) -> TransactionKernel {
-        self.transaction_kernel.clone()
+    pub fn transaction_kernel(&self) -> &TransactionKernel {
+        &self.transaction_kernel
     }
 }
 
