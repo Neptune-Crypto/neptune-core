@@ -31,8 +31,10 @@ use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
 use block_proposal::BlockProposal;
+use blockchain_state::BlockchainArchivalState;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
+use light_state::LightState;
 use mempool::Mempool;
 use mempool::TransactionOrigin;
 use mining_state::MiningState;
@@ -67,6 +69,7 @@ use super::peer::SyncChallengeResponse;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::api;
 use crate::config_models::cli_args;
+use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
@@ -77,6 +80,7 @@ use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -91,6 +95,7 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::ArchivalState;
 use crate::Hash;
 use crate::RPCServerToMain;
+use crate::WalletFileContext;
 use crate::VERSION;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
@@ -161,21 +166,17 @@ pub struct GlobalStateLock {
 }
 
 impl GlobalStateLock {
-    /// the key to the watery kingdom.
-    pub fn new(
-        wallet_state: WalletState,
-        chain: BlockchainState,
-        net: NetworkingState,
-        cli: cli_args::Args,
-        mempool: Mempool,
+    pub fn from_global_state(
+        global_state: GlobalState,
         rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
     ) -> Self {
-        let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool);
+        let cli = global_state.cli.clone();
         let global_state_lock = sync_tokio::AtomicRw::from((
             global_state,
             Some("GlobalState"),
             Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
         ));
+
         Self {
             global_state_lock,
             cli,
@@ -616,6 +617,49 @@ impl Drop for GlobalState {
 }
 
 impl GlobalState {
+    pub async fn try_new(
+        data_directory: DataDirectory,
+        genesis: Block,
+        cli: cli_args::Args,
+    ) -> Result<Self> {
+        // Get wallet object, create various wallet secret files
+        let wallet_dir = data_directory.wallet_directory_path();
+        DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
+        let wallet_file_context =
+            WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
+        debug!("Now getting wallet state. This may take a while if the database needs pruning.");
+        let wallet_state =
+            WalletState::try_new_from_context(&data_directory, wallet_file_context, &cli, &genesis)
+                .await?;
+        debug!("Got wallet state.");
+
+        let archival_state = ArchivalState::new(data_directory.clone(), genesis).await;
+        debug!("Got archival state");
+
+        // Get latest block. Use hardcoded genesis block if nothing is in database.
+        let latest_block: Block = archival_state.get_tip().await;
+
+        let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
+        let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
+        debug!("Got peer databases");
+
+        let net = NetworkingState::new(peer_map, peer_databases);
+
+        let light_state: LightState = LightState::from(latest_block);
+        let chain = BlockchainArchivalState {
+            light_state,
+            archival_state,
+        };
+        let chain = BlockchainState::Archival(Box::new(chain));
+        let mempool = Mempool::new(
+            cli.max_mempool_size,
+            cli.max_mempool_num_tx,
+            chain.light_state().hash(),
+        );
+
+        Ok(Self::new(wallet_state, chain, net, cli, mempool))
+    }
+
     pub fn new(
         wallet_state: WalletState,
         chain: BlockchainState,
@@ -1883,10 +1927,9 @@ mod tests {
         #[apply(shared_tokio_runtime)]
         async fn generating_own_handshake_doesnt_crash() {
             mock_genesis_global_state(
-                Network::Main,
                 2,
                 WalletEntropy::devnet_wallet(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(Network::Main),
             )
             .await
             .lock_guard()
@@ -1899,10 +1942,9 @@ mod tests {
         async fn handshakes_listen_port_is_some_when_max_peers_is_default() {
             let network = Network::Main;
             let bob = mock_genesis_global_state(
-                network,
                 2,
                 WalletEntropy::devnet_wallet(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
 
@@ -1919,10 +1961,9 @@ mod tests {
         async fn handshakes_listen_port_is_none_when_max_peers_is_zero() {
             let network = Network::Main;
             let mut bob = mock_genesis_global_state(
-                network,
                 2,
                 WalletEntropy::devnet_wallet(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
             let no_incoming_connections = cli_args::Args {
@@ -1944,10 +1985,9 @@ mod tests {
     async fn set_new_tip_clears_block_proposal_related_data() {
         let network = Network::Main;
         let mut bob = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let mut bob = bob.global_state_lock.lock_guard_mut().await;
@@ -1977,10 +2017,9 @@ mod tests {
 
         let alice = WalletEntropy::new_pseudorandom(rng.random());
         let bob = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         assert!(
@@ -2357,7 +2396,6 @@ mod tests {
         let mut rng = rand::rng();
         let network = Network::RegTest;
         let mut alice_state_lock = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
             cli_args::Args::default_with_network(network),
@@ -2416,10 +2454,9 @@ mod tests {
         let mut rng = rand::rng();
 
         let mut alice = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let mut alice = alice.lock_guard_mut().await;
@@ -2677,10 +2714,9 @@ mod tests {
         let network = Network::Main;
         let mut rng = rand::rng();
         let mut alice = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let mut alice = alice.lock_guard_mut().await;
@@ -2882,10 +2918,11 @@ mod tests {
 
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
+            network,
             ..Default::default()
         };
         let mut premine_receiver =
-            mock_genesis_global_state(network, 3, WalletEntropy::devnet_wallet(), cli_args).await;
+            mock_genesis_global_state(3, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
         let genesis_spending_key = premine_receiver
             .lock_guard()
             .await
@@ -2895,15 +2932,11 @@ mod tests {
 
         let wallet_secret_alice = WalletEntropy::new_pseudorandom(rng.random());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
-        let mut alice =
-            mock_genesis_global_state(network, 3, wallet_secret_alice, cli_args::Args::default())
-                .await;
+        let mut alice = mock_genesis_global_state(3, wallet_secret_alice, cli_args.clone()).await;
 
         let wallet_secret_bob = WalletEntropy::new_pseudorandom(rng.random());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
-        let mut bob =
-            mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
-                .await;
+        let mut bob = mock_genesis_global_state(3, wallet_secret_bob, cli_args.clone()).await;
 
         let genesis_block = Block::genesis(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
@@ -3287,10 +3320,9 @@ mod tests {
 
         let network = Network::Main;
         let mut global_state_lock = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let genesis_block = Block::genesis(network);
@@ -3351,7 +3383,6 @@ mod tests {
 
         let network = Network::Main;
         let mut global_state_lock_small = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
             cli_args::Args {
@@ -3362,7 +3393,6 @@ mod tests {
         )
         .await;
         let global_state_lock_big = mock_genesis_global_state(
-            network,
             2,
             WalletEntropy::devnet_wallet(),
             cli_args::Args {
@@ -3574,10 +3604,9 @@ mod tests {
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
             let mut global_state_lock = mock_genesis_global_state(
-                network,
                 2,
                 wallet_secret.clone(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
 
@@ -3646,10 +3675,9 @@ mod tests {
             let wallet_secret = WalletEntropy::new_random();
 
             let mut alice = mock_genesis_global_state(
-                network,
                 2,
                 wallet_secret.clone(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
 
@@ -3701,10 +3729,9 @@ mod tests {
             let network = Network::Main;
             let wallet_secret = WalletEntropy::new_random();
             let mut alice = mock_genesis_global_state(
-                network,
                 2,
                 wallet_secret.clone(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
             let mut alice = alice.global_state_lock.lock_guard_mut().await;
@@ -3770,10 +3797,9 @@ mod tests {
 
             for depth in 1..=4 {
                 let mut alice = mock_genesis_global_state(
-                    network,
                     2,
                     wallet_secret.clone(),
-                    cli_args::Args::default(),
+                    cli_args::Args::default_with_network(network),
                 )
                 .await;
                 let mut alice = alice.global_state_lock.lock_guard_mut().await;
@@ -3831,8 +3857,7 @@ mod tests {
 
             for claim_composer_fees in [false, true] {
                 let mut global_state_lock =
-                    mock_genesis_global_state(network, 2, wallet_secret.clone(), cli_args.clone())
-                        .await;
+                    mock_genesis_global_state(2, wallet_secret.clone(), cli_args.clone()).await;
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
                 if claim_composer_fees {
@@ -3932,10 +3957,9 @@ mod tests {
             for claim_cb in [false, true] {
                 let expected_num_mutxos = if claim_cb { 3 } else { 1 };
                 let mut global_state_lock = mock_genesis_global_state(
-                    network,
                     2,
                     wallet_secret.clone(),
-                    cli_args::Args::default(),
+                    cli_args::Args::default_with_network(network),
                 )
                 .await;
                 let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -3969,7 +3993,13 @@ mod tests {
     }
 
     mod bootstrap_from_raw_block_files {
+        use std::fs::File;
+        use std::io::Write;
+
         use super::*;
+        use crate::tests::shared::mock_genesis_global_state_with_block;
+        use crate::tests::shared::test_helper_data_dir;
+        use crate::tests::shared::try_fetch_file_from_server;
 
         async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
             // Ensure more than one file is used to store blocks.
@@ -3984,10 +4014,9 @@ mod tests {
 
             let peer_count = 0;
             let mut state = mock_genesis_global_state(
-                network,
                 peer_count,
                 WalletEntropy::devnet_wallet(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
             {
@@ -4008,10 +4037,9 @@ mod tests {
             let old_state = old_state.lock_guard().await;
 
             let mut new_state = mock_genesis_global_state(
-                network,
                 0,
                 WalletEntropy::devnet_wallet(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
             let mut new_state = new_state.lock_guard_mut().await;
@@ -4037,10 +4065,9 @@ mod tests {
 
             // Build the new state from the block directory of old state.
             let mut new_state = mock_genesis_global_state(
-                network,
                 0,
                 WalletEntropy::devnet_wallet(),
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
             let mut new_state = new_state.lock_guard_mut().await;
@@ -4069,6 +4096,75 @@ mod tests {
                     .await
                     .synced_unspent,
                 "Restored wallet state must agree with original state"
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn can_restore_from_real_mainnet_data_with_reorganizations() {
+            let expected_blk_files = ["blk0.dat"];
+            let network = Network::Main;
+
+            // We need to override difficulty since it's different when the
+            // test flag is set. We need the real main net block.
+            let mainnets_real_genesis_block =
+                Block::genesis(network).with_difficulty(network.genesis_difficulty());
+
+            // Use at least four MPs per UTXO, otherwise they get unsynced.
+            let cli = cli_args::Args {
+                network,
+                number_of_mps_per_utxo: 4,
+                ..Default::default()
+            };
+            let peer_count = 0;
+
+            let mut state = mock_genesis_global_state_with_block(
+                peer_count,
+                WalletEntropy::devnet_wallet(),
+                cli,
+                mainnets_real_genesis_block,
+            )
+            .await;
+            let mut state = state.lock_guard_mut().await;
+
+            // Are the required blk files present on disk? If not, fetch them
+            // from a server.
+            let test_data_dir = test_helper_data_dir();
+            for blk_file_name in expected_blk_files {
+                let mut path = test_data_dir.clone();
+                path.push(blk_file_name);
+                if File::open(&path).is_err() {
+                    // Try fetching file from server and write it to disk.
+                    let (file, _server) = try_fetch_file_from_server(blk_file_name.to_owned())
+                        .unwrap_or_else(|| {
+                            panic!("File {blk_file_name} must be available from a server")
+                        });
+                    let mut f = File::create_new(&path).unwrap();
+                    f.write_all(&file).unwrap();
+                }
+            }
+
+            let validate_blocks = true;
+            state
+                .bootstrap_from_directory(&test_data_dir, validate_blocks)
+                .await
+                .unwrap();
+            let restored_block_height = state.chain.light_state().header().height;
+            assert_eq!(
+                BlockHeight::new(bfe!(113)),
+                restored_block_height,
+                "Expected block height not reached in state-recovery"
+            );
+
+            let wallet_status = state.get_wallet_status_for_tip().await;
+            let balance = state.wallet_state.confirmed_available_balance(
+                &wallet_status,
+                network.launch_date() + Timestamp::months(7),
+            );
+            assert_eq!(
+                NativeCurrencyAmount::coins(20),
+                balance,
+                "Expected balance must be available after state-recovery"
             );
         }
     }
@@ -4193,25 +4289,20 @@ mod tests {
             let alice_to_bob_fee = NativeCurrencyAmount::coins(1);
 
             // init global state for alice bob
-            let mut alice_state_lock = mock_genesis_global_state(
-                network,
-                3,
-                WalletEntropy::devnet_wallet(),
-                cli_args::Args::default(),
-            )
-            .await;
+            let cli_args = cli_args::Args::default_with_network(network);
+            let mut alice_state_lock =
+                mock_genesis_global_state(3, WalletEntropy::devnet_wallet(), cli_args.clone())
+                    .await;
             let mut bob_state_lock = mock_genesis_global_state(
-                network,
                 3,
                 WalletEntropy::new_pseudorandom(rng.random()),
-                cli_args::Args::default(),
+                cli_args.clone(),
             )
             .await;
             let charlie_state_lock = mock_genesis_global_state(
-                network,
                 3,
                 WalletEntropy::new_pseudorandom(rng.random()),
-                cli_args::Args::default(),
+                cli_args.clone(),
             )
             .await;
 
@@ -4387,10 +4478,9 @@ mod tests {
             {
                 // devnet_wallet() stands in for alice's seed.
                 let mut alice_restored_state_lock = mock_genesis_global_state(
-                    network,
                     3,
                     WalletEntropy::devnet_wallet(),
-                    cli_args::Args::default(),
+                    cli_args::Args::default_with_network(network),
                 )
                 .await;
 

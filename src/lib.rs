@@ -44,9 +44,7 @@ pub mod util_types;
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests;
 
-use std::collections::HashMap;
 use std::env;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -62,8 +60,8 @@ use futures::StreamExt;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::handshake_data::HandshakeData;
-use models::peer::peer_info::PeerInfo;
 use models::state::wallet::wallet_file::WalletFileContext;
+use models::state::GlobalState;
 use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
@@ -88,11 +86,6 @@ use crate::models::channel::MinerToMain;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::RPCServerToMain;
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::BlockchainArchivalState;
-use crate::models::state::blockchain_state::BlockchainState;
-use crate::models::state::light_state::LightState;
-use crate::models::state::mempool::Mempool;
-use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
@@ -125,54 +118,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path()).await?;
     info!("Data directory is {}", data_directory);
 
-    // Get wallet object, create various wallet secret files
-    let wallet_dir = data_directory.wallet_directory_path();
-    DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-    let wallet_file_context =
-        WalletFileContext::read_from_file_or_create(&data_directory.wallet_directory_path())?;
-    info!("Now getting wallet state. This may take a while if the database needs pruning.");
-    let wallet_state =
-        WalletState::try_new_from_context(&data_directory, wallet_file_context, &cli_args).await?;
-    info!("Got wallet state.");
-
-    // Connect to or create databases for block index, peers, mutator set, block sync
-    let block_index_db = ArchivalState::initialize_block_index_database(&data_directory).await?;
-    info!("Got block index database");
-
-    let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
-    info!("Got peer database");
-
-    let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_directory).await?;
-    info!("Got archival mutator set");
-
-    let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_directory).await?;
-    info!("Got archival block MMR");
-
-    let archival_state = ArchivalState::new(
-        data_directory.clone(),
-        block_index_db,
-        archival_mutator_set,
-        archival_block_mmr,
-        cli_args.network,
-    )
-    .await;
-
-    // Get latest block. Use hardcoded genesis block if nothing is in database.
-    let latest_block: Block = archival_state.get_tip().await;
-
-    // Bind socket to port on this machine, to handle incoming connections from peers
-    let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
-        let ret = TcpListener::bind((cli_args.listen_addr, incoming_peer_listener))
-           .await
-           .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, incoming_peer_listener))?;
-        info!("Now listening for incoming peer-connections");
-        ret
-    } else {
-        info!("Not accepting incoming peer-connections");
-        TcpListener::bind("127.0.0.1:0").await?
-    };
-
-    let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
+    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
+        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+    let genesis = Block::genesis(cli_args.network);
+    let global_state =
+        GlobalState::try_new(data_directory.clone(), genesis, cli_args.clone()).await?;
+    let mut global_state_lock =
+        GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
 
     // Construct the broadcast channel to communicate from the main task to peer tasks
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
@@ -181,32 +133,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     // Add the MPSC (multi-producer, single consumer) channel for peer-task-to-main communication
     let (peer_task_to_main_tx, peer_task_to_main_rx) =
         mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
-
-    let networking_state = NetworkingState::new(peer_map, peer_databases);
-
-    let light_state: LightState = LightState::from(latest_block);
-    let blockchain_archival_state = BlockchainArchivalState {
-        light_state,
-        archival_state,
-    };
-    let blockchain_state = BlockchainState::Archival(Box::new(blockchain_archival_state));
-    let mempool = Mempool::new(
-        cli_args.max_mempool_size,
-        cli_args.max_mempool_num_tx,
-        blockchain_state.light_state().hash(),
-    );
-
-    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
-        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-
-    let mut global_state_lock = GlobalStateLock::new(
-        wallet_state,
-        blockchain_state,
-        networking_state,
-        cli_args,
-        mempool,
-        rpc_server_to_main_tx.clone(),
-    );
 
     if let Some(bootstrap_directory) = global_state_lock.cli().bootstrap_from_directory.clone() {
         info!(
@@ -231,6 +157,18 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         .restore_monitored_utxos_from_recovery_data()
         .await?;
     info!("UTXO restoration check complete");
+
+    // Bind socket to port on this machine, to handle incoming connections from peers
+    let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
+        let ret = TcpListener::bind((cli_args.listen_addr, incoming_peer_listener))
+           .await
+           .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, incoming_peer_listener))?;
+        info!("Now listening for incoming peer-connections");
+        ret
+    } else {
+        info!("Not accepting incoming peer-connections");
+        TcpListener::bind("127.0.0.1:0").await?
+    };
 
     // Connect to peers, and provide each peer task with a thread-safe copy of the state
     let own_handshake_data: HandshakeData =

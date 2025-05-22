@@ -3719,9 +3719,12 @@ mod tests {
         ) -> Transaction {
             let wallet_secret = WalletEntropy::devnet_wallet();
             let alice_key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let alice_gsl =
-                mock_genesis_global_state(network, 1, wallet_secret, cli_args::Args::default())
-                    .await;
+            let alice_gsl = mock_genesis_global_state(
+                1,
+                wallet_secret,
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
             let alice = alice_gsl.lock_guard().await;
             let genesis_block = alice.chain.light_state();
             let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);

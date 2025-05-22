@@ -1156,7 +1156,7 @@ pub(crate) mod tests {
 
     #[cfg(test)]
     impl Block {
-        fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
+        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
             self.kernel.header.difficulty = difficulty;
             self.unset_digest();
             self
@@ -1495,11 +1495,11 @@ pub(crate) mod tests {
 
             let alice_wallet = WalletEntropy::devnet_wallet();
             let mut alice = mock_genesis_global_state(
-                network,
                 3,
                 alice_wallet.clone(),
                 cli_args::Args {
                     guesser_fraction: 0.5,
+                    network,
                     ..Default::default()
                 },
             )
@@ -1531,10 +1531,9 @@ pub(crate) mod tests {
             for i in 0..10 {
                 println!("i: {i}");
                 alice = mock_genesis_global_state(
-                    network,
                     3,
                     alice_wallet.clone(),
-                    cli_args::Args::default(),
+                    cli_args::Args::default_with_network(network),
                 )
                 .await;
                 alice.set_new_tip(block1.clone()).await.unwrap();
@@ -1862,9 +1861,12 @@ pub(crate) mod tests {
             let alice_wallet = WalletEntropy::devnet_wallet();
             let alice_key = alice_wallet.nth_generation_spending_key(0);
             let alice_address = alice_key.to_address();
-            let mut alice =
-                mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default())
-                    .await;
+            let mut alice = mock_genesis_global_state(
+                0,
+                alice_wallet,
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
 
             let output = TxOutput::offchain_native_currency(
                 NativeCurrencyAmount::coins(4),
@@ -1952,8 +1954,12 @@ pub(crate) mod tests {
         let mut rng = StdRng::seed_from_u64(893423984854);
         let network = Network::Main;
         let devnet_wallet = WalletEntropy::devnet_wallet();
-        let mut alice =
-            mock_genesis_global_state(network, 0, devnet_wallet, cli_args::Args::default()).await;
+        let mut alice = mock_genesis_global_state(
+            0,
+            devnet_wallet,
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
 
         let job_queue = TritonVmJobQueue::get_instance();
 

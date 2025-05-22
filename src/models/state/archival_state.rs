@@ -18,7 +18,6 @@ pub(crate) mod bootstrap_from_block_files;
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
 use crate::config_models::data_directory::DataDirectory;
-use crate::config_models::network::Network;
 use crate::database::create_db_if_missing;
 use crate::database::storage::storage_schema::traits::*;
 use crate::database::NeptuneLevelDb;
@@ -96,7 +95,7 @@ impl core::fmt::Debug for ArchivalState {
 
 impl ArchivalState {
     /// Create databases for block persistence
-    pub(crate) async fn initialize_block_index_database(
+    async fn initialize_block_index_database(
         data_dir: &DataDirectory,
     ) -> Result<NeptuneLevelDb<BlockIndexKey, BlockIndexValue>> {
         let block_index_db_dir_path = data_dir.block_index_database_dir_path();
@@ -112,9 +111,7 @@ impl ArchivalState {
     }
 
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
-    pub(crate) async fn initialize_mutator_set(
-        data_dir: &DataDirectory,
-    ) -> Result<RustyArchivalMutatorSet> {
+    async fn initialize_mutator_set(data_dir: &DataDirectory) -> Result<RustyArchivalMutatorSet> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path).await?;
 
@@ -143,7 +140,7 @@ impl ArchivalState {
         Ok(archival_set)
     }
 
-    pub(crate) async fn initialize_archival_block_mmr(
+    async fn initialize_archival_block_mmr(
         data_dir: &DataDirectory,
     ) -> Result<RustyArchivalBlockMmr> {
         let abmmr_dir_path = data_dir.archival_block_mmr_dir_path();
@@ -236,14 +233,11 @@ impl ArchivalState {
         (leaving, luca, arriving)
     }
 
-    pub(crate) async fn new(
-        data_dir: DataDirectory,
-        block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
-        mut archival_mutator_set: RustyArchivalMutatorSet,
-        mut archival_block_mmr: RustyArchivalBlockMmr,
-        network: Network,
-    ) -> Self {
-        let genesis_block = Box::new(Block::genesis(network));
+    pub(crate) async fn new(data_dir: DataDirectory, genesis_block: Block) -> Self {
+        let mut archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)
+            .await
+            .expect("Must be able to initialize archival mutator set");
+        debug!("Got archival mutator set");
 
         // If archival mutator set is empty, populate it with the addition records from genesis block
         // This assumes genesis block doesn't spend anything -- which it can't so that should be OK.
@@ -259,6 +253,11 @@ impl ArchivalState {
             archival_mutator_set.persist().await;
         }
 
+        let mut archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir)
+            .await
+            .expect("Must be able to initialize archival block MMR");
+        debug!("Got archival block MMR");
+
         // Add genesis block digest to archival MMR, if empty.
         if archival_block_mmr.ammr().is_empty().await {
             archival_block_mmr
@@ -267,6 +266,11 @@ impl ArchivalState {
                 .await;
         }
 
+        let block_index_db = ArchivalState::initialize_block_index_database(&data_dir)
+            .await
+            .expect("Must be able to initialize block index database");
+        debug!("Got block index database");
+        let genesis_block = Box::new(genesis_block);
         Self {
             data_dir,
             block_index_db,
@@ -1190,24 +1194,17 @@ pub(super) mod tests {
     use crate::tests::shared::mock_genesis_archival_state;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-    use crate::tests::shared::unit_test_databases;
+    use crate::tests::shared::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     pub(super) async fn make_test_archival_state(network: Network) -> ArchivalState {
-        let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();
+        let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
 
-        let ams = ArchivalState::initialize_mutator_set(&data_dir)
-            .await
-            .unwrap();
-
-        let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir)
-            .await
-            .unwrap();
-
-        ArchivalState::new(data_dir, block_index_db, ams, archival_block_mmr, network).await
+        let genesis_block = Block::genesis(network);
+        ArchivalState::new(data_dir, genesis_block).await
     }
 
     #[traced_test]
@@ -1295,9 +1292,9 @@ pub(super) mod tests {
         // Verify that a restored archival mutator set is populated with the right `sync_label`
         let network = Network::Beta;
         let mut archival_state = make_test_archival_state(network).await;
-        let cli_args = cli_args::Args::default();
+        let cli_args = cli_args::Args::default_with_network(network);
         let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
         let (mock_block_1, _) = make_mock_block(
             network,
             &archival_state.genesis_block,
@@ -1337,9 +1334,9 @@ pub(super) mod tests {
         let mut rng = StdRng::seed_from_u64(107221549301u64);
         let cli_args = cli_args::Args::default_with_network(network);
         let alice_wallet =
-            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
         let alice_wallet = alice_wallet.wallet_entropy;
-        let mut alice = mock_genesis_global_state(network, 0, alice_wallet, cli_args).await;
+        let mut alice = mock_genesis_global_state(0, alice_wallet, cli_args).await;
         let alice_key = alice
             .lock_guard()
             .await
@@ -1480,7 +1477,7 @@ pub(super) mod tests {
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let cli_args = cli_args::Args::default_with_network(network);
-        let mut alice = mock_genesis_global_state(network, 42, alice_wallet, cli_args).await;
+        let mut alice = mock_genesis_global_state(42, alice_wallet, cli_args).await;
         let genesis_block = Block::genesis(network);
 
         let num_premine_utxos = Block::premine_utxos(network).len();
@@ -1576,7 +1573,7 @@ pub(super) mod tests {
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let cli_args = cli_args::Args::default_with_network(network);
-        let mut alice = mock_genesis_global_state(network, 42, alice_wallet, cli_args).await;
+        let mut alice = mock_genesis_global_state(42, alice_wallet, cli_args).await;
 
         let mut expected_num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
@@ -1748,16 +1745,16 @@ pub(super) mod tests {
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         let network = Network::Main;
-        let cli_args = cli_args::Args::default();
+        let cli_args = cli_args::Args::default_with_network(network);
         let premine_rec_ws =
-            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), network, &cli_args).await;
+            mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
         let premine_rec_spending_key = premine_rec_ws.wallet_entropy.nth_generation_spending_key(0);
         let mut premine_rec = mock_genesis_global_state(
-            network,
             3,
             premine_rec_ws.wallet_entropy,
             cli_args::Args {
                 guesser_fraction: 0.0,
+                network,
                 ..Default::default()
             },
         )
@@ -1778,15 +1775,11 @@ pub(super) mod tests {
         let mut rng = StdRng::seed_from_u64(41251549301u64);
         let wallet_secret_alice = WalletEntropy::new_pseudorandom(rng.random());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
-        let mut alice =
-            mock_genesis_global_state(network, 3, wallet_secret_alice, cli_args::Args::default())
-                .await;
+        let mut alice = mock_genesis_global_state(3, wallet_secret_alice, cli_args.clone()).await;
 
         let wallet_secret_bob = WalletEntropy::new_pseudorandom(rng.random());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
-        let mut bob =
-            mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
-                .await;
+        let mut bob = mock_genesis_global_state(3, wallet_secret_bob, cli_args.clone()).await;
 
         let genesis_block = Block::genesis(network);
         let launch_date = genesis_block.header().timestamp;

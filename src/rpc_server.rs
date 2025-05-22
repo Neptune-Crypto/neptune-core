@@ -3680,15 +3680,14 @@ mod tests {
     use crate::Block;
 
     async fn test_rpc_server(
-        network: Network,
         wallet_entropy: WalletEntropy,
         peer_count: u8,
         cli: cli_args::Args,
     ) -> NeptuneRPCServer {
         let global_state_lock =
-            mock_genesis_global_state(network, peer_count, wallet_entropy, cli).await;
+            mock_genesis_global_state(peer_count, wallet_entropy, cli.clone()).await;
 
-        let data_directory = unit_test_data_directory(network).unwrap();
+        let data_directory = unit_test_data_directory(cli.network).unwrap();
 
         let valid_tokens: Vec<rpc_auth::Token> = vec![rpc_auth::Cookie::try_new(&data_directory)
             .await
@@ -3717,13 +3716,9 @@ mod tests {
         // Verify that a wallet not receiving a premine is empty at startup
         for network in Network::iter() {
             let rpc_server = test_rpc_server(
-                network,
                 WalletEntropy::new_random(),
                 2,
-                cli_args::Args {
-                    network,
-                    ..Default::default()
-                },
+                cli_args::Args::default_with_network(network),
             )
             .await;
             assert_eq!(network, rpc_server.network(context::current()).await?);
@@ -3742,10 +3737,9 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(123456789088u64);
 
         let rpc_server = test_rpc_server(
-            network,
             WalletEntropy::new_pseudorandom(rng.random()),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -3889,10 +3883,9 @@ mod tests {
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         let rpc_server = test_rpc_server(
-            Network::Beta,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(Network::Beta),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -3909,10 +3902,9 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn clear_ip_standing_test() -> Result<()> {
         let mut rpc_server = test_rpc_server(
-            Network::Beta,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(Network::Beta),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4068,10 +4060,9 @@ mod tests {
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
         let mut rpc_server = test_rpc_server(
-            Network::Beta,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(Network::Beta),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4197,10 +4188,9 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn utxo_digest_test() {
         let rpc_server = test_rpc_server(
-            Network::Beta,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(Network::Beta),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4237,10 +4227,9 @@ mod tests {
     async fn block_info_test() {
         let network = Network::RegTest;
         let rpc_server = test_rpc_server(
-            network,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4349,10 +4338,9 @@ mod tests {
     async fn public_announcements_in_block_test() {
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
-            network,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let mut rng = rand::rng();
@@ -4417,10 +4405,9 @@ mod tests {
     async fn block_digest_test() {
         let network = Network::RegTest;
         let rpc_server = test_rpc_server(
-            network,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4501,10 +4488,9 @@ mod tests {
         // the RPC call returns `None`, so we only verify that the call doesn't
         // crash the host machine, we don't verify that any value is returned.
         let rpc_server = test_rpc_server(
-            Network::Beta,
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(Network::Beta),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4526,10 +4512,11 @@ mod tests {
         // set flag on, verify non-initiation
         let cli_on = cli_args::Args {
             no_transaction_initiation: true,
+            network,
             ..Default::default()
         };
 
-        let rpc_server = test_rpc_server(network, WalletEntropy::new_random(), 2, cli_on).await;
+        let rpc_server = test_rpc_server(WalletEntropy::new_random(), 2, cli_on).await;
         let token = cookie_token(&rpc_server).await;
 
         let output: OutputFormat = (address.into(), amount).into();
@@ -4583,10 +4570,9 @@ mod tests {
         async fn provide_solution_when_no_proposal_known() {
             let network = Network::Main;
             let bob = test_rpc_server(
-                network,
                 WalletEntropy::new_random(),
                 2,
-                cli_args::Args::default(),
+                cli_args::Args::default_with_network(network),
             )
             .await;
             let bob_token = cookie_token(&bob).await;
@@ -4612,7 +4598,12 @@ mod tests {
         async fn cached_exported_proposals_are_stored_correctly() {
             let network = Network::Main;
             let bob = WalletEntropy::new_random();
-            let mut bob = test_rpc_server(network, bob.clone(), 2, cli_args::Args::default()).await;
+            let mut bob = test_rpc_server(
+                bob.clone(),
+                2,
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
 
             let genesis = Block::genesis(network);
             let block1 = invalid_empty_block(network, &genesis);
@@ -4672,7 +4663,12 @@ mod tests {
         async fn exported_pow_puzzle_is_consistent_with_block_hash() {
             let network = Network::Main;
             let bob = WalletEntropy::new_random();
-            let mut bob = test_rpc_server(network, bob.clone(), 2, cli_args::Args::default()).await;
+            let mut bob = test_rpc_server(
+                bob.clone(),
+                2,
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
             let bob_token = cookie_token(&bob).await;
 
             let genesis = Block::genesis(network);
@@ -4845,9 +4841,12 @@ mod tests {
 
                 // bob's node
                 let (pay_to_bob_outputs, bob_rpc_server, bob_token) = {
-                    let rpc_server =
-                        test_rpc_server(network, WalletEntropy::new_random(), 2, Args::default())
-                            .await;
+                    let rpc_server = test_rpc_server(
+                        WalletEntropy::new_random(),
+                        2,
+                        Args::default_with_network(network),
+                    )
+                    .await;
                     let token = cookie_token(&rpc_server).await;
 
                     let receiving_address_generation = rpc_server
@@ -4883,10 +4882,10 @@ mod tests {
                     let wallet_entropy = WalletEntropy::new_random();
                     let cli_args = cli_args::Args {
                         tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                        network,
                         ..Default::default()
                     };
-                    let mut rpc_server =
-                        test_rpc_server(network, wallet_entropy.clone(), 2, cli_args).await;
+                    let mut rpc_server = test_rpc_server(wallet_entropy.clone(), 2, cli_args).await;
                     let token = cookie_token(&rpc_server).await;
 
                     let genesis_block = Block::genesis(network);
@@ -5040,9 +5039,10 @@ mod tests {
                 let bob_wallet = WalletEntropy::new_random();
                 let cli_args = cli_args::Args {
                     tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                    network,
                     ..Default::default()
                 };
-                let mut bob = test_rpc_server(network, bob_wallet.clone(), 2, cli_args).await;
+                let mut bob = test_rpc_server(bob_wallet.clone(), 2, cli_args).await;
                 let bob_token = cookie_token(&bob).await;
 
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
@@ -5221,15 +5221,11 @@ mod tests {
             let network = Network::Main;
             let cli_args = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                network,
                 ..Default::default()
             };
-            let rpc_server = test_rpc_server(
-                network,
-                WalletEntropy::new_pseudorandom(rng.random()),
-                2,
-                cli_args,
-            )
-            .await;
+            let rpc_server =
+                test_rpc_server(WalletEntropy::new_pseudorandom(rng.random()), 2, cli_args).await;
             let token = cookie_token(&rpc_server).await;
 
             let ctx = context::current();
@@ -5296,10 +5292,10 @@ mod tests {
             let network = Network::Main;
             let cli_args = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                network,
                 ..Default::default()
             };
-            let mut rpc_server =
-                test_rpc_server(network, WalletEntropy::devnet_wallet(), 2, cli_args).await;
+            let mut rpc_server = test_rpc_server(WalletEntropy::devnet_wallet(), 2, cli_args).await;
 
             let ctx = context::current();
             let token = cookie_token(&rpc_server).await;
@@ -5368,15 +5364,12 @@ mod tests {
                 let network = Network::Main;
                 let cli_args = cli_args::Args {
                     tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                    network,
                     ..Default::default()
                 };
-                let mut rpc_server = test_rpc_server(
-                    network,
-                    WalletEntropy::new_pseudorandom(rng.random()),
-                    2,
-                    cli_args,
-                )
-                .await;
+                let mut rpc_server =
+                    test_rpc_server(WalletEntropy::new_pseudorandom(rng.random()), 2, cli_args)
+                        .await;
                 let token = cookie_token(&rpc_server).await;
 
                 // --- Init.  get wallet spending key ---

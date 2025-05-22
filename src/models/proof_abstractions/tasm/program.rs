@@ -176,31 +176,27 @@ pub mod tests {
     use std::fs::create_dir_all;
     use std::fs::File;
     use std::io::stdout;
-    use std::io::Read;
     use std::io::Write;
     use std::panic::catch_unwind;
     use std::path::Path;
     use std::path::PathBuf;
-    use std::time::Duration;
     use std::time::SystemTime;
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use rand::seq::SliceRandom;
     use tasm_lib::triton_vm;
     use tracing::debug;
-    use tracing::Span;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::tests::shared::test_helper_data_dir;
+    use crate::tests::shared::try_fetch_file_from_server;
+    use crate::tests::shared::try_load_file_from_disk;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm::stark::Stark;
-
-    const TEST_DATA_DIR: &str = "test_data";
-    const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         fn from(job_priority: TritonVmJobPriority) -> Self {
@@ -349,11 +345,29 @@ pub mod tests {
 
     fn proof_path(claim: &Claim) -> PathBuf {
         let name = proof_filename(claim);
-        let mut path = PathBuf::new();
-        path.push(TEST_DATA_DIR);
+        let mut path = test_helper_data_dir();
         path.push(Path::new(&name));
 
         path
+    }
+
+    /// Tries to load a proof for the claim from the test data directory
+    fn try_load_proof_from_disk(claim: &Claim) -> Option<Proof> {
+        let file_path = proof_path(claim);
+        let file_contents = try_load_file_from_disk(&file_path)?;
+
+        let mut proof_data = vec![];
+        for ch in file_contents.chunks(8) {
+            if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
+                proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
+            } else {
+                debug!("cannot cast chunk to eight bytes");
+                return None;
+            }
+        }
+
+        let proof = Proof::from(proof_data);
+        Some(proof)
     }
 
     /// First, attempt to load the proof from disk. If it does not exist,
@@ -395,66 +409,6 @@ pub mod tests {
         }
     }
 
-    /// Tries to load a proof for the claim from the test data directory
-    fn try_load_proof_from_disk(claim: &Claim) -> Option<Proof> {
-        let path = proof_path(claim);
-        let Ok(mut input_file) = File::open(path.clone()) else {
-            debug!("cannot open file '{}' -- might not exist", path.display());
-            return None;
-        };
-        let mut file_contents = vec![];
-        if input_file.read_to_end(&mut file_contents).is_err() {
-            debug!("cannot read file '{}'", path.display());
-            return None;
-        }
-        let mut proof_data = vec![];
-        for ch in file_contents.chunks(8) {
-            if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
-                proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
-            } else {
-                debug!("cannot cast chunk to eight bytes");
-                return None;
-            }
-        }
-        let proof = Proof::from(proof_data);
-        Some(proof)
-    }
-
-    /// Load a list of proof-servers from test data directory
-    fn load_servers() -> Vec<String> {
-        let mut server_list_path = PathBuf::new();
-        server_list_path.push(TEST_DATA_DIR);
-        server_list_path.push(Path::new("proof_servers").with_extension("txt"));
-        let Ok(mut input_file) = File::open(server_list_path.clone()) else {
-            debug!(
-                "cannot proof-server list '{}' -- file might not exist",
-                server_list_path.display()
-            );
-            return vec![];
-        };
-        let mut file_contents = vec![];
-        if input_file.read_to_end(&mut file_contents).is_err() {
-            debug!("cannot read file '{}'", server_list_path.display());
-            return vec![];
-        }
-        let Ok(file_as_string) = String::from_utf8(file_contents) else {
-            debug!(
-                "cannot parse file '{}' -- is it valid utf8?",
-                server_list_path.display()
-            );
-            return vec![];
-        };
-        file_as_string.lines().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn test_load_servers() {
-        let servers = load_servers();
-        for server in servers {
-            println!("read server: {}", server);
-        }
-    }
-
     /// Queries known servers for proofs.
     ///
     /// The proof-servers file is located in `proof_servers.txt` test data
@@ -481,113 +435,21 @@ pub mod tests {
     /// not store the proof to disk.
     /// TODO: Consider making this async.
     fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, String)> {
-        fn get_test_name_from_tracing() -> String {
-            match Span::current().metadata().map(|x| x.name()) {
-                Some(test_name) => test_name.to_owned(),
-                None => "unknown".to_owned(),
+        let (file_contents, server) = try_fetch_file_from_server(filename)?;
+
+        let mut proof_data = vec![];
+        for ch in file_contents.chunks(8) {
+            if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
+                proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
+            } else {
+                eprintln!("cannot cast chunk to eight bytes. Server was: {server}");
             }
         }
 
-        fn attempt_to_get_test_name() -> String {
-            let thread = std::thread::current();
-            match thread.name() {
-                Some(test_name) => {
-                    if test_name.eq("tokio-runtime-worker") {
-                        get_test_name_from_tracing()
-                    } else {
-                        test_name.to_owned()
-                    }
-                }
-                None => get_test_name_from_tracing(),
-            }
-        }
+        let proof = Proof::from(proof_data);
+        println!("got proof.");
 
-        let mut servers = load_servers();
-        servers.shuffle(&mut rand::rng());
-
-        // Add test name to request allow server to see which test requires a proof
-        let mut headers = clienter::HttpHeaders::default();
-        headers.insert(
-            TEST_NAME_HTTP_HEADER_KEY.to_string(),
-            attempt_to_get_test_name(),
-        );
-
-        for server in servers {
-            let server_ = server.clone();
-            let filename_ = filename.clone();
-            let headers_ = headers.clone();
-            let handle = std::thread::spawn(move || {
-                let url = format!("{}{}", server_, filename_);
-
-                debug!("requesting: <{url}>");
-
-                let uri: clienter::Uri = url.into();
-
-                let mut http_client = clienter::HttpClient::new();
-                http_client.timeout = Some(Duration::from_secs(10));
-                http_client.headers = headers_;
-                let request = http_client.request(clienter::HttpMethod::GET, uri);
-
-                // note: send() blocks
-                let Ok(mut response) = http_client.send(&request) else {
-                    println!(
-                        "server '{}' failed for file '{}'; trying next ...",
-                        server_.clone(),
-                        filename_
-                    );
-
-                    return None;
-                };
-
-                // only retrieve body if we got a 2xx code.
-                // addresses #477
-                // https://github.com/Neptune-Crypto/neptune-core/issues/477
-                let body = if response.status.is_success() {
-                    response.body()
-                } else {
-                    Ok(vec![])
-                };
-
-                Some((response.status, body))
-            });
-
-            let Some((status_code, body)) = handle.join().unwrap() else {
-                eprintln!("Could not connect to server {server}.");
-                continue;
-            };
-
-            if !status_code.is_success() {
-                eprintln!("{server} responded with {status_code}");
-                continue;
-            }
-
-            let Ok(file_contents) = body else {
-                eprintln!(
-                    "error reading file '{}' from server '{}'; trying next ...",
-                    filename, server
-                );
-
-                continue;
-            };
-
-            let mut proof_data = vec![];
-            for ch in file_contents.chunks(8) {
-                if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
-                    proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
-                } else {
-                    eprintln!("cannot cast chunk to eight bytes. Server was: {server}");
-                }
-            }
-
-            let proof = Proof::from(proof_data);
-            println!("got proof.");
-
-            return Some((proof, server));
-        }
-
-        println!("No known servers serve file `{}`", filename);
-
-        None
+        Some((proof, server))
     }
 
     #[apply(shared_tokio_runtime)]
@@ -622,10 +484,9 @@ pub mod tests {
         nondeterminism: NonDeterminism,
     ) -> Proof {
         let name = proof_filename(claim);
-        let mut path = PathBuf::new();
-        path.push(TEST_DATA_DIR);
+        let mut path = test_helper_data_dir();
         create_dir_all(&path)
-            .unwrap_or_else(|_| panic!("cannot create '{TEST_DATA_DIR}' directory"));
+            .unwrap_or_else(|_| panic!("cannot create '{}' directory", path.to_string_lossy()));
         path.push(Path::new(&name));
 
         let proof: Proof = triton_vm::prove(Stark::default(), claim, program, nondeterminism)

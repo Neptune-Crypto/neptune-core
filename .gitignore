@@ -7,8 +7,9 @@ target/
 /makefile-target
 /makefile-target-opt-level3
 
-# git shouldn't see the proof files. Bc big.
+# git shouldn't see the proof files, or block files. Bc big.
 /test_data/*.proof
+/test_data/blk*.dat
 
 # Remove Cargo.lock from gitignore if creating an executable, leave it for libraries
 # More information here https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html

@@ -707,11 +707,11 @@ mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn test_utxoreceiver_auto_not_owned_output() {
+        let network = Network::RegTest;
         let global_state_lock = mock_genesis_global_state(
-            Network::RegTest,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
 
@@ -756,11 +756,11 @@ mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn test_utxoreceiver_auto_owned_output() {
+        let network = Network::RegTest;
         let mut global_state_lock = mock_genesis_global_state(
-            Network::RegTest,
             2,
             WalletEntropy::devnet_wallet(),
-            cli_args::Args::default(),
+            cli_args::Args::default_with_network(network),
         )
         .await;
 

@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
+use std::fs::File;
+use std::io::Read;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -28,6 +31,7 @@ use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use rand::random;
 use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
@@ -40,6 +44,8 @@ use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
+use tracing::debug;
+use tracing::Span;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -49,7 +55,6 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
-use crate::database::NeptuneLevelDb;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
@@ -81,8 +86,6 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
-use crate::models::database::BlockIndexKey;
-use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
 use crate::models::peer::handshake_data::VersionString;
 use crate::models::peer::peer_info::PeerConnectionInfo;
@@ -103,8 +106,10 @@ use crate::models::state::wallet::address::generation_address::GenerationReceivi
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::wallet::wallet_configuration::WalletConfiguration;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::wallet::wallet_state::WalletState;
+use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
@@ -119,23 +124,6 @@ use crate::VERSION;
 /// Return an empty peer map
 pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
     HashMap::new()
-}
-
-// Return empty database objects, and root directory for this unit test instantiation's
-/// data directory.
-pub async fn unit_test_databases(
-    network: Network,
-) -> Result<(
-    NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
-    PeerDatabases,
-    DataDirectory,
-)> {
-    let data_dir: DataDirectory = unit_test_data_directory(network)?;
-
-    let block_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
-    let peer_db = NetworkingState::initialize_peer_databases(&data_dir).await?;
-
-    Ok((block_db, peer_db, data_dir))
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
@@ -201,38 +189,35 @@ pub(crate) fn get_dummy_peer_connection_data_genesis(
     (handshake, socket_address)
 }
 
-/// Get a global state object for unit test purposes. This global state
-/// populated with state from the genesis block, e.g. in the archival mutator
-/// set and the wallet.
-///
+/// Get a global state object for unit test purposes. This global state is
+/// populated with state from a caller-defined genesis block.
 /// All contained peers represent outgoing connections.
-pub(crate) async fn mock_genesis_global_state(
-    // TODO: Remove network and read it from CLI arguments instead
-    network: Network,
+pub(crate) async fn mock_genesis_global_state_with_block(
     peer_count: u8,
     wallet: WalletEntropy,
     cli: cli_args::Args,
+    genesis_block: Block,
 ) -> GlobalStateLock {
-    let (archival_state, peer_db, _data_dir) = mock_genesis_archival_state(network).await;
+    let data_dir: DataDirectory = unit_test_data_directory(cli.network).unwrap();
+    let archival_state = ArchivalState::new(data_dir.clone(), genesis_block.clone()).await;
 
+    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)
+        .await
+        .unwrap();
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
         peer_map.insert(peer_address, get_dummy_peer_outgoing(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db);
-    let genesis_block = archival_state.get_tip().await;
+    let net = NetworkingState::new(peer_map, peer_db);
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
+    assert_eq!(archival_state.get_tip().await.hash(), genesis_block.hash());
 
     let light_state: LightState = LightState::from(genesis_block.to_owned());
-    println!(
-        "Genesis light state MSA hash: {}",
-        light_state.mutator_set_accumulator_after().hash()
-    );
-    let blockchain_state = BlockchainState::Archival(Box::new(BlockchainArchivalState {
+    let chain = BlockchainState::Archival(Box::new(BlockchainArchivalState {
         light_state,
         archival_state,
     }));
@@ -242,7 +227,10 @@ pub(crate) async fn mock_genesis_global_state(
         genesis_block.hash(),
     );
 
-    let wallet_state = mock_genesis_wallet_state(wallet, network, &cli).await;
+    let configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);
+    let wallet_state = WalletState::try_new(configuration, wallet, &genesis_block)
+        .await
+        .unwrap();
 
     // dummy channel
     let (rpc_to_main_tx, mut rpc_to_main_rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(5);
@@ -252,14 +240,23 @@ pub(crate) async fn mock_genesis_global_state(
         }
     });
 
-    GlobalStateLock::new(
-        wallet_state,
-        blockchain_state,
-        networking_state,
-        cli.clone(),
-        mempool,
-        rpc_to_main_tx,
-    )
+    let global_state = GlobalState::new(wallet_state, chain, net, cli, mempool);
+
+    GlobalStateLock::from_global_state(global_state, rpc_to_main_tx)
+}
+
+/// Get a global state object for unit test purposes. This global state is
+/// populated with state from the genesis block, e.g. in the archival mutator
+/// set and the wallet.
+///
+/// All contained peers represent outgoing connections.
+pub(crate) async fn mock_genesis_global_state(
+    peer_count: u8,
+    wallet: WalletEntropy,
+    cli: cli_args::Args,
+) -> GlobalStateLock {
+    let genesis_block = Block::genesis(cli.network);
+    mock_genesis_global_state_with_block(peer_count, wallet, cli, genesis_block).await
 }
 
 /// A state with a premine UTXO and self-mined blocks. Both composing and
@@ -270,11 +267,11 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
     rng: &mut T,
     num_blocks_mined: usize,
 ) -> GlobalStateLock {
+    let network = cli_args.network;
     let wallet = WalletEntropy::devnet_wallet();
     let own_key = wallet.nth_generation_spending_key_for_tests(0);
-    let network = cli_args.network;
     let mut global_state_lock =
-        mock_genesis_global_state(network, 2, wallet.clone(), cli_args).await;
+        mock_genesis_global_state(2, wallet.clone(), cli_args.clone()).await;
     let mut previous_block = Block::genesis(network);
 
     for _ in 0..num_blocks_mined {
@@ -324,7 +321,7 @@ pub(crate) async fn get_test_genesis_setup(
     let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
     let devnet_wallet = WalletEntropy::devnet_wallet();
-    let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
+    let state = mock_genesis_global_state(peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx,
@@ -454,6 +451,160 @@ impl<Item> stream::Stream for Mock<Item> {
             Poll::Ready(Some(Err(MockError::UnexpectedRead)))
         }
     }
+}
+
+/// Return path for the directory containing test data, like proofs and block
+/// data.
+pub(crate) fn test_helper_data_dir() -> PathBuf {
+    const TEST_DATA_DIR_NAME: &str = "test_data/";
+    let mut path = PathBuf::new();
+    path.push(TEST_DATA_DIR_NAME);
+    path
+}
+
+/// Load a list of proof-servers from test data directory
+fn load_servers() -> Vec<String> {
+    let mut server_list_path = test_helper_data_dir();
+    server_list_path.push(Path::new("proof_servers").with_extension("txt"));
+    let Ok(mut input_file) = File::open(server_list_path.clone()) else {
+        debug!(
+            "cannot proof-server list '{}' -- file might not exist",
+            server_list_path.display()
+        );
+        return vec![];
+    };
+    let mut file_contents = vec![];
+    if input_file.read_to_end(&mut file_contents).is_err() {
+        debug!("cannot read file '{}'", server_list_path.display());
+        return vec![];
+    }
+    let Ok(file_as_string) = String::from_utf8(file_contents) else {
+        debug!(
+            "cannot parse file '{}' -- is it valid utf8?",
+            server_list_path.display()
+        );
+        return vec![];
+    };
+    file_as_string.lines().map(|s| s.to_string()).collect()
+}
+
+/// Tries to load a file from disk, returns the bytes if successful.
+pub(crate) fn try_load_file_from_disk(path: &Path) -> Option<Vec<u8>> {
+    let Ok(mut input_file) = File::open(path) else {
+        debug!("cannot open file '{}' -- might not exist", path.display());
+        return None;
+    };
+
+    let mut file_contents = vec![];
+    if input_file.read_to_end(&mut file_contents).is_err() {
+        debug!("cannot read file '{}'", path.display());
+        return None;
+    }
+
+    Some(file_contents)
+}
+
+/// Return the specified file from a server, along with the name of the server
+/// providing the result.
+pub(crate) fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, String)> {
+    const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
+
+    fn get_test_name_from_tracing() -> String {
+        match Span::current().metadata().map(|x| x.name()) {
+            Some(test_name) => test_name.to_owned(),
+            None => "unknown".to_owned(),
+        }
+    }
+
+    fn attempt_to_get_test_name() -> String {
+        let thread = std::thread::current();
+        match thread.name() {
+            Some(test_name) => {
+                if test_name.eq("tokio-runtime-worker") {
+                    get_test_name_from_tracing()
+                } else {
+                    test_name.to_owned()
+                }
+            }
+            None => get_test_name_from_tracing(),
+        }
+    }
+
+    let mut servers = load_servers();
+    servers.shuffle(&mut rand::rng());
+
+    // Add test name to request allow server to see which test requires this
+    // file.
+    let mut headers = clienter::HttpHeaders::default();
+    headers.insert(
+        TEST_NAME_HTTP_HEADER_KEY.to_string(),
+        attempt_to_get_test_name(),
+    );
+
+    for server in servers {
+        let server_ = server.clone();
+        let filename_ = filename.clone();
+        let headers_ = headers.clone();
+        let handle = std::thread::spawn(move || {
+            let url = format!("{}{}", server_, filename_);
+
+            debug!("requesting: <{url}>");
+
+            let uri: clienter::Uri = url.into();
+
+            let mut http_client = clienter::HttpClient::new();
+            http_client.timeout = Some(Duration::from_secs(10));
+            http_client.headers = headers_;
+            let request = http_client.request(clienter::HttpMethod::GET, uri);
+
+            // note: send() blocks
+            let Ok(mut response) = http_client.send(&request) else {
+                println!(
+                    "server '{}' failed for file '{}'; trying next ...",
+                    server_.clone(),
+                    filename_
+                );
+
+                return None;
+            };
+
+            // only retrieve body if we got a 2xx code.
+            // addresses #477
+            // https://github.com/Neptune-Crypto/neptune-core/issues/477
+            let body = if response.status.is_success() {
+                response.body()
+            } else {
+                Ok(vec![])
+            };
+
+            Some((response.status, body))
+        });
+
+        let Some((status_code, body)) = handle.join().unwrap() else {
+            eprintln!("Could not connect to server {server}.");
+            continue;
+        };
+
+        if !status_code.is_success() {
+            eprintln!("{server} responded with {status_code}");
+            continue;
+        }
+
+        let Ok(file_contents) = body else {
+            eprintln!(
+                "error reading file '{}' from server '{}'; trying next ...",
+                filename, server
+            );
+
+            continue;
+        };
+
+        return Some((file_contents, server));
+    }
+
+    println!("No known servers serve file `{}`", filename);
+
+    None
 }
 
 pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
@@ -886,47 +1037,25 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
     .await
 }
 
-/// Return a dummy-wallet used for testing. The returned wallet is populated with
-/// whatever UTXOs are present in the genesis block.
-pub async fn mock_genesis_wallet_state(
+pub(crate) async fn mock_genesis_wallet_state(
     wallet_entropy: WalletEntropy,
-    network: Network,
     cli_args: &cli_args::Args,
 ) -> WalletState {
-    let data_dir = unit_test_data_directory(network).unwrap();
-    mock_genesis_wallet_state_with_data_dir(wallet_entropy, &data_dir, cli_args).await
-}
-
-pub async fn mock_genesis_wallet_state_with_data_dir(
-    wallet_entropy: WalletEntropy,
-    data_dir: &DataDirectory,
-    cli_args: &cli_args::Args,
-) -> WalletState {
-    WalletState::new_from_wallet_entropy(data_dir, wallet_entropy, cli_args).await
+    let data_dir = unit_test_data_directory(cli_args.network).unwrap();
+    WalletState::new_from_wallet_entropy(&data_dir, wallet_entropy, cli_args).await
 }
 
 /// Return an archival state populated with the genesis block
 pub(crate) async fn mock_genesis_archival_state(
     network: Network,
 ) -> (ArchivalState, PeerDatabases, DataDirectory) {
-    let (block_index_db, peer_db, data_dir) = unit_test_databases(network).await.unwrap();
+    let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
 
-    let ams = ArchivalState::initialize_mutator_set(&data_dir)
+    let genesis = Block::genesis(network);
+    let archival_state = ArchivalState::new(data_dir.clone(), genesis).await;
+    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)
         .await
         .unwrap();
-
-    let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir)
-        .await
-        .unwrap();
-
-    let archival_state = ArchivalState::new(
-        data_dir.clone(),
-        block_index_db,
-        ams,
-        archival_block_mmr,
-        network,
-    )
-    .await;
 
     (archival_state, peer_db, data_dir)
 }
@@ -1350,4 +1479,16 @@ where
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     Ok(())
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_servers() {
+        let servers = load_servers();
+        for server in servers {
+            println!("read server: {}", server);
+        }
+    }
 }
