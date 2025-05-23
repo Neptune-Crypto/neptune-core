@@ -72,7 +72,7 @@ pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 type LookupItem<'a> = (TransactionKernelId, &'a Transaction);
-type TransactionValue = NativeCurrencyAmount;
+pub(crate) type TransactionValue = NativeCurrencyAmount;
 
 /// Represents a mempool state change.
 ///
@@ -238,6 +238,8 @@ impl Mempool {
     /// with higher fee density. This means that transactions initialized by
     /// this node's wallet will always be targeted for proof-upgrading first.
     ///
+    /// Will only return transactions that are synced to the latest tip.
+    ///
     /// Also returns the value of this transactions, for the node operator.
     pub(crate) fn preferred_proof_collection(
         &self,
@@ -249,6 +251,10 @@ impl Mempool {
             .chain(self.fee_density_iter().map(|(txid, _)| txid))
         {
             let candidate = self.tx_dictionary.get(&txid).unwrap();
+            if !self.tx_is_synced(&candidate.transaction.kernel) {
+                continue;
+            }
+
             if let TransactionProof::ProofCollection(proof_collection) =
                 &candidate.transaction.proof
             {
@@ -265,31 +271,70 @@ impl Mempool {
         None
     }
 
-    /// Return the two most dense single-proof transactions. Returns `None` if
-    /// no such pair exists in the mempool.
-    pub(crate) fn most_dense_single_proof_pair(
+    /// Returns the preferred single proof pair for proof upgrading through a
+    /// merge. Always prefers transactions with a positive value. Then
+    /// transactions with a higher fee density. Will only ever return
+    /// transactions that either
+    ///   a) have a positive value, or
+    ///   b) pay a positive transaction fee.
+    ///
+    /// Will only return transactions that are synced to the latest tip.
+    ///
+    /// Returns the pair of transaction along with their sum of values.
+    pub(crate) fn preferred_single_proof_pair(
         &self,
-    ) -> Option<([(&TransactionKernel, &Proof); 2], TransactionPriority)> {
+    ) -> Option<([(TransactionKernel, Proof); 2], TransactionValue)> {
         let mut ret = vec![];
-        let mut own_tx = false;
-        for (txid, _fee_density) in self.fee_density_iter() {
+        let mut value = NativeCurrencyAmount::zero();
+        for txid in self
+            .value_iter()
+            .map(|(txid, _)| txid)
+            .chain(self.fee_density_iter().map(|(txid, _)| txid))
+        {
             let candidate = self.tx_dictionary.get(&txid).unwrap();
-            if let TransactionProof::SingleProof(proof) = &candidate.transaction.proof {
-                ret.push((&candidate.transaction.kernel, proof));
-                own_tx = own_tx || candidate.value.is_own();
+
+            if !self.tx_is_synced(&candidate.transaction.kernel) {
+                continue;
             }
 
-            let origin = match own_tx {
-                true => TransactionOrigin::Own,
-                false => TransactionOrigin::Foreign,
+            let TransactionProof::SingleProof(_) = &candidate.transaction.proof else {
+                continue;
             };
 
+            // Do not attempt to merge transactions that neither have a value
+            // nor pay a fee.
+            if candidate.value.is_zero() && candidate.transaction.kernel.fee.is_zero() {
+                continue;
+            }
+
+            // Avoid selecting same transaction twice.
+            if ret.contains(&txid) {
+                continue;
+            }
+
+            value += candidate.value;
+
+            ret.push(txid);
+
             if ret.len() == 2 {
-                return Some((ret.try_into().unwrap(), origin));
+                break;
             }
         }
 
-        None
+        let Ok(ret) = <Vec<_> as TryInto<[_; 2]>>::try_into(ret) else {
+            return None;
+        };
+
+        Some((
+            ret.map(|txid| {
+                let candidate = self.tx_dictionary.get(&txid).unwrap();
+                (
+                    candidate.transaction.kernel.to_owned(),
+                    candidate.transaction.proof.to_owned().into_single_proof(),
+                )
+            }),
+            value,
+        ))
     }
 
     /// check if transaction exists in mempool
@@ -368,7 +413,7 @@ impl Mempool {
     pub(super) fn insert(
         &mut self,
         new_tx: Transaction,
-        origin: TransactionOrigin,
+        value: TransactionValue,
     ) -> Vec<MempoolEvent> {
         fn new_tx_has_higher_proof_quality(
             new_tx: &Transaction,
@@ -423,7 +468,7 @@ impl Mempool {
         };
         let as_mempool_transaction = MempoolTransaction {
             transaction: new_tx.clone(),
-            value: origin,
+            value,
             primitive_witness,
         };
 
@@ -450,21 +495,32 @@ impl Mempool {
             }
         }
 
-        self.fee_density.push(txid, new_tx.fee_density());
+        self.fee_densities.push(txid, new_tx.fee_density());
         self.tx_dictionary.insert(txid, as_mempool_transaction);
+        if value.is_positive() {
+            self.values.push(txid, value);
+        }
         events.push(MempoolEvent::AddTx(new_tx));
 
         assert_eq!(
             self.tx_dictionary.len(),
-            self.fee_density.len(),
+            self.fee_densities.len(),
             "mempool's table and queue length must agree prior to shrink"
+        );
+        assert!(
+            self.values.len() <= self.tx_dictionary.len(),
+            "Length of values queue may never exceed number of transactions prior to shrink"
         );
         self.shrink_to_max_size();
         self.shrink_to_max_length();
         assert_eq!(
             self.tx_dictionary.len(),
-            self.fee_density.len(),
+            self.fee_densities.len(),
             "mempool's table and queue length must agree after shrink"
+        );
+        assert!(
+            self.values.len() <= self.tx_dictionary.len(),
+            "Length of values queue may never exceed number of transactions after shrink"
         );
 
         events
@@ -500,15 +556,12 @@ impl Mempool {
         self.tx_dictionary.len()
     }
 
-    /// Return the number of transactions currently stored in the mempool that
-    /// were initiated locally.
+    /// Return the number of transaction stored in the mempool that have a
+    /// positive value.
     ///
-    /// Computes in O(n)
-    pub(crate) fn num_own_txs(&self) -> usize {
-        self.tx_dictionary
-            .values()
-            .filter(|x| x.value.is_own())
-            .count()
+    /// Computes in O(1)
+    pub(crate) fn num_valued_txs(&self) -> usize {
+        self.values.len()
     }
 
     /// check if `Mempool` is empty
@@ -518,8 +571,8 @@ impl Mempool {
         self.tx_dictionary.is_empty()
     }
 
-    /// Return a vector with copies of the transactions, in descending order by fee
-    /// density. Only returns transactions that are
+    /// Return a vector with copies of the transactions, in descending order by
+    /// fee density. Only returns transactions that are
     /// - backed by single proofs, and
     /// - synced to the tip.
     ///
@@ -532,7 +585,6 @@ impl Mempool {
         max_num_txs: Option<usize>,
     ) -> Vec<Transaction> {
         let mut transactions = vec![];
-        let mut fee_acc = NativeCurrencyAmount::zero();
 
         for (transaction_digest, _fee_density) in self.fee_density_iter() {
             // No more transactions can possibly be packed
@@ -542,7 +594,7 @@ impl Mempool {
 
             if let Some(transaction_ptr) = self.get(transaction_digest) {
                 // Only return transaction synced to tip
-                if self.tip_mutator_set_hash != transaction_ptr.kernel.mutator_set_hash {
+                if !self.tx_is_synced(&transaction_ptr.kernel) {
                     continue;
                 }
 
@@ -560,7 +612,6 @@ impl Mempool {
 
                 // Include transaction
                 remaining_storage -= transaction_size;
-                fee_acc = fee_acc + transaction_copy.kernel.fee;
                 transactions.push(transaction_copy)
             }
         }
@@ -719,7 +770,7 @@ impl Mempool {
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];
         for (tx_id, tx) in &mut self.tx_dictionary {
-            if !(composing || tx.value.is_own()) {
+            if !(composing || tx.value.is_positive()) {
                 debug!(
                     "Not updating transaction {tx_id} since it's not \
                     initiated by us, and client is not composing."
@@ -780,7 +831,7 @@ impl Mempool {
             if !can_update {
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
-                if tx.value.is_own() {
+                if tx.value.is_positive() {
                     warn!("Unable to update own transaction to new mutator set. You may need to create this transaction again. Removing {tx_id} from mempool.");
                 }
             }
@@ -824,6 +875,11 @@ impl Mempool {
         self.fee_densities.shrink_to_fit();
         self.tx_dictionary.shrink_to_fit();
         self.values.shrink_to_fit();
+    }
+
+    /// Return whether the transaction is synced to the tip block.
+    fn tx_is_synced(&self, transaction_kernel: &TransactionKernel) -> bool {
+        self.tip_mutator_set_hash == transaction_kernel.mutator_set_hash
     }
 
     /// Produce a sorted iterator over a snapshot of the Double-Ended Priority Queue.
@@ -1337,7 +1393,7 @@ mod tests {
             assert_eq!(
                 densest_txs,
                 mempool
-                    .most_dense_single_proof_pair()
+                    .preferred_single_proof_pair()
                     .unwrap()
                     .0
                     .map(|x| x.0.txid())
@@ -1538,7 +1594,7 @@ mod tests {
         assert_eq!(
             densest_txs,
             mempool
-                .most_dense_single_proof_pair()
+                .preferred_single_proof_pair()
                 .unwrap()
                 .0
                 .map(|x| x.0.txid())
@@ -1549,7 +1605,7 @@ mod tests {
         assert_eq!(1, mempool.len());
         assert_eq!(&merged, mempool.get(merged.kernel.txid()).unwrap());
 
-        assert!(mempool.most_dense_single_proof_pair().is_none());
+        assert!(mempool.preferred_single_proof_pair().is_none());
     }
 
     #[traced_test]

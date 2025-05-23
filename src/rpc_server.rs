@@ -2759,7 +2759,7 @@ impl RPC for NeptuneRPCServer {
         };
         let mempool_own_tx_count = {
             log_slow_scope!(fn_name!() + "::mempool.num_own_txs()");
-            state.mempool.num_own_txs()
+            state.mempool.num_valued_txs()
         };
         let cpu_temp = None; // disable for now.  call is too slow.
         let proving_capability = self.state.cli().proving_capability();

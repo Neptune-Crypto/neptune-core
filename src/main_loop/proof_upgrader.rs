@@ -11,7 +11,6 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-use super::TransactionOrigin;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -29,6 +28,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::mempool::TransactionValue;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -63,7 +63,7 @@ pub enum UpgradeJob {
         kernel: TransactionKernel,
         proof: ProofCollection,
         mutator_set: MutatorSetAccumulator,
-        gobbling_fee: NativeCurrencyAmount,
+        upgrade_incentive: UpgradeIncentive,
     },
     Merge {
         left_kernel: TransactionKernel,
@@ -72,9 +72,44 @@ pub enum UpgradeJob {
         single_proof_right: Proof,
         shuffle_seed: [u8; 32],
         mutator_set: MutatorSetAccumulator,
-        gobbling_fee: NativeCurrencyAmount,
+        upgrade_incentive: UpgradeIncentive,
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
+}
+
+/// Enumerate the incentive to perform a transaction upgrade.
+#[derive(Clone, Debug)]
+enum UpgradeIncentive {
+    /// The transaction is upgraded because fees can be gobbled.
+    Gobble(NativeCurrencyAmount),
+
+    /// The transaction is upgraded because we'd like to see it go through for
+    /// other reasons that fee-collection. Usually because it affects our
+    /// balance.
+    BalanceAffecting(NativeCurrencyAmount),
+}
+
+impl PartialOrd for UpgradeIncentive {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (
+                UpgradeIncentive::Gobble(native_currency_amount),
+                UpgradeIncentive::Gobble(native_currency_amount),
+            ) => todo!(),
+            (
+                UpgradeIncentive::Gobble(native_currency_amount),
+                UpgradeIncentive::BalanceAffecting(native_currency_amount),
+            ) => todo!(),
+            (
+                UpgradeIncentive::BalanceAffecting(native_currency_amount),
+                UpgradeIncentive::Gobble(native_currency_amount),
+            ) => todo!(),
+            (
+                UpgradeIncentive::BalanceAffecting(native_currency_amount),
+                UpgradeIncentive::BalanceAffecting(native_currency_amount),
+            ) => todo!(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -167,7 +202,8 @@ impl UpgradeJob {
     /// Gobbling fees are charged when a transaction is upgraded from
     /// proof-collection to single-proof, or when two single proofs are merged.
     /// The other cases are either not worth it, as you need to create a single-
-    /// proof to gobble, or the proof upgrade relates to own funds.
+    /// proof to gobble, or the proof upgrade relates to own funds. Gobbling
+    /// fees are only charged on 3rd party transactions.
     ///
     /// In particular, no fees are charged for updating a transaction's mutator
     /// set data because doing so would require a single proof and a merge step,
@@ -175,8 +211,18 @@ impl UpgradeJob {
     /// network. This policy could be revised when proving gets faster.
     fn gobbling_fee(&self) -> NativeCurrencyAmount {
         match self {
-            UpgradeJob::ProofCollectionToSingleProof { gobbling_fee, .. } => *gobbling_fee,
-            UpgradeJob::Merge { gobbling_fee, .. } => *gobbling_fee,
+            UpgradeJob::ProofCollectionToSingleProof {
+                upgrade_incentive, ..
+            } => match upgrade_incentive {
+                UpgradeIncentive::Gobble(amount) => *amount,
+                UpgradeIncentive::BalanceAffecting(_) => NativeCurrencyAmount::zero(),
+            },
+            UpgradeJob::Merge {
+                upgrade_incentive, ..
+            } => match upgrade_incentive {
+                UpgradeIncentive::Gobble(amount) => *amount,
+                UpgradeIncentive::BalanceAffecting(_) => NativeCurrencyAmount::zero(),
+            },
             _ => NativeCurrencyAmount::zero(),
         }
     }
@@ -296,19 +342,23 @@ impl UpgradeJob {
 
     /// Upgrade transaction proofs, inserts upgraded tx into the mempool and
     /// informs peers of this new transaction.
+    ///
+    /// * `value` the transaction's value to this node. Should be zero for all
+    ///   transactions not affecting this node's balance.
     pub(crate) async fn handle_upgrade(
         self,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
-        tx_origin: TransactionOrigin,
+        value: TransactionValue,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
         main_to_peer_channel: tokio::sync::broadcast::Sender<MainToPeerTask>,
     ) {
         let mut upgrade_job = self;
 
-        let priority = match tx_origin {
-            TransactionOrigin::Foreign => TritonVmJobPriority::Lowest,
-            TransactionOrigin::Own => TritonVmJobPriority::High,
+        let priority = if value.is_positive() {
+            TritonVmJobPriority::High
+        } else {
+            TritonVmJobPriority::Lowest
         };
 
         // process in a loop.  in case a new block comes in while processing
@@ -363,7 +413,6 @@ impl UpgradeJob {
                 }
                 Err(e) => {
                     error!("UpgradeProof job failed. error: {e}");
-                    error!("upgrading of witness or proof in {tx_origin} transaction failed.");
                     error!(
                         "Consider lowering your proving capability to {}, in case it is set higher.\nCurrent proving \
                         capability is set to: {}.",
@@ -400,9 +449,7 @@ impl UpgradeJob {
                     /* Handle successful upgrade */
                     // Insert tx into mempool before notifying peers, so we're
                     // sure to have it when they ask.
-                    global_state
-                        .mempool_insert(upgraded.clone(), tx_origin)
-                        .await;
+                    global_state.mempool_insert(upgraded.clone(), value).await;
 
                     global_state
                         .wallet_state
@@ -732,11 +779,12 @@ impl UpgradeJob {
 }
 
 /// Return an [UpgradeJob] that describes work that can be done to upgrade the
-/// proof-quality of a transaction found in mempool. Also indicates whether the
-/// upgrade job affects one of our own transactions, or a foreign transaction.
+/// proof-quality of a transaction found in mempool. Also reports the value
+/// of this job to the wallet of this node. The value reported will be zero for
+/// all 3rd party transactions.
 pub(super) fn get_upgrade_task_from_mempool(
     global_state: &GlobalState,
-) -> Option<(UpgradeJob, TransactionOrigin)> {
+) -> Option<(UpgradeJob, TransactionValue)> {
     let tip_mutator_set = global_state
         .chain
         .light_state()
@@ -746,7 +794,7 @@ pub(super) fn get_upgrade_task_from_mempool(
     let num_proofs_threshold = global_state.max_num_proofs();
 
     // Do we have any `ProofCollection`s?
-    let proof_collection_job = if let Some((kernel, proof, tx_origin)) = global_state
+    let proof_collection_job = if let Some((kernel, proof, tx_value)) = global_state
         .mempool
         .preferred_proof_collection(num_proofs_threshold)
     {
@@ -755,14 +803,15 @@ pub(super) fn get_upgrade_task_from_mempool(
             return None;
         }
 
-        let gobbling_fee = if tx_origin == TransactionOrigin::Own {
+        // Do not gobble transaction fees if this transaction affects our
+        // balance, as gobbling increases upgrading times.
+        let gobbling_fee = if tx_value.is_positive() {
             NativeCurrencyAmount::zero()
         } else {
             kernel.fee.lossy_f64_fraction_mul(gobbling_fraction)
         };
 
-        let upgrade_is_worth_it =
-            gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
+        let upgrade_is_worth_it = gobbling_fee >= min_gobbling_fee || tx_value.is_positive();
         if upgrade_is_worth_it {
             let upgrade_job = UpgradeJob::ProofCollectionToSingleProof {
                 kernel: kernel.to_owned(),
@@ -770,7 +819,7 @@ pub(super) fn get_upgrade_task_from_mempool(
                 mutator_set: tip_mutator_set.clone(),
                 gobbling_fee,
             };
-            Some((upgrade_job, tx_origin))
+            Some((upgrade_job, tx_value))
         } else {
             None
         }
@@ -778,31 +827,39 @@ pub(super) fn get_upgrade_task_from_mempool(
         None
     };
 
-    if let Some((_, TransactionOrigin::Own)) = &proof_collection_job {
-        return proof_collection_job;
+    if let Some((_, tx_value)) = &proof_collection_job {
+        if tx_value.is_positive() {
+            return proof_collection_job;
+        }
     }
 
     // Can we merge two single proofs?
     let merge_job = if let Some((
         [(left_kernel, left_single_proof), (right_kernel, right_single_proof)],
-        tx_origin,
-    )) = global_state.mempool.most_dense_single_proof_pair()
+        tx_value,
+    )) = global_state.mempool.preferred_single_proof_pair()
     {
-        if left_kernel.mutator_set_hash != right_kernel.mutator_set_hash
-            || right_kernel.mutator_set_hash != tip_mutator_set.hash()
-        {
-            error!("Deprecated transaction found in mempool. Has SingleProof in need of updating. Consider clearing mempool.");
+        // Sanity check
+        assert_eq!(
+            left_kernel.mutator_set_hash, right_kernel.mutator_set_hash,
+            "Mempool must return transactions with matching mutator set hashes."
+        );
+        if left_kernel.mutator_set_hash != tip_mutator_set.hash() {
+            error!(
+                "Deprecated transactions returned by mempool for merging. This shouldn't happen."
+            );
             return None;
         }
 
-        let gobbling_fee = if tx_origin == TransactionOrigin::Own {
+        // Do not gobble transaction fees if this transaction affects our
+        // balance, as gobbling increases upgrading times.
+        let gobbling_fee = if tx_value.is_positive() {
             NativeCurrencyAmount::zero()
         } else {
             (left_kernel.fee + right_kernel.fee).lossy_f64_fraction_mul(gobbling_fraction)
         };
 
-        let upgrade_is_worth_is =
-            gobbling_fee >= min_gobbling_fee || tx_origin == TransactionOrigin::Own;
+        let upgrade_is_worth_is = gobbling_fee >= min_gobbling_fee || tx_value.is_positive();
         if upgrade_is_worth_is {
             let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
             let upgrade_decision = UpgradeJob::Merge {
@@ -814,7 +871,7 @@ pub(super) fn get_upgrade_task_from_mempool(
                 mutator_set: tip_mutator_set,
                 gobbling_fee,
             };
-            Some((upgrade_decision, tx_origin))
+            Some((upgrade_decision, tx_value))
         } else {
             None
         }
