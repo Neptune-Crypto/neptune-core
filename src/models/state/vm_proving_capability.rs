@@ -89,6 +89,9 @@ impl VmProvingCapability {
     ///
     /// The program is executed inside spawn_blocking() so it will not block
     /// concurrent async tasks on the same thread.
+    ///
+    /// see `check_if_capable` for description of LOG2_PADDED_HEIGHT_METHOD
+    /// env var that affects this method.
     pub async fn check_if_capable_async(
         &self,
         program: Program,
@@ -110,6 +113,26 @@ impl VmProvingCapability {
     /// The program is executed in blocking fashion so it will block concurrent
     /// async tasks on the same thread.  async callers should use
     /// `check_if_capable_async()` instead.
+    ///
+    /// #### environment variable: LOG2_PADDED_HEIGHT_METHOD
+    ///
+    /// By default the log2(padded-height) is calculated using VmState::run().
+    ///
+    /// A more accurate but slower way is to use VM::trace_execution_of_state().
+    /// This is typically about 4x slower.
+    ///
+    /// And the fastest method is to skip running the program entirely.  But
+    /// that option is only available when running unit tests.
+    ///
+    /// These methods can be selected at runtime:
+    ///
+    /// ```text
+    /// LOG2_PADDED_HEIGHT_METHOD=trace neptune-core <args>
+    /// LOG2_PADDED_HEIGHT_METHOD=run neptune-core <args>
+    ///
+    /// # only for unit tests
+    /// LOG2_PADDED_HEIGHT_METHOD=skip cargo test <args>
+    /// ```
     pub fn check_if_capable(
         &self,
         program: Program,
@@ -123,11 +146,11 @@ impl VmProvingCapability {
     /// executes the supplied program triple to obtain the log2(padded_height)
     ///
     /// perf: this is an expensive operation; it may be under a second up to
-    /// several seconds
+    /// 5+ seconds depending on the program's complexity.
     ///
     /// The program is executed in blocking fashion so it will block concurrent
     /// async tasks on the same thread.  async callers should use
-    /// `obtain_log2_padded_height_async()` instead.
+    /// tokio's spawn_blocking() to wrap this fn.
     fn obtain_log2_padded_height(
         program: Program,
         claim: Claim,
@@ -135,9 +158,29 @@ impl VmProvingCapability {
     ) -> Result<u32, VmProvingCapabilityError> {
         crate::macros::log_scope_duration!(crate::macros::fn_name!());
 
-        let vmstate = VMState::new(program, claim.input.into(), nondeterminism);
-        let (aet, _) = VM::trace_execution_of_state(vmstate)?;
-        Ok(aet.padded_height().ilog2())
+        let mut vmstate = VMState::new(program, claim.input.into(), nondeterminism);
+
+        let method =
+            std::env::var("LOG2_PADDED_HEIGHT_METHOD").unwrap_or_else(|_| "run".to_string());
+
+        match method.as_str() {
+            "trace" => {
+                // this is about 4x slower.
+                let (aet, _) = VM::trace_execution_of_state(vmstate)?;
+                Ok(aet.padded_height().ilog2())
+            }
+
+            // this is fastest, as it avoids running program at all.
+            // but only supported for unit tests, as a "turbo" mode.
+            #[cfg(test)]
+            "skip" => Ok(0),
+
+            "run" | &_ => {
+                // this is baseline
+                vmstate.run().unwrap();
+                Ok(vmstate.cycle_count.next_power_of_two().ilog2())
+            }
+        }
     }
 
     /// automatically detect the log2_padded_height for this device.
