@@ -52,11 +52,11 @@ mod tests {
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScript;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -577,7 +577,7 @@ mod tests {
         let bob_change_key = bob_wallet.nth_generation_spending_key_for_tests(0).into();
         let config_1 = TxCreationConfig::default()
             .recover_change_on_chain(bob_change_key)
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let tx_1 = tx_initiator_internal
             .create_transaction(
                 receiver_data_to_alice.clone(),
@@ -833,7 +833,7 @@ mod tests {
 
         let config_2b = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
 
         let tx_from_bob: Transaction = tx_initiator_internal
             .create_transaction(
@@ -858,6 +858,7 @@ mod tests {
             &alice,
             block_2_b.header().timestamp + network.minimum_block_time(),
             TritonVmJobPriority::Normal.into(),
+            TransactionProofType::SingleProof,
         )
         .await
         .unwrap();
@@ -1039,6 +1040,7 @@ mod tests {
             &bob,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),
+            TransactionProofType::SingleProof,
         )
         .await
         .unwrap();
@@ -1050,7 +1052,7 @@ mod tests {
         let change_key = WalletEntropy::devnet_wallet().nth_symmetric_key_for_tests(0);
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let sender_tx: Transaction = bob
             .api()
             .tx_initiator_internal()

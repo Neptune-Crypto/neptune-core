@@ -96,7 +96,7 @@ use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::vm_proving_capability::VmProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::BaseKeyType;
 use crate::models::state::wallet::address::BaseSpendingKey;
@@ -140,7 +140,7 @@ pub struct DashBoardOverviewDataFromClient {
     // `None` symbolizes failure to get mining status
     pub mining_status: Option<MiningStatus>,
 
-    pub proving_capability: TxProvingCapability,
+    pub proving_capability: VmProvingCapability,
 
     // # of confirmations of the last wallet balance change.
     //
@@ -4832,7 +4832,6 @@ mod tests {
             use cli_args::Args;
 
             use super::*;
-            use crate::models::state::tx_proving_capability::TxProvingCapability;
             use crate::tests::shared::invalid_block_with_transaction;
             use crate::tests::shared::invalid_empty_block;
 
@@ -4881,7 +4880,7 @@ mod tests {
                 let (blocks, alice_to_bob_utxo_notifications, bob_amount) = {
                     let wallet_entropy = WalletEntropy::new_random();
                     let cli_args = cli_args::Args {
-                        tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                        vm_proving_capability: Some(TransactionProofType::ProofCollection.into()),
                         network,
                         ..Default::default()
                     };
@@ -5038,7 +5037,7 @@ mod tests {
                 let network = Network::Main;
                 let bob_wallet = WalletEntropy::new_random();
                 let cli_args = cli_args::Args {
-                    tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                    vm_proving_capability: Some(TransactionProofType::ProofCollection.into()),
                     network,
                     ..Default::default()
                 };
@@ -5220,7 +5219,7 @@ mod tests {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;
             let cli_args = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                vm_proving_capability: Some(TransactionProofType::ProofCollection.into()),
                 network,
                 ..Default::default()
             };
@@ -5265,7 +5264,7 @@ mod tests {
                 //     ),
                 //     fee,
                 //     timestamp,
-                //     TxProvingCapability::PrimitiveWitness,
+                //     TransactionProofType::PrimitiveWitness,
                 // )
                 // .await;
                 assert!(result.is_ok());
@@ -5291,7 +5290,7 @@ mod tests {
             let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;
             let cli_args = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
                 network,
                 ..Default::default()
             };
@@ -5363,7 +5362,7 @@ mod tests {
                 let mut rng = StdRng::seed_from_u64(1814);
                 let network = Network::Main;
                 let cli_args = cli_args::Args {
-                    tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+                    vm_proving_capability: Some(TransactionProofType::ProofCollection.into()),
                     network,
                     ..Default::default()
                 };
@@ -5499,7 +5498,7 @@ mod tests {
                 //         ),
                 //         fee,
                 //         timestamp,
-                //         TxProvingCapability::ProofCollection,
+                //         TransactionProofType::ProofCollection,
                 //     )
                 //     .await;
 

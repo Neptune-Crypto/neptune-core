@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -176,6 +177,7 @@ impl Transaction {
         info!("starting single proof via update ...");
         let proof = TransactionProofBuilder::new()
             .single_proof_witness(&new_single_proof_witness)
+            .transaction_proof_type(TransactionProofType::SingleProof)
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
@@ -240,6 +242,7 @@ impl Transaction {
 
         let proof = TransactionProofBuilder::new()
             .single_proof_witness(&new_single_proof_witness)
+            .transaction_proof_type(TransactionProofType::SingleProof)
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
