@@ -17,8 +17,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2025-05-18 # date is temporary – see issue #600
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
@@ -32,7 +33,7 @@ jobs:
       # at all, documentation tests are skipped.
       - name: Collect coverage data (skip doctests & benchmarks)
         run: >
-          cargo +nightly llvm-cov nextest
+          cargo llvm-cov nextest
           --lib --bins --tests --examples
           --lcov --output-path lcov.info
           --
