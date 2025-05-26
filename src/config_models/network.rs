@@ -145,11 +145,12 @@ impl Network {
 
     /// indicates if automated mining should be performed by this network
     ///
-    /// note: we disable auto-mining in regtest mode because it generates blocks
+    /// note: We disable auto-mining in regtest mode because it generates blocks
     /// very quickly and that is not a good fit when mining is enabled for
-    /// duration of the neptune-core process as blockchain grows very quickly.
+    /// duration of the neptune-core process since the blockchain grows very
+    /// quickly.
     ///
-    /// instead developers are encouraged to use [crate::api::regtest] module to
+    /// Instead developers are encouraged to use [crate::api::regtest] module to
     /// generate any number of blocks in a controlled, deterministic fashion.
     //
     // bitcoin-core does not use cli flags, but rather RPC commands to
@@ -193,6 +194,43 @@ mod tests {
     use num_traits::Zero;
 
     use super::*;
+    use crate::twenty_first::prelude::Digest;
+
+    impl Network {
+        /// returns known genesis block hash
+        ///
+        /// These hashes were all determined and placed here as of 2025-05-25.
+        ///
+        /// The initial/primary purpose is for the test
+        /// genesis_block_hasnt_changed() so it can verify that code changes do
+        /// not modify the genesis hash for each network.
+        ///
+        /// If the genesis block is intentionally changed for any network, or a
+        /// network is added, then this fn needs to be updated, with a comment
+        /// noting the date, old and new hash, and reason for the change.
+        ///
+        /// * 2025-05-25: Testnet hash has changed:
+        ///   old: d986e9b229831f779cee1a556f2a63d24631559eb9b3bb8c3daca8d65d1f66acca1d10026698ada8
+        ///   new: 380df1ec5895553d056acb7a35a6eb9967c893ccc1e7c6e86995459e4d20e4f99800f04c86711d53
+        ///   reason: lower genesis difficulty, add difficulty-reset mechanism and restart Testnet network.
+        ///   commit: 1293adaff5df7be02382b867424fca2604692eac
+        ///
+        /// * 2025-05-25: TestnetMock hash has changed:
+        ///   old: unknown.
+        ///   new: 6c9605ab77ecfdfedfc8a2beb09863de38c4c63523364bf5d9c0eb30ad63b8b53cf1f37ef036ebda
+        ///   reason: repurpose 'Alpha' to 'TestnetMock', lower genesis difficulty, and impl difficulty-reset and mock-proofs.
+        ///   commit: 1293adaff5df7be02382b867424fca2604692eac
+        pub fn genesis_block_known_hash(&self) -> Digest {
+            let hex = match *self {
+                Self::Main => "3eeaed3acdd8765b9a3e689d74f745365d6a3de57fb4a9a19c46ac432ce419a92fb82d47dc0d3f54",
+                Self::TestnetMock => "6c9605ab77ecfdfedfc8a2beb09863de38c4c63523364bf5d9c0eb30ad63b8b53cf1f37ef036ebda",
+                Self::Beta => "fc3ccb02b5491028e7d2620fd788806c79317f8bd481e4cbc9d690efeac1de2c7df7fde25bfa33b9",
+                Self::Testnet => "380df1ec5895553d056acb7a35a6eb9967c893ccc1e7c6e86995459e4d20e4f99800f04c86711d53",
+                Self::RegTest => "67d1ce0d5fe62582e7156494b36b1cd80888f1b259e003410204a72276f96fb6f8f8272e820f4dd9",
+            };
+            Digest::try_from_hex(hex).unwrap()
+        }
+    }
 
     #[test]
     fn main_variant_is_zero() {
