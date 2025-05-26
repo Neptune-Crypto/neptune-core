@@ -95,26 +95,28 @@ and submit a pull request for each change.  This is accomplished by:
 
 When working on an open github issue, it is recommended to prefix the topic branch with the issue identifier.
 
-When the branch is intended to become a pull request, it is recommended to add the suffix `_pr`.
+When the branch is intended to become a pull request, it is recommended to add the suffix `-pr`.
 
 If the branch exists in a triton/neptune official repo, (as opposed to a personal fork), then it is recommended to prefix with your github username followed by `/`.
 
-So if working on issue `#232` and adding feature *walk_and_chew_gum* one might name the branch `myuser/232_walk_and_chew_gum_pr`.
+So if working on issue `#232` and adding feature *walk-and-chew-gum* one might name the branch `myuser/232-walk-and-chew-gum-pr`.
 
-### Testnet policy (pre-release)
+### Testing policy (pre-release)
 
 It is project policy that each major and minor release be tested as a
-release-candidate in the public community testnet prior to making an official
-release.
+release-candidate on the main net prior to making an official release. Testing
+on main net increases the likelihood that any unintended incompatibilities with
+previous versions of the software are caught. And it tests the release-candidate
+in an environment where reorganizations regularly occur.
 
-A period of public testnet testing provides the community with an opportunity to
-try out candidate builds in their own unique environments and report any issues,
-and to prepare for new features in advance.
+It is an important period of integration testing "in the wild" for the release
+candidate binary.  Operating on main net, it will necessarily be exposed to
+peers running older versions of the software and may shake out issues that do
+not occur with automated testing.
 
-It is also an important period of integration testing "in the wild" for the
-release candidate binary.  Operating on a public testnet, it will necessarily be
-exposed to peers running older versions of the software and may shake out issues
-that do not occur with automated testing.
+If resources allow, the release candidate should also be tested on a public
+test net where it might be cheaper or easier to get test transactions included
+in blocks.
 
 #### Some specifics
 
@@ -142,7 +144,7 @@ that do not occur with automated testing.
 
 ## deviation from standard semver practice
 
-neptune-core is presently both a (blockchain) library and a binary. Semantic versioning signals changes to APIs and mainly applies to libraries.  But it does not capture breaking changes that can occur in a blockchain ecosystem or breaking changes with regards to stored state, ie databases.
+neptune-core is presently both a (blockchain) library and a binary. Semantic versioning signals changes to APIs and mainly applies to libraries.  But it does not capture breaking changes that can occur in a blockchain ecosystem or breaking changes with regards to stored state, i.e. databases.
 
 For blockchains it is of primary importance to maintain consensus and network
 compatibility with other nodes on the network.
@@ -203,8 +205,8 @@ The normal/typical release flow would be:
 
 1. normal changes (not consensus) are introduced in master.
 2. a release candidate is tagged from master, eg `v0.3.0-rc1` and built.
-3. a testnet is created for `v0.3.0-rc1`
-4. if significant problems are found then a new branch `v0.3.0-rc2` is created at `v0.3.0-rc1`, or possibly from master.  commit(s) are added. When ready, the final commit in the branch is tagged with `v0.3.0-rc2`, another testnet created, and so on.
+3. The binary is launched on main net and connects with peers.
+4. if significant problems are found then a new branch `v0.3.0-rc2` is created at `v0.3.0-rc1`, or possibly from master.  commit(s) are added. When ready, the final commit in the branch is tagged with `v0.3.0-rc2`, another instance launched, and so on.
 5. fixes for the release-candidate should also be applied to master, if applicable.
 6. After two weeks, or when team decides, the latest release-candidate tag is also tagged with `v0.3.0`, signifying an actual release.
 7. The release is performed.
@@ -218,9 +220,10 @@ Detailed release instructions are in [releasing.md](releasing.md).
 
 ## latest-release tag
 
-The `master` branch may contain changes that are not compatible with previous
-release. Individuals looking for the latest release can simply checkout the
-`latest-release` tag, which is updated as part of the release process.
+The `master` branch may (but should, ideally not) contain changes that are not
+compatible with previous release. Individuals looking for the latest release can
+simply checkout the `latest-release` tag, which is updated as part of the
+release process.
 
 _note: End-users are discouraged from building and running the `master` branch
 as it could result in undefined and unsupported states with regards to database

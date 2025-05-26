@@ -108,7 +108,7 @@ then the flag `--port <port>` is your friend.
 
 ## Release Candidates and Public Testnet
 
-It is policy that each release candidate be made available for public testing on `testnet` prior to official release.  [Details](https://docs.neptune.cash/contributing/git-workflow.html#testnet-policy-pre-release)
+It is policy that each release candidate be made available for public testing on main net prior to official release.  [Details](https://docs.neptune.cash/contributing/git-workflow.html#testnet-policy-pre-release)
 
 ## Setup for Development (Ubuntu)
 
