@@ -1167,20 +1167,28 @@ pub(crate) mod tests {
         }
     }
 
+    /// This test verifies that genesis block hash does not accidentally change.
+    ///
+    /// For every network it compares a known hash of the genesis block with
+    /// the current hash of the genesis block, which must match.
+    ///
+    /// See Network::genesis_block_known_hash() for details of the known hashes.
     #[test]
     fn genesis_block_hasnt_changed() {
-        // Ensure that code changes does not modify the hash of main net's
-        // genesis block.
+        for network in Network::iter() {
+            // Insert the real difficulty such that the block's hash can be
+            // compared to the one found in block explorers and other real
+            // instances, otherwise the hash would only be valid for test code.
+            let genesis_block =
+                Block::genesis(network).with_difficulty(network.genesis_difficulty());
 
-        // Insert the real difficulty such that the block's hash can be
-        // compared to the one found in block explorers and other real
-        // instances, otherwise the hash would only be valid for test code.
-        let network = Network::Main;
-        let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
-        assert_eq!(
-            "3eeaed3acdd8765b9a3e689d74f745365d6a3de57fb4a9a19c46ac432ce419a92fb82d47dc0d3f54",
-            genesis_block.hash().to_hex()
-        );
+            assert_eq!(
+                network.genesis_block_known_hash().to_hex(),
+                genesis_block.hash().to_hex(),
+                "genesis-block known hash must match actual hash for network {}",
+                network,
+            );
+        }
     }
 
     #[test]
