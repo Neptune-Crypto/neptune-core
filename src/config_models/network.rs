@@ -1,7 +1,5 @@
 use std::fmt;
 use std::str::FromStr;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -52,23 +50,9 @@ pub enum Network {
 }
 
 impl Network {
-    pub(crate) fn launch_date(&self) -> Timestamp {
-        match self {
-            Network::RegTest => {
-                const SEVEN_DAYS: u64 = 1000 * 60 * 60 * 24 * 7;
-
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64;
-                let now_rounded = (now / SEVEN_DAYS) * SEVEN_DAYS;
-                Timestamp(BFieldElement::new(now_rounded))
-            }
-            // 11 Feb 2025, noon UTC
-            Network::TestnetMock | Network::Testnet | Network::Beta | Network::Main => {
-                Timestamp(BFieldElement::new(1739275200000u64))
-            }
-        }
+    pub fn launch_date(&self) -> Timestamp {
+        // 11 Feb 2025, noon UTC (same for all networks)
+        Timestamp(BFieldElement::new(1739275200000u64))
     }
 
     /// indicates if the network uses mock proofs
