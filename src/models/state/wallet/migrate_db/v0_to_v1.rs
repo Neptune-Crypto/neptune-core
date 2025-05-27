@@ -141,9 +141,11 @@ mod migration {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use num_traits::Zero;
     use tasm_lib::prelude::Digest;
 
     use super::*;
+    use crate::api::export::NativeCurrencyAmount;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::traits::StorageWriter;
     use crate::database::storage::storage_schema::DbtSingleton;
@@ -186,7 +188,7 @@ mod tests {
         let sent_tx_v0 = migration::schema_v0::SentTransaction {
             tx_inputs: vec![],
             tx_outputs: vec![tx_output1, tx_output2],
-            fee: 0.into(),
+            fee: NativeCurrencyAmount::zero(),
             timestamp: Timestamp::now(),
             tip_when_sent: rand::random(),
         };

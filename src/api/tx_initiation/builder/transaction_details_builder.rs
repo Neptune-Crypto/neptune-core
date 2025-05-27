@@ -162,7 +162,7 @@ impl TransactionDetailsBuilder {
             })?;
 
         // ##multicoin## : do we need a change output for each Coin?
-        let has_change_output = change_amount > 0.into();
+        let has_change_output = change_amount.is_positive();
 
         // Add change output, if required to balance transaction
         let tip_block = if has_change_output {

@@ -8,6 +8,7 @@ use neptune_cash::api::export::SymmetricKey;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TxProvingCapability;
 use num_traits::ops::checked::CheckedSub;
+use num_traits::Zero;
 
 /// test: alice sends funds to herself onchain
 ///
@@ -63,7 +64,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
         .send(
             vec![(alice_address, NativeCurrencyAmount::coins_from_str("2.45")?)],
             Default::default(),
-            0.into(),
+            NativeCurrencyAmount::zero(),
             Timestamp::now(),
         )
         .await?;
@@ -233,7 +234,7 @@ pub async fn alice_sends_to_bob(
     // bob checks balances are correct.
     let bob_balances = bob.gsl.api().wallet().balances(Timestamp::now()).await;
     assert_eq!(bob_balances.unconfirmed_available, payment_amount);
-    assert_eq!(bob_balances.confirmed_available, 0.into());
+    assert!(bob_balances.confirmed_available.is_zero());
 
     // alice mines another block to her wallet
     alice
@@ -377,7 +378,10 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
         alice_balances_after_confirmed.unconfirmed_total.to_string()
     );
     assert_eq!(
-        (alice_balances_after_send.unconfirmed_total + 128.into() + fee_amount).to_string(),
+        (alice_balances_after_send.unconfirmed_total
+            + NativeCurrencyAmount::coins(128)
+            + fee_amount)
+            .to_string(),
         alice_balances_after_confirmed.confirmed_total.to_string(),
     );
 

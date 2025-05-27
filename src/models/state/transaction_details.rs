@@ -71,7 +71,7 @@ impl Display for TransactionDetails {
             self.tx_inputs.total_native_coins(),
             self.tx_outputs.total_native_coins(),
             self.fee,
-            self.coinbase.unwrap_or_else(|| 0.into()),
+            self.coinbase.unwrap_or_else(NativeCurrencyAmount::zero),
             self.tx_inputs
                 .iter()
                 .map(|o| o.native_currency_amount())
@@ -267,7 +267,7 @@ impl TransactionDetails {
         self.tx_inputs
             .total_native_coins()
             .checked_sub(&not_spend)
-            .unwrap_or_else(|| 0.into())
+            .unwrap_or_else(NativeCurrencyAmount::zero)
     }
 
     /// verifies the transaction details are valid.

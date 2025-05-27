@@ -303,20 +303,6 @@ impl NativeCurrencyAmount {
     }
 }
 
-// mostly so that 0.into() works.  but also handy for any whole number amounts,
-// so it is not necessary to `use NativeCurrencyAmount` or `NumTraits::Zero`.
-//
-// rationale: while `NativeCurrencyAmount` wraps an i128 that is an internal
-// implementation detail. It could just as well wrap an array of bytes, or a
-// Rational, BigInt, or something else. The integer interface presented to the
-// world is that of the coins() method, which accepts a u32.  As such, this impl
-// From is approprate.
-impl From<u32> for NativeCurrencyAmount {
-    fn from(n: u32) -> Self {
-        Self::coins(n)
-    }
-}
-
 impl NativeCurrencyAmount {
     pub fn is_negative(&self) -> bool {
         self.0.is_negative()

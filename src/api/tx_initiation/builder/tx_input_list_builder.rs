@@ -14,6 +14,7 @@
 //! see [builder](super) for examples of using the builders together.
 use get_size2::GetSize;
 use itertools::Itertools;
+use num_traits::Zero;
 use rand::rng;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
@@ -108,8 +109,6 @@ impl TxInputListBuilder {
             spend_amount,
         } = self;
 
-        let zero: NativeCurrencyAmount = 0.into();
-
         // create an ordering for the sequence
         let ordered_iter = match policy {
             InputSelectionPolicy::Random => {
@@ -138,6 +137,7 @@ impl TxInputListBuilder {
         };
 
         // scan sequence until we have enough
+        let zero: NativeCurrencyAmount = NativeCurrencyAmount::zero();
         ordered_iter.scan((zero, spend_amount), |(current_amount, target), input| {
             if *current_amount < *target {
                 *current_amount = *current_amount + input.utxo.get_native_currency_amount();
