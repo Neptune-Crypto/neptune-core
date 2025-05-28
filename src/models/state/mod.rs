@@ -36,7 +36,6 @@ use blockchain_state::BlockchainState;
 use itertools::Itertools;
 use light_state::LightState;
 use mempool::Mempool;
-use mempool::TransactionOrigin;
 use mining_state::MiningState;
 use mining_status::ComposingWorkInfo;
 use mining_status::GuessingWorkInfo;
@@ -334,8 +333,8 @@ impl GlobalStateLock {
 
         // insert transaction into mempool
         // todo: we should use Arc<Tx> in mempool to avoid cloning large Tx.
-        gsm.mempool_insert((*transaction).clone(), TransactionOrigin::Own)
-            .await;
+        let tx_value = tx_artifacts.details().tx_outputs.total_native_coins();
+        gsm.mempool_insert((*transaction).clone(), tx_value).await;
 
         tracing::debug!("flush dbs");
         gsm.flush_databases().await.expect("flushed DBs");
@@ -1760,13 +1759,14 @@ impl GlobalState {
         self.wallet_state.handle_mempool_events(events).await
     }
 
-    /// adds Tx to mempool and notifies wallet of change.
+    /// adds Tx to mempool and notifies wallet of change. value represents
+    /// the value that the transaction has to caller.
     pub(crate) async fn mempool_insert(
         &mut self,
         transaction: Transaction,
-        origin: TransactionOrigin,
+        value: NativeCurrencyAmount,
     ) {
-        let events = self.mempool.insert(transaction, origin);
+        let events = self.mempool.insert(transaction, value);
         self.wallet_state.handle_mempool_events(events).await
     }
 
