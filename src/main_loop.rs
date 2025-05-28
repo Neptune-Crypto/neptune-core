@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use itertools::Itertools;
+use num_traits::Zero;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpdateMutatorSetDataJob;
 use proof_upgrader::UpgradeJob;
@@ -28,6 +29,7 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
+use crate::api::export::NativeCurrencyAmount;
 use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
 use crate::macros::fn_name;
@@ -50,7 +52,6 @@ use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
-use crate::models::state::mempool::TransactionOrigin;
 use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
@@ -855,12 +856,10 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
-                    // Insert into mempool
+                    // Insert into mempool.
+                    let tx_value = NativeCurrencyAmount::zero();
                     global_state_mut
-                        .mempool_insert(
-                            pt2m_transaction.transaction.to_owned(),
-                            TransactionOrigin::Foreign,
-                        )
+                        .mempool_insert(pt2m_transaction.transaction.to_owned(), tx_value)
                         .await;
                 }
 
@@ -1323,7 +1322,7 @@ impl MainLoopHandler {
 
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
-        let (upgrade_candidate, tx_origin) = {
+        let upgrade_candidate = {
             let global_state = self.global_state_lock.lock_guard().await;
             if !attempt_upgrade(&global_state, main_loop_state) {
                 trace!("Not attempting upgrade.");
@@ -1333,13 +1332,12 @@ impl MainLoopHandler {
             debug!("Attempting to run transaction-proof-upgrade");
 
             // Find a candidate for proof upgrade
-            let Some((upgrade_candidate, tx_origin)) = get_upgrade_task_from_mempool(&global_state)
-            else {
+            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&global_state) else {
                 debug!("Found no transaction-proof to upgrade");
                 return Ok(());
             };
 
-            (upgrade_candidate, tx_origin)
+            upgrade_candidate
         };
 
         info!(
@@ -1364,7 +1362,6 @@ impl MainLoopHandler {
                     upgrade_candidate
                         .handle_upgrade(
                             vm_job_queue,
-                            tx_origin,
                             perform_ms_update_if_needed,
                             global_state_lock_clone,
                             main_to_peer_broadcast_tx_clone,
@@ -1736,7 +1733,6 @@ impl MainLoopHandler {
                         upgrade_job
                             .handle_upgrade(
                                 vm_job_queue.clone(),
-                                TransactionOrigin::Own,
                                 true,
                                 global_state_lock_clone,
                                 main_to_peer_broadcast_tx_clone,
@@ -1755,7 +1751,7 @@ impl MainLoopHandler {
             RPCServerToMain::BroadcastMempoolTransactions => {
                 info!("Broadcasting transaction notifications for all shareable transactions in mempool");
                 let state = self.global_state_lock.lock_guard().await;
-                let txs = state.mempool.get_sorted_iter().collect_vec();
+                let txs = state.mempool.fee_density_iter().collect_vec();
                 for (txid, _) in txs {
                     // Since a read-lock is held over global state, the
                     // transaction must exist in the mempool.
@@ -2226,7 +2222,7 @@ mod tests {
                 .global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*proof_collection_tx).clone(), TransactionOrigin::Foreign)
+                .mempool_insert((*proof_collection_tx).clone(), NativeCurrencyAmount::zero())
                 .await;
             assert!(
                 main_loop_handler
@@ -2253,7 +2249,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_sorted_iter()
+                .fee_density_iter()
                 .next_back()
                 .expect("mempool should contain one item here");
 
