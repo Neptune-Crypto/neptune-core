@@ -31,6 +31,7 @@ use crate::models::state::vm_proving_capability::VmProvingCapabilityError;
 
 /// represents an error running a [ProverJob]
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ProverJobError {
     #[error("external proving process failed")]
     TritonVmProverFailed(#[from] VmProcessError),
@@ -43,6 +44,7 @@ pub enum ProverJobError {
 ///
 /// provides additional details for [ProverJobError::TritonVmProverFailed]
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum VmProcessError {
     #[error("parameter serialization failed")]
     ParameterSerializationFailed(#[from] serde_json::Error),

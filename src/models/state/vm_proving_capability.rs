@@ -1,4 +1,6 @@
 use std::fmt::Display;
+use std::io::Write;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use num_traits::Zero;
@@ -12,6 +14,7 @@ use crate::models::state::NonDeterminism;
 use crate::models::state::Program;
 use crate::models::state::VMState;
 use crate::models::state::VM;
+use crate::tasm_lib::triton_vm::error::VMError;
 
 /// represents proving capability of a device.
 ///
@@ -20,8 +23,8 @@ use crate::models::state::VM;
 /// (program, claim, nondeterminism) triple necessary for generating a
 /// TritonVm `Proof`.
 ///
-/// A rough indicator of a device's capability can be obtained via
-/// the `auto_detect()` method.
+// A rough indicator of a device's capability can be obtained via
+// the [`auto_detect()`] method.
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct VmProvingCapability {
     log2_padded_height: u8,
@@ -59,11 +62,11 @@ impl VmProvingCapability {
     ///
     /// assert!(capability.can_prove(15u32).is_ok());
     /// assert!(capability.can_prove(16u32).is_ok());
-    /// assert!(!capability.can_prove(17u32).is_ok());
+    /// assert!(capability.can_prove(17u32).is_err());
     ///
     /// assert!(capability.can_prove(TransactionProofType::PrimitiveWitness).is_ok());
     /// assert!(capability.can_prove(TransactionProofType::ProofCollection).is_ok());
-    /// assert!(!capability.can_prove(TransactionProofType::SingleProof).is_ok());
+    /// assert!(capability.can_prove(TransactionProofType::SingleProof).is_err());
     ///
     /// let single_proof_capability: VmProvingCapability = TransactionProofType::SingleProof.into();
     /// assert!(single_proof_capability.can_prove(TransactionProofType::SingleProof).is_ok());
@@ -99,9 +102,16 @@ impl VmProvingCapability {
         nondeterminism: NonDeterminism,
     ) -> Result<(), VmProvingCapabilityError> {
         let copy = *self;
-        tokio::task::spawn_blocking(move || copy.check_if_capable(program, claim, nondeterminism))
-            .await
-            .unwrap()
+        let join_result = tokio::task::spawn_blocking(move || {
+            copy.check_if_capable(program, claim, nondeterminism)
+        })
+        .await;
+
+        match join_result {
+            Ok(r) => r,
+            Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+            Err(e) => panic!("unexpected error from spawn_blocking(). {e}"),
+        }
     }
 
     /// executes the supplied program triple to determine if device is capable
@@ -145,8 +155,9 @@ impl VmProvingCapability {
 
     /// executes the supplied program triple to obtain the log2(padded_height)
     ///
-    /// perf: this is an expensive operation; it may be under a second up to
-    /// 5+ seconds depending on the program's complexity.
+    /// perf: this is an expensive operation; it may be under a second up to 60+
+    /// seconds depending on the program's complexity and
+    /// NEPTUNE_LOG2_PADDED_HEIGHT_METHOD setting.
     ///
     /// The program is executed in blocking fashion so it will block concurrent
     /// async tasks on the same thread.  async callers should use
@@ -158,14 +169,17 @@ impl VmProvingCapability {
     ) -> Result<u32, VmProvingCapabilityError> {
         crate::macros::log_scope_duration!(crate::macros::fn_name!());
 
-        let mut vmstate = VMState::new(program, claim.input.into(), nondeterminism);
+        debug_assert_eq!(program.hash(), claim.program_digest);
 
-        let method =
-            std::env::var("LOG2_PADDED_HEIGHT_METHOD").unwrap_or_else(|_| "run".to_string());
+        let mut vmstate = VMState::new(program, claim.input.into(), nondeterminism);
+        let _ = Self::maybe_write_debuggable_vm_state_to_disk(&vmstate);
+
+        let method = std::env::var("NEPTUNE_LOG2_PADDED_HEIGHT_METHOD")
+            .unwrap_or_else(|_| "run".to_string());
 
         match method.as_str() {
             "trace" => {
-                // this is about 4x slower.
+                // this is about 4x slower than "run".
                 let (aet, _) = VM::trace_execution_of_state(vmstate)?;
                 Ok(aet.padded_height().ilog2())
             }
@@ -177,10 +191,46 @@ impl VmProvingCapability {
 
             "run" | &_ => {
                 // this is baseline
-                vmstate.run().unwrap();
-                Ok(vmstate.cycle_count.next_power_of_two().ilog2())
+                match vmstate.run() {
+                    Ok(_) => {
+                        debug_assert_eq!(claim.output, vmstate.public_output);
+                        Ok(vmstate.cycle_count.next_power_of_two().ilog2())
+                    }
+                    Err(e) => Err(VMError::new(e, vmstate).into()),
+                }
             }
         }
+    }
+
+    /// If the environment variable NEPTUNE_WRITE_VM_STATE_DIR is set,
+    /// write the initial VM state to file `<DIR>/vm_state.<pid>.<random>.json`.
+    ///
+    /// This file can be used to debug the program using the [Triton TUI]:
+    /// ```sh
+    /// triton-tui --initial-state <file>
+    /// ```
+    ///
+    /// [Triton TUI]: https://crates.io/crates/triton-tui
+    pub fn maybe_write_debuggable_vm_state_to_disk(
+        vm_state: &VMState,
+    ) -> Result<Option<PathBuf>, LogVmStateError> {
+        let Ok(dir) = std::env::var("NEPTUNE_WRITE_VM_STATE_DIR") else {
+            return Ok(None);
+        };
+
+        let filename = format!(
+            "vm_state.{}.{}.json",
+            std::process::id(),
+            rand::random::<u32>()
+        );
+
+        let path = PathBuf::from(dir).join(filename);
+
+        let mut state_file =
+            std::fs::File::create(&path).map_err(|e| LogVmStateError::from((path.clone(), e)))?;
+        let state = serde_json::to_string(&vm_state)?;
+        write!(state_file, "{}", state).map_err(|e| LogVmStateError::from((path.clone(), e)))?;
+        Ok(Some(path))
     }
 
     /// automatically detect the log2_padded_height for this device.
@@ -214,10 +264,9 @@ impl VmProvingCapability {
 
         let s = System::new_all();
         let total_memory = s.total_memory();
-        assert!(
-            !total_memory.is_zero(),
-            "Total memory reported illegal value of 0"
-        );
+        if total_memory.is_zero() {
+            tracing::warn!("Total memory reported illegal value of 0");
+        }
 
         let physical_core_count = s.physical_core_count().unwrap_or(1);
 
@@ -255,11 +304,33 @@ impl FromStr for VmProvingCapability {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, strum::EnumIs)]
+#[non_exhaustive]
 pub enum VmProvingCapabilityError {
     #[error("could not obtain padded-height due to program execution error")]
     VmExecutionFailed(#[from] tasm_lib::triton_vm::error::VMError),
 
     #[error("device capability {capability} is insufficient to generate proof that requires capability {attempted}")]
     DeviceNotCapable { capability: u32, attempted: u32 },
+}
+
+#[derive(Debug, thiserror::Error, strum::EnumIs)]
+#[non_exhaustive]
+pub enum LogVmStateError {
+    #[error("could not obtain padded-height due to program execution error")]
+    IoError {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error(transparent)]
+    SerializeError(#[from] serde_json::Error),
+}
+
+impl From<(PathBuf, std::io::Error)> for LogVmStateError {
+    fn from(v: (PathBuf, std::io::Error)) -> Self {
+        let (path, source) = v;
+        Self::IoError { path, source }
+    }
 }

@@ -14,6 +14,7 @@ use num_traits::Zero;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
@@ -246,19 +247,7 @@ pub struct Args {
     #[structopt(long, default_value = "3")]
     pub(crate) number_of_mps_per_utxo: usize,
 
-    /// Specifies device's capability to generate TritonVM proofs
-    ///
-    /// If no value is set, this parameter is estimated based on available RAM
-    /// and number of CPU cores
-    ///
-    /// Triton VM's prover complexity is a function of something called padded
-    /// height which is always a power of two. A basic proof has a complexity of
-    /// 2^15.  A powerful machine with 128 CPU cores and at least 128Gb RAM can
-    /// handle a padded height of 2^23.
-    ///
-    /// For such a machine, one would set a limit of 23:
-    ///  --vm-proving-capability 23
-    #[clap(long, value_parser = clap::value_parser!(VmProvingCapability))]
+    #[clap(long, long_help=VM_PROVING_CAPABILITY_HELP, value_parser = clap::value_parser!(VmProvingCapability))]
     pub vm_proving_capability: Option<VmProvingCapability>,
 
     /// Cache for the proving capability. If the above parameter is not set, we
@@ -393,6 +382,32 @@ pub struct Args {
     #[clap(long)]
     pub(crate) scan_keys: Option<usize>,
 }
+
+pub const VM_PROVING_CAPABILITY_HELP: &str = const_format::formatcp!(
+    "\
+Specifies device's capability to generate TritonVM proofs
+
+If no value is set, this parameter is estimated based on available RAM
+and number of CPU cores
+
+Triton VM's prover complexity is a function of something called padded
+height which is always a power of two. A basic proof has a complexity of
+2^15.  A powerful machine with 128 CPU cores and at least 512Gb RAM can
+handle a padded height of 2^23.
+
+source: https://talk.neptune.cash/t/performance-numbers-for-triton-vm-proving/69
+
+For such a machine, one would set a limit of 23:
+--vm-proving-capability 23
+
+Minimum values by transaction-proof type:
+ primitive-witness: {}
+ proof-collection: {}
+ single-proof: {}",
+    TransactionProofType::PrimitiveWitness.log2_padded_height(),
+    TransactionProofType::ProofCollection.log2_padded_height(),
+    TransactionProofType::SingleProof.log2_padded_height()
+);
 
 impl Default for Args {
     fn default() -> Self {

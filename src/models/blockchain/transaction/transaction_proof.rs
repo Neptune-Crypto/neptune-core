@@ -87,7 +87,13 @@ impl TransactionProofType {
         matches!(self, Self::ProofCollection | Self::SingleProof)
     }
 
-    pub(crate) fn log2_padded_height(&self) -> u8 {
+    /// provides an estimate of padded-height complexity for each variant.
+    ///
+    /// these values were determined by running unit tests
+    /// and logging padded-height values in the ProverJob.
+    ///
+    /// They might need to be adjusted in the future.
+    pub(crate) const fn log2_padded_height(&self) -> u8 {
         match *self {
             Self::PrimitiveWitness => 0,
             Self::ProofCollection => 15,
