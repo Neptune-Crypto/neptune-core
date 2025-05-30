@@ -14,7 +14,7 @@ pub(crate) mod tx_creation_artifacts;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tx_creation_config;
-pub mod tx_proving_capability;
+pub mod vm_proving_capability;
 pub mod wallet;
 
 use std::cmp::max;
@@ -51,7 +51,7 @@ use transaction_kernel_id::TransactionKernelId;
 use twenty_first::math::digest::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
 use tx_creation_artifacts::TxCreationArtifactsError;
-use tx_proving_capability::TxProvingCapability;
+use vm_proving_capability::VmProvingCapability;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -1732,7 +1732,7 @@ impl GlobalState {
         self.cli().peers.clone()
     }
 
-    pub(crate) fn proving_capability(&self) -> TxProvingCapability {
+    pub(crate) fn proving_capability(&self) -> VmProvingCapability {
         self.cli().proving_capability()
     }
 
@@ -1899,6 +1899,7 @@ mod tests {
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::BlockProof;
     use crate::models::blockchain::transaction::lock_script::LockScript;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
@@ -2057,7 +2058,7 @@ mod tests {
         let one_month = Timestamp::months(1);
         let config = TxCreationConfig::default()
             .recover_change_off_chain(bob_spending_key.into())
-            .with_prover_capability(TxProvingCapability::ProofCollection);
+            .with_prover_capability(TransactionProofType::ProofCollection);
         assert!(bob
             .api()
             .tx_initiator_internal()
@@ -2947,6 +2948,7 @@ mod tests {
             &premine_receiver,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),
+            TransactionProofType::SingleProof,
         )
         .await
         .unwrap();
@@ -2997,7 +2999,7 @@ mod tests {
             .await;
         let config_alice_and_bob = TxCreationConfig::default()
             .recover_change_off_chain(genesis_key)
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let tx_outputs_for_alice_and_bob =
             [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()].concat();
         let artifacts_alice_and_bob = premine_receiver
@@ -3187,7 +3189,7 @@ mod tests {
         // Weaker machines need to use the proof server.
         let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_spending_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let artifacts_from_alice = alice
             .api()
             .tx_initiator_internal()
@@ -3232,7 +3234,7 @@ mod tests {
         ];
         let config_bob = TxCreationConfig::default()
             .recover_change_off_chain(bob_spending_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let artifacts_from_bob = bob
             .api()
             .tx_initiator_internal()
@@ -3269,6 +3271,7 @@ mod tests {
             &premine_receiver,
             in_seven_months,
             TritonVmJobPriority::Normal.into(),
+            TransactionProofType::SingleProof,
         )
         .await
         .unwrap();
@@ -3366,9 +3369,8 @@ mod tests {
                 &genesis_block,
                 global_state_lock,
                 timestamp,
-                global_state_lock
-                    .cli()
-                    .proof_job_options_primitive_witness(),
+                TritonVmJobPriority::Normal.into(),
+                TransactionProofType::PrimitiveWitness,
             )
             .await
             .unwrap();
@@ -4352,7 +4354,7 @@ mod tests {
                 // create tx.  utxo_notify_method is a test param.
                 let config = TxCreationConfig::default()
                     .recover_to_provided_key(Arc::new(alice_change_key), change_notification_medium)
-                    .with_prover_capability(TxProvingCapability::SingleProof);
+                    .with_prover_capability(TransactionProofType::SingleProof);
                 let artifacts = alice_state_lock
                     .api()
                     .tx_initiator_internal()
@@ -4395,8 +4397,9 @@ mod tests {
                     &genesis_block,
                     &charlie_state_lock,
                     seven_months_post_launch,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmJobPriority::Normal.into(),
                     TxMergeOrigin::ExplicitList(vec![Arc::into_inner(alice_to_bob_tx).unwrap()]),
+                    TransactionProofType::SingleProof,
                 )
                 .await
                 .unwrap();

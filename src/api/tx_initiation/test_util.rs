@@ -81,12 +81,10 @@ impl TransactionInitiatorInternal {
         drop(state_lock);
 
         let witness = tx_details.primitive_witness();
-        let kernel = witness.kernel.clone();
 
         // generate proof
         let proof = TransactionProofBuilder::new()
-            .transaction_details(&tx_details)
-            .primitive_witness(witness)
+            .primitive_witness_ref(&witness)
             .job_queue(tx_creation_config.job_queue())
             .proof_job_options(tx_creation_config.proof_job_options())
             .build()
@@ -94,7 +92,7 @@ impl TransactionInitiatorInternal {
 
         // create transaction
         let transaction = TransactionBuilder::new()
-            .transaction_kernel(kernel)
+            .transaction_kernel(witness.kernel)
             .transaction_proof(proof)
             .build()?;
 

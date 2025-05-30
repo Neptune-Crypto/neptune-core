@@ -75,6 +75,7 @@ use crate::models::blockchain::transaction::transaction_kernel::tests::pseudoran
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -950,7 +951,8 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         composer_parameters,
         block_timestamp,
         TritonVmJobQueue::get_instance(),
-        cli.proof_job_options_primitive_witness(),
+        (&cli).into(),
+        TransactionProofType::PrimitiveWitness,
     )
     .await
     .unwrap();
@@ -1084,6 +1086,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         global_state_lock,
         timestamp,
         Default::default(),
+        TransactionProofType::SingleProof,
     )
     .await?;
 

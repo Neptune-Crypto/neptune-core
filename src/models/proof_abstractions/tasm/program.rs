@@ -191,7 +191,6 @@ pub mod tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::tests::shared::test_helper_data_dir;
     use crate::tests::shared::try_fetch_file_from_server;
     use crate::tests::shared::try_load_file_from_disk;
@@ -201,29 +200,12 @@ pub mod tests {
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         fn from(job_priority: TritonVmJobPriority) -> Self {
             let job_settings = ProverJobSettings {
-                tx_proving_capability: TxProvingCapability::SingleProof,
-                proof_type: TransactionProofType::SingleProof,
+                vm_proving_capability: TransactionProofType::SingleProof.into(),
                 ..Default::default()
             };
             Self {
                 job_priority,
                 job_settings,
-                cancel_job_rx: None,
-            }
-        }
-    }
-
-    impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
-        fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
-            let (job_priority, max_log2_padded_height_for_proofs) = v;
-            Self {
-                job_priority,
-                job_settings: ProverJobSettings {
-                    max_log2_padded_height_for_proofs,
-                    network: Default::default(),
-                    tx_proving_capability: TxProvingCapability::SingleProof,
-                    proof_type: TransactionProofType::SingleProof,
-                },
                 cancel_job_rx: None,
             }
         }

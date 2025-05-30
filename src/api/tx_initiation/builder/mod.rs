@@ -74,18 +74,11 @@
 //!        .await?;
 //!    drop(state_lock); // release lock asap.
 //!
-//!    // use cli options for building proof, but override proof-type
-//!    let options = TritonVmProofJobOptionsBuilder::new()
-//!        .template(&gsl.cli().into())
-//!        .proof_type(TransactionProofType::PrimitiveWitness)
-//!        .build();
-//!
 //!    // generate simplistic PrimitiveWitness "proof"
 //!    // This exposes secrets, so tx cannot be broadcast until
 //!    // proof is upgraded to ProofCollection.
 //!    let proof = TransactionProofBuilder::new()
 //!        .transaction_details(&tx_details)
-//!        .job_queue(vm_job_queue())
 //!        .proof_job_options(gsl.cli().into())
 //!        .build()
 //!        .await?;
@@ -127,17 +120,12 @@
 //!
 //! # async fn example(tx_details: TransactionDetails, gsl: GlobalStateLock) -> anyhow::Result<TransactionProof> {
 //!
-//! // specify target proof-type = SingleProof
-//! let options = TritonVmProofJobOptionsBuilder::new()
-//!     .template(&gsl.cli().into())
-//!     .proof_type(TransactionProofType::SingleProof)
-//!     .build();
-//!
 //! // This will take minutes even on a very powerful machine.
 //! let proof = TransactionProofBuilder::new()
 //!     .transaction_details(&tx_details)
+//!     .transaction_proof_type(TransactionProofType::SingleProof)
 //!     .job_queue(vm_job_queue())
-//!     .proof_job_options(options)
+//!     .proof_job_options(gsl.cli().into())
 //!     .build()
 //!     .await?;
 //! # Ok(proof)
