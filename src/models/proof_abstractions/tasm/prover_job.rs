@@ -28,6 +28,8 @@ use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
 use crate::models::state::vm_proving_capability::VmProvingCapability;
 use crate::models::state::vm_proving_capability::VmProvingCapabilityError;
+use crate::util_types::log_vm_state;
+use crate::util_types::log_vm_state::LogProofInputsType;
 
 /// represents an error running a [ProverJob]
 #[derive(Debug, thiserror::Error)]
@@ -174,6 +176,12 @@ impl ProverJob {
     /// If we are in a test environment, try reading it from disk. If it is not
     /// there, generate it and store it to disk.
     async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
+        // log proof inputs if matching env var is set (may expose witness secrets)
+        // maybe_write() logs warning if error occurs; we ignore any error.
+        let _ = log_vm_state::maybe_write(LogProofInputsType::Proof, &self.claim, || {
+            self.nondeterminism.clone()
+        });
+
         // produce mock proofs if network so requires. (ie RegTest)
         if self.job_settings.network.use_mock_proof() {
             let proof = Proof::valid_mock(self.claim.clone());

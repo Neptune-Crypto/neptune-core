@@ -1,6 +1,4 @@
 use std::fmt::Display;
-use std::io::Write;
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use num_traits::Zero;
@@ -172,7 +170,6 @@ impl VmProvingCapability {
         debug_assert_eq!(program.hash(), claim.program_digest);
 
         let mut vmstate = VMState::new(program, claim.input.into(), nondeterminism);
-        let _ = Self::maybe_write_debuggable_vm_state_to_disk(&vmstate);
 
         let method = std::env::var("NEPTUNE_LOG2_PADDED_HEIGHT_METHOD")
             .unwrap_or_else(|_| "run".to_string());
@@ -200,37 +197,6 @@ impl VmProvingCapability {
                 }
             }
         }
-    }
-
-    /// If the environment variable NEPTUNE_WRITE_VM_STATE_DIR is set,
-    /// write the initial VM state to file `<DIR>/vm_state.<pid>.<random>.json`.
-    ///
-    /// This file can be used to debug the program using the [Triton TUI]:
-    /// ```sh
-    /// triton-tui --initial-state <file>
-    /// ```
-    ///
-    /// [Triton TUI]: https://crates.io/crates/triton-tui
-    pub fn maybe_write_debuggable_vm_state_to_disk(
-        vm_state: &VMState,
-    ) -> Result<Option<PathBuf>, LogVmStateError> {
-        let Ok(dir) = std::env::var("NEPTUNE_WRITE_VM_STATE_DIR") else {
-            return Ok(None);
-        };
-
-        let filename = format!(
-            "vm_state.{}.{}.json",
-            std::process::id(),
-            rand::random::<u32>()
-        );
-
-        let path = PathBuf::from(dir).join(filename);
-
-        let mut state_file =
-            std::fs::File::create(&path).map_err(|e| LogVmStateError::from((path.clone(), e)))?;
-        let state = serde_json::to_string(&vm_state)?;
-        write!(state_file, "{}", state).map_err(|e| LogVmStateError::from((path.clone(), e)))?;
-        Ok(Some(path))
     }
 
     /// automatically detect the log2_padded_height for this device.
@@ -312,25 +278,4 @@ pub enum VmProvingCapabilityError {
 
     #[error("device capability {capability} is insufficient to generate proof that requires capability {attempted}")]
     DeviceNotCapable { capability: u32, attempted: u32 },
-}
-
-#[derive(Debug, thiserror::Error, strum::EnumIs)]
-#[non_exhaustive]
-pub enum LogVmStateError {
-    #[error("could not obtain padded-height due to program execution error")]
-    IoError {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error(transparent)]
-    SerializeError(#[from] serde_json::Error),
-}
-
-impl From<(PathBuf, std::io::Error)> for LogVmStateError {
-    fn from(v: (PathBuf, std::io::Error)) -> Self {
-        let (path, source) = v;
-        Self::IoError { path, source }
-    }
 }

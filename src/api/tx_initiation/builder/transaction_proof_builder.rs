@@ -43,6 +43,8 @@ use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 use crate::triton_vm_job_queue::vm_job_queue;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::util_types::log_vm_state;
+use crate::util_types::log_vm_state::LogProofInputsType;
 
 /// a builder for [TransactionProof]
 ///
@@ -344,8 +346,16 @@ async fn gen_single<'a, F>(
     valid_mock: bool,
 ) -> Result<TransactionProof, CreateProofError>
 where
-    F: FnOnce() -> NonDeterminism + Send + Sync + 'a,
+    F: Clone + FnOnce() -> NonDeterminism + Send + Sync + 'a,
 {
+    // log proof inputs if matching env var is set. (does not expose witness secrets)
+    // maybe_write() logs warning if error occurs; we ignore any error.
+    let _ = log_vm_state::maybe_write(
+        LogProofInputsType::NoWitness,
+        &claim,
+        nondeterminism.clone(),
+    );
+
     Ok(TransactionProof::SingleProof(
         ProofBuilder::new()
             .program(SingleProof.program())
