@@ -606,6 +606,12 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockInfo>>;
 
+    /// Return block body for the specified block if found
+    async fn block_body(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<Block>>;
+
     /// Return the public announements contained in a specified block.
     ///
     /// Returns `None` if the selected block could not be found, otherwise
@@ -1160,6 +1166,12 @@ pub trait RPC {
         start_index: usize,
         number: usize,
     ) -> RpcResult<Vec<MempoolTransactionInfo>>;
+
+    /// Return Transaction by id from mempool if found
+    async fn mempool_tx(
+        token: rpc_auth::Token,
+        transaction_kid: TransactionKernelId,
+    ) -> RpcResult<Option<Transaction>>;
 
     /// Return the information used on the dashboard's overview tab
     ///
@@ -2363,6 +2375,30 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn block_body(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<Block>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+
+        let archival_state = state.chain.archival_state();
+
+        let Some(block) = archival_state.get_block(digest).await.unwrap() else {
+            return Ok(None);
+        };
+
+        Ok(Some(block))
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn public_announcements_in_block(
         self,
         _context: tarpc::context::Context,
@@ -3537,6 +3573,23 @@ impl RPC for NeptuneRPCServer {
 
         Ok(mempool_transactions)
     }
+
+    // documented in trait. do not add doc-comment.
+    async fn mempool_tx(
+        self,
+        _context: ::tarpc::context::Context,
+        token: rpc_auth::Token,
+        transaction_kid: TransactionKernelId,
+    ) -> RpcResult<Option<Transaction>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let global_state = self.state.lock_guard().await;
+
+        let tx = global_state.mempool.get(transaction_kid);
+
+        Ok(tx.cloned())
+    }
 }
 
 pub mod error {
@@ -3675,6 +3728,7 @@ mod tests {
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::random_transaction_kernel;
     use crate::tests::shared::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
     use crate::Block;
@@ -3772,6 +3826,10 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
+            .block_body(ctx, token, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
             .public_announcements_in_block(ctx, token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
@@ -3823,6 +3881,10 @@ mod tests {
             .broadcast_all_mempool_txs(ctx, token)
             .await;
         let _ = rpc_server.clone().mempool_overview(ctx, token, 0, 20).await;
+        let _ = rpc_server
+            .clone()
+            .mempool_tx(ctx, token, random_transaction_kernel().txid())
+            .await;
         let _ = rpc_server.clone().clear_all_standings(ctx, token).await;
         let _ = rpc_server
             .clone()
