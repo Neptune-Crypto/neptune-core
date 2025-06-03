@@ -178,9 +178,12 @@ impl ProverJob {
     async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
         // log proof inputs if matching env var is set (may expose witness secrets)
         // maybe_write() logs warning if error occurs; we ignore any error.
-        let _ = log_vm_state::maybe_write(LogProofInputsType::Proof, &self.claim, || {
-            self.nondeterminism.clone()
-        });
+        let _ = log_vm_state::maybe_write(
+            LogProofInputsType::MayContainWalletSecrets,
+            self.program.clone(),
+            &self.claim,
+            || self.nondeterminism.clone(),
+        );
 
         // produce mock proofs if network so requires. (ie RegTest)
         if self.job_settings.network.use_mock_proof() {

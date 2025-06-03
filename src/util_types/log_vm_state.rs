@@ -2,8 +2,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::models::blockchain::shared::Hash as NeptuneHash;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 use crate::triton_vm::vm::VMState;
@@ -12,24 +11,25 @@ use crate::triton_vm::vm::VMState;
 ///
 /// this type facilitates offering distinct logging modes for:
 ///
-/// 1. `Proof` (any kind of Proof)
-/// 2. `NoWitness`
+/// 1. `MayContainWalletSecrets` (any kind of Proof)
+/// 2. `DoesNotContainWalletSecrets`
 ///
-/// The `Proof` mode is useful for logging inputs to every single Proof that is
-/// generated.  These include proofs generated from `PrimitiveWitness` meaning
-/// that the claims expose secrets and should not be shared. This mode of
-/// logging is considered a security risk, but can be useful for investigating
-/// or researching alone, or on testnet(s), etc.
+/// The `MayContainWalletSecrets` mode is useful for logging inputs to every
+/// single Proof that is generated.  These include proofs generated from
+/// `PrimitiveWitness` meaning that the claims expose secrets and should not be
+/// shared. This mode of logging is considered a security risk, but can be
+/// useful for investigating or researching alone, or on testnet(s), etc.
 ///
-/// The `NoWitness` mode is useful when logging proof inputs for purposes of
-/// sharing with others, eg neptune-core developers for debugging.  However it
-/// does not log any Proofs generated from a `PrimitiveWitness`.
+/// The `DoesNotContainWalletSecrets` mode is useful when logging proof inputs for
+/// purposes of sharing with others, eg neptune-core developers for debugging.
+/// However it does not log any Proofs generated from a `PrimitiveWitness`
+/// and thus does not leak wallet secrets.
 pub enum LogProofInputsType {
-    /// log any inputs of any kind of proof, possibly leaking witness secrets
-    Proof,
+    /// log proof inputs that may contain wallet secrets
+    MayContainWalletSecrets,
 
-    /// log inputs of proof, without leaking witness secrets
-    NoWitness,
+    /// log proof inputs that do not contain wallet secrets
+    DoesNotContainWalletSecrets,
 }
 
 impl LogProofInputsType {
@@ -39,16 +39,16 @@ impl LogProofInputsType {
     /// directory in which to write proof files.
     pub const fn env_var_name(&self) -> &str {
         match *self {
-            Self::Proof => "NEPTUNE_VM_STATE_DIR",
-            Self::NoWitness => "NEPTUNE_VM_STATE_NO_WITNESS_DIR",
+            Self::MayContainWalletSecrets => "NEPTUNE_VM_STATE_WITH_SECRETS_DIR",
+            Self::DoesNotContainWalletSecrets => "NEPTUNE_VM_STATE_NO_SECRETS_DIR",
         }
     }
 
     /// returns file name prefix
     pub const fn file_prefix(&self) -> &str {
         match *self {
-            Self::Proof => "vm_state.claim",
-            Self::NoWitness => "vm_state.no_witness_claim",
+            Self::MayContainWalletSecrets => "vm_state.unsafe_to_share",
+            Self::DoesNotContainWalletSecrets => "vm_state.safe_to_share",
         }
     }
 }
@@ -71,16 +71,18 @@ impl LogProofInputsType {
 ///
 /// Security:
 ///
-/// Files of type [LogProofInputsType::Proof] should only be used for debugging
-/// by the wallet owner as they may contain wallet secrets.
+/// Files of type [LogProofInputsType::MayContainWalletSecrets] should only be
+/// used for debugging by the wallet owner as they may contain wallet secrets.
 ///
-/// Files of type [LogProofInputsType::NoWitness] can be shared with others
-/// eg, neptune-core developers, for purposes of debugging/assistance.
+/// Files of type [LogProofInputsType::DoesNotContainWalletSecrets] can be shared
+/// with others eg, neptune-core developers, for purposes of
+/// debugging/assistance.
 ///
 /// It is the *callers* responsibility to ensure that the provided claim matches
 /// the `log_proof_inputs_type`
 pub fn maybe_write<'a, F>(
     log_proof_inputs_type: LogProofInputsType,
+    program: Program,
     claim: &Claim,
     nondeterminism: F,
 ) -> Result<Option<PathBuf>, LogVmStateError>
@@ -92,20 +94,17 @@ where
     };
     let prefix = log_proof_inputs_type.file_prefix();
 
-    write(&dir, prefix, claim, nondeterminism()).inspect_err(|e| tracing::warn!("{}", e))
+    write(&dir, prefix, program, claim, nondeterminism()).inspect_err(|e| tracing::warn!("{}", e))
 }
 
 fn write(
     dir: &str,
     file_prefix: &str,
+    program: Program,
     claim: &Claim,
     nondeterminism: NonDeterminism,
 ) -> Result<Option<PathBuf>, LogVmStateError> {
-    let vm_state = VMState::new(
-        SingleProof.program(),
-        claim.input.clone().into(),
-        nondeterminism,
-    );
+    let vm_state = VMState::new(program, claim.input.clone().into(), nondeterminism);
 
     let filename = format!(
         "{}.{}.{}.json",

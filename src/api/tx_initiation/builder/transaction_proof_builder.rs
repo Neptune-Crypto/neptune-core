@@ -351,7 +351,8 @@ where
     // log proof inputs if matching env var is set. (does not expose witness secrets)
     // maybe_write() logs warning if error occurs; we ignore any error.
     let _ = log_vm_state::maybe_write(
-        LogProofInputsType::NoWitness,
+        LogProofInputsType::DoesNotContainWalletSecrets,
+        SingleProof.program(),
         &claim,
         nondeterminism.clone(),
     );

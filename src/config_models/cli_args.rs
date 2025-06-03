@@ -383,7 +383,7 @@ pub struct Args {
     pub(crate) scan_keys: Option<usize>,
 }
 
-pub const VM_PROVING_CAPABILITY_HELP: &str = const_format::formatcp!(
+const VM_PROVING_CAPABILITY_HELP: &str = const_format::formatcp!(
     "\
 Specifies device's capability to generate TritonVM proofs
 
