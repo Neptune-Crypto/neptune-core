@@ -686,8 +686,8 @@ async fn main() -> Result<()> {
             let wallet_file_name = WalletFileContext::wallet_secret_path(&wallet_dir);
             if !wallet_file_name.exists() {
                 println!(
-                    concat!("Cannot Shamir-secret-share wallet secret because there is no wallet.dat file to read from.\n \
-                    Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
+                    "Cannot Shamir-secret-share wallet secret because there is no wallet.dat file to read from.\n \
+                    Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`."
                 );
                 return Ok(());
             }

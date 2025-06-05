@@ -899,23 +899,20 @@ impl PeerLoopHandler {
                         .try_get_leaf(block_height.into())
                         .await;
 
-                    let canonical_block_digest = match canonical_block_digest {
-                        None => {
-                            let own_tip_height = self
-                                .global_state_lock
-                                .lock_guard()
-                                .await
-                                .chain
-                                .light_state()
-                                .header()
-                                .height;
-                            warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
-                            self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
-                                .await?;
+                    let Some(canonical_block_digest) = canonical_block_digest else {
+                        let own_tip_height = self
+                            .global_state_lock
+                            .lock_guard()
+                            .await
+                            .chain
+                            .light_state()
+                            .header()
+                            .height;
+                        warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
+                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
+                            .await?;
 
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
-                        Some(digest) => digest,
+                        return Ok(KEEP_CONNECTION_ALIVE);
                     };
 
                     let canonical_chain_block: Block = self

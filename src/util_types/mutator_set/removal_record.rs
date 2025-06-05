@@ -204,9 +204,9 @@ impl RemovalRecord {
                 .map(|x| (x / u128::from(CHUNK_SIZE)) as u64)
                 .collect();
 
-            chunks_set
-                .iter()
-                .for_each(|chnkidx| chunk_index_to_rr_index.entry(*chnkidx).or_default().push(i));
+            for chnkidx in chunks_set {
+                chunk_index_to_rr_index.entry(chnkidx).or_default().push(i);
+            }
         });
 
         // Find the removal records that need a new dictionary entry for the chunk

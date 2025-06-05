@@ -1820,7 +1820,7 @@ impl MainLoopHandler {
         }
     }
 
-    async fn graceful_shutdown(&mut self, task_handles: Vec<JoinHandle<()>>) -> Result<()> {
+    async fn graceful_shutdown(&mut self, join_handles: Vec<JoinHandle<()>>) -> Result<()> {
         info!("Shutdown initiated.");
 
         // Stop mining
@@ -1836,11 +1836,13 @@ impl MainLoopHandler {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Child processes should have finished by now. If not, abort them violently.
-        task_handles.iter().for_each(|jh| jh.abort());
+        // Child tasks should have finished by now. If not, abort them.
+        for jh in &join_handles {
+            jh.abort();
+        }
 
         // wait for all to finish.
-        futures::future::join_all(task_handles).await;
+        futures::future::join_all(join_handles).await;
 
         Ok(())
     }
