@@ -10,6 +10,8 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
+pub(crate) mod upgrade_priority;
+
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -41,8 +43,6 @@ use priority_queue::double_priority_queue::iterators::IntoSortedIter as DoubleEn
 use priority_queue::priority_queue::iterators::IntoSortedIter as SingleEndedIterator;
 use priority_queue::DoublePriorityQueue;
 use priority_queue::PriorityQueue;
-use serde::Deserialize;
-use serde::Serialize;
 use tracing::debug;
 use tracing::error;
 use tracing::warn;
@@ -51,7 +51,7 @@ use twenty_first::math::digest::Digest;
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
-use crate::main_loop::proof_upgrader::UpgradeIncentive;
+use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -62,6 +62,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 use crate::prelude::twenty_first;
 
 // 72 hours in secs
@@ -92,12 +93,13 @@ pub enum MempoolEvent {
     UpdateTxMutatorSet(TransactionKernelId, Transaction),
 }
 
-#[derive(Debug, GetSize, Clone, Serialize, Deserialize)]
+#[derive(Debug, GetSize, Clone)]
 struct MempoolTransaction {
     transaction: Transaction,
 
     /// The value of a transaction for the node operator.
-    value: TransactionValue,
+    #[get_size(ignore)]
+    upgrade_priority: UpgradePriority,
 
     /// Primitive witness of the transaction. Can be used to update proof-
     /// collection backed transactions. If set, indicates that the transaction
@@ -160,7 +162,7 @@ pub struct Mempool {
     /// this priority queue.
     // This is relatively small compared to `tx_dictionary`
     #[get_size(ignore)]
-    values: PriorityQueue<TransactionKernelId, TransactionValue>,
+    values: PriorityQueue<TransactionKernelId, UpgradePriority>,
 
     /// The digest of the chain's tip. Used to discover reorganizations.
     tip_digest: Digest,
@@ -245,7 +247,7 @@ impl Mempool {
     pub(crate) fn preferred_proof_collection(
         &self,
         num_proofs_threshold: usize,
-    ) -> Option<(&TransactionKernel, &ProofCollection, TransactionValue)> {
+    ) -> Option<(&TransactionKernel, &ProofCollection, UpgradePriority)> {
         for txid in self
             .value_iter()
             .map(|(txid, _)| txid)
@@ -263,7 +265,7 @@ impl Mempool {
                     return Some((
                         &candidate.transaction.kernel,
                         proof_collection,
-                        candidate.value,
+                        candidate.upgrade_priority,
                     ));
                 }
             }
@@ -284,9 +286,9 @@ impl Mempool {
     /// Returns the pair of transaction along with their sum of values.
     pub(crate) fn preferred_single_proof_pair(
         &self,
-    ) -> Option<([(TransactionKernel, Proof); 2], TransactionValue)> {
+    ) -> Option<([(TransactionKernel, Proof); 2], UpgradePriority)> {
         let mut ret = vec![];
-        let mut value = NativeCurrencyAmount::zero();
+        let mut priority = UpgradePriority::Irrelevant;
         for txid in self
             .value_iter()
             .map(|(txid, _)| txid)
@@ -304,7 +306,9 @@ impl Mempool {
 
             // Do not attempt to merge transactions that neither have a value
             // nor pay a fee.
-            if candidate.value.is_zero() && candidate.transaction.kernel.fee.is_zero() {
+            if candidate.upgrade_priority.is_irrelevant()
+                && candidate.transaction.kernel.fee.is_zero()
+            {
                 continue;
             }
 
@@ -313,7 +317,7 @@ impl Mempool {
                 continue;
             }
 
-            value += candidate.value;
+            priority = priority + candidate.upgrade_priority;
 
             ret.push(txid);
 
@@ -334,7 +338,7 @@ impl Mempool {
                     candidate.transaction.proof.to_owned().into_single_proof(),
                 )
             }),
-            value,
+            priority,
         ))
     }
 
@@ -410,7 +414,7 @@ impl Mempool {
     pub(super) fn insert(
         &mut self,
         new_tx: Transaction,
-        value: TransactionValue,
+        priority: UpgradePriority,
     ) -> Vec<MempoolEvent> {
         fn new_tx_has_higher_proof_quality(
             new_tx: &Transaction,
@@ -465,7 +469,7 @@ impl Mempool {
         };
         let as_mempool_transaction = MempoolTransaction {
             transaction: new_tx.clone(),
-            value,
+            upgrade_priority: priority,
             primitive_witness,
         };
 
@@ -494,8 +498,8 @@ impl Mempool {
 
         self.fee_densities.push(txid, new_tx.fee_density());
         self.tx_dictionary.insert(txid, as_mempool_transaction);
-        if value.is_positive() {
-            self.values.push(txid, value);
+        if !priority.is_irrelevant() {
+            self.values.push(txid, priority);
         }
         events.push(MempoolEvent::AddTx(new_tx));
 
@@ -767,7 +771,7 @@ impl Mempool {
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];
         for (tx_id, tx) in &mut self.tx_dictionary {
-            if !(composing || tx.value.is_positive()) {
+            if !(composing || tx.upgrade_priority.is_irrelevant()) {
                 debug!(
                     "Not updating transaction {tx_id} since it's not \
                     initiated by us, and client is not composing."
@@ -810,7 +814,7 @@ impl Mempool {
                             old_proof.to_owned(),
                             previous_mutator_set_accumulator.clone(),
                             mutator_set_update.clone(),
-                            UpgradeIncentive::BalanceAffecting(tx.value),
+                            UpgradeIncentive::BalanceAffecting(tx.upgrade_priority),
                         );
                         debug!("Updating single-proof supported transaction {tx_id} to new mutator set.");
 
@@ -829,7 +833,7 @@ impl Mempool {
             if !can_update {
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
-                if tx.value.is_positive() {
+                if tx.upgrade_priority.is_positive() {
                     warn!("Unable to update own transaction to new mutator set. You may need to create this transaction again. Removing {tx_id} from mempool.");
                 }
             }
@@ -914,7 +918,7 @@ impl Mempool {
     /// Yields the transaction kernel IDs in order of descending value.
     pub fn value_iter(
         &self,
-    ) -> SingleEndedIterator<TransactionKernelId, NativeCurrencyAmount, RandomState> {
+    ) -> SingleEndedIterator<TransactionKernelId, UpgradePriority, RandomState> {
         let dpq_clone = self.values.clone();
         dpq_clone.into_sorted_iter()
     }

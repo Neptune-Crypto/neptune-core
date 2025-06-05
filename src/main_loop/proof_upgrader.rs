@@ -15,6 +15,7 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
+use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -75,53 +76,6 @@ pub enum UpgradeJob {
         upgrade_incentive: UpgradeIncentive,
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
-}
-
-/// Enumerate the incentive to perform a transaction upgrade.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum UpgradeIncentive {
-    /// The transaction is upgraded because fees can be gobbled.
-    Gobble(NativeCurrencyAmount),
-
-    /// The transaction is upgraded because we'd like to see it go through for
-    /// other reasons that fee-collection. Usually because it affects our
-    /// balance.
-    BalanceAffecting(NativeCurrencyAmount),
-}
-
-impl UpgradeIncentive {
-    fn upgrade_is_worth_it(&self, min_gobbling_fee: NativeCurrencyAmount) -> bool {
-        match self {
-            UpgradeIncentive::Gobble(gobble_amt) => *gobble_amt >= min_gobbling_fee,
-            UpgradeIncentive::BalanceAffecting(_) => true,
-        }
-    }
-}
-
-impl PartialOrd for UpgradeIncentive {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (UpgradeIncentive::Gobble(self_amt), UpgradeIncentive::Gobble(other_amt)) => {
-                self_amt.partial_cmp(other_amt)
-            }
-            (UpgradeIncentive::Gobble(_), UpgradeIncentive::BalanceAffecting(_)) => {
-                Some(std::cmp::Ordering::Less)
-            }
-            (UpgradeIncentive::BalanceAffecting(_), UpgradeIncentive::Gobble(_)) => {
-                Some(std::cmp::Ordering::Greater)
-            }
-            (
-                UpgradeIncentive::BalanceAffecting(self_amt),
-                UpgradeIncentive::BalanceAffecting(other_amt),
-            ) => self_amt.partial_cmp(other_amt),
-        }
-    }
-}
-
-impl Ord for UpgradeIncentive {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).expect("Ord must be implemented.")
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -218,8 +172,8 @@ impl UpgradeJob {
     /// Gobbling fees are charged when a transaction is upgraded from
     /// proof-collection to single-proof, or when two single proofs are merged.
     /// The other cases are either not worth it, as you need to create a single-
-    /// proof to gobble, or the proof upgrade relates to own funds. Gobbling
-    /// fees are only charged on 3rd party transactions.
+    /// proof to gobble, or the proof upgrade relates to a transaction that we
+    /// already have a financial interest in, so we don't charge a fee.
     ///
     /// In particular, no fees are charged for updating a transaction's mutator
     /// set data because doing so would require a single proof and a merge step,
@@ -231,13 +185,13 @@ impl UpgradeJob {
                 upgrade_incentive, ..
             } => match upgrade_incentive {
                 UpgradeIncentive::Gobble(amount) => *amount,
-                UpgradeIncentive::BalanceAffecting(_) => NativeCurrencyAmount::zero(),
+                _ => NativeCurrencyAmount::zero(),
             },
             UpgradeJob::Merge {
                 upgrade_incentive, ..
             } => match upgrade_incentive {
                 UpgradeIncentive::Gobble(amount) => *amount,
-                UpgradeIncentive::BalanceAffecting(_) => NativeCurrencyAmount::zero(),
+                _ => NativeCurrencyAmount::zero(),
             },
             _ => NativeCurrencyAmount::zero(),
         }
@@ -370,14 +324,9 @@ impl UpgradeJob {
         let mut upgrade_job = self;
 
         let upgrade_incentive = upgrade_job.upgrade_incentive();
-        let tx_value = match upgrade_incentive {
-            UpgradeIncentive::Gobble(_) => NativeCurrencyAmount::zero(),
-            UpgradeIncentive::BalanceAffecting(native_currency_amount) => native_currency_amount,
-        };
-        let priority = if tx_value.is_negative() {
-            TritonVmJobPriority::High
-        } else {
-            TritonVmJobPriority::Low
+        let priority = match upgrade_incentive {
+            UpgradeIncentive::Critical => TritonVmJobPriority::High,
+            _ => TritonVmJobPriority::Low,
         };
 
         // process in a loop.  in case a new block comes in while processing
@@ -469,7 +418,7 @@ impl UpgradeJob {
                     // Insert tx into mempool before notifying peers, so we're
                     // sure to have it when they ask.
                     global_state
-                        .mempool_insert(upgraded.clone(), tx_value)
+                        .mempool_insert(upgraded.clone(), upgrade_incentive.into())
                         .await;
 
                     global_state

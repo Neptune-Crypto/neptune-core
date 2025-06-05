@@ -1,4 +1,5 @@
 pub mod proof_upgrader;
+pub(crate) mod upgrade_incentive;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

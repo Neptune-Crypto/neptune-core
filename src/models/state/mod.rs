@@ -82,6 +82,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
+use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -289,7 +290,7 @@ impl GlobalStateLock {
         self.cli = cli;
     }
 
-    /// stores/records a transaction into local state (mempool and wallet)
+    /// stores/records a locally-initiated transaction into the global state.
     pub async fn record_transaction(
         &mut self,
         tx_artifacts: &TxCreationArtifacts,
@@ -332,9 +333,8 @@ impl GlobalStateLock {
             .await;
 
         // insert transaction into mempool
-        // todo: we should use Arc<Tx> in mempool to avoid cloning large Tx.
-        let tx_value = tx_artifacts.details().tx_outputs.total_native_coins();
-        gsm.mempool_insert((*transaction).clone(), tx_value).await;
+        gsm.mempool_insert((*transaction).clone(), UpgradePriority::Critical)
+            .await;
 
         tracing::debug!("flush dbs");
         gsm.flush_databases().await.expect("flushed DBs");
@@ -1764,7 +1764,7 @@ impl GlobalState {
     pub(crate) async fn mempool_insert(
         &mut self,
         transaction: Transaction,
-        value: NativeCurrencyAmount,
+        value: UpgradePriority,
     ) {
         let events = self.mempool.insert(transaction, value);
         self.wallet_state.handle_mempool_events(events).await
