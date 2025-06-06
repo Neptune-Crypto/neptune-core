@@ -930,12 +930,13 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 pub(crate) async fn fake_valid_block_from_tx_for_tests(
     predecessor: &Block,
     tx: Transaction,
-    nonce: Digest,
+    seed: [u8; 32],
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx).await;
 
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
     while !block.has_proof_of_work(predecessor.header()) {
-        mine_iteration_for_tests(&mut block, nonce);
+        mine_iteration_for_tests(&mut block, &mut rng);
     }
 
     block
@@ -1032,7 +1033,7 @@ async fn fake_block_successor(
     predecessor: &Block,
     timestamp: Timestamp,
     with_valid_pow: bool,
-    rness: Randomness<1, 3>,
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
     fake_block_successor_with_merged_tx(
@@ -1051,7 +1052,7 @@ pub async fn fake_block_successor_with_merged_tx(
     timestamp: Timestamp,
     with_valid_pow: bool,
     txs: Vec<Transaction>,
-    rness: Randomness<1, 3>,
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
     let (mut seed_bytes, mut seed_digests) = (rness.bytes_arr.to_vec(), rness.digests.to_vec());
@@ -1074,7 +1075,7 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(predecessor, block_tx, seed_digests.pop().unwrap()).await
+        fake_valid_block_from_tx_for_tests(predecessor, block_tx, seed_bytes.pop().unwrap()).await
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }
@@ -1083,7 +1084,7 @@ pub async fn fake_block_successor_with_merged_tx(
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
-    rness: Randomness<1, 3>,
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
     fake_block_successor(predecessor, timestamp, false, rness, network).await
@@ -1092,7 +1093,7 @@ pub(crate) async fn fake_valid_block_proposal_successor_for_test(
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
-    rness: Randomness<1, 3>,
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
     fake_block_successor(predecessor, timestamp, true, rness, network).await
@@ -1105,7 +1106,7 @@ pub(crate) async fn fake_valid_successor_for_tests(
 /// will not pass `triton_vm::verify`, as its validity is only mocked.
 pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
-    rness: Randomness<1, 3>,
+    rness: Randomness<2, 2>,
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     fake_valid_successor_for_tests(
@@ -1126,7 +1127,7 @@ pub(crate) async fn fake_valid_block_for_tests(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     predecessor: &Block,
     block_interval: Timestamp,
-    rness: [Randomness<1, 3>; N],
+    rness: [Randomness<2, 2>; N],
     network: Network,
 ) -> [Block; N] {
     fake_valid_sequence_of_blocks_for_tests_dyn(
@@ -1149,7 +1150,7 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     mut predecessor: &Block,
     block_interval: Timestamp,
-    mut rness_vec: Vec<Randomness<1, 3>>,
+    mut rness_vec: Vec<Randomness<2, 2>>,
     network: Network,
 ) -> Vec<Block> {
     let mut blocks = vec![];
@@ -1194,9 +1195,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
 // recursively copy source dir to destination
 pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::Result<()> {
     if !source.is_dir() {
-        return Err(std::io::Error::other(
-            "Source is not a directory",
-        ));
+        return Err(std::io::Error::other("Source is not a directory"));
     }
     std::fs::create_dir_all(destination)?;
     for entry in std::fs::read_dir(source)? {

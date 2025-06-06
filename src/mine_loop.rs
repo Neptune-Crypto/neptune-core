@@ -1076,8 +1076,8 @@ pub(crate) mod mine_loop_tests {
     /// Does *not* update the timestamp of the block and therefore also does not
     /// update the difficulty field, as this applies to the next block and only
     /// changes as a result of the timestamp of this block.
-    pub(crate) fn mine_iteration_for_tests(block: &mut Block, nonce: Digest) {
-        block.set_header_nonce(nonce);
+    pub(crate) fn mine_iteration_for_tests(block: &mut Block, rng: &mut StdRng) {
+        block.set_header_nonce(rng.random());
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds
