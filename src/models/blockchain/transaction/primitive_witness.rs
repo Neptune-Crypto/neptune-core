@@ -22,6 +22,7 @@ use super::transaction_kernel::TransactionKernelModifier;
 use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::TransactionDetails;
+use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::TxInputList;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
@@ -94,6 +95,15 @@ impl SaltedUtxos {
                 .try_into()
                 .unwrap(),
         }
+    }
+
+    /// The total value contained in the UTXOs, regardless of which other coins
+    /// are present (even if that makes the Neptune coins unspendable.)
+    pub(crate) fn get_native_currency_amount(&self) -> NativeCurrencyAmount {
+        self.utxos
+            .iter()
+            .map(|x| x.get_native_currency_amount())
+            .sum()
     }
 }
 

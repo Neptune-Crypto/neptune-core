@@ -72,6 +72,11 @@ impl TransactionProof {
         matches!(self, Self::SingleProof(_))
     }
 
+    /// Convert a transaction proof into a Triton VM proof.
+    ///
+    /// # Panics
+    ///
+    /// - If the proof type is any other than [TransactionProof::SingleProof].
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,

@@ -3331,10 +3331,10 @@ pub(crate) mod tests {
         use crate::config_models::cli_args;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::Transaction;
+        use crate::models::state::mempool::upgrade_priority::UpgradePriority;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-        use crate::models::state::TransactionOrigin;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
@@ -3431,7 +3431,7 @@ pub(crate) mod tests {
             global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx).clone(), TransactionOrigin::Own)
+                .mempool_insert((*tx).clone(), UpgradePriority::Critical)
                 .await;
 
             {
@@ -3578,9 +3578,10 @@ pub(crate) mod tests {
             );
 
             // generate one transaction
+            let send_amt1 = NativeCurrencyAmount::coins(1);
             let tx1 = outgoing_transaction(
                 &mut alice,
-                NativeCurrencyAmount::coins(1),
+                send_amt1,
                 NativeCurrencyAmount::coins(1),
                 now,
                 change_key,
@@ -3592,13 +3593,14 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx1).clone(), TransactionOrigin::Own)
+                .mempool_insert((*tx1).clone(), UpgradePriority::Critical)
                 .await;
 
             // generate a second transaction
+            let send_amt2 = NativeCurrencyAmount::coins(1);
             let tx2 = outgoing_transaction(
                 &mut alice,
-                NativeCurrencyAmount::coins(1),
+                send_amt2,
                 NativeCurrencyAmount::coins(1),
                 now,
                 change_key,
@@ -3610,7 +3612,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx2).clone(), TransactionOrigin::Own)
+                .mempool_insert((*tx2).clone(), UpgradePriority::Critical)
                 .await;
 
             // verify that the mempool contains two transactions
@@ -4698,11 +4700,11 @@ pub(crate) mod tests {
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::main_loop::proof_upgrader::UpgradeJob;
+        use crate::main_loop::upgrade_incentive::UpgradeIncentive;
         use crate::mine_loop::create_block_transaction;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-        use crate::models::state::mempool::TransactionOrigin;
         use crate::MainToPeerTask;
         use crate::PEER_CHANNEL_CAPACITY;
 
@@ -4934,6 +4936,7 @@ pub(crate) mod tests {
             };
             let mut rando =
                 mock_genesis_global_state(2, rando_wallet_secret.clone(), rando_cli_args).await;
+            let upgrade_incentive = UpgradeIncentive::Gobble(fee);
             let upgrade_job_one = UpgradeJob::ProofCollectionToSingleProof {
                 kernel: proof_collection_transaction.kernel.clone(),
                 proof: proof_collection_transaction
@@ -4941,18 +4944,12 @@ pub(crate) mod tests {
                     .clone()
                     .into_proof_collection(),
                 mutator_set: genesis_block.mutator_set_accumulator_after().unwrap(),
-                gobbling_fee: fee,
+                upgrade_incentive,
             };
             let (channel_to_nowhere_one, nowhere_one) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
             upgrade_job_one
-                .handle_upgrade(
-                    dummy_queue.clone(),
-                    TransactionOrigin::Foreign,
-                    true,
-                    rando.clone(),
-                    channel_to_nowhere_one,
-                )
+                .handle_upgrade(dummy_queue.clone(), rando.clone(), channel_to_nowhere_one)
                 .await;
             drop(nowhere_one); // drop must occur after message is sent
 
@@ -5005,17 +5002,12 @@ pub(crate) mod tests {
                 single_proof_transaction.proof.into_single_proof(),
                 genesis_mutator_set,
                 block_one.mutator_set_update().unwrap(),
+                upgrade_incentive,
             ));
             let (channel_to_nowhere_two, nowhere_two) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
             upgrade_job_two
-                .handle_upgrade(
-                    dummy_queue.clone(),
-                    TransactionOrigin::Foreign,
-                    true,
-                    rando.clone(),
-                    channel_to_nowhere_two,
-                )
+                .handle_upgrade(dummy_queue.clone(), rando.clone(), channel_to_nowhere_two)
                 .await;
             drop(nowhere_two); // drop must occur after message is sent
 

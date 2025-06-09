@@ -1953,7 +1953,7 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
-    use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::mempool::upgrade_priority::UpgradePriority;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
@@ -3376,7 +3376,7 @@ mod tests {
                 state_lock
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(dummy_tx.clone(), TransactionOrigin::Own)
+                    .mempool_insert(dummy_tx.clone(), UpgradePriority::Irrelevant)
                     .await;
             }
 
@@ -3553,7 +3553,7 @@ mod tests {
         state_lock
             .lock_guard_mut()
             .await
-            .mempool_insert(transaction_1.clone(), TransactionOrigin::Foreign)
+            .mempool_insert(transaction_1.clone(), UpgradePriority::Irrelevant)
             .await;
         assert!(
             !state_lock.lock_guard().await.mempool.is_empty(),
@@ -3790,7 +3790,7 @@ mod tests {
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert((*own_tx).to_owned(), TransactionOrigin::Foreign)
+                    .mempool_insert((*own_tx).to_owned(), UpgradePriority::Irrelevant)
                     .await;
 
                 let tx_notification: TransactionNotification = new_tx.try_into().unwrap();

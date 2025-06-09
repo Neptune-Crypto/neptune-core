@@ -1093,7 +1093,7 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
-    use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::mempool::upgrade_priority::UpgradePriority;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
@@ -1294,8 +1294,9 @@ pub(crate) mod tests {
             .wallet_state
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
+        let amt_to_alice = NativeCurrencyAmount::coins(4);
         let output_to_alice = TxOutput::offchain_native_currency(
-            NativeCurrencyAmount::coins(4),
+            amt_to_alice,
             rng.random(),
             alice_key.to_address().into(),
             false,
@@ -1387,7 +1388,7 @@ pub(crate) mod tests {
             {
                 let mut alice_gsm = alice.lock_guard_mut().await;
                 alice_gsm
-                    .mempool_insert((*tx_from_alice).clone(), TransactionOrigin::Own)
+                    .mempool_insert((*tx_from_alice).clone(), UpgradePriority::Critical)
                     .await;
                 assert_eq!(1, alice_gsm.mempool.len());
             }

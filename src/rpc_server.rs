@@ -3538,7 +3538,7 @@ impl RPC for NeptuneRPCServer {
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state
             .mempool
-            .get_sorted_iter()
+            .fee_density_iter()
             .skip(start_index)
             .take(number)
             .map(|(txkid, _)| txkid)
