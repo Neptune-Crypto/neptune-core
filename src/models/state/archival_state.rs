@@ -911,30 +911,31 @@ impl ArchivalState {
         ret
     }
 
-    /// Returns Some(MutatorSetUpdate) if a path could be found from tip to a
-    /// block with the indicated mutator set.
+    /// Returns the old mutator set matching the provided digest as well as the
+    /// mutator set update required to go from the old state to that in the tip.
     ///
     /// # Warning
     ///
     /// This can be a very expensive function to run if it's called with a high
     /// max search depth, as it loads all the blocks in the search path into
     /// memory. A max search depth of 0 means that only the tip is checked.
-    pub(crate) async fn get_mutator_set_update_to_tip(
+    async fn mutator_set_to_tip_internal(
         &mut self,
-        mutator_set: &MutatorSetAccumulator,
+        old_ms_digest: Digest,
+        old_aocl_num_leafs: Option<u64>,
         max_search_depth: usize,
-    ) -> Option<MutatorSetUpdate> {
+    ) -> Option<(MutatorSetAccumulator, MutatorSetUpdate)> {
         let mut search_depth = 0;
         let mut block_mutations = vec![];
 
         let mut haystack = self.get_tip().await;
         let mut parent = self.get_tip_parent().await;
-        loop {
+        let old_msa = loop {
             let haystack_msa = haystack
                 .mutator_set_accumulator_after()
                 .expect("Block from state must have mutator set after");
-            if haystack_msa.hash() == mutator_set.hash() {
-                break;
+            if haystack_msa.hash() == old_ms_digest {
+                break haystack_msa;
             }
 
             search_depth += 1;
@@ -943,7 +944,8 @@ impl ArchivalState {
             // just its hash allows us to do early return here. Parent == None
             // indicates that we've gone all the way back to genesis, with no
             // match.
-            if mutator_set.aocl.num_leafs() > haystack_msa.aocl.num_leafs()
+            if old_aocl_num_leafs
+                .is_some_and(|old_num_leafs| old_num_leafs > haystack_msa.aocl.num_leafs())
                 || search_depth > max_search_depth
                 || parent.is_none()
             {
@@ -963,16 +965,16 @@ impl ArchivalState {
                 .get_block(haystack.header().prev_block_digest)
                 .await
                 .expect("Must succeed in reading block");
-        }
+        };
 
         // The removal records collected above were valid for each block but
         // are in the general case not valid for the `mutator_set` which was
         // given as input to this function. In order to find the right removal
-        // records, we make ephemeral changes (not persisted to disk) to the
-        // archival mutator set. This allows us to read out MMR-authentication
-        // paths from a previous state of the mutator set. It's crucial that
-        // these changes are not persisted, as that would leave the archival
-        // mutator set in a state incompatible with the tip.
+        // records, we, temporarily, roll back the state of the archival mutator
+        // set. This allows us to read out MMR-authentication paths from a
+        // previous state of the mutator set. It's crucial that these changes
+        // are not persisted, as that would leave the archival mutator set in a
+        // state incompatible with the tip.
         self.archival_mutator_set.persist().await;
         for (additions, removals) in &block_mutations {
             for rr in removals.iter().rev() {
@@ -1022,7 +1024,49 @@ impl ArchivalState {
 
         self.archival_mutator_set.drop_unpersisted().await;
 
-        Some(MutatorSetUpdate::new(removal_records, addition_records))
+        Some((
+            old_msa,
+            MutatorSetUpdate::new(removal_records, addition_records),
+        ))
+    }
+
+    /// Returns the old mutator set matching the provided digest as well as the
+    /// mutator set update required to go from the old state to that in the tip.
+    ///
+    /// # Warning
+    ///
+    /// This can be a very expensive function to run if it's called with a high
+    /// max search depth, as it loads all the blocks in the search path into
+    /// memory. A max search depth of 0 means that only the tip is checked.
+    pub(crate) async fn old_mutator_set_and_mutator_set_update_to_tip(
+        &mut self,
+        old_mutator_set_digest: Digest,
+        max_search_depth: usize,
+    ) -> Option<(MutatorSetAccumulator, MutatorSetUpdate)> {
+        self.mutator_set_to_tip_internal(old_mutator_set_digest, None, max_search_depth)
+            .await
+    }
+
+    /// Returns Some(MutatorSetUpdate) if a path could be found from tip to a
+    /// block with the indicated mutator set.
+    ///
+    /// # Warning
+    ///
+    /// This can be a very expensive function to run if it's called with a high
+    /// max search depth, as it loads all the blocks in the search path into
+    /// memory. A max search depth of 0 means that only the tip is checked.
+    pub(crate) async fn get_mutator_set_update_to_tip(
+        &mut self,
+        mutator_set: &MutatorSetAccumulator,
+        max_search_depth: usize,
+    ) -> Option<MutatorSetUpdate> {
+        self.mutator_set_to_tip_internal(
+            mutator_set.hash(),
+            Some(mutator_set.aocl.num_leafs()),
+            max_search_depth,
+        )
+        .await
+        .map(|(_, msa)| msa)
     }
 
     /// Update the mutator set with a block after this block has been stored to
