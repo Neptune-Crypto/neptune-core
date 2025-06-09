@@ -50,6 +50,7 @@ use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;
+use crate::api::export::NeptuneProof;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -239,6 +240,38 @@ impl Mempool {
         } else {
             false
         }
+    }
+
+    /// Return the preferred single-proof backed transaction for the "update"
+    /// proof upgrade. Returns a transaction that is not synced to the tip
+    /// such that the caller can make the transaction synced again.
+    ///
+    /// Will always prioritize transactions with a positive upgrade priority.
+    pub(crate) fn preferred_update(
+        &self,
+    ) -> Option<(&TransactionKernel, &NeptuneProof, UpgradePriority)> {
+        for txid in self
+            .upgrade_priority_iter()
+            .map(|(txid, _)| txid)
+            .chain(self.fee_density_iter().map(|(txid, _)| txid))
+        {
+            let candidate = self.tx_dictionary.get(&txid).unwrap();
+            if self.tx_is_synced(&candidate.transaction.kernel) {
+                continue;
+            }
+
+            let TransactionProof::SingleProof(single_proof) = &candidate.transaction.proof else {
+                continue;
+            };
+
+            return Some((
+                &candidate.transaction.kernel,
+                single_proof,
+                candidate.upgrade_priority,
+            ));
+        }
+
+        None
     }
 
     /// Return the preferred proof collection for proof upgrading. Will always
@@ -2006,7 +2039,124 @@ mod tests {
         );
     }
 
-    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
+    /// Return a valid, deterministic transaction with a specified proof type.
+    /// Returned transaction is synced to the genesis block.
+    async fn tx_with_proof_type(
+        proof_type: TxProvingCapability,
+        network: Network,
+        fee: NativeCurrencyAmount,
+    ) -> std::sync::Arc<Transaction> {
+        let genesis_block = Block::genesis(network);
+        let bob_wallet_secret = WalletEntropy::devnet_wallet();
+        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let bob = mock_genesis_global_state(
+            2,
+            bob_wallet_secret.clone(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        let config = TxCreationConfig::default()
+            .recover_change_on_chain(bob_spending_key.into())
+            .with_prover_capability(proof_type);
+
+        // Clippy is wrong here. You can *not* eliminate the binding.
+        #[allow(clippy::let_and_return)]
+        let transaction = bob
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
+            .await
+            .unwrap()
+            .transaction;
+        transaction
+    }
+
+    mod proof_upgrade_candidates {
+        use proptest::prop_assert;
+        use proptest::prop_assert_eq;
+        use test_strategy::proptest;
+
+        use super::*;
+        use crate::tests::shared::fake_valid_successor_for_tests;
+
+        #[apply(shared_tokio_runtime)]
+        async fn sp_update_only_returns_unsynced_txs() {
+            let network = Network::Main;
+            let fee = NativeCurrencyAmount::coins(1);
+            let sp_tx = tx_with_proof_type(TxProvingCapability::SingleProof, network, fee).await;
+
+            let mut rng = rand::rng();
+            let genesis_block = Block::genesis(network);
+            let mut mempool = setup_mock_mempool(0, &genesis_block);
+
+            // Insert synced transaction into mempool, verify no transaction
+            // is returned.
+            mempool.insert(sp_tx.into(), UpgradePriority::Critical);
+            assert!(mempool.preferred_update().is_none());
+
+            // Ensure tx in mempool becomes unsynced.
+            let block1_timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
+            let block1 = fake_valid_successor_for_tests(
+                &genesis_block,
+                block1_timestamp,
+                rng.random(),
+                network,
+            )
+            .await;
+            mempool.update_with_block_and_predecessor(
+                &block1,
+                &genesis_block,
+                TxProvingCapability::SingleProof,
+                true,
+            );
+            assert!(mempool.preferred_update().is_some());
+        }
+
+        #[proptest(cases = 15, async = "tokio")]
+        async fn preferred_update_is_tx_with_highest_upgrade_priority(
+            #[strategy(arb())] upgrade_priority_a: UpgradePriority,
+            #[strategy(arb())] upgrade_priority_b: UpgradePriority,
+            #[strategy(PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets(
+                [(2, 2, 2),
+                 (1, 1, 1),],
+    ))]
+            pws: [PrimitiveWitness; 2],
+        ) {
+            // Transactions in the mempool do not need to be valid, so we just
+            // pretend that the primitive-witness backed transactions have a
+            // SingleProof.
+            let into_single_proof_transaction = |pw: PrimitiveWitness| {
+                let mock_proof = TransactionProof::invalid();
+                Transaction {
+                    kernel: pw.kernel,
+                    proof: mock_proof,
+                }
+            };
+            let [tx_a, tx_b] = pws;
+            let tx_a = into_single_proof_transaction(tx_a);
+            let tx_b = into_single_proof_transaction(tx_b);
+
+            let mut mempool = Mempool::new(ByteSize::gb(1), None, &Block::genesis(Network::Main));
+            mempool.insert(tx_a.clone(), upgrade_priority_a);
+            mempool.insert(tx_b.clone(), upgrade_priority_b);
+
+            // All transactions in the mempool should be considered unsynced at
+            // this point, so a transaction will be returned from below call.
+            let (preferred_txk, _, upgrade_priority) = mempool.preferred_update().unwrap();
+
+            if preferred_txk.txid() == tx_a.txid() {
+                prop_assert!(upgrade_priority_a >= upgrade_priority_b);
+                prop_assert_eq!(upgrade_priority_a, upgrade_priority);
+            } else if preferred_txk.txid() == tx_b.txid() {
+                prop_assert!(upgrade_priority_a <= upgrade_priority_b);
+                prop_assert_eq!(upgrade_priority_b, upgrade_priority);
+            } else {
+                panic!("Must return either tx_a or tx_b");
+            }
+        }
+    }
+
     mod proof_quality_tests {
         use proptest::prop_assert_eq;
         use proptest::prop_assert_ne;
@@ -2014,38 +2164,6 @@ mod tests {
 
         use super::*;
         use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-
-        /// Return a valid, deterministic transaction with a specified proof type.
-        async fn tx_with_proof_type(
-            proof_type: TxProvingCapability,
-            network: Network,
-            fee: NativeCurrencyAmount,
-        ) -> std::sync::Arc<Transaction> {
-            let genesis_block = Block::genesis(network);
-            let bob_wallet_secret = WalletEntropy::devnet_wallet();
-            let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-            let bob = mock_genesis_global_state(
-                2,
-                bob_wallet_secret.clone(),
-                cli_args::Args::default_with_network(network),
-            )
-            .await;
-            let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-            let config = TxCreationConfig::default()
-                .recover_change_on_chain(bob_spending_key.into())
-                .with_prover_capability(proof_type);
-
-            // Clippy is wrong here. You can *not* eliminate the binding.
-            #[allow(clippy::let_and_return)]
-            let transaction = bob
-                .api()
-                .tx_initiator_internal()
-                .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
-                .await
-                .unwrap()
-                .transaction;
-            transaction
-        }
 
         #[apply(shared_tokio_runtime)]
         async fn always_preserve_primitive_witness_if_available() {

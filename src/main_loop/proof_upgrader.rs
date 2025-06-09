@@ -77,6 +77,7 @@ pub enum UpgradeJob {
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
 }
 
+/// A job to update an unsynced single-proof backed transaction to a synced one.
 #[derive(Clone, Debug)]
 pub struct UpdateMutatorSetDataJob {
     old_kernel: TransactionKernel,
@@ -747,7 +748,9 @@ impl UpgradeJob {
 /// proof-quality of a transaction found in mempool. Also reports the value
 /// of this job to the wallet of this node. The value reported will be zero for
 /// all 3rd party transactions.
-pub(super) fn get_upgrade_task_from_mempool(global_state: &GlobalState) -> Option<UpgradeJob> {
+pub(super) async fn get_upgrade_task_from_mempool(
+    global_state: &mut GlobalState,
+) -> Option<UpgradeJob> {
     let tip_mutator_set = global_state
         .chain
         .light_state()
@@ -786,10 +789,49 @@ pub(super) fn get_upgrade_task_from_mempool(global_state: &GlobalState) -> Optio
     };
 
     if let Some(upgrade_job) = &proof_collection_job {
-        if let UpgradeIncentive::BalanceAffecting(_) = upgrade_job.upgrade_incentive() {
+        if let UpgradeIncentive::Critical = upgrade_job.upgrade_incentive() {
             return proof_collection_job;
         }
     }
+
+    // Do we have any unsynced single proofs, worthy of an update?
+    let update_job = if let Some((tx_kernel, single_proof, upgrade_priority)) =
+        global_state.mempool.preferred_update()
+    {
+        let gobbling_potential = NativeCurrencyAmount::zero();
+        let upgrade_incentive =
+            upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
+        if upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee) {
+            let old_msa_digest = tx_kernel.mutator_set_hash;
+            let Some((old_mutator_set, mutator_set_update)) = global_state
+                .chain
+                .archival_state_mut()
+                .old_mutator_set_and_mutator_set_update_to_tip(
+                    old_msa_digest,
+                    SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+                )
+                .await
+            else {
+                error!(
+                    "Unsyncable single-proof backed transaction found in mempool. This should\
+                 not happen."
+                );
+                return None;
+            };
+            let job = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob {
+                old_kernel: tx_kernel.to_owned(),
+                old_single_proof: single_proof.to_owned(),
+                old_mutator_set,
+                mutator_set_update,
+                upgrade_incentive,
+            });
+            Some(job)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // Can we merge two single proofs?
     let merge_job = if let Some((
@@ -833,7 +875,7 @@ pub(super) fn get_upgrade_task_from_mempool(global_state: &GlobalState) -> Optio
     };
 
     // pick the most profitable option
-    let mut jobs = [proof_collection_job, merge_job]
+    let mut jobs = [proof_collection_job, merge_job, update_job]
         .into_iter()
         .flatten()
         .collect_vec();
@@ -935,9 +977,9 @@ mod tests {
                 .await;
             assert!(
                 !upgrade_priority.is_irrelevant()
-                    && get_upgrade_task_from_mempool(&rando).is_some()
+                    && get_upgrade_task_from_mempool(&mut rando).await.is_some()
                     || upgrade_priority.is_irrelevant()
-                        && get_upgrade_task_from_mempool(&rando).is_none()
+                        && get_upgrade_task_from_mempool(&mut rando).await.is_none()
             );
 
             // A high-fee paying transaction must be returned for upgrading
@@ -952,7 +994,7 @@ mod tests {
             rando
                 .mempool_insert(pc_tx_high_fee.clone().into(), UpgradePriority::Irrelevant)
                 .await;
-            let job = get_upgrade_task_from_mempool(&rando).unwrap();
+            let job = get_upgrade_task_from_mempool(&mut rando).await.unwrap();
             let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
                 panic!("Expected proof-collection to single-proof job");
             };
@@ -1183,8 +1225,8 @@ mod tests {
         }
 
         let merge_upgrade_job = {
-            let alice = alice.lock_guard().await;
-            get_upgrade_task_from_mempool(&alice).unwrap()
+            let mut alice = alice.lock_guard_mut().await;
+            get_upgrade_task_from_mempool(&mut alice).await.unwrap()
         };
         assert!(
             matches!(merge_upgrade_job, UpgradeJob::Merge { .. }),

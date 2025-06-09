@@ -1326,7 +1326,7 @@ impl MainLoopHandler {
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
         let upgrade_candidate = {
-            let global_state = self.global_state_lock.lock_guard().await;
+            let mut global_state = self.global_state_lock.lock_guard_mut().await;
             if !attempt_upgrade(&global_state, main_loop_state) {
                 trace!("Not attempting upgrade.");
                 return Ok(());
@@ -1335,7 +1335,8 @@ impl MainLoopHandler {
             debug!("Attempting to run transaction-proof-upgrade");
 
             // Find a candidate for proof upgrade
-            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&global_state) else {
+            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&mut global_state).await
+            else {
                 debug!("Found no transaction-proof to upgrade");
                 return Ok(());
             };
