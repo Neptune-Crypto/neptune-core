@@ -43,6 +43,17 @@ pub struct Args {
     #[clap(long, value_name = "DIR")]
     pub bootstrap_from_directory: Option<PathBuf>,
 
+    /// The number of blocks between each database flush during bootstrapping.
+    ///
+    /// A value of 0 disables automatic flushing during bootstrapping.
+    /// Lower non-zero values flush more frequently, reducing memory usage but increasing I/O overhead.
+    /// Higher values reduce flush frequency and I/O, but increase memory usage.
+    /// If you run into memory issues, consider lowering this value.
+    ///
+    /// Default: 250 blocks.
+    #[clap(long, default_value = "250")]
+    pub(crate) bootstrap_flush_period: usize,
+
     /// Set this to disable block validation for a faster bootstrapping.
     #[clap(long)]
     pub disable_bootstrap_block_validation: bool,
