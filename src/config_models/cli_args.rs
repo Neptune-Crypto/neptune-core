@@ -49,8 +49,6 @@ pub struct Args {
     /// Lower non-zero values flush more frequently, reducing memory usage but increasing I/O overhead.
     /// Higher values reduce flush frequency and I/O, but increase memory usage.
     /// If you run into memory issues, consider lowering this value.
-    ///
-    /// Default: 250 blocks.
     #[clap(long, default_value = "250")]
     pub(crate) bootstrap_flush_period: usize,
 
