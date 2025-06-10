@@ -7,3 +7,5 @@ This can be done by using the `--bootstrap-from-directory=<DIR>` CLI argument wh
 Once the node has read all blocks this way, the directory containing the block data used for bootstrapping can be deleted, as the process copies all block data.
 
 By default, the blocks read this way will be validated. Skipping this validation step can speedup initial synchronization significantly. To skip the validation step, add the argument `--disable-bootstrap-block-validation`. If you skip the validation step, this process can no longer be considered trustless, and `neptune-core` may end up in an unrecoverable state if the source data is somehow corrupted.
+
+A torrent of the latest snapshot can always be downloaded from <http://neptunefundamentals.org:42580/latest-snapshot.torrent>. This snapshot is updated weekly.
