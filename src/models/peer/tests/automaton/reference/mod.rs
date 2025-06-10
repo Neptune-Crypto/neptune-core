@@ -1,4 +1,5 @@
 use super::super::PeerMessage;
+use crate::api::export::Network;
 use crate::models::blockchain::block::Block;
 use crate::models::peer::peer_block_notifications::PeerBlockNotification;
 use crate::models::peer::SyncChallengeResponse;
@@ -39,6 +40,7 @@ pub(crate) struct Automaton {
     // distance: u8,
     sync_stage: Option<SyncStage>,
     pub is_inbound: bool,
+    pub network: Network,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +51,11 @@ pub enum AssosiatedData {
     /// feels like randomness is not interesting, but flagging validity could be
     // Randomness([u8; 32]),
     Valid,
-    MakeNewBlocks(Timestamp, [u8; 32], [tasm_lib::prelude::Digest; crate::models::peer::tests::automaton::BLOCKS_NEW_LEN]),
+    MakeNewBlocks(
+        Timestamp,
+        [u8; 32],
+        [tasm_lib::prelude::Digest; crate::models::peer::tests::automaton::BLOCKS_NEW_LEN],
+    ),
 }
 impl From<SyncChallengeResponse> for Transition {
     fn from(v: SyncChallengeResponse) -> Self {

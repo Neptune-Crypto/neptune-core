@@ -34,6 +34,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                         // distance,
                         sync_stage: None,
                         is_inbound,
+                        network: Network::Testnet, // TODO which one should be here?
                     }
                 },
             )
@@ -123,7 +124,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                     PeerMessage::BlockProposalRequest(BlockProposalRequest::new(d)),
                     None
                 )),
-                block_new(current_tip.clone()).prop_map(|b| Transition(
+                block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
                     PeerMessage::BlockProposalRequest(BlockProposalRequest::new(b.hash())),
                     Some(AssosiatedData::NewBlock(b))
                 ))
@@ -132,7 +133,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             prop_oneof![
                 crate::models::peer::transfer_block::block_transfer_prop_compose_random()
                     .prop_map(|tb| Transition(PeerMessage::Block(Box::new(tb)), None)),
-                utils::block_new(current_tip.clone()).prop_map(|b| Transition(
+                utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
                     PeerMessage::Block(Box::new(b.clone().try_into().unwrap())),
                     Some(AssosiatedData::NewBlock(b))
                 )),
@@ -141,14 +142,14 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
             prop_oneof![
                 utils::block_invalid()
                     .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None)),
-                utils::block_new(current_tip.clone()).prop_map(|b| Transition(
+                utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
                     PeerMessage::BlockProposal(Box::new(b.clone())),
                     Some(AssosiatedData::NewBlock(b))
                 ))
             ],
             // `BlockNotification`
             prop_oneof![
-                utils::block_new(current_tip.clone()).prop_map(|b| Transition(
+                utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
                     PeerMessage::BlockNotification(PeerBlockNotification::from(&b)),
                     Some(AssosiatedData::NewBlock(b))
                 )),

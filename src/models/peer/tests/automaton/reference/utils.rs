@@ -1,24 +1,30 @@
-use crate::{models::{
-    blockchain::{
-        block::{block_header::BlockHeader, Block},
-        transaction::primitive_witness::PrimitiveWitness,
+use crate::{
+    api::export::Network,
+    models::{
+        blockchain::{
+            block::{block_header::BlockHeader, Block},
+            transaction::primitive_witness::PrimitiveWitness,
+        },
+        peer::SyncChallenge,
+        proof_abstractions::timestamp::Timestamp,
     },
-    peer::SyncChallenge,
-    proof_abstractions::timestamp::Timestamp,
-}, tests::shared::Randomness};
+    tests::shared::Randomness,
+};
 use proptest::prelude::*;
 use proptest_arbitrary_interop::arb;
 use tasm_lib::{prelude::Digest, twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator};
 use tokio::runtime::Runtime;
 
 prop_compose! {
-    pub fn blocks_new(predecessor: Block) (
+    pub fn blocks_new(predecessor: Block, network: Network) (
         timestamp in arb::<Timestamp>(),
-        rness in arb::<[Randomness<1,3>; 10]>()
-    ) -> ([Block; 10], [Randomness<1,3>; 10]) {
+        rness in arb::<[Randomness<2,2>; 10]>()
+    ) -> ([Block; 10], [Randomness<2,2>; 10]) {
         (
             Runtime::new().unwrap().block_on(
-                crate::tests::shared::fake_valid_sequence_of_blocks_for_tests::<10>(&predecessor, timestamp, rness.clone())
+                crate::tests::shared::fake_valid_sequence_of_blocks_for_tests::<10>(
+                    &predecessor, timestamp, rness.clone(), network
+                )
             ),
             rness
         )
@@ -27,13 +33,14 @@ prop_compose! {
 
 prop_compose! {
     // adaptation of `fake_valid_block_for_tests`
-    pub fn block_new(current_tip: Block)
-    (rness in arb::<Randomness<1,3>>()) -> Block {
+    pub fn block_new(current_tip: Block, network: Network)
+    (rness in arb::<Randomness<2,2>>()) -> Block {
         tokio::runtime::Runtime::new().unwrap().block_on(
             crate::tests::shared::fake_valid_successor_for_tests(
                 &current_tip,
                 current_tip.header().timestamp + crate::models::proof_abstractions::timestamp::Timestamp::hours(1),
                 rness,
+                network
             )
         )
     }

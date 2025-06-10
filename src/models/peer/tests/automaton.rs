@@ -92,7 +92,7 @@ impl proptest_state_machine::StateMachineTest for TheSut {
 
     fn apply(
         state: Self::SystemUnderTest,
-        _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
+        ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
         if state.stopped {
@@ -115,14 +115,19 @@ impl proptest_state_machine::StateMachineTest for TheSut {
 
         let mut g_cloned = g.clone();
         let mut blocks_stuff = async |bs: Vec<crate::models::blockchain::block::Block>| {
-            let jq = g_cloned.vm_job_queue().clone();
+            // let jq = g_cloned.vm_job_queue().clone();
             let mut g_guard = g_cloned.lock_guard_mut().await;
             for b in bs {
                 dbg!(g_guard.set_new_tip(b).await.unwrap())
                     .into_iter()
                     .for_each(|j| {
                         rt.block_on(async {
-                            j.upgrade(&jq, Default::default()).await.unwrap();
+                            j.upgrade(
+                                crate::job_queue::triton_vm::vm_job_queue(),
+                                Default::default(),
+                            )
+                            .await
+                            .unwrap();
                         })
                     });
             }
@@ -140,14 +145,17 @@ impl proptest_state_machine::StateMachineTest for TheSut {
         let g_cloned = g.clone();
 
         rt.block_on(async {
-            dbg!(format!("{:?}", transition.0)
-                .lines()
-                .next()
-                .unwrap_or_default());
+            // dbg!(format!("{:?}", transition.0)
+            //     .lines()
+            //     .next()
+            //     .unwrap_or_default());
             dbg!(&transition.1.is_some());
             match transition {
                 Transition(_, Some(AssosiatedData::MakeNewBlocks(..))) => {
-                    // blocks_stuff(ref_state.blocks[ref_state.blocks.len()-1 - BLOCKS_NEW_LEN..].into()).await;
+                    blocks_stuff(
+                        ref_state.blocks[ref_state.blocks.len() - 1 - BLOCKS_NEW_LEN..].into(),
+                    )
+                    .await;
 
                     // let mut g_guard = g_cloned.lock_guard_mut().await;
                     // let l = ref_state.blocks.len();

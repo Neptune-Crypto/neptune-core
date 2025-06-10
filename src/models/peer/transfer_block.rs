@@ -1,8 +1,12 @@
+#[cfg(test)]
+use crate::api::export::NeptuneProof;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
+#[cfg(test)]
+use tasm_lib::triton_vm::proof::Claim;
 
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -32,13 +36,14 @@ proptest::prop_compose! {
         header in arb::<BlockHeader>(),
         body in crate::models::blockchain::block::block_body::block_body_prop_compose(),
         appendix in arb::<BlockAppendix>(),
-        proof in arb::<Proof>()
+        // proof in arb::<Proof>()
+        claim in arb::<Claim>()
     ) -> TransferBlock {
         TransferBlock {
             header,
             body,
             appendix,
-            proof
+            proof: NeptuneProof::invalid_mock(claim)
         }
     }
 }
@@ -72,7 +77,7 @@ impl TryFrom<Block> for TransferBlock {
 #[cfg(test)]
 impl TransferBlock {
     /// Ommits any checks simulating a bad incoming block.
-    pub fn from_random(block: &Block) -> Self {
+    pub fn from_random(block: &Block, claim: Claim) -> Self {
         let crate::models::blockchain::block::block_kernel::BlockKernel {
             header,
             body,
@@ -81,7 +86,7 @@ impl TransferBlock {
         Self {
             header,
             body,
-            proof: Proof(Vec::new()),
+            proof: NeptuneProof::invalid_mock(claim),
             appendix,
         }
     }

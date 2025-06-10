@@ -60,7 +60,8 @@ prop_compose! {
             kernel: pw.kernel,
             proof: crate::models::blockchain::transaction::TransactionProof::SingleProof(
                 // crate::models::blockchain::transaction::TransactionProof::Witness(pw).into_single_proof()
-                tasm_lib::triton_vm::proof::Proof(Vec::new())
+                // tasm_lib::triton_vm::proof::Proof(Vec::new())
+                crate::models::blockchain::transaction::validity::single_proof::SingleProof::produce_mock(true)
             )
         };
         if is_notif {Transition(PeerMessage::TransactionNotification((&tx_instance).try_into().unwrap()), None)}
@@ -73,7 +74,8 @@ prop_compose! {
 prop_compose! {
     pub fn block_response(current_tip: Block) (
         coinbase_sender_randomness in arb::<Digest>(),
-        k in arb::<Digest>()
+        k in arb::<Digest>(),
+        claim in arb::<tasm_lib::triton_vm::proof::Claim>()
     ) -> Transition {
         /* S Kaunov, [11.02.2025 15:06]
         So, there's few PeerMessage variants which seems to be relevant.
@@ -90,7 +92,7 @@ prop_compose! {
             GenerationSpendingKey::derive_from_seed(k),
             coinbase_sender_randomness
         )).0;
-        let content = Box::new(crate::models::peer::transfer_block::TransferBlock::from_random(&the));
+        let content = Box::new(crate::models::peer::transfer_block::TransferBlock::from_random(&the, claim));
         Transition(PeerMessage::Block(content), None)
     }
 }
