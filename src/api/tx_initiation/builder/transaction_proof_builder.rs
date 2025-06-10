@@ -43,6 +43,8 @@ use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 use crate::triton_vm_job_queue::vm_job_queue;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::util_types::log_vm_state;
+use crate::util_types::log_vm_state::LogProofInputsType;
 
 /// a builder for [TransactionProof]
 ///
@@ -62,6 +64,7 @@ pub struct TransactionProofBuilder<'a> {
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: Option<TritonVmProofJobOptions>,
     valid_mock: Option<bool>,
+    transaction_proof_type: Option<TransactionProofType>,
 }
 
 impl<'a> TransactionProofBuilder<'a> {
@@ -161,6 +164,14 @@ impl<'a> TransactionProofBuilder<'a> {
         self
     }
 
+    /// specify type of proof to build (optional)
+    ///
+    /// default = best proof possible based on [VmProvingCapability](crate::api::export::VmProvingCapability)
+    pub fn transaction_proof_type(mut self, transaction_proof_type: TransactionProofType) -> Self {
+        self.transaction_proof_type = Some(transaction_proof_type);
+        self
+    }
+
     /// generate the proof.
     ///
     /// ## Required (one-of)
@@ -241,16 +252,19 @@ impl<'a> TransactionProofBuilder<'a> {
             job_queue,
             proof_job_options,
             valid_mock,
+            transaction_proof_type,
         } = self;
 
         let proof_job_options = proof_job_options.ok_or(ProofRequirement::ProofJobOptions)?;
+        let transaction_proof_type = transaction_proof_type
+            .unwrap_or_else(|| proof_job_options.job_settings.vm_proving_capability.into());
 
         let valid_mock = valid_mock.unwrap_or(true);
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 
         // note: evaluation order must match order stated in the method doc-comment.
 
-        if proof_job_options.job_settings.proof_type.is_single_proof() {
+        if transaction_proof_type.is_single_proof() {
             // claim, nondeterminism --> single proof
             if let Some((c, nd)) = claim_and_nondeterminism {
                 return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
@@ -284,16 +298,37 @@ impl<'a> TransactionProofBuilder<'a> {
 
         // owned primitive witness --> proof_type
         if let Some(w) = primitive_witness {
-            return from_witness(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
+            return from_witness(
+                Cow::Owned(w),
+                job_queue,
+                proof_job_options,
+                transaction_proof_type,
+                valid_mock,
+            )
+            .await;
         }
         // primitive witness reference --> proof_type
         else if let Some(w) = primitive_witness_ref {
-            return from_witness(Cow::Borrowed(w), job_queue, proof_job_options, valid_mock).await;
+            return from_witness(
+                Cow::Borrowed(w),
+                job_queue,
+                proof_job_options,
+                transaction_proof_type,
+                valid_mock,
+            )
+            .await;
         }
         // transaction_details --> proof_type
         else if let Some(d) = transaction_details {
             let w = d.primitive_witness();
-            return from_witness(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
+            return from_witness(
+                Cow::Owned(w),
+                job_queue,
+                proof_job_options,
+                transaction_proof_type,
+                valid_mock,
+            )
+            .await;
         }
 
         Err(ProofRequirement::TransactionProofInput.into())
@@ -311,8 +346,17 @@ async fn gen_single<'a, F>(
     valid_mock: bool,
 ) -> Result<TransactionProof, CreateProofError>
 where
-    F: FnOnce() -> NonDeterminism + Send + Sync + 'a,
+    F: Clone + FnOnce() -> NonDeterminism + Send + Sync + 'a,
 {
+    // log proof inputs if matching env var is set. (does not expose witness secrets)
+    // maybe_write() logs warning if error occurs; we ignore any error.
+    let _ = log_vm_state::maybe_write(
+        LogProofInputsType::DoesNotContainWalletSecrets,
+        SingleProof.program(),
+        &claim,
+        nondeterminism.clone(),
+    );
+
     Ok(TransactionProof::SingleProof(
         ProofBuilder::new()
             .program(SingleProof.program())
@@ -333,14 +377,12 @@ async fn from_witness(
     witness_cow: Cow<'_, PrimitiveWitness>,
     job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
+    transaction_proof_type: TransactionProofType,
     valid_mock: bool,
 ) -> Result<TransactionProof, CreateProofError> {
-    let capability = proof_job_options.job_settings.tx_proving_capability;
-    let proof_type = proof_job_options.job_settings.proof_type;
-
     // generate mock proof, if network uses mock proofs.
     if proof_job_options.job_settings.network.use_mock_proof() {
-        let proof = match proof_type {
+        let proof = match transaction_proof_type {
             TransactionProofType::PrimitiveWitness => {
                 TransactionProof::Witness(witness_cow.into_owned())
             }
@@ -356,16 +398,16 @@ async fn from_witness(
         return Ok(proof);
     }
 
-    // abort early if machine is too weak
-    if !capability.can_prove(proof_type) {
-        return Err(CreateProofError::TooWeak {
-            proof_type,
-            capability,
-        });
-    }
+    // abort early if machine is too weak.
+    //
+    // note: the fallible calls below eventually call ProofBuilder::build()
+    // which would perform a more expensive verification.  Since we know the
+    // transaction_proof_type here, we can perform this quick check.
+    let capability = proof_job_options.job_settings.vm_proving_capability;
+    capability.can_prove(transaction_proof_type)?;
 
     // produce proof of requested type
-    let transaction_proof = match proof_type {
+    let transaction_proof = match transaction_proof_type {
         TransactionProofType::PrimitiveWitness => {
             TransactionProof::Witness(witness_cow.into_owned())
         }

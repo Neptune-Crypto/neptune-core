@@ -1887,6 +1887,7 @@ dependencies = [
  "clap_complete",
  "clienter",
  "console-subscriber",
+ "const_format",
  "crossterm 0.27.0",
  "deranged 0.4.0",
  "directories",

@@ -11,11 +11,11 @@ use std::str::FromStr;
 use neptune_cash::api::export::GlobalStateLock;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::TransactionKernelId;
+use neptune_cash::api::export::TransactionProofType;
 use neptune_cash::config_models::cli_args::Args;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
-use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::task::JoinHandle;
@@ -56,7 +56,7 @@ impl GenesisNode {
 
         // we default proving capability to primitive-witness as lowest common
         // denominator and because otherwise dev machines often miss this case.
-        args.tx_proving_capability = Some(TxProvingCapability::PrimitiveWitness);
+        args.vm_proving_capability = Some(TransactionProofType::PrimitiveWitness.into());
 
         if let Ok(dd) = Self::integration_test_data_directory(args.network) {
             args.data_dir = Some(dd.root_dir_path());

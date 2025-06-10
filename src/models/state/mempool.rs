@@ -47,10 +47,11 @@ use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
-use super::tx_proving_capability::TxProvingCapability;
+use super::vm_proving_capability::VmProvingCapability;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::Transaction;
@@ -644,9 +645,11 @@ impl Mempool {
         &mut self,
         new_block: &Block,
         predecessor_block: &Block,
-        tx_proving_capability: TxProvingCapability,
+        vm_proving_capability: impl Into<VmProvingCapability>,
         composing: bool,
     ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
+        let vm_proving_capability = vm_proving_capability.into();
+
         // If the mempool is empty, there is nothing to do.
         if self.is_empty() {
             self.set_tip_digest_sync_label(new_block.hash());
@@ -733,8 +736,9 @@ impl Mempool {
                 continue;
             }
 
-            let can_upgrade_single_proof =
-                TxProvingCapability::SingleProof == tx_proving_capability;
+            let can_upgrade_single_proof = vm_proving_capability
+                .can_prove(TransactionProofType::SingleProof)
+                .is_ok();
             let (update_job, can_update) = match &tx.transaction.proof {
                 TransactionProof::ProofCollection(_) => {
                     debug!("Failed to update transaction {tx_id}. Because it is only supported by a proof collection.");
@@ -764,7 +768,7 @@ impl Mempool {
 
                         (Some(job), true)
                     } else {
-                        debug!("Not updating single-proof supported transaction {tx_id}, because TxProvingCapability was only {tx_proving_capability}.");
+                        debug!("Not updating single-proof supported transaction {tx_id}, because VmProvingCapability was only {vm_proving_capability}.");
                         (None, false)
                     }
                 }
@@ -884,7 +888,6 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
@@ -1059,7 +1062,7 @@ mod tests {
         let high_fee = NativeCurrencyAmount::coins(15);
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_spending_key.into())
-            .with_prover_capability(TxProvingCapability::ProofCollection);
+            .with_prover_capability(TransactionProofType::ProofCollection);
         let tx_by_bob = bob
             .api()
             .tx_initiator_internal()
@@ -1323,7 +1326,7 @@ mod tests {
         let in_eight_months = now + Timestamp::months(8);
         let config_bob = TxCreationConfig::default()
             .recover_change_on_chain(bob_spending_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let artifacts_bob = bob
             .api()
             .tx_initiator_internal()
@@ -1367,7 +1370,7 @@ mod tests {
         )];
         let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
+            .with_prover_capability(TransactionProofType::SingleProof);
         let tx_from_alice_original = alice
             .api()
             .tx_initiator_internal()
@@ -1408,6 +1411,7 @@ mod tests {
             &bob,
             in_eight_months,
             TritonVmJobPriority::Normal.into(),
+            TransactionProofType::SingleProof,
         )
         .await
         .unwrap();
@@ -1432,7 +1436,7 @@ mod tests {
         let (_, update_jobs2) = mempool.update_with_block_and_predecessor(
             &block_2,
             &block_1,
-            TxProvingCapability::SingleProof,
+            TransactionProofType::SingleProof,
             true,
         );
         mocked_mempool_update_handler(update_jobs2, &mut mempool).await;
@@ -1464,7 +1468,7 @@ mod tests {
             let (_, update_jobs_n) = mempool.update_with_block_and_predecessor(
                 &next_block,
                 &previous_block,
-                TxProvingCapability::SingleProof,
+                TransactionProofType::SingleProof,
                 true,
             );
             mocked_mempool_update_handler(update_jobs_n, &mut mempool).await;
@@ -1490,6 +1494,7 @@ mod tests {
             &alice,
             block_5_timestamp,
             TritonVmJobPriority::Normal.into(),
+            TransactionProofType::SingleProof,
         )
         .await
         .unwrap();
@@ -1513,7 +1518,7 @@ mod tests {
         let (_, update_jobs5) = mempool.update_with_block_and_predecessor(
             &block_5,
             &previous_block,
-            TxProvingCapability::SingleProof,
+            TransactionProofType::SingleProof,
             true,
         );
         mocked_mempool_update_handler(update_jobs5, &mut mempool).await;
@@ -1637,9 +1642,9 @@ mod tests {
         let network = Network::Main;
         let alice_wallet = WalletEntropy::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let proving_capability = TxProvingCapability::SingleProof;
+        let proving_capability = TransactionProofType::SingleProof;
         let cli_with_proof_capability = cli_args::Args {
-            tx_proving_capability: Some(proving_capability),
+            vm_proving_capability: Some(proving_capability.into()),
             network,
             ..Default::default()
         };
@@ -1813,7 +1818,7 @@ mod tests {
                 let tx_outputs: TxOutputList = vec![receiver_data.clone()].into();
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(premine_spending_key.into())
-                    .with_prover_capability(TxProvingCapability::ProofCollection);
+                    .with_prover_capability(TransactionProofType::ProofCollection);
                 preminer_clone
                     .api()
                     .tx_initiator_internal()
@@ -1999,7 +2004,7 @@ mod tests {
 
         /// Return a valid, deterministic transaction with a specified proof type.
         async fn tx_with_proof_type(
-            proof_type: TxProvingCapability,
+            proof_type: impl Into<TransactionProofType>,
             network: Network,
             fee: NativeCurrencyAmount,
         ) -> std::sync::Arc<Transaction> {
@@ -2015,7 +2020,7 @@ mod tests {
             let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(bob_spending_key.into())
-                .with_prover_capability(proof_type);
+                .with_prover_capability(proof_type.into());
 
             // Clippy is wrong here. You can *not* eliminate the binding.
             #[allow(clippy::let_and_return)]
@@ -2034,7 +2039,7 @@ mod tests {
         async fn single_proof_always_replaces_primitive_witness() {
             let network = Network::Main;
             let pw_high_fee = tx_with_proof_type(
-                TxProvingCapability::PrimitiveWitness,
+                TransactionProofType::PrimitiveWitness,
                 network,
                 NativeCurrencyAmount::coins(15),
             )
@@ -2046,7 +2051,7 @@ mod tests {
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
-                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+                tx_with_proof_type(TransactionProofType::SingleProof, network, low_fee).await;
             let txid = sp_low_fee.kernel.txid();
             mempool.insert(sp_low_fee.into(), TransactionOrigin::Own);
             assert!(
@@ -2065,7 +2070,7 @@ mod tests {
         async fn single_proof_always_replaces_proof_collection() {
             let network = Network::Main;
             let pc_high_fee = tx_with_proof_type(
-                TxProvingCapability::ProofCollection,
+                TransactionProofType::ProofCollection,
                 network,
                 NativeCurrencyAmount::coins(15),
             )
@@ -2077,7 +2082,7 @@ mod tests {
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
-                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+                tx_with_proof_type(TransactionProofType::SingleProof, network, low_fee).await;
             let txid = sp_low_fee.kernel.txid();
             mempool.insert(sp_low_fee.into(), TransactionOrigin::Own);
             assert!(
@@ -2096,7 +2101,7 @@ mod tests {
         async fn proof_collection_always_replaces_proof_primitive_witness() {
             let network = Network::Main;
             let pc_high_fee = tx_with_proof_type(
-                TxProvingCapability::PrimitiveWitness,
+                TransactionProofType::PrimitiveWitness,
                 network,
                 NativeCurrencyAmount::coins(15),
             )
@@ -2108,7 +2113,7 @@ mod tests {
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
-                tx_with_proof_type(TxProvingCapability::ProofCollection, network, low_fee).await;
+                tx_with_proof_type(TransactionProofType::ProofCollection, network, low_fee).await;
             let txid = sp_low_fee.kernel.txid();
             mempool.insert(sp_low_fee.into(), TransactionOrigin::Own);
             assert!(

@@ -1947,12 +1947,12 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::fake_valid_block_for_tests;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
@@ -3432,7 +3432,7 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
-            .with_prover_capability(TxProvingCapability::ProofCollection);
+            .with_prover_capability(TransactionProofType::ProofCollection);
         let transaction_1: Transaction = state_lock
             .api()
             .tx_initiator_internal()
@@ -3517,7 +3517,7 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
-            .with_prover_capability(TxProvingCapability::ProofCollection);
+            .with_prover_capability(TransactionProofType::ProofCollection);
         let transaction_1: Transaction = state_lock
             .api()
             .tx_initiator_internal()
@@ -3726,8 +3726,8 @@ mod tests {
             let genesis_block = alice.chain.light_state();
             let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
             let prover_capability = match quality {
-                TransactionProofQuality::ProofCollection => TxProvingCapability::ProofCollection,
-                TransactionProofQuality::SingleProof => TxProvingCapability::SingleProof,
+                TransactionProofQuality::ProofCollection => TransactionProofType::ProofCollection,
+                TransactionProofQuality::SingleProof => TransactionProofType::SingleProof,
             };
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(alice_key.into())

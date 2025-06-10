@@ -11,14 +11,14 @@ use clap::builder::TypedValueParser;
 use clap::Parser;
 use itertools::Itertools;
 use num_traits::Zero;
-use sysinfo::System;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::vm_proving_capability::VmProvingCapability;
 use crate::models::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 use crate::triton_vm_job_queue::TritonVmJobPriority;
 
@@ -247,25 +247,15 @@ pub struct Args {
     #[structopt(long, default_value = "3")]
     pub(crate) number_of_mps_per_utxo: usize,
 
-    /// Configure how complicated proofs this machine is capable of producing.
-    /// If no value is set, this parameter is estimated. For privacy, this level
-    /// must not be set to [`TxProvingCapability::LockScript`], as this leaks
-    /// information about amounts and input/output UTXOs.
-    ///
-    /// Proving the lockscripts is mandatory, since this is what prevents others
-    /// from spending your coins.
-    ///
-    /// e.g. `--tx-proving-capability=singleproof` or
-    /// `--tx-proving-capability=proofcollection`.
-    #[clap(long)]
-    pub tx_proving_capability: Option<TxProvingCapability>,
+    #[clap(long, long_help=VM_PROVING_CAPABILITY_HELP, value_parser = clap::value_parser!(VmProvingCapability))]
+    pub vm_proving_capability: Option<VmProvingCapability>,
 
     /// Cache for the proving capability. If the above parameter is not set, we
     /// want to estimate proving capability and afterwards reuse the result from
     /// previous estimations. This argument cannot be set from CLI, so clap
     /// ignores it.
     #[clap(skip)]
-    pub(crate) tx_proving_capability_cache: OnceLock<TxProvingCapability>,
+    pub(crate) vm_proving_capability_cache: OnceLock<VmProvingCapability>,
 
     /// The number of seconds between each attempt to upgrade transactions in
     /// the mempool to proofs of a higher quality. Will only run if the machine
@@ -279,21 +269,6 @@ pub struct Args {
     /// note: this will attempt to connect to localhost:6669
     #[structopt(long, name = "tokio-console", default_value = "false")]
     pub tokio_console: bool,
-
-    /// Sets the max program complexity limit for proof creation in Triton VM.
-    ///
-    /// Triton VM's prover complexity is a function of something called padded height
-    /// which is always a power of two. A basic proof has a complexity of 2^11.
-    /// A powerful machine in 2024 with 128 CPU cores can handle a padded height of 2^23.
-    ///
-    /// For such a machine, one would set a limit of 23.
-    ///
-    /// if the limit is reached while mining, a warning is logged and mining will pause.
-    /// non-mining operations may panic and halt neptune-core
-    ///
-    /// no limit is applied if unset.
-    #[structopt(long, short, value_parser = clap::value_parser!(u8).range(10..32))]
-    pub max_log2_padded_height_for_proofs: Option<u8>,
 
     /// Sets the maximum number of proofs in a `ProofCollection` that can be
     /// recursively combined into a `SingleProof` by this machine. I.e. how big
@@ -408,6 +383,32 @@ pub struct Args {
     pub(crate) scan_keys: Option<usize>,
 }
 
+const VM_PROVING_CAPABILITY_HELP: &str = const_format::formatcp!(
+    "\
+Specifies device's capability to generate TritonVM proofs
+
+If no value is set, this parameter is estimated based on available RAM
+and number of CPU cores
+
+Triton VM's prover complexity is a function of something called padded
+height which is always a power of two. A basic proof has a complexity of
+2^15.  A powerful machine with 128 CPU cores and at least 512Gb RAM can
+handle a padded height of 2^23.
+
+source: https://talk.neptune.cash/t/performance-numbers-for-triton-vm-proving/69
+
+For such a machine, one would set a limit of 23:
+--vm-proving-capability 23
+
+Minimum values by transaction-proof type:
+ primitive-witness: {}
+ proof-collection: {}
+ single-proof: {}",
+    TransactionProofType::PrimitiveWitness.log2_padded_height(),
+    TransactionProofType::ProofCollection.log2_padded_height(),
+    TransactionProofType::SingleProof.log2_padded_height()
+);
+
 impl Default for Args {
     fn default() -> Self {
         let empty: Vec<String> = vec![];
@@ -520,10 +521,8 @@ impl Args {
         TritonVmProofJobOptions {
             job_priority,
             job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
                 network: self.network,
-                tx_proving_capability: self.proving_capability(),
-                proof_type: self.proving_capability().into(),
+                vm_proving_capability: self.proving_capability(),
             },
             cancel_job_rx: None,
         }
@@ -531,44 +530,14 @@ impl Args {
 
     /// Get the proving capability CLI argument or estimate it if it is not set.
     /// Cache the result so we don't estimate more than once.
-    pub fn proving_capability(&self) -> TxProvingCapability {
-        *self.tx_proving_capability_cache.get_or_init(|| {
-            if let Some(proving_capability) = self.tx_proving_capability {
+    pub fn proving_capability(&self) -> VmProvingCapability {
+        *self.vm_proving_capability_cache.get_or_init(|| {
+            if let Some(proving_capability) = self.vm_proving_capability {
                 proving_capability
-            } else if self.compose {
-                TxProvingCapability::SingleProof
             } else {
-                Self::estimate_proving_capability()
+                VmProvingCapability::auto_detect()
             }
         })
-    }
-
-    fn estimate_proving_capability() -> TxProvingCapability {
-        const SINGLE_PROOF_CORE_REQ: usize = 19;
-        // see https://github.com/Neptune-Crypto/neptune-core/issues/426
-        const SINGLE_PROOF_MEMORY_USAGE: u64 = (1u64 << 30) * 120;
-
-        const PROOF_COLLECTION_CORE_REQ: usize = 2;
-        const PROOF_COLLECTION_MEMORY_USAGE: u64 = (1u64 << 30) * 16;
-
-        let s = System::new_all();
-        let total_memory = s.total_memory();
-        assert!(
-            !total_memory.is_zero(),
-            "Total memory reported illegal value of 0"
-        );
-
-        let physical_core_count = s.physical_core_count().unwrap_or(1);
-
-        if total_memory > SINGLE_PROOF_MEMORY_USAGE && physical_core_count > SINGLE_PROOF_CORE_REQ {
-            TxProvingCapability::SingleProof
-        } else if total_memory > PROOF_COLLECTION_MEMORY_USAGE
-            && physical_core_count > PROOF_COLLECTION_CORE_REQ
-        {
-            TxProvingCapability::ProofCollection
-        } else {
-            TxProvingCapability::PrimitiveWitness
-        }
     }
 
     /// creates a `TritonVmProofJobOptions` from cli args.
@@ -582,10 +551,8 @@ impl From<&Args> for TritonVmProofJobOptions {
         Self {
             job_priority: Default::default(),
             job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
                 network: cli.network,
-                tx_proving_capability: cli.proving_capability(),
-                proof_type: cli.proving_capability().into(),
+                vm_proving_capability: cli.proving_capability(),
             },
             cancel_job_rx: None,
         }
@@ -608,19 +575,6 @@ mod tests {
                 network,
                 ..Default::default()
             }
-        }
-
-        pub(crate) fn proof_job_options_prooftype(
-            &self,
-            proof_type: TransactionProofType,
-        ) -> TritonVmProofJobOptions {
-            let mut options: TritonVmProofJobOptions = self.into();
-            options.job_settings.proof_type = proof_type;
-            options
-        }
-
-        pub(crate) fn proof_job_options_primitive_witness(&self) -> TritonVmProofJobOptions {
-            self.proof_job_options_prooftype(TransactionProofType::PrimitiveWitness)
         }
     }
 
@@ -659,19 +613,13 @@ mod tests {
     }
 
     #[test]
-    fn estimate_own_proving_capability() {
-        // doubles as a no-crash test
-        println!("{}", Args::estimate_proving_capability());
-    }
-
-    #[test]
     fn cli_args_can_differ_about_proving_capability() {
         let a = Args {
-            tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+            vm_proving_capability: Some(TransactionProofType::ProofCollection.into()),
             ..Default::default()
         };
         let b = Args {
-            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
             ..Default::default()
         };
         assert_ne!(a.proving_capability(), b.proving_capability());

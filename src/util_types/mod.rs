@@ -1,4 +1,5 @@
 pub mod archival_mmr;
+pub(crate) mod log_vm_state;
 pub mod mutator_set;
 pub mod rusty_archival_block_mmr;
 

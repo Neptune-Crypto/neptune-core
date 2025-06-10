@@ -13,7 +13,6 @@ use tracing::warn;
 
 use super::TransactionOrigin;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -31,7 +30,6 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -142,23 +140,22 @@ impl UpgradeJob {
     /// be used for transactions that originate locally.
     pub(super) fn from_primitive_witness(
         network: Network,
-        tx_proving_capability: TxProvingCapability,
+        tx_proof_type: impl Into<TransactionProofType>,
         primitive_witness: PrimitiveWitness,
     ) -> UpgradeJob {
-        match tx_proving_capability {
-            TxProvingCapability::ProofCollection => {
+        match tx_proof_type.into() {
+            TransactionProofType::ProofCollection => {
                 UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness }
             }
-            TxProvingCapability::SingleProof => {
+            TransactionProofType::SingleProof => {
                 UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness }
             }
-            TxProvingCapability::PrimitiveWitness if network.use_mock_proof() => {
+            TransactionProofType::PrimitiveWitness if network.use_mock_proof() => {
                 UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness }
             }
-            TxProvingCapability::PrimitiveWitness => {
+            TransactionProofType::PrimitiveWitness => {
                 panic!("Client cannot have primitive witness capability only")
             }
-            TxProvingCapability::LockScript => todo!("TODO: Add support for this"),
         }
     }
 
@@ -364,12 +361,6 @@ impl UpgradeJob {
                 Err(e) => {
                     error!("UpgradeProof job failed. error: {e}");
                     error!("upgrading of witness or proof in {tx_origin} transaction failed.");
-                    error!(
-                        "Consider lowering your proving capability to {}, in case it is set higher.\nCurrent proving \
-                        capability is set to: {}.",
-                        TxProvingCapability::ProofCollection,
-                        global_state_lock.cli().proving_capability()
-                    );
                     return;
                 }
             };
@@ -564,16 +555,11 @@ impl UpgradeJob {
                 vec![]
             };
 
-            // ensure that proof-type is SingleProof
-            let options = TritonVmProofJobOptionsBuilder::new()
-                .template(&proof_job_options)
-                .proof_type(TransactionProofType::SingleProof)
-                .build();
-
             let proof = TransactionProofBuilder::new()
                 .primitive_witness_ref(&gobbler_witness)
+                .transaction_proof_type(TransactionProofType::SingleProof)
                 .job_queue(triton_vm_job_queue.clone())
-                .proof_job_options(options)
+                .proof_job_options(proof_job_options.clone())
                 .build()
                 .await?;
 
@@ -597,6 +583,7 @@ impl UpgradeJob {
 
                 let single_proof = TransactionProofBuilder::new()
                     .single_proof_witness(&single_proof_witness)
+                    .transaction_proof_type(TransactionProofType::SingleProof)
                     .job_queue(triton_vm_job_queue.clone())
                     .proof_job_options(proof_job_options.clone())
                     .build()
@@ -672,17 +659,12 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToProofCollection {
                 primitive_witness: witness,
             } => {
-                // ensure that proof-type is ProofCollection
-                let options = TritonVmProofJobOptionsBuilder::new()
-                    .template(&proof_job_options)
-                    .proof_type(TransactionProofType::ProofCollection)
-                    .build();
-
                 info!("Proof-upgrader: Start producing proof collection");
                 let proof_collection = TransactionProofBuilder::new()
                     .primitive_witness_ref(&witness)
+                    .transaction_proof_type(TransactionProofType::ProofCollection)
                     .job_queue(triton_vm_job_queue.clone())
-                    .proof_job_options(options)
+                    .proof_job_options(proof_job_options)
                     .build()
                     .await?;
                 info!("Proof-upgrader, proof collection: Done");
@@ -698,17 +680,12 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToSingleProof {
                 primitive_witness: witness,
             } => {
-                // ensure that proof-type is SingleProof
-                let options = TritonVmProofJobOptionsBuilder::new()
-                    .template(&proof_job_options)
-                    .proof_type(TransactionProofType::SingleProof)
-                    .build();
-
                 info!("Proof-upgrader: Start producing single proof");
                 let proof = TransactionProofBuilder::new()
                     .primitive_witness_ref(&witness)
+                    .transaction_proof_type(TransactionProofType::SingleProof)
                     .job_queue(triton_vm_job_queue.clone())
-                    .proof_job_options(options)
+                    .proof_job_options(proof_job_options)
                     .build()
                     .await?;
 
@@ -862,7 +839,7 @@ mod tests {
     async fn transaction_from_state(
         mut state: GlobalStateLock,
         seed: u64,
-        proof_quality: TxProvingCapability,
+        proof_quality: TransactionProofType,
         fee: NativeCurrencyAmount,
     ) -> Arc<Transaction> {
         let mut rng: StdRng = SeedableRng::seed_from_u64(seed);
@@ -909,7 +886,7 @@ mod tests {
         let pc_tx_low_fee = transaction_from_state(
             alice.clone(),
             512777439428,
-            TxProvingCapability::ProofCollection,
+            TransactionProofType::ProofCollection,
             NativeCurrencyAmount::from_nau(2),
         )
         .await;
@@ -932,7 +909,7 @@ mod tests {
             let pc_tx_high_fee = transaction_from_state(
                 alice.clone(),
                 512777439428,
-                TxProvingCapability::ProofCollection,
+                TransactionProofType::ProofCollection,
                 NativeCurrencyAmount::from_nau(1_000_000_000),
             )
             .await;
@@ -958,11 +935,11 @@ mod tests {
         let network = Network::Main;
 
         for proving_capability in [
-            TxProvingCapability::ProofCollection,
-            TxProvingCapability::SingleProof,
+            TransactionProofType::ProofCollection,
+            TransactionProofType::SingleProof,
         ] {
             let mut cli = cli_args::Args::default_with_network(network);
-            cli.tx_proving_capability = Some(proving_capability);
+            cli.vm_proving_capability = Some(proving_capability.into());
 
             // Alice is premine recipient, so she can make a transaction (after
             // expiry of timelock).
@@ -971,7 +948,7 @@ mod tests {
             let pwtx = transaction_from_state(
                 alice.clone(),
                 512777439428,
-                TxProvingCapability::PrimitiveWitness,
+                TransactionProofType::PrimitiveWitness,
                 NativeCurrencyAmount::from_nau(100),
             )
             .await;
@@ -1015,13 +992,12 @@ mod tests {
                 .unwrap()
                 .to_owned();
             match proving_capability {
-                TxProvingCapability::LockScript => unreachable!(),
-                TxProvingCapability::PrimitiveWitness => unreachable!(),
-                TxProvingCapability::ProofCollection => assert!(
+                TransactionProofType::PrimitiveWitness => unreachable!(),
+                TransactionProofType::ProofCollection => assert!(
                     matches!(mempool_tx.proof, TransactionProof::ProofCollection(_)),
                     "Tx in mempool must be backed with {proving_capability} after upgrade"
                 ),
-                TxProvingCapability::SingleProof => assert!(
+                TransactionProofType::SingleProof => assert!(
                     matches!(mempool_tx.proof, TransactionProof::SingleProof(_)),
                     "Tx in mempool must be backed with {proving_capability} after upgrade"
                 ),
@@ -1037,11 +1013,11 @@ mod tests {
         let network = Network::Main;
 
         for proving_capability in [
-            TxProvingCapability::ProofCollection,
-            TxProvingCapability::SingleProof,
+            TransactionProofType::ProofCollection,
+            TransactionProofType::SingleProof,
         ] {
             let mut cli = cli_args::Args::default_with_network(network);
-            cli.tx_proving_capability = Some(proving_capability);
+            cli.vm_proving_capability = Some(proving_capability.into());
 
             // Alice is premine recipient, so she can make a transaction (after
             // expiry of timelock).
@@ -1050,7 +1026,7 @@ mod tests {
             let pwtx = transaction_from_state(
                 alice.clone(),
                 512777439429,
-                TxProvingCapability::PrimitiveWitness,
+                TransactionProofType::PrimitiveWitness,
                 NativeCurrencyAmount::from_nau(100),
             )
             .await;
@@ -1103,13 +1079,12 @@ mod tests {
                 .unwrap()
                 .to_owned();
             match proving_capability {
-                TxProvingCapability::LockScript => unreachable!(),
-                TxProvingCapability::PrimitiveWitness => unreachable!(),
-                TxProvingCapability::ProofCollection => assert!(
+                TransactionProofType::PrimitiveWitness => unreachable!(),
+                TransactionProofType::ProofCollection => assert!(
                     matches!(mempool_tx.proof, TransactionProof::ProofCollection(_)),
                     "Tx in mempool must be backed with {proving_capability} after upgrade"
                 ),
-                TxProvingCapability::SingleProof => assert!(
+                TransactionProofType::SingleProof => assert!(
                     matches!(mempool_tx.proof, TransactionProof::SingleProof(_)),
                     "Tx in mempool must be backed with {proving_capability} after upgrade"
                 ),
@@ -1138,7 +1113,7 @@ mod tests {
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
         let cli_args = cli_args::Args {
             network,
-            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
             ..Default::default()
         };
         let mut alice = state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;
@@ -1149,7 +1124,7 @@ mod tests {
             let single_proof_tx = transaction_from_state(
                 alice.clone(),
                 rng.random(),
-                TxProvingCapability::SingleProof,
+                TransactionProofType::SingleProof,
                 tx_fee,
             )
             .await;

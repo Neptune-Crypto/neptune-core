@@ -12,7 +12,7 @@ use neptune_cash::models::blockchain::block::block_header::BlockHeader;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::state::mining_status::MiningStatus;
-use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
+use neptune_cash::models::state::vm_proving_capability::VmProvingCapability;
 use neptune_cash::prelude::twenty_first;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
@@ -66,7 +66,7 @@ pub struct OverviewData {
     up_since: Option<u64>,
     cpu_load: Option<f64>,
     cpu_capacity: Option<f64>,
-    proving_capability: TxProvingCapability,
+    proving_capability: VmProvingCapability,
 
     /// CPU temperature in degrees Celsius
     cpu_temperature: Option<f32>,

@@ -36,7 +36,6 @@ use crate::api::export::TransactionProofType;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
@@ -47,7 +46,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::StateLock;
-use crate::triton_vm_job_queue::vm_job_queue;
 use crate::GlobalStateLock;
 
 /// provides a send() method to send a neptune transaction in one call.
@@ -125,20 +123,12 @@ impl TransactionSender {
         tracing::info!("send: proving tx:\n{}", tx_details);
 
         let witness = tx_details.primitive_witness();
-        let kernel = witness.kernel.clone();
-
-        // use cli options for building proof, but override proof-type
-        let options = TritonVmProofJobOptionsBuilder::new()
-            .template(&gsl.cli().as_proof_job_options())
-            .proof_type(target_proof_type)
-            .build();
 
         // generate proof
         let proof = TransactionProofBuilder::new()
-            .transaction_details(&tx_details)
-            .primitive_witness(witness)
-            .job_queue(vm_job_queue())
-            .proof_job_options(options)
+            .primitive_witness_ref(&witness)
+            .transaction_proof_type(target_proof_type)
+            .proof_job_options(gsl.cli().into())
             .build()
             .await?;
 
@@ -146,7 +136,7 @@ impl TransactionSender {
 
         // create transaction
         let transaction = TransactionBuilder::new()
-            .transaction_kernel(kernel)
+            .transaction_kernel(witness.kernel)
             .transaction_proof(proof)
             .build()?;
 

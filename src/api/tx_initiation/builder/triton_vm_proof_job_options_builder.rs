@@ -1,10 +1,9 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
 use crate::config_models::network::Network;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::vm_proving_capability::VmProvingCapability;
 use crate::triton_vm_job_queue::TritonVmJobPriority;
 
 /// a builder for [TritonVmProofJobOptions]
@@ -27,7 +26,7 @@ use crate::triton_vm_job_queue::TritonVmJobPriority;
 /// let args = Args::default();
 /// TritonVmProofJobOptionsBuilder::new()
 ///     .template(&args.as_proof_job_options())
-///     .proof_type(TransactionProofType::SingleProof)
+///     .proving_capability(TransactionProofType::SingleProof)
 ///     .build();
 /// ```
 ///
@@ -36,7 +35,7 @@ use crate::triton_vm_job_queue::TritonVmJobPriority;
 /// ```
 /// use neptune_cash::api::export::TritonVmJobPriority;
 /// use neptune_cash::api::export::Network;
-/// use neptune_cash::api::export::TxProvingCapability;
+/// use neptune_cash::api::export::VmProvingCapability;
 /// use neptune_cash::api::export::TransactionProofType;
 /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 ///
@@ -45,10 +44,8 @@ use crate::triton_vm_job_queue::TritonVmJobPriority;
 /// TritonVmProofJobOptionsBuilder::new()
 ///     .job_priority(TritonVmJobPriority::Normal)
 ///     .cancel_job_rx(cancel_job_rx)
-///     .max_log2_padded_height_for_proofs(23)  // 2^23
 ///     .network(Network::Testnet)
-///     .proving_capability(TxProvingCapability::ProofCollection)
-///     .proof_type(TransactionProofType::PrimitiveWitness)
+///     .proving_capability(TransactionProofType::ProofCollection)
 ///     .build();
 /// ```
 #[derive(Debug, Default)]
@@ -58,10 +55,8 @@ pub struct TritonVmProofJobOptionsBuilder {
     cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,
 
     // these are from ProverJobSettings
-    max_log2_padded_height_for_proofs: Option<u8>,
     network: Option<Network>,
-    tx_proving_capability: Option<TxProvingCapability>,
-    proof_type: Option<TransactionProofType>,
+    vm_proving_capability: Option<VmProvingCapability>,
 }
 
 impl TritonVmProofJobOptionsBuilder {
@@ -70,7 +65,7 @@ impl TritonVmProofJobOptionsBuilder {
         Default::default()
     }
 
-    /// add template to set default values of all fields.
+    /// add template to set default values of all fields. (optional)
     ///
     /// in particular cli_args::Args can be used for this purpose.
     ///
@@ -84,7 +79,7 @@ impl TritonVmProofJobOptionsBuilder {
     /// let args = Args::default();
     /// TritonVmProofJobOptionsBuilder::new()
     ///     .template(&args.as_proof_job_options())
-    ///     .proof_type(TransactionProofType::SingleProof)
+    ///     .proving_capability(TransactionProofType::SingleProof)
     ///     .build();
     /// ```
     pub fn template(mut self, template: &TritonVmProofJobOptions) -> Self {
@@ -93,18 +88,16 @@ impl TritonVmProofJobOptionsBuilder {
         self.prover_job_settings(&template.job_settings)
     }
 
-    /// add prover job settings
+    /// add prover job settings (optional)
     ///
     /// this will set all fields from [ProverJobSettings] at once.
     pub fn prover_job_settings(mut self, js: &ProverJobSettings) -> Self {
-        self.max_log2_padded_height_for_proofs = js.max_log2_padded_height_for_proofs;
         self.network = Some(js.network);
-        self.tx_proving_capability = Some(js.tx_proving_capability);
-        self.proof_type = Some(js.proof_type);
+        self.vm_proving_capability = Some(js.vm_proving_capability);
         self
     }
 
-    /// add job priority
+    /// add job priority (optional)
     ///
     /// see [TritonVmProofJobOptions::job_priority].
     ///
@@ -114,7 +107,7 @@ impl TritonVmProofJobOptionsBuilder {
         self
     }
 
-    /// add cancel_job_rx
+    /// add cancel_job_rx (optional)
     ///
     /// see [TritonVmProofJobOptions::cancel_job_rx].
     ///
@@ -125,6 +118,7 @@ impl TritonVmProofJobOptionsBuilder {
     /// ```
     /// use neptune_cash::api::export::TransactionDetails;
     /// use neptune_cash::api::export::TransactionProof;
+    /// use neptune_cash::api::export::TransactionProofType;
     /// use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     /// use neptune_cash::triton_vm_job_queue::vm_job_queue;
@@ -144,6 +138,7 @@ impl TritonVmProofJobOptionsBuilder {
     ///     let build_future =
     ///         TransactionProofBuilder::new()
     ///             .transaction_details(&tx_details)
+    ///             .transaction_proof_type(TransactionProofType::SingleProof)
     ///             .job_queue(vm_job_queue())
     ///             .proof_job_options(options)
     ///             .build();
@@ -166,17 +161,7 @@ impl TritonVmProofJobOptionsBuilder {
         self
     }
 
-    /// add max_log2_padded_height_for_proofs
-    ///
-    /// see [cli_args::Args::max_log2_padded_height_for_proofs](crate::config_models::cli_args::Args::max_log2_padded_height_for_proofs).
-    ///
-    /// default: None (no limit)
-    pub fn max_log2_padded_height_for_proofs(mut self, max: u8) -> Self {
-        self.max_log2_padded_height_for_proofs = Some(max);
-        self
-    }
-
-    /// add network
+    /// add network (optional)
     ///
     /// default: [Network::default()]
     pub fn network(mut self, network: Network) -> Self {
@@ -184,25 +169,17 @@ impl TritonVmProofJobOptionsBuilder {
         self
     }
 
-    /// specify the machine's proving capability.
+    /// specify the machine's proving capability. (optional)
     ///
-    /// It is important to set the device's [TxProvingCapability] so that weak
+    /// It is important to set the device's [VmProvingCapability] so that weak
     /// devices will not attempt to build proofs they are not capable of.
     ///
-    /// default: [TxProvingCapability::default()]
-    pub fn proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
-        self.tx_proving_capability = Some(tx_proving_capability);
-        self
-    }
-
-    /// specify the target proof type.
-    ///
-    /// Usually it is desirable build the best proof the hardware is capable of.
-    /// Therefore this field defaults to the proving-capability if not provided.
-    ///
-    /// default: [Self::proving_capability()]
-    pub fn proof_type(mut self, proof_type: TransactionProofType) -> Self {
-        self.proof_type = Some(proof_type);
+    /// default: [VmProvingCapability::default()]
+    pub fn proving_capability(
+        mut self,
+        vm_proving_capability: impl Into<VmProvingCapability>,
+    ) -> Self {
+        self.vm_proving_capability = Some(vm_proving_capability.into());
         self
     }
 
@@ -211,22 +188,17 @@ impl TritonVmProofJobOptionsBuilder {
         let Self {
             job_priority,
             cancel_job_rx,
-            max_log2_padded_height_for_proofs,
             network,
-            tx_proving_capability,
-            proof_type,
+            vm_proving_capability,
         } = self;
 
         let job_priority = job_priority.unwrap_or_default();
         let network = network.unwrap_or_default();
-        let tx_proving_capability = tx_proving_capability.unwrap_or_default();
-        let proof_type = proof_type.unwrap_or(tx_proving_capability.into());
+        let vm_proving_capability = vm_proving_capability.unwrap_or_default();
 
         let job_settings = ProverJobSettings {
-            max_log2_padded_height_for_proofs,
             network,
-            tx_proving_capability,
-            proof_type,
+            vm_proving_capability,
         };
 
         TritonVmProofJobOptions {

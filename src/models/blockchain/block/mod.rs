@@ -1119,12 +1119,12 @@ pub(crate) mod tests {
     use crate::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::TypeScript;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
@@ -1464,6 +1464,7 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+        use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;
@@ -1522,7 +1523,8 @@ pub(crate) mod tests {
                 &block1,
                 &alice,
                 plus_eight_months,
-                (TritonVmJobPriority::Normal, None).into(),
+                TritonVmJobPriority::Normal.into(),
+                TransactionProofType::SingleProof,
             )
             .await
             .unwrap();
@@ -1540,7 +1542,7 @@ pub(crate) mod tests {
                 let outputs = vec![output_to_self.clone(); i];
                 let config2 = TxCreationConfig::default()
                     .recover_change_on_chain(alice_key)
-                    .with_prover_capability(TxProvingCapability::SingleProof);
+                    .with_prover_capability(TransactionProofType::SingleProof);
                 let tx2 = alice
                     .api()
                     .tx_initiator_internal()
@@ -1583,13 +1585,14 @@ pub(crate) mod tests {
                     &block2_without_valid_pow,
                     &alice,
                     plus_nine_months,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmJobPriority::Normal.into(),
+                    TransactionProofType::SingleProof,
                 )
                 .await
                 .unwrap();
                 let config3 = TxCreationConfig::default()
                     .recover_change_on_chain(alice_key)
-                    .with_prover_capability(TxProvingCapability::SingleProof);
+                    .with_prover_capability(TransactionProofType::SingleProof);
                 let tx3 = alice
                     .api()
                     .tx_initiator_internal()
@@ -1877,7 +1880,7 @@ pub(crate) mod tests {
             let fee = NativeCurrencyAmount::coins(1);
             let config1 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                .with_prover_capability(TransactionProofType::PrimitiveWitness);
             let tx1 = alice
                 .api()
                 .tx_initiator_internal()
@@ -1896,7 +1899,7 @@ pub(crate) mod tests {
 
             let config2 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                .with_prover_capability(TransactionProofType::PrimitiveWitness);
             let tx2 = alice
                 .api()
                 .tx_initiator_internal()
@@ -1982,7 +1985,8 @@ pub(crate) mod tests {
                 &blocks[i - 1],
                 &alice,
                 launch_date,
-                TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
+                TritonVmJobPriority::Normal.into(),
+                TransactionProofType::SingleProof,
             )
             .await
             .unwrap();
@@ -2012,7 +2016,7 @@ pub(crate) mod tests {
                 .into();
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key.into())
-                    .with_prover_capability(TxProvingCapability::SingleProof)
+                    .with_prover_capability(TransactionProofType::SingleProof)
                     .use_job_queue(job_queue.clone());
                 let transaction_creation_artifacts = alice
                     .api()

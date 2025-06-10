@@ -36,6 +36,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
@@ -52,7 +53,6 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::mempool::TransactionOrigin;
 use crate::models::state::networking_state::SyncAnchor;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::triton_vm_job_queue::vm_job_queue;
@@ -1324,7 +1324,10 @@ impl MainLoopHandler {
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
             Ok(global_state.net.sync_anchor.is_none()
-                && global_state.proving_capability() == TxProvingCapability::SingleProof
+                && global_state
+                    .proving_capability()
+                    .can_prove(TransactionProofType::SingleProof)
+                    .is_ok()
                 && !previous_upgrade_task_is_still_running
                 && tx_upgrade_interval
                     .is_some_and(|upgrade_interval| duration_since_last_upgrade > upgrade_interval))
@@ -1365,8 +1368,12 @@ impl MainLoopHandler {
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
         let vm_job_queue = vm_job_queue();
-        let perform_ms_update_if_needed =
-            self.global_state_lock.cli().proving_capability() == TxProvingCapability::SingleProof;
+        let perform_ms_update_if_needed = self
+            .global_state_lock
+            .cli()
+            .proving_capability()
+            .can_prove(TransactionProofType::SingleProof)
+            .is_ok();
 
         let global_state_lock_clone = self.global_state_lock.clone();
         let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
@@ -2156,7 +2163,7 @@ mod tests {
 
         async fn tx_no_outputs(
             global_state_lock: &mut GlobalStateLock,
-            tx_proof_type: TxProvingCapability,
+            tx_proof_type: TransactionProofType,
             fee: NativeCurrencyAmount,
         ) -> Arc<Transaction> {
             let change_key = global_state_lock
@@ -2200,7 +2207,7 @@ mod tests {
             // Force instance to create SingleProofs, otherwise CI and other
             // weak machines fail.
             let mocked_cli = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
                 tx_proof_upgrade_interval: 100, // seconds
                 ..Default::default()
             };
@@ -2223,7 +2230,7 @@ mod tests {
             let fee = NativeCurrencyAmount::coins(1);
             let proof_collection_tx = tx_no_outputs(
                 &mut main_loop_handler.global_state_lock,
-                TxProvingCapability::ProofCollection,
+                TransactionProofType::ProofCollection,
                 fee,
             )
             .await;

@@ -130,6 +130,7 @@ humantime = "2.1.0"
 #
 # Once the issue is resolved, this unused dependency can be removed.
 deranged = "=0.4.0"
+const_format = "0.2.34"
 
 [dev-dependencies]
 

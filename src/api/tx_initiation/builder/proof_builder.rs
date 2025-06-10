@@ -196,18 +196,11 @@ impl<'a> ProofBuilder<'a> {
         // building a real proof.
         let nondeterminism = nondeterminism_callback();
 
-        let proof_type = proof_job_options.job_settings.proof_type;
-        let capability = proof_job_options.job_settings.tx_proving_capability;
-        if !capability.can_prove(proof_type) {
-            return Err(CreateProofError::TooWeak {
-                proof_type,
-                capability,
-            });
-        }
-        // this builder only supports proofs that can be executed in triton-vm.
-        if !proof_type.executes_in_vm() {
-            return Err(CreateProofError::NotVmProof(proof_type));
-        }
+        proof_job_options
+            .job_settings
+            .vm_proving_capability
+            .check_if_capable_async(program.clone(), claim.clone(), nondeterminism.clone())
+            .await?;
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 

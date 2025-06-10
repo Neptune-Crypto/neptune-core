@@ -2005,9 +2005,9 @@ pub(crate) mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -2260,7 +2260,7 @@ pub(crate) mod tests {
         let tx_outputs = vec![txoutput.clone(), txoutput.clone()];
         let config2 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            .with_prover_capability(TransactionProofType::PrimitiveWitness);
         let tx_block2 = bob
             .api()
             .tx_initiator_internal()
@@ -2305,7 +2305,7 @@ pub(crate) mod tests {
         // balance.
         let config3 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            .with_prover_capability(TransactionProofType::PrimitiveWitness);
         let tx_block3 = bob
             .api()
             .tx_initiator_internal()
@@ -2366,7 +2366,7 @@ pub(crate) mod tests {
         let fee = NativeCurrencyAmount::coins(10);
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            .with_prover_capability(TransactionProofType::PrimitiveWitness);
         let mut tx_block2: Transaction = bob
             .api()
             .tx_initiator_internal()
@@ -2468,7 +2468,7 @@ pub(crate) mod tests {
         let fee = NativeCurrencyAmount::coins(10);
         let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
-            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+            .with_prover_capability(TransactionProofType::PrimitiveWitness);
         let mut tx_block2: Transaction = bob
             .api()
             .tx_initiator_internal()
@@ -3202,7 +3202,7 @@ pub(crate) mod tests {
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(a_key.into())
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                .with_prover_capability(TransactionProofType::PrimitiveWitness);
             let mut tx_spending_guesser_fee: Transaction = bob
                 .api()
                 .tx_initiator_internal()
@@ -3303,7 +3303,6 @@ pub(crate) mod tests {
         use crate::config_models::cli_args;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::Transaction;
-        use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::models::state::TransactionOrigin;
@@ -3385,7 +3384,7 @@ pub(crate) mod tests {
 
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                    .with_prover_capability(TransactionProofType::PrimitiveWitness);
                 global_state_lock
                     .api()
                     .tx_initiator_internal()
@@ -3467,7 +3466,7 @@ pub(crate) mod tests {
 
                 let config = TxCreationConfig::default()
                     .recover_change_off_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                    .with_prover_capability(TransactionProofType::PrimitiveWitness);
                 alice_global_lock
                     .api()
                     .tx_initiator_internal()
@@ -3971,7 +3970,7 @@ pub(crate) mod tests {
 
                 let config = TxCreationConfig::default()
                     .recover_change_off_chain(change_key)
-                    .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                    .with_prover_capability(TransactionProofType::PrimitiveWitness);
                 alice_global_lock
                     .api()
                     .tx_initiator_internal()
@@ -4226,7 +4225,7 @@ pub(crate) mod tests {
             );
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(premine_change_key)
-                .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+                .with_prover_capability(TransactionProofType::PrimitiveWitness);
             let transaction = premine_receiver
                 .api()
                 .tx_initiator_internal()
@@ -4548,7 +4547,8 @@ pub(crate) mod tests {
                 composer_parameters.clone(),
                 now,
                 TritonVmJobQueue::get_instance(),
-                rando.cli().proof_job_options_primitive_witness(),
+                rando.cli().into(),
+                TransactionProofType::PrimitiveWitness,
             )
             .await
             .unwrap();
@@ -4680,9 +4680,8 @@ pub(crate) mod tests {
                 composer_parameters.clone(),
                 now,
                 TritonVmJobQueue::get_instance(),
-                global_state_lock
-                    .cli()
-                    .proof_job_options_primitive_witness(),
+                global_state_lock.cli().into(),
+                TransactionProofType::PrimitiveWitness,
             )
             .await
             .unwrap();
@@ -4788,7 +4787,7 @@ pub(crate) mod tests {
             // set up premine recipient
             let network = Network::Main;
             let cli_args = cli_args::Args {
-                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
                 network,
                 ..Default::default()
             };
@@ -4825,7 +4824,7 @@ pub(crate) mod tests {
 
             let config = TxCreationConfig::default()
                 .recover_change_on_chain(change_key.into())
-                .with_prover_capability(TxProvingCapability::ProofCollection);
+                .with_prover_capability(TransactionProofType::ProofCollection);
 
             let proof_collection_transaction = alice
                 .api()
@@ -4844,7 +4843,7 @@ pub(crate) mod tests {
             let rando_wallet_secret = WalletEntropy::new_pseudorandom(rng.random());
             let rando_cli_args = cli_args::Args {
                 fee_notification: upgrade_fee_notification_policy,
-                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                vm_proving_capability: Some(TransactionProofType::SingleProof.into()),
                 // necessary to allow proof-collection -> single-proof upgrades for foreign transactions
                 compose: true,
                 network,
@@ -4881,6 +4880,7 @@ pub(crate) mod tests {
                 &alice,
                 now,
                 TritonVmProofJobOptions::default(),
+                TransactionProofType::SingleProof,
             )
             .await
             .unwrap();
@@ -4958,6 +4958,7 @@ pub(crate) mod tests {
                 &alice,
                 block_one.header().timestamp + Timestamp::minutes(10),
                 TritonVmProofJobOptions::default(),
+                TransactionProofType::SingleProof,
             )
             .await
             .unwrap();
