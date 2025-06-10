@@ -10,7 +10,7 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
-pub(crate) mod upgrade_priority;
+pub mod upgrade_priority;
 
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
@@ -720,8 +720,7 @@ impl Mempool {
 
     /// Remove from the mempool all transactions that become invalid because
     /// of a newly received block. Update all mutator set data for transactions
-    /// that are our own. If client acts as a composer, all transactions are
-    /// updated.
+    /// that are our own.
     ///
     /// Since updating SingleProof-backed transactions takes a very long time,
     /// this proof generation does not happen in this method. Only a
@@ -735,7 +734,7 @@ impl Mempool {
         predecessor_block: &Block,
         tx_proving_capability: TxProvingCapability,
         composing: bool,
-    ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
+    ) -> (Vec<MempoolEvent>, Vec<PrimitiveWitness>) {
         // If the mempool is empty, there is nothing to do.
         if self.is_empty() {
             self.set_sync_labels(new_block);
@@ -791,30 +790,9 @@ impl Mempool {
         // Remove the transactions that become invalid with this block
         let mut events = self.retain(keep);
 
-        // Prepare a mutator set update to be applied to all retained items
-        let mutator_set_update = new_block.mutator_set_update();
-
-        // Update policy:
-        // We update transaction if either of these conditions are true:
-        // a) We're composing
-        // b) We initiated this transaction *and* client is capable of creating
-        //    these proofs.
-        // If we cannot update the transaction, we kick it out regardless.
-        let previous_mutator_set_accumulator =
-            predecessor_block.mutator_set_accumulator_after().clone();
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];
         for (tx_id, tx) in &mut self.tx_dictionary {
-            if !composing && tx.upgrade_priority.is_irrelevant() {
-                debug!(
-                    "Not updating transaction {tx_id} since it's not \
-                    initiated by us, and client is not composing."
-                );
-                kick_outs.push(*tx_id);
-                events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
-                continue;
-            }
-
             if tx.transaction.kernel.inputs.is_empty() {
                 debug!("Not updating transaction since empty transactions cannot be updated.");
                 kick_outs.push(*tx_id);
@@ -822,50 +800,30 @@ impl Mempool {
                 continue;
             }
 
-            let can_upgrade_single_proof =
-                TxProvingCapability::SingleProof == tx_proving_capability;
-            let (update_job, can_update) = match &tx.transaction.proof {
+            let (update_job, remove_from_mempool) = match &tx.transaction.proof {
+                // Proof-collection backed transaction cannot be updated, but if
+                // the transaction was initiated locally, the primitive witness
+                // will be known, and it can be updated.
                 TransactionProof::ProofCollection(_) => {
-                    debug!("Failed to update transaction {tx_id}. Because it is only supported by a proof collection.");
-
-                    (None, false)
-                }
-                TransactionProof::Witness(_primitive_witness) => {
-                    debug!(
-                        "Failed to update transaction {tx_id}. Because it \
-                    is only supported by a primitive witness. While it is \
-                    technically possible, policy dictates not to update such \
-                    transactions in the mempool. Re-initiate the transaction \
-                    instead."
-                    );
-
-                    (None, false)
-                }
-                TransactionProof::SingleProof(old_proof) => {
-                    if can_upgrade_single_proof {
-                        let job = UpdateMutatorSetDataJob::new(
-                            tx.transaction.kernel.clone(),
-                            old_proof.to_owned(),
-                            previous_mutator_set_accumulator.clone(),
-                            mutator_set_update.clone(),
-                            tx.upgrade_priority
-                                .incentive_given_gobble_potential(NativeCurrencyAmount::zero()),
-                        );
-                        debug!("Updating single-proof supported transaction {tx_id} to new mutator set.");
-
-                        (Some(job), true)
+                    if let Some(pw) = &tx.primitive_witness {
+                        (Some(pw.to_owned()), false)
                     } else {
-                        debug!("Not updating single-proof supported transaction {tx_id}, because TxProvingCapability was only {tx_proving_capability}.");
-                        (None, false)
+                        (None, true)
                     }
                 }
+
+                // Primitive witness-backed transactions can easily be updated.
+                TransactionProof::Witness(pw) => (Some(pw.to_owned()), false),
+
+                // Single proofs can be updated, so we don't kick them out.
+                TransactionProof::SingleProof(_) => (None, false),
             };
 
             if let Some(update_job) = update_job {
                 update_jobs.push(update_job);
             }
 
-            if !can_update {
+            if remove_from_mempool {
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
                 if !tx.upgrade_priority.is_irrelevant() {

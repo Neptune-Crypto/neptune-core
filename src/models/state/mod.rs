@@ -1761,11 +1761,7 @@ impl GlobalState {
 
     /// adds Tx to mempool and notifies wallet of change. value represents
     /// the value that the transaction has to caller.
-    pub(crate) async fn mempool_insert(
-        &mut self,
-        transaction: Transaction,
-        value: UpgradePriority,
-    ) {
+    pub async fn mempool_insert(&mut self, transaction: Transaction, value: UpgradePriority) {
         let events = self.mempool.insert(transaction, value);
         self.wallet_state.handle_mempool_events(events).await
     }

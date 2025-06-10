@@ -89,7 +89,7 @@ impl TransactionProof {
         }
     }
 
-    pub(crate) fn proof_quality(&self) -> anyhow::Result<TransactionProofQuality> {
+    pub fn proof_quality(&self) -> anyhow::Result<TransactionProofQuality> {
         match self {
             TransactionProof::Witness(_) => {
                 anyhow::bail!("Primitive witness does not have a proof")
