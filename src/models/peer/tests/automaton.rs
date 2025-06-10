@@ -219,5 +219,5 @@ the `Mock`, then grab the result from the thread with the `Reference` and finish
 proptest_state_machine::prop_state_machine! {
     #![proptest_config(proptest::test_runner::Config::with_cases(1))]
     #[test]
-    fn automaton(sequential 1..20 => TheSut);
+    fn automaton(sequential 1..50 => TheSut);
 }

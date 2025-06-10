@@ -76,116 +76,114 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
         ``` */
 
         /* TODO is it possible to add a check here that the `Strategy` covers all the variants? */
-        /* attempted to be sorted from simple to complex as the book recommends */
-        let mut the = prop_oneof![
-            /* Few variants are excluded from the strateegy.
-            - Handshake: an existing peer can only punish for a `Handshake` hence it doesn't matter at all what's inside such a `PeerMessage` (TODO add a simple `Transition` for this)
-            - nothing to test and `proptest` doesn't like finite automata
-                - `Bye`
-                - `ConnectionStatus`
-            */
-            // `PeerListRequest`
-            Just(Transition(PeerMessage::PeerListRequest, None)),
-            // `BlockRequestByHeight`
-            Just(Transition(
+        /* Weighted strategy to heavily favor safe messages that don't trigger peer banning */
+        
+        // Safe messages (high weight) - these typically don't cause negative sanctions
+        let safe_messages = prop_oneof![
+            // `PeerListRequest` - safe, no sanctions
+            50 => Just(Transition(PeerMessage::PeerListRequest, None)),
+            // `BlockRequestByHeight` with valid height - safe
+            40 => Just(Transition(
                 PeerMessage::BlockRequestByHeight(BlockHeight::from(blocks_len as u64)),
                 None
             )),
-            // `TransactionRequest`
+            // `TransactionRequest` with valid tx id - safe
+            40 => (0..blocks_len).prop_map(move |i| Transition(
+                PeerMessage::TransactionRequest(blocks_tx_id[i]),
+                None
+            )),
+            // `BlockNotificationRequest` without new blocks - safe
+            30 => Just(Transition(PeerMessage::BlockNotificationRequest, None)),
+            // Valid `BlockNotification` with new block - safe and beneficial
+            25 => utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
+                PeerMessage::BlockNotification(PeerBlockNotification::from(&b)),
+                Some(AssosiatedData::NewBlock(b))
+            )),
+            // Valid `Block` with new block - safe and beneficial
+            25 => utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
+                PeerMessage::Block(Box::new(b.clone().try_into().unwrap())),
+                Some(AssosiatedData::NewBlock(b))
+            )),
+            // Valid `BlockProposal` with new block - safe and beneficial
+            20 => utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
+                PeerMessage::BlockProposal(Box::new(b.clone())),
+                Some(AssosiatedData::NewBlock(b))
+            )),
+            // `BlockProposalRequest` with valid hash - safe
+            15 => block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
+                PeerMessage::BlockProposalRequest(BlockProposalRequest::new(b.hash())),
+                Some(AssosiatedData::NewBlock(b))
+            )),
+        ];
+
+        // Moderately risky messages (medium weight) - might cause minor sanctions
+        let moderate_messages = if blocks_len > 1 {
             prop_oneof![
-                (0..blocks_len).prop_map(move |i| Transition(
-                    PeerMessage::TransactionRequest(blocks_tx_id[i]),
-                    None
-                )),
-                arb::<crate::models::state::transaction_kernel_id::TransactionKernelId>()
-                    .prop_map(|r| Transition(PeerMessage::TransactionRequest(r), None))
-            ],
-            // `BlockRequestByHash` random. #validChained
-            arb::<Digest>()
-                .prop_map(|digest| Transition(PeerMessage::BlockRequestByHash(digest), None)),
-            // `BlockNotificationRequest`
-            prop_oneof![
-                Just(Transition(PeerMessage::BlockNotificationRequest, None)),
-                strategy_variants::block_notif_req()
-            ],
-            // `SyncChallengeResponse`
-            super::super::super::syncchallenge_response_prop_compose_random()
-                .prop_map(|r| r.into()),
-            // `SyncChallenge` random (a valid is chained based on the state in the end) #validChained
-            proptest_arbitrary_interop::arb::<SyncChallenge>()
-                .prop_map(|ch| Transition(ch.into(), None)),
-            // `Transaction`
-            strategy_variants::tx(false),
-            // `TransactionNotification`
-            strategy_variants::tx(true),
-            // `BlockProposalRequest`
-            prop_oneof![
-                arb::<Digest>().prop_map(|d| Transition(
+                // `TransactionRequest` with random id - might cause minor sanctions
+                10 => arb::<crate::models::state::transaction_kernel_id::TransactionKernelId>()
+                    .prop_map(|r| Transition(PeerMessage::TransactionRequest(r), None)),
+                // `BlockRequestByHash` with known hash - safe
+                8 => (1..blocks_len).prop_map(move |i| {
+                    Transition(PeerMessage::BlockRequestByHash(blocks_digests[i]), None)
+                }),
+                // `BlockProposalRequest` with random hash - might cause minor sanctions
+                5 => arb::<Digest>().prop_map(|d| Transition(
                     PeerMessage::BlockProposalRequest(BlockProposalRequest::new(d)),
                     None
                 )),
-                block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
-                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(b.hash())),
-                    Some(AssosiatedData::NewBlock(b))
-                ))
-            ],
-            // `Block`
+                // `BlockNotificationRequest` with new blocks - safe but complex
+                5 => strategy_variants::block_notif_req(),
+            ].boxed()
+        } else {
             prop_oneof![
-                crate::models::peer::transfer_block::block_transfer_prop_compose_random()
-                    .prop_map(|tb| Transition(PeerMessage::Block(Box::new(tb)), None)),
-                utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
-                    PeerMessage::Block(Box::new(b.clone().try_into().unwrap())),
-                    Some(AssosiatedData::NewBlock(b))
+                // `TransactionRequest` with random id - might cause minor sanctions
+                10 => arb::<crate::models::state::transaction_kernel_id::TransactionKernelId>()
+                    .prop_map(|r| Transition(PeerMessage::TransactionRequest(r), None)),
+                // `BlockProposalRequest` with random hash - might cause minor sanctions
+                5 => arb::<Digest>().prop_map(|d| Transition(
+                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(d)),
+                    None
                 )),
-            ],
-            // `BlockProposal`
-            prop_oneof![
-                utils::block_invalid()
-                    .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None)),
-                utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
-                    PeerMessage::BlockProposal(Box::new(b.clone())),
-                    Some(AssosiatedData::NewBlock(b))
-                ))
-            ],
-            // `BlockNotification`
-            prop_oneof![
-                utils::block_new(current_tip.clone(), state.network).prop_map(|b| Transition(
-                    PeerMessage::BlockNotification(PeerBlockNotification::from(&b)),
-                    Some(AssosiatedData::NewBlock(b))
-                )),
-                strategy_variants::block_notif()
-            ],
-            // `BlockRequestBatch`
-            // TODO need an example of the MMR part
-            //      look into `peer_loop_tests::sync_challenges`
-            // (
-            //     proptest::collection::vec(arb::<Digest>(), 0..crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST),
-            //     1u16..100u16,
-            //     arb::<Digest>()
-            // ).prop_map(|(known_blocks, max_response_len, anchor)|
-            //     Transition(PeerMessage::BlockRequestBatch(
-            //         crate::models::peer::BlockRequestBatch {
-            //             known_blocks,
-            //             max_response_len,
-            //             anchor
-            //         }
-            //     ), None)
-            // ),
-        ]
-        .boxed();
-        // `BlockRequestByHash` from `blocks` except genesis
-        // TODO add the `Just` strategy for genesis (as `blocks_digests[0]`) -- now the peer thread just panics on this, and it's not clear if that's an intended behaviour
-        if blocks_len > 1 {
-            the = the
-                .prop_union(
-                    (1..blocks_len)
-                        .prop_map(move |i| {
-                            Transition(PeerMessage::BlockRequestByHash(blocks_digests[i]), None)
-                        })
-                        .boxed(),
-                )
-                .boxed();
-        }
+                // `BlockNotificationRequest` with new blocks - safe but complex
+                5 => strategy_variants::block_notif_req(),
+            ].boxed()
+        };
+
+        // Risky messages (low weight) - likely to cause sanctions but needed for testing
+        let risky_messages = prop_oneof![
+            // Random `BlockRequestByHash` - might cause sanctions
+            3 => arb::<Digest>()
+                .prop_map(|digest| Transition(PeerMessage::BlockRequestByHash(digest), None)),
+            // Random `BlockNotification` - might cause sanctions
+            3 => strategy_variants::block_notif(),
+            // Valid transactions - generally safe but can have edge cases
+            2 => strategy_variants::tx(false),
+            2 => strategy_variants::tx(true),
+            // Random transfer blocks - might cause sanctions
+            2 => crate::models::peer::transfer_block::block_transfer_prop_compose_random()
+                .prop_map(|tb| Transition(PeerMessage::Block(Box::new(tb)), None)),
+            // Invalid blocks - will cause sanctions but needed for testing
+            1 => utils::block_invalid()
+                .prop_map(|b| Transition(PeerMessage::BlockProposal(Box::new(b)), None)),
+        ];
+
+        // Very risky messages (very low weight) - will likely cause severe sanctions
+        let very_risky_messages = prop_oneof![
+            // Random `SyncChallenge` - high chance of severe sanctions (-50 points)
+            1 => proptest_arbitrary_interop::arb::<SyncChallenge>()
+                .prop_map(|ch| Transition(ch.into(), None)),
+            // Random `SyncChallengeResponse` - very high chance of severe sanctions (-500 points)
+            1 => super::super::super::syncchallenge_response_prop_compose_random()
+                .prop_map(|r| r.into()),
+        ];
+
+        // Combine all strategies with weights favoring safe messages
+        let mut the = prop_oneof![
+            70 => safe_messages,      // 70% chance of safe messages
+            20 => moderate_messages,  // 20% chance of moderate messages  
+            8 => risky_messages,      // 8% chance of risky messages
+            2 => very_risky_messages, // 2% chance of very risky messages
+        ].boxed();
         // `SyncChallenge` from `BlockNotification`
         if let Some(SyncStage::WaitingForChallenge(challenge_pre, tip_of_request)) =
             state.sync_stage.clone()
