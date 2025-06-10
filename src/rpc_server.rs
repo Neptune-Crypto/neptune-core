@@ -116,6 +116,7 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -741,6 +742,13 @@ pub trait RPC {
     /// # }
     /// ```
     async fn utxo_digest(token: rpc_auth::Token, leaf_index: u64) -> RpcResult<Option<Digest>>;
+
+    /// Returns the block in which the specified UTXO was created, if available
+    async fn utxo_origin_block(
+        token: rpc_auth::Token,
+        addition_record: AdditionRecord,
+        max_search_depth: Option<u64>,
+    ) -> RpcResult<Option<Block>>;
 
     /// Return the block header for the specified block
     ///
@@ -2310,6 +2318,27 @@ impl RPC for NeptuneRPCServer {
                 false => None,
             },
         )
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn utxo_origin_block(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        addition_record: AdditionRecord,
+        max_search_depth: Option<u64>,
+    ) -> RpcResult<Option<Block>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let block = state
+            .chain
+            .archival_state()
+            .find_canonical_block_with_output(addition_record, max_search_depth)
+            .await;
+
+        Ok(block)
     }
 
     // documented in trait. do not add doc-comment.
