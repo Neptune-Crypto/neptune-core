@@ -374,12 +374,16 @@ impl Block {
     ///
     /// Includes the guesser-fee UTXOs which are not included by the
     /// `mutator_set_accumulator` field on the block body.
-    pub fn mutator_set_accumulator_after(&self) -> MutatorSetAccumulator {
+    pub fn mutator_set_accumulator_after(
+        &self,
+    ) -> Result<MutatorSetAccumulator, BlockValidationError> {
         let mut msa = self.kernel.body.mutator_set_accumulator.clone();
-        let mutator_set_update = MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records());
+        let mutator_set_update =
+            MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records()?);
         mutator_set_update.apply_to_accumulator(&mut msa)
             .expect("mutator set update derived from guesser fees should be applicable to mutator set accumulator contained in body");
-        msa
+
+        Ok(msa)
     }
 
     #[inline]
@@ -819,11 +823,9 @@ impl Block {
         }
 
         // 2.a)
+        let msa_before = previous_block.mutator_set_accumulator_after()?;
         for removal_record in &self.kernel.body.transaction_kernel.inputs {
-            if !previous_block
-                .mutator_set_accumulator_after()
-                .can_remove(removal_record)
-            {
+            if !msa_before.can_remove(removal_record) {
                 return Err(BlockValidationError::RemovalRecordsValid);
             }
         }
@@ -847,7 +849,7 @@ impl Block {
             self.body().transaction_kernel.inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
-        let mut msa = previous_block.mutator_set_accumulator_after();
+        let mut msa = msa_before;
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
 
         // 2.c)
@@ -1025,8 +1027,14 @@ impl Block {
 
     /// The amount rewarded to the guesser who finds a valid nonce for this
     /// block.
-    pub(crate) fn total_guesser_reward(&self) -> NativeCurrencyAmount {
-        self.body().transaction_kernel.fee
+    pub(crate) fn total_guesser_reward(
+        &self,
+    ) -> Result<NativeCurrencyAmount, BlockValidationError> {
+        if self.body().transaction_kernel.fee.is_negative() {
+            return Err(BlockValidationError::NegativeFee);
+        }
+
+        Ok(self.body().transaction_kernel.fee)
     }
 
     /// Get the block's guesser fee UTXOs.
@@ -1034,17 +1042,17 @@ impl Block {
     /// The amounts in the UTXOs are taken from the transaction fee.
     ///
     /// The genesis block does not have a guesser reward.
-    pub(crate) fn guesser_fee_utxos(&self) -> Vec<Utxo> {
+    pub(crate) fn guesser_fee_utxos(&self) -> Result<Vec<Utxo>, BlockValidationError> {
         const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
 
         if self.header().height.is_genesis() {
-            return vec![];
+            return Ok(vec![]);
         }
 
         let lock = self.header().guesser_digest;
         let lock_script = HashLockKey::lock_script_from_after_image(lock);
 
-        let total_guesser_reward = self.total_guesser_reward();
+        let total_guesser_reward = self.total_guesser_reward()?;
         let mut value_locked = total_guesser_reward;
         value_locked.div_two();
         let value_unlocked = total_guesser_reward.checked_sub(&value_locked).unwrap();
@@ -1056,15 +1064,18 @@ impl Block {
         let locked_utxo = Utxo::new(lock_script.clone(), coins);
         let unlocked_utxo = Utxo::new_native_currency(lock_script, value_unlocked);
 
-        vec![locked_utxo, unlocked_utxo]
+        Ok(vec![locked_utxo, unlocked_utxo])
     }
 
     /// Compute the addition records that correspond to the UTXOs generated for
     /// the block's guesser
     ///
     /// The genesis block does not have this addition record.
-    pub(crate) fn guesser_fee_addition_records(&self) -> Vec<AdditionRecord> {
-        self.guesser_fee_utxos()
+    pub(crate) fn guesser_fee_addition_records(
+        &self,
+    ) -> Result<Vec<AdditionRecord>, BlockValidationError> {
+        Ok(self
+            .guesser_fee_utxos()?
             .into_iter()
             .map(|utxo| {
                 let item = Tip5::hash(&utxo);
@@ -1078,21 +1089,22 @@ impl Block {
 
                 commit(item, sender_randomness, receiver_digest)
             })
-            .collect_vec()
+            .collect_vec())
     }
 
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
-    pub(crate) fn mutator_set_update(&self) -> MutatorSetUpdate {
+    pub(crate) fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
         let mut mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
 
-        let extra_addition_records = self.guesser_fee_addition_records();
+        let extra_addition_records = self.guesser_fee_addition_records()?;
         mutator_set_update.additions.extend(extra_addition_records);
-        mutator_set_update
+
+        Ok(mutator_set_update)
     }
 }
 
@@ -1258,7 +1270,7 @@ pub(crate) mod tests {
                 block_proof_witness.appendix(),
                 BlockProof::Invalid,
             );
-            let total_guesser_reward = block1.total_guesser_reward();
+            let total_guesser_reward = block1.total_guesser_reward().unwrap();
             let total_miner_reward = total_composer_reward + total_guesser_reward;
             assert_eq!(NativeCurrencyAmount::coins(128), total_miner_reward);
 
@@ -1826,9 +1838,10 @@ pub(crate) mod tests {
                 (0.4, guesser_preimage),
             )
             .await;
-            let ars = block1.guesser_fee_addition_records();
+            let ars = block1.guesser_fee_addition_records().unwrap();
             let ars_from_wallet = block1
                 .guesser_fee_utxos()
+                .unwrap()
                 .iter()
                 .map(|utxo| commit(Tip5::hash(utxo), block1.hash(), guesser_preimage.hash()))
                 .collect_vec();
@@ -1837,7 +1850,7 @@ pub(crate) mod tests {
             let MutatorSetUpdate {
                 removals: _,
                 additions,
-            } = block1.mutator_set_update();
+            } = block1.mutator_set_update().unwrap();
             assert!(
                 ars.iter().all(|ar| additions.contains(ar)),
                 "All addition records must be present in block's mutator set update"
@@ -1858,7 +1871,7 @@ pub(crate) mod tests {
             let preimage = rand::rng().random::<Digest>();
             block.set_header_guesser_digest(preimage.hash());
 
-            let guesser_fee_utxos = block.guesser_fee_utxos();
+            let guesser_fee_utxos = block.guesser_fee_utxos().unwrap();
 
             let lock_script_and_witness =
                 HashLockKey::from_preimage(preimage).lock_script_and_witness();
@@ -1881,7 +1894,7 @@ pub(crate) mod tests {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             assert!(
-                genesis_block.guesser_fee_utxos().is_empty(),
+                genesis_block.guesser_fee_utxos().unwrap().is_empty(),
                 "Genesis block has no guesser fee UTXOs"
             );
 
@@ -1945,7 +1958,7 @@ pub(crate) mod tests {
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
             let mutator_set_update_guesser_fees =
-                MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records());
+                MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records().unwrap());
             let mut mutator_set_update_tx = MutatorSetUpdate::new(
                 block2.body().transaction_kernel.inputs.clone(),
                 block2.body().transaction_kernel.outputs.clone(),

@@ -242,6 +242,10 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     assert_eq!(archival_state.get_tip().await.hash(), genesis_block.hash());
 
     let light_state: LightState = LightState::from(genesis_block.to_owned());
+    println!(
+        "Genesis light state MSA hash: {}",
+        light_state.mutator_set_accumulator_after().unwrap().hash()
+    );
     let chain = BlockchainState::Archival(Box::new(BlockchainArchivalState {
         light_state,
         archival_state,
@@ -672,7 +676,7 @@ pub(crate) fn invalid_block_with_transaction(
         difficulty: previous_block.header().difficulty,
     };
 
-    let mut next_mutator_set = previous_block.mutator_set_accumulator_after().clone();
+    let mut next_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmr.append(previous_block.hash());
 
@@ -898,7 +902,7 @@ pub(crate) fn invalid_empty_block(network: Network, predecessor: &Block) -> Bloc
     let tx = make_mock_transaction_with_mutator_set_hash(
         vec![],
         vec![],
-        predecessor.mutator_set_accumulator_after().hash(),
+        predecessor.mutator_set_accumulator_after().unwrap().hash(),
     );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, network.target_block_interval())
@@ -924,7 +928,7 @@ pub(crate) fn invalid_empty_block_with_timestamp(
     let tx = make_mock_transaction_with_mutator_set_hash_and_timestamp(
         vec![],
         vec![],
-        predecessor.mutator_set_accumulator_after().hash(),
+        predecessor.mutator_set_accumulator_after().unwrap().hash(),
         timestamp,
     );
     Block::block_template_invalid_proof(predecessor, tx, timestamp, network.target_block_interval())
@@ -1040,7 +1044,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         // create the nop-tx and merge into the coinbase transaction to set the
         // merge bit to allow the tx to be included in a block.
         let nop_details = TransactionDetails::nop(
-            predecessor_block.mutator_set_accumulator_after(),
+            predecessor_block.mutator_set_accumulator_after().unwrap(),
             timestamp,
             network,
         );
@@ -1216,6 +1220,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
             Some(mp) => {
                 if !tip_block
                     .mutator_set_accumulator_after()
+                    .unwrap()
                     .verify(Tip5::hash(&monitored_utxo.utxo), &mp)
                 {
                     warn!("Invalid MSMP");
