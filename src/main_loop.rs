@@ -33,10 +33,13 @@ use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+use crate::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
@@ -51,6 +54,8 @@ use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
+use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
+use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdateResult;
 use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -150,13 +155,13 @@ struct MutableMainLoopState {
 
     /// A channel that the task updating mempool transactions can use to
     /// communicate its result.
-    update_mempool_receiver: mpsc::Receiver<Vec<Transaction>>,
+    update_mempool_receiver: mpsc::Receiver<Vec<PrimitiveWitnessUpdateResult>>,
 }
 
 impl MutableMainLoopState {
     fn new(task_handles: Vec<JoinHandle<()>>) -> Self {
         let (_dummy_sender, dummy_receiver) =
-            mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
+            mpsc::channel::<Vec<PrimitiveWitnessUpdateResult>>(TX_UPDATER_CHANNEL_CAPACITY);
         Self {
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
@@ -446,30 +451,64 @@ impl MainLoopHandler {
         }
     }
 
-    /// Run a list of Triton VM prover jobs that update the mutator set state
-    /// for transactions.
+    /// Update the mutator set data for a list of primitive witnesses. Will
+    /// produce proof collections if the transactions already where
+    /// proof-collection backed when found in the mempool.
     ///
     /// Sends the result back through the provided channel.
     async fn update_mempool_jobs(
-        update_jobs: Vec<UpdateMutatorSetDataJob>,
+        mut global_state_lock: GlobalStateLock,
+        update_jobs: Vec<PrimitiveWitnessUpdate>,
         job_queue: Arc<TritonVmJobQueue>,
-        transaction_update_sender: mpsc::Sender<Vec<Transaction>>,
+        transaction_update_sender: mpsc::Sender<Vec<PrimitiveWitnessUpdateResult>>,
         proof_job_options: TritonVmProofJobOptions,
     ) {
         debug!(
-            "Attempting to update transaction proofs of {} transactions",
+            "Attempting to update transaction witnesses of {} transactions",
             update_jobs.len()
         );
         let mut result = vec![];
         for job in update_jobs {
-            // Jobs for updating txs in the mempool have highest priority since
-            // they block the composer from continuing.
-            // TODO: Handle errors better here.
-            let job_result = job
-                .upgrade(job_queue.clone(), proof_job_options.clone())
-                .await
-                .unwrap();
-            result.push(job_result);
+            let old_msa = &job.old_primitive_witness.mutator_set_accumulator;
+            let txid = job.old_primitive_witness.kernel.txid();
+            let mut state = global_state_lock.lock_guard_mut().await;
+            let msa_update = state
+                .chain
+                .archival_state_mut()
+                .get_mutator_set_update_to_tip(old_msa, SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE)
+                .await;
+            let Some(msa_update) = msa_update else {
+                result.push(PrimitiveWitnessUpdateResult::Failure(txid));
+                continue;
+            };
+
+            let new_pw = job
+                .old_primitive_witness
+                .update_with_new_ms_data(msa_update);
+
+            let upgraded_tx = if job.was_proof_collection {
+                let pc_job = PrimitiveWitnessToProofCollection {
+                    primitive_witness: new_pw.clone(),
+                };
+                let upgrade_result = pc_job.upgrade(job_queue.clone(), &proof_job_options).await;
+                match upgrade_result {
+                    Ok(upgraded) => upgraded,
+                    Err(_) => {
+                        result.push(PrimitiveWitnessUpdateResult::Failure(txid));
+                        continue;
+                    }
+                }
+            } else {
+                Transaction {
+                    kernel: new_pw.kernel.clone(),
+                    proof: TransactionProof::Witness(new_pw.clone()),
+                }
+            };
+
+            result.push(PrimitiveWitnessUpdateResult::Success {
+                new_primitive_witness: new_pw,
+                new_transaction: upgraded_tx,
+            });
         }
 
         transaction_update_sender
@@ -480,24 +519,54 @@ impl MainLoopHandler {
 
     /// Handles a list of transactions whose proof has been updated with new
     /// mutator set data.
-    async fn handle_updated_mempool_txs(&mut self, updated_txs: Vec<Transaction>) {
-        // Update mempool with updated transactions
+    async fn handle_updated_mempool_txs(
+        &mut self,
+        update_results: Vec<PrimitiveWitnessUpdateResult>,
+    ) {
         {
             let mut state = self.global_state_lock.lock_guard_mut().await;
-            for updated in &updated_txs {
-                let txid = updated.kernel.txid();
-                if let Some(tx) = state.mempool.get_mut(txid) {
-                    *tx = updated.to_owned();
-                } else {
-                    warn!("Updated transaction which is no longer in mempool");
+            for update_result in &update_results {
+                match update_result {
+                    PrimitiveWitnessUpdateResult::Failure(txkid) => {
+                        warn!(
+                            "Failed to update transaction {txkid} to be valid under new mutator \
+                        set. Removing from the mempool."
+                        );
+                        state.mempool_remove(*txkid).await
+                    }
+                    PrimitiveWitnessUpdateResult::Success {
+                        new_primitive_witness,
+                        new_transaction,
+                    } => {
+                        let txid = new_primitive_witness.kernel.txid();
+                        info!("Updated transaction {txid} to be valid under new mutator set");
+
+                        // Insert transaction both as primitive witness and as
+                        // proof-collection backed, if available, since this
+                        // makes the update of the primitive witness simpler if
+                        // we need to do it again.
+                        state.mempool_insert(
+                            new_primitive_witness.to_owned().into(),
+                            UpgradePriority::Critical,
+                        );
+                        state.mempool_insert(new_transaction.to_owned(), UpgradePriority::Critical);
+                    }
                 }
             }
         }
 
-        // Then notify all peers
-        for updated in updated_txs {
-            let pmsg = MainToPeerTask::TransactionNotification((&updated).try_into().unwrap());
-            self.main_to_peer_broadcast(pmsg);
+        // Then notify all peers about shareable (proof-collection backed) transactions.
+        for updated in update_results {
+            if let PrimitiveWitnessUpdateResult::Success {
+                new_primitive_witness,
+                new_transaction,
+            } = updated
+            {
+                if let Ok(pmsg) = (&new_transaction).try_into() {
+                    let pmsg = MainToPeerTask::TransactionNotification(pmsg);
+                    self.main_to_peer_broadcast(pmsg);
+                }
+            }
         }
 
         // Tell miner that it can now start composing next block.
@@ -520,11 +589,6 @@ impl MainLoopHandler {
         let new_block_hash = new_block.hash();
 
         // clone block in advance, so lock is held less time.
-        // note that this clone is wasted if block is not more canonical
-        // but that should be the less common case.
-        //
-        // perf: in the future we should use Arc systematically to avoid these
-        // expensive block clones.
         let new_block_clone = (*new_block).clone();
 
         // important!  the is_canonical check and set_new_tip() need to be an
@@ -545,15 +609,11 @@ impl MainLoopHandler {
                 self.main_to_miner_tx.send(MainToMiner::Continue);
                 return Ok(());
             }
-            // set new tip and obtain list of update-jobs to perform.
-            // the jobs update mutator-set data for:
-            //   all tx if we are in composer role.
-            //   else self-owned tx.
-            // see: Mempool::update_with_block_and_predecessor()
+
             let update_jobs = gsm.set_new_tip(new_block_clone).await?;
             gsm.flush_databases().await?;
             update_jobs
-        }; // write-lock is dropped here.
+        };
 
         // Share block with peers right away.
         let pmsg = MainToPeerTask::Block(new_block);
@@ -721,7 +781,7 @@ impl MainLoopHandler {
                         }
                     }
 
-                    let mut update_jobs: Vec<UpdateMutatorSetDataJob> = vec![];
+                    let mut update_jobs: Vec<PrimitiveWitnessUpdate> = vec![];
                     for new_block in blocks {
                         debug!(
                             "Storing block {} in database. Height: {}, Mined: {}",
@@ -1379,7 +1439,7 @@ impl MainLoopHandler {
     fn spawn_mempool_txs_update_job(
         &self,
         main_loop_state: &mut MutableMainLoopState,
-        update_jobs: Vec<UpdateMutatorSetDataJob>,
+        update_jobs: Vec<PrimitiveWitnessUpdate>,
     ) {
         // job completion of the spawned task is communicated through the
         // `update_mempool_txs_handle` channel.
@@ -1388,7 +1448,7 @@ impl MainLoopHandler {
             handle.abort();
         }
         let (update_sender, update_receiver) =
-            mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
+            mpsc::channel::<Vec<PrimitiveWitnessUpdateResult>>(TX_UPDATER_CHANNEL_CAPACITY);
 
         // note: if this task is cancelled, the job will continue
         // because TritonVmJobOptions::cancel_job_rx is None.
@@ -1397,11 +1457,13 @@ impl MainLoopHandler {
             .global_state_lock
             .cli()
             .proof_job_options(TritonVmJobPriority::Highest);
+        let global_state_lock = self.global_state_lock.clone();
         main_loop_state.update_mempool_txs_handle = Some(
             tokio::task::Builder::new()
                 .name("mempool tx ms-updater")
                 .spawn(async move {
                     Self::update_mempool_jobs(
+                        global_state_lock,
                         update_jobs,
                         vm_job_queue.clone(),
                         update_sender,

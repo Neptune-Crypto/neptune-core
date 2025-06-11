@@ -82,6 +82,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
+use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -251,7 +252,7 @@ impl GlobalStateLock {
     }
 
     /// store a block (non coinbase)
-    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<PrimitiveWitnessUpdate>> {
         self.lock_guard_mut().await.set_new_tip(new_block).await
     }
 
@@ -1463,7 +1464,7 @@ impl GlobalState {
     pub(crate) async fn set_new_tip(
         &mut self,
         new_block: Block,
-    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    ) -> Result<Vec<PrimitiveWitnessUpdate>> {
         self.set_new_tip_internal(new_block).await
     }
 
@@ -1493,7 +1494,7 @@ impl GlobalState {
     async fn set_new_tip_internal(
         &mut self,
         new_block: Block,
-    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    ) -> Result<Vec<PrimitiveWitnessUpdate>> {
         crate::macros::log_scope_duration!();
 
         // Apply the updates
@@ -1537,12 +1538,7 @@ impl GlobalState {
         // removing all transaction that became invalid/was mined by this
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
-        let (mempool_events, update_jobs) = self.mempool.update_with_block_and_predecessor(
-            &new_block,
-            &tip_parent,
-            self.proving_capability(),
-            self.cli().compose,
-        );
+        let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_block);
 
         // update wallet state with relevant UTXOs from this block
         self.wallet_state

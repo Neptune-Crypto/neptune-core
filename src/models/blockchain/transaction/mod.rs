@@ -75,6 +75,15 @@ pub struct Transaction {
     pub proof: TransactionProof,
 }
 
+impl From<PrimitiveWitness> for Transaction {
+    fn from(value: PrimitiveWitness) -> Self {
+        Transaction {
+            kernel: value.kernel.clone(),
+            proof: TransactionProof::Witness(value),
+        }
+    }
+}
+
 // for simpler Arc compatibility with existing tests.
 #[cfg(test)]
 impl From<Arc<Transaction>> for Transaction {

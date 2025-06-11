@@ -10,6 +10,7 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
+pub(crate) mod primitive_witness_update;
 pub mod upgrade_priority;
 
 use std::collections::hash_map::RandomState;
@@ -62,6 +63,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 use crate::prelude::twenty_first;
 
@@ -719,22 +721,13 @@ impl Mempool {
     }
 
     /// Remove from the mempool all transactions that become invalid because
-    /// of a newly received block. Update all mutator set data for transactions
-    /// that are our own.
-    ///
-    /// Since updating SingleProof-backed transactions takes a very long time,
-    /// this proof generation does not happen in this method. Only a
-    /// description of the jobs to be done is returned. It is then up to the
-    /// caller to ensure these updates happen. Returned mempool events does not
-    /// include information about mutator set updates. That must be handled by
-    /// the caller where the update jobs are executed.
-    pub(super) fn update_with_block_and_predecessor(
+    /// of a newly received block. Return a description of the transactions for
+    /// which a primitive witness is present such that the caller can update
+    /// their mutator set data.
+    pub(super) fn update_with_block(
         &mut self,
         new_block: &Block,
-        predecessor_block: &Block,
-        tx_proving_capability: TxProvingCapability,
-        composing: bool,
-    ) -> (Vec<MempoolEvent>, Vec<PrimitiveWitness>) {
+    ) -> (Vec<MempoolEvent>, Vec<PrimitiveWitnessUpdate>) {
         // If the mempool is empty, there is nothing to do.
         if self.is_empty() {
             self.set_sync_labels(new_block);
@@ -806,14 +799,18 @@ impl Mempool {
                 // will be known, and it can be updated.
                 TransactionProof::ProofCollection(_) => {
                     if let Some(pw) = &tx.primitive_witness {
-                        (Some(pw.to_owned()), false)
+                        let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned(), true);
+                        (Some(pw_update_job), false)
                     } else {
                         (None, true)
                     }
                 }
 
                 // Primitive witness-backed transactions can easily be updated.
-                TransactionProof::Witness(pw) => (Some(pw.to_owned()), false),
+                TransactionProof::Witness(pw) => {
+                    let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned(), false);
+                    (Some(pw_update_job), false)
+                }
 
                 // Single proofs can be updated, so we don't kick them out.
                 TransactionProof::SingleProof(_) => (None, false),
@@ -1024,7 +1021,7 @@ mod tests {
     ///
     /// Assumes that all transactions in the mempool are valid.
     async fn mocked_mempool_update_handler(
-        update_jobs: Vec<UpdateMutatorSetDataJob>,
+        update_jobs: Vec<PrimitiveWitnessUpdate>,
         mempool: &mut Mempool,
     ) -> Vec<MempoolEvent> {
         let mut updated_txs = vec![];
@@ -1426,12 +1423,7 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        let (_, update_jobs2) = mempool.update_with_block_and_predecessor(
-            &block_2,
-            &block_1,
-            TxProvingCapability::SingleProof,
-            true,
-        );
+        let (_, update_jobs2) = mempool.update_with_block(&block_2);
         mocked_mempool_update_handler(update_jobs2, &mut mempool).await;
         assert_eq!(1, mempool.len());
 
@@ -1457,12 +1449,7 @@ mod tests {
                 make_mock_block(network, &previous_block, None, alice_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
-            let (_, update_jobs_n) = mempool.update_with_block_and_predecessor(
-                &next_block,
-                &previous_block,
-                TxProvingCapability::SingleProof,
-                true,
-            );
+            let (_, update_jobs_n) = mempool.update_with_block(&next_block);
             mocked_mempool_update_handler(update_jobs_n, &mut mempool).await;
             previous_block = next_block;
         }
@@ -1501,12 +1488,7 @@ mod tests {
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
-        let (_, update_jobs5) = mempool.update_with_block_and_predecessor(
-            &block_5,
-            &previous_block,
-            TxProvingCapability::SingleProof,
-            true,
-        );
+        let (_, update_jobs5) = mempool.update_with_block(&block_5);
         mocked_mempool_update_handler(update_jobs5, &mut mempool).await;
 
         assert!(
@@ -2039,12 +2021,7 @@ mod tests {
                 network,
             )
             .await;
-            mempool.update_with_block_and_predecessor(
-                &block1,
-                &genesis_block,
-                TxProvingCapability::SingleProof,
-                true,
-            );
+            mempool.update_with_block(&block1);
             assert!(mempool.preferred_update().is_some());
         }
 
