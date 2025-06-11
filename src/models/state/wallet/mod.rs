@@ -120,7 +120,7 @@ mod wallet_tests {
                 next_block = nb;
                 alice
                     .update_wallet_state_with_new_block(
-                        &previous_block.mutator_set_accumulator_after(),
+                        &previous_block.mutator_set_accumulator_after().unwrap(),
                         &next_block,
                     )
                     .await
@@ -141,6 +141,7 @@ mod wallet_tests {
             assert!(
                 next_block
                     .mutator_set_accumulator_after()
+                    .unwrap()
                     .verify(Hash::hash(&genesis_block_utxo), &ms_membership_proof),
                 "Membership proof must be valid after updating wallet state with generated blocks"
             );
@@ -180,7 +181,7 @@ mod wallet_tests {
         );
         alice_wallet
             .update_wallet_state_with_new_block(
-                &genesis_block.mutator_set_accumulator_after(),
+                &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block_1,
             )
             .await
@@ -218,9 +219,10 @@ mod wallet_tests {
                         .unwrap(),
                 )
             });
-        assert!(items_and_msmps_block1
-            .clone()
-            .all(|(item, msmp)| block_1.mutator_set_accumulator_after().verify(item, &msmp)));
+        assert!(items_and_msmps_block1.clone().all(|(item, msmp)| block_1
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .verify(item, &msmp)));
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
@@ -229,17 +231,24 @@ mod wallet_tests {
 
         // TODO: Is this assertion correct? Do we need to check if an auth path
         // is empty?
-        assert!(!items_and_msmps_block1
-            .clone()
-            .all(|(item, msmp)| block_3.mutator_set_accumulator_after().verify(item, &msmp)));
+        assert!(!items_and_msmps_block1.clone().all(|(item, msmp)| block_3
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .verify(item, &msmp)));
 
         // Verify that the membership proof is valid *after* running the updater
         alice_wallet
-            .update_wallet_state_with_new_block(&block_1.mutator_set_accumulator_after(), &block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.mutator_set_accumulator_after().unwrap(),
+                &block_2,
+            )
             .await
             .unwrap();
         alice_wallet
-            .update_wallet_state_with_new_block(&block_2.mutator_set_accumulator_after(), &block_3)
+            .update_wallet_state_with_new_block(
+                &block_2.mutator_set_accumulator_after().unwrap(),
+                &block_3,
+            )
             .await
             .unwrap();
 
@@ -257,9 +266,10 @@ mod wallet_tests {
                         .unwrap(),
                 )
             });
-        assert!(items_and_msmps_block3
-            .clone()
-            .all(|(item, msmp)| block_3.mutator_set_accumulator_after().verify(item, &msmp)));
+        assert!(items_and_msmps_block3.clone().all(|(item, msmp)| block_3
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .verify(item, &msmp)));
     }
 
     #[traced_test]
@@ -308,7 +318,8 @@ mod wallet_tests {
                         alice_global_state
                             .chain
                             .light_state()
-                            .mutator_set_accumulator_after(),
+                            .mutator_set_accumulator_after()
+                            .unwrap(),
                     )
                 })
                 .await;
@@ -421,7 +432,7 @@ mod wallet_tests {
             .allocate_sufficient_input_funds(
                 liquid_mining_reward.scalar_mul(2),
                 next_block.hash(),
-                &next_block.mutator_set_accumulator_after(),
+                &next_block.mutator_set_accumulator_after().unwrap(),
                 now,
             )
             .await
@@ -433,7 +444,7 @@ mod wallet_tests {
         );
 
         // This block throws away four UTXOs.
-        let msa_tip_previous = next_block.mutator_set_accumulator_after().clone();
+        let msa_tip_previous = next_block.mutator_set_accumulator_after().unwrap().clone();
         let output_utxo = Utxo::new_native_currency(
             LockScript::anyone_can_spend(),
             NativeCurrencyAmount::coins(200),
@@ -454,7 +465,7 @@ mod wallet_tests {
         let tx = make_mock_transaction_with_mutator_set_hash(
             removal_records,
             addition_records,
-            next_block.mutator_set_accumulator_after().hash(),
+            next_block.mutator_set_accumulator_after().unwrap().hash(),
         );
 
         let next_block = Block::block_template_invalid_proof(&next_block.clone(), tx, now, None);
@@ -470,7 +481,7 @@ mod wallet_tests {
                 .wallet_state
                 .get_wallet_status(
                     next_block.hash(),
-                    &next_block.mutator_set_accumulator_after(),
+                    &next_block.mutator_set_accumulator_after().unwrap(),
                 )
                 .await;
             ags.wallet_state
@@ -639,7 +650,7 @@ mod wallet_tests {
         // Verify that all monitored UTXOs have valid membership proofs
         for monitored_utxo in alice_monitored_utxos {
             assert!(
-                block_1.mutator_set_accumulator_after().verify(
+                block_1.mutator_set_accumulator_after().unwrap().verify(
                     Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(block_1.hash())
@@ -688,6 +699,7 @@ mod wallet_tests {
             assert!(
                 first_block_after_spree
                     .mutator_set_accumulator_after()
+                    .unwrap()
                     .verify(
                         Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
@@ -714,7 +726,9 @@ mod wallet_tests {
             .wallet_state
             .get_wallet_status(
                 first_block_after_spree.hash(),
-                &first_block_after_spree.mutator_set_accumulator_after(),
+                &first_block_after_spree
+                    .mutator_set_accumulator_after()
+                    .unwrap(),
             )
             .await;
         assert_eq!(
@@ -759,7 +773,7 @@ mod wallet_tests {
         // Verify that all monitored UTXOs (with synced MPs) have valid membership proofs
         for monitored_utxo in &alice_monitored_utxos_at_2b {
             assert!(
-                block_2_b.mutator_set_accumulator_after().verify(
+                block_2_b.mutator_set_accumulator_after().unwrap().verify(
                     Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(block_2_b.hash())
@@ -778,7 +792,9 @@ mod wallet_tests {
             .await
             .wallet_state
             .update_wallet_state_with_new_block(
-                &first_block_after_spree.mutator_set_accumulator_after(),
+                &first_block_after_spree
+                    .mutator_set_accumulator_after()
+                    .unwrap(),
                 &first_block_continuing_spree,
             )
             .await
@@ -802,6 +818,7 @@ mod wallet_tests {
             assert!(
                 first_block_continuing_spree
                     .mutator_set_accumulator_after()
+                    .unwrap()
                     .verify(
                         Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
@@ -910,7 +927,7 @@ mod wallet_tests {
             .await
             .wallet_state
             .update_wallet_state_with_new_block(
-                &block_2_b.mutator_set_accumulator_after(),
+                &block_2_b.mutator_set_accumulator_after().unwrap(),
                 &block_3_b,
             )
             .await
@@ -940,7 +957,7 @@ mod wallet_tests {
         for monitored_utxo in alice_monitored_utxos_3b {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || block_3_b.mutator_set_accumulator_after().verify(
+                    || block_3_b.mutator_set_accumulator_after().unwrap().verify(
                         Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
                             .get_membership_proof_for_block(block_3_b.hash())
@@ -958,7 +975,9 @@ mod wallet_tests {
             .await
             .wallet_state
             .update_wallet_state_with_new_block(
-                &first_block_continuing_spree.mutator_set_accumulator_after(),
+                &first_block_continuing_spree
+                    .mutator_set_accumulator_after()
+                    .unwrap(),
                 &second_block_continuing_spree,
             )
             .await
@@ -982,6 +1001,7 @@ mod wallet_tests {
                 monitored_utxo.spent_in_block.is_some()
                     || second_block_continuing_spree
                         .mutator_set_accumulator_after()
+                        .unwrap()
                         .verify(
                             Hash::hash(&monitored_utxo.utxo),
                             &monitored_utxo
@@ -1260,7 +1280,7 @@ mod wallet_tests {
                     .wallet_state
                     .get_wallet_status(
                         genesis_block.hash(),
-                        &genesis_block.mutator_set_accumulator_after(),
+                        &genesis_block.mutator_set_accumulator_after().unwrap(),
                     )
                     .await;
 

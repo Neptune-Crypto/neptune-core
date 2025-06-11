@@ -238,7 +238,9 @@ impl ProofOfWorkPuzzle {
     /// Return a PoW puzzle assuming that the caller has already set the correct
     /// guesser digest.
     fn new(block_proposal: Block, latest_block_header: BlockHeader) -> Self {
-        let guesser_reward = block_proposal.total_guesser_reward();
+        let guesser_reward = block_proposal
+            .total_guesser_reward()
+            .expect("Block proposal must be valid");
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block_proposal);
         let threshold = latest_block_header.difficulty.target();
         let prev_block = block_proposal.header().prev_block_digest;
@@ -2080,10 +2082,15 @@ impl NeptuneRPCServer {
             Some(block) => {
                 let aocl_leaf_index = {
                     // Find matching AOCL leaf index that must be in this block
-                    let last_aocl_index_in_block =
-                        block.mutator_set_accumulator_after().aocl.num_leafs() - 1;
+                    let last_aocl_index_in_block = block
+                        .mutator_set_accumulator_after()
+                        .expect("Block from state must be valid")
+                        .aocl
+                        .num_leafs()
+                        - 1;
                     let num_outputs_in_block: u64 = block
                         .mutator_set_update()
+                        .expect("Block from state must be valid")
                         .additions
                         .len()
                         .try_into()
@@ -3292,7 +3299,9 @@ impl RPC for NeptuneRPCServer {
         let state = self.state.lock_guard().await;
         let tip = state.chain.light_state();
         let tip_hash = tip.hash();
-        let tip_msa = tip.mutator_set_accumulator_after();
+        let tip_msa = tip
+            .mutator_set_accumulator_after()
+            .expect("Block from state must be valid");
 
         Ok(state
             .wallet_state
@@ -3506,6 +3515,7 @@ impl RPC for NeptuneRPCServer {
             .chain
             .light_state()
             .mutator_set_accumulator_after()
+            .expect("Block from state must be valid")
             .hash();
 
         let mempool_transactions = mempool_txkids
@@ -3618,6 +3628,7 @@ mod rpc_server_tests {
     use macro_rules_attr::apply;
     use num_traits::One;
     use num_traits::Zero;
+    use proptest::prop_assume;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -4310,11 +4321,13 @@ mod rpc_server_tests {
     }
 
     #[traced_test]
-    #[test_strategy::proptest(async = "tokio")]
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn public_announcements_in_block_test(
         #[strategy(propcompose_txkernel_with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
+        prop_assume!(!tx_block1.fee.is_negative());
+
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
             network,
@@ -4701,7 +4714,7 @@ mod rpc_server_tests {
                 block1.set_header_guesser_digest(guesser_digest);
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
-                    block1.total_guesser_reward(),
+                    block1.total_guesser_reward().unwrap(),
                     pow_puzzle.total_guesser_reward
                 );
 

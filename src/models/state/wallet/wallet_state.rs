@@ -844,6 +844,7 @@ impl WalletState {
             let sender_randomness = block.hash();
             block
                 .guesser_fee_utxos()
+                .expect("Block must be valid")
                 .into_iter()
                 .map(|utxo| IncomingUtxo {
                     utxo,
@@ -1396,7 +1397,7 @@ impl WalletState {
         let MutatorSetUpdate {
             additions: addition_records,
             removals: _removal_records,
-        } = new_block.mutator_set_update();
+        } = new_block.mutator_set_update().expect("Block must be valid");
 
         let offchain_received_outputs = self
             .scan_for_expected_utxos(&addition_records)
@@ -1629,10 +1630,10 @@ impl WalletState {
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
-            new_block.mutator_set_accumulator_after().clone().hash(),
+            new_block.mutator_set_accumulator_after().expect("Block must be valid").clone().hash(),
             msa_state.hash(),
             "\n\nMutator set in applied block:\n{}\n\nmust agree with that in wallet handler:\n{}\n\n",
-            new_block.mutator_set_accumulator_after().clone().hash(),
+            new_block.mutator_set_accumulator_after().expect("Block must be valid").clone().hash(),
             msa_state.hash(),
         );
 
@@ -2064,7 +2065,8 @@ pub(crate) mod tests {
         let released_timestamp = launch_timestamp + Timestamp::months(12);
         let genesis = alice.chain.light_state();
         let genesis_digest = genesis.hash();
-        let mutator_set_accumulator_after_genesis = genesis.mutator_set_accumulator_after();
+        let mutator_set_accumulator_after_genesis =
+            genesis.mutator_set_accumulator_after().unwrap();
         let alice_ws_genesis = alice
             .wallet_state
             .get_wallet_status(genesis_digest, &mutator_set_accumulator_after_genesis)
@@ -2133,7 +2135,7 @@ pub(crate) mod tests {
             .allocate_sufficient_input_funds(
                 one_coin,
                 block1.hash(),
-                &block1.mutator_set_accumulator_after(),
+                &block1.mutator_set_accumulator_after().unwrap(),
                 block_1_timestamp,
             )
             .await
@@ -2239,7 +2241,10 @@ pub(crate) mod tests {
             let ags = alice.lock_guard().await;
             let wallet_status = ags
                 .wallet_state
-                .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block2.hash(),
+                    &block2.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert_eq!(
                 NativeCurrencyAmount::coins(14),
@@ -2277,7 +2282,10 @@ pub(crate) mod tests {
             let ags = alice.lock_guard().await;
             let wallet_status = ags
                 .wallet_state
-                .get_wallet_status(block3.hash(), &block3.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block3.hash(),
+                    &block3.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert_eq!(
                 NativeCurrencyAmount::coins(28),
@@ -2364,7 +2372,10 @@ pub(crate) mod tests {
             let ags = alice.lock_guard().await;
             let wallet_status = ags
                 .wallet_state
-                .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block2.hash(),
+                    &block2.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
 
             assert!(
@@ -2466,7 +2477,10 @@ pub(crate) mod tests {
             let ags = alice.lock_guard().await;
             let wallet_status = ags
                 .wallet_state
-                .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block2.hash(),
+                    &block2.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
 
             assert!(
@@ -2588,7 +2602,10 @@ pub(crate) mod tests {
             let item = Tip5::hash(&mutxo.utxo);
             let (mutxo_sync_block_digest, msmp) =
                 mutxo.get_latest_membership_proof_entry().unwrap();
-            assert!(block_1b.mutator_set_accumulator_after().verify(item, &msmp));
+            assert!(block_1b
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .verify(item, &msmp));
             assert_eq!(block_1b.hash(), mutxo_sync_block_digest);
             assert_eq!(block_1b.hash(), mutxo.confirmed_in_block.unwrap().0);
         }
@@ -2621,7 +2638,7 @@ pub(crate) mod tests {
         );
         bob.wallet_state
             .update_wallet_state_with_new_block(
-                &genesis_block.mutator_set_accumulator_after(),
+                &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block1,
             )
             .await
@@ -2642,7 +2659,7 @@ pub(crate) mod tests {
         // Apply block again and verify that nothing new is stored.
         bob.wallet_state
             .update_wallet_state_with_new_block(
-                &genesis_block.mutator_set_accumulator_after(),
+                &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block1,
             )
             .await
@@ -2713,7 +2730,7 @@ pub(crate) mod tests {
                 make_mock_block(&latest_block, None, alice_key, rng.random()).await;
             bob.wallet_state
                 .update_wallet_state_with_new_block(
-                    &latest_block.mutator_set_accumulator_after(),
+                    &latest_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                 )
                 .await
@@ -2896,6 +2913,7 @@ pub(crate) mod tests {
                 .clone();
             assert!(genesis_block
                 .mutator_set_accumulator_after()
+                .unwrap()
                 .verify(Hash::hash(&utxo), &ms_membership_proof));
         }
     }
@@ -2974,7 +2992,10 @@ pub(crate) mod tests {
                 let bgs = bob.global_state_lock.lock_guard().await;
                 let wallet_status = bgs
                     .wallet_state
-                    .get_wallet_status(block1.hash(), &block1.mutator_set_accumulator_after())
+                    .get_wallet_status(
+                        block1.hash(),
+                        &block1.mutator_set_accumulator_after().unwrap(),
+                    )
                     .await;
 
                 assert!(
@@ -2992,7 +3013,10 @@ pub(crate) mod tests {
                 let bgs = bob.global_state_lock.lock_guard().await;
                 let wallet_status = bgs
                     .wallet_state
-                    .get_wallet_status(block1.hash(), &block1.mutator_set_accumulator_after())
+                    .get_wallet_status(
+                        block1.hash(),
+                        &block1.mutator_set_accumulator_after().unwrap(),
+                    )
                     .await;
 
                 assert!(
@@ -3074,7 +3098,7 @@ pub(crate) mod tests {
                 eus.iter().map(|x| x.addition_record).unique().count(),
                 "Addition records from expected UTXOs must be unique"
             );
-            let ars_from_block = block1.guesser_fee_addition_records();
+            let ars_from_block = block1.guesser_fee_addition_records().unwrap();
             for eu in eus {
                 assert!(
                     ars_from_block.contains(&eu.addition_record),
@@ -3178,7 +3202,10 @@ pub(crate) mod tests {
                 let bgs = bob.global_state_lock.lock_guard().await;
                 let wallet_status = bgs
                     .wallet_state
-                    .get_wallet_status(block2.hash(), &block2.mutator_set_accumulator_after())
+                    .get_wallet_status(
+                        block2.hash(),
+                        &block2.mutator_set_accumulator_after().unwrap(),
+                    )
                     .await;
 
                 assert!(
@@ -3285,7 +3312,11 @@ pub(crate) mod tests {
             let tx = {
                 // verify that confirmed and unconfirmed balances.
                 let gs = global_state_lock.lock_guard().await;
-                let msa = gs.chain.light_state().mutator_set_accumulator_after();
+                let msa = gs
+                    .chain
+                    .light_state()
+                    .mutator_set_accumulator_after()
+                    .unwrap();
                 let wallet_status = gs.wallet_state.get_wallet_status(tip_digest, &msa).await;
 
                 assert_eq!(
@@ -3336,7 +3367,11 @@ pub(crate) mod tests {
 
             {
                 let gs = global_state_lock.lock_guard().await;
-                let msa = gs.chain.light_state().mutator_set_accumulator_after();
+                let msa = gs
+                    .chain
+                    .light_state()
+                    .mutator_set_accumulator_after()
+                    .unwrap();
                 let wallet_status = gs.wallet_state.get_wallet_status(tip_digest, &msa).await;
 
                 assert_eq!(
@@ -3361,7 +3396,12 @@ pub(crate) mod tests {
             {
                 // verify that wallet's unconfirmed balance is `coinbase amt` again.
                 let msa = global_state_lock
-                    .lock(|gs| gs.chain.light_state().mutator_set_accumulator_after())
+                    .lock(|gs| {
+                        gs.chain
+                            .light_state()
+                            .mutator_set_accumulator_after()
+                            .unwrap()
+                    })
                     .await;
 
                 let gs = global_state_lock.lock_guard().await;
@@ -3453,7 +3493,10 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .get_wallet_status(block.hash(), &block.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block.hash(),
+                    &block.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert_eq!(
                 2,
@@ -3947,7 +3990,10 @@ pub(crate) mod tests {
                     .lock_guard_mut()
                     .await
                     .wallet_state
-                    .get_wallet_status(genesis.hash(), &genesis.mutator_set_accumulator_after())
+                    .get_wallet_status(
+                        genesis.hash(),
+                        &genesis.mutator_set_accumulator_after().unwrap()
+                    )
                     .await
                     .synced_unspent_total_amount(),
                 "Alice assumed to be premine recipient"
@@ -3979,7 +4025,10 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .get_wallet_status(block_1a.hash(), &block_1a.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block_1a.hash(),
+                    &block_1a.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert!(wallet_status_1a.synced_unspent_total_amount().is_zero());
 
@@ -4000,7 +4049,10 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(block_2b.hash(), &block_2b.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block_2b.hash(),
+                    &block_2b.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert_eq!(
                 init_balance,
@@ -4031,7 +4083,10 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(block_2a.hash(), &block_2a.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block_2a.hash(),
+                    &block_2a.mutator_set_accumulator_after().unwrap()
+                )
                 .await
                 .synced_unspent_total_amount()
                 .is_zero());
@@ -4079,7 +4134,10 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(block_1a.hash(), &block_1a.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block_1a.hash(),
+                    &block_1a.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert_eq!(
                 Block::block_subsidy(1u64.into()),
@@ -4101,7 +4159,10 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(block_1b.hash(), &block_1b.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block_1b.hash(),
+                    &block_1b.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert!(wallet_status_1b.synced_unspent_total_amount().is_zero());
             assert!(!wallet_status_1b.unsynced.is_empty());
@@ -4109,10 +4170,11 @@ pub(crate) mod tests {
     }
 
     pub(crate) mod scan_mode {
+        use std::hint::black_box;
+
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
-        use std::hint::black_box;
 
         use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -4220,21 +4282,27 @@ pub(crate) mod tests {
                 .await;
 
                 let wallet_status_ = alice_wallet_state
-                    .get_wallet_status(block_1.hash(), &block_1.mutator_set_accumulator_after())
+                    .get_wallet_status(
+                        block_1.hash(),
+                        &block_1.mutator_set_accumulator_after().unwrap(),
+                    )
                     .await;
                 let balance_ = alice_wallet_state.confirmed_available_balance(&wallet_status_, now);
                 assert_eq!(NativeCurrencyAmount::coins(0), balance_);
 
                 alice_wallet_state
                     .update_wallet_state_with_new_block(
-                        &genesis_block.mutator_set_accumulator_after(),
+                        &genesis_block.mutator_set_accumulator_after().unwrap(),
                         &block_1,
                     )
                     .await
                     .unwrap();
 
                 let wallet_status = alice_wallet_state
-                    .get_wallet_status(block_1.hash(), &block_1.mutator_set_accumulator_after())
+                    .get_wallet_status(
+                        block_1.hash(),
+                        &block_1.mutator_set_accumulator_after().unwrap(),
+                    )
                     .await;
                 let balance = alice_wallet_state.confirmed_available_balance(&wallet_status, now);
                 if should_catch_utxo {
@@ -4530,7 +4598,7 @@ pub(crate) mod tests {
                 .await
                 .wallet_state
                 .update_wallet_state_with_new_block(
-                    &previous_block.mutator_set_accumulator_after(),
+                    &previous_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                 )
                 .await
@@ -4541,7 +4609,10 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(new_block.hash(), &new_block.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    new_block.hash(),
+                    &new_block.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             println!(
                 "wallet status -- # synced unspent: {}",
@@ -4665,7 +4736,7 @@ pub(crate) mod tests {
                 .await
                 .wallet_state
                 .update_wallet_state_with_new_block(
-                    &genesis_block.mutator_set_accumulator_after(),
+                    &genesis_block.mutator_set_accumulator_after().unwrap(),
                     &new_block,
                 )
                 .await
@@ -4676,7 +4747,10 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(new_block.hash(), &new_block.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    new_block.hash(),
+                    &new_block.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert_eq!(2, wallet_status.synced_unspent.len());
         }
@@ -4805,7 +4879,7 @@ pub(crate) mod tests {
                     .proof
                     .clone()
                     .into_proof_collection(),
-                mutator_set: genesis_block.mutator_set_accumulator_after(),
+                mutator_set: genesis_block.mutator_set_accumulator_after().unwrap(),
                 gobbling_fee: fee,
             };
             let (channel_to_nowhere_one, nowhere_one) =
@@ -4856,7 +4930,7 @@ pub(crate) mod tests {
 
             // upgrade transaction again
             // this time mutator set data
-            let genesis_mutator_set = genesis_block.mutator_set_accumulator_after();
+            let genesis_mutator_set = genesis_block.mutator_set_accumulator_after().unwrap();
             let single_proof_transaction = rando
                 .lock_guard()
                 .await
@@ -4867,7 +4941,7 @@ pub(crate) mod tests {
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
                 genesis_mutator_set,
-                block_one.mutator_set_update(),
+                block_one.mutator_set_update().unwrap(),
             ));
             let (channel_to_nowhere_two, nowhere_two) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
@@ -4883,7 +4957,7 @@ pub(crate) mod tests {
             drop(nowhere_two); // drop must occur after message is sent
 
             // get upgraded transaction
-            let block_one_mutator_set = block_one.mutator_set_accumulator_after();
+            let block_one_mutator_set = block_one.mutator_set_accumulator_after().unwrap();
             let transactions_for_block = rando
                 .lock_guard()
                 .await
@@ -4951,7 +5025,10 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_wallet_status(block_two.hash(), &block_two.mutator_set_accumulator_after())
+                .get_wallet_status(
+                    block_two.hash(),
+                    &block_two.mutator_set_accumulator_after().unwrap(),
+                )
                 .await;
             assert_eq!(2, wallet_status.synced_unspent.len());
         }
