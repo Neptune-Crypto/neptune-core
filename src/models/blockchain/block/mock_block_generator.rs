@@ -146,7 +146,7 @@ impl MockBlockGenerator {
             // create the nop-tx and merge into the coinbase transaction to set the
             // merge bit to allow the tx to be included in a block.
             let nop_details = TransactionDetails::nop(
-                predecessor_block.mutator_set_accumulator_after(),
+                predecessor_block.mutator_set_accumulator_after().unwrap(),
                 timestamp,
                 network,
             );

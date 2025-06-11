@@ -893,8 +893,10 @@ impl MainLoopHandler {
                     info!("Received new favorable block proposal for mining operation.");
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
-                        block.header().height,
-                        block.total_guesser_reward(),
+                        block.header().prev_block_digest,
+                        block
+                            .total_guesser_reward()
+                            .expect("block received by main loop should be valid"),
                     );
                     if let Err(reject_reason) = verdict {
                         warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
