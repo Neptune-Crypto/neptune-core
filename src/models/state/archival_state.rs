@@ -1198,7 +1198,6 @@ pub(super) mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     pub(super) async fn make_test_archival_state(network: Network) -> ArchivalState {
         let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
@@ -2630,11 +2629,13 @@ pub(super) mod tests {
     }
 
     #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn find_canonical_block_with_input_genesis_block_test() {
+    #[test_strategy::proptest(async = "tokio")]
+    async fn find_canonical_block_with_input_genesis_block_test(
+        #[strategy(crate::util_types::mutator_set::removal_record::propcompose_absindset())]
+        random_index_set: AbsoluteIndexSet,
+    ) {
         let network = Network::Main;
         let archival_state = make_test_archival_state(network).await;
-        let random_index_set: AbsoluteIndexSet = random_removal_record().absolute_indices;
 
         assert!(archival_state
             .find_canonical_block_with_input(random_index_set, None)

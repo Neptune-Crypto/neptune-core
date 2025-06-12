@@ -289,11 +289,12 @@ mod tests {
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
-    use test_strategy::proptest;
 
     use super::MsaAndRecords;
-    use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
-    use crate::util_types::test_shared::mutator_set::random_removal_record;
+    use crate::util_types::mutator_set::ms_membership_proof::tests::propcompose_msmembershipproof;
+    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+    use crate::util_types::mutator_set::removal_record::RemovalRecord;
+    use crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict;
 
     impl MsaAndRecords {
         /// Split an [MsaAndRecords] into multiple instances of the same type.
@@ -329,7 +330,7 @@ mod tests {
         }
     }
 
-    #[proptest(cases = 1)]
+    #[test_strategy::proptest(cases = 1)]
     fn msa_and_records_is_valid(
         #[strategy(0usize..10)] _num_removals: usize,
         #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
@@ -348,21 +349,23 @@ mod tests {
 
     #[test]
     fn split_msa_and_records() {
-        split_prop([1]);
-        split_prop([0]);
-        split_prop([0, 5]);
-        split_prop([3, 4]);
-        split_prop([12, 2, 5]);
+        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 1))| split_prop([1], data));
+        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 0))| split_prop([0], data));
+        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 5))| split_prop([0, 5], data));
+        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 7))| split_prop([3, 4], data));
+        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 19))| split_prop([12, 2, 5], data));
     }
 
-    fn split_prop<const N: usize>(split: [usize; N]) {
+    fn split_prop<const N: usize>(
+        split: [usize; N],
+        mut data: Vec<(RemovalRecord, MsMembershipProof)>,
+    ) {
         let mut original = MsaAndRecords::default();
         let total = split.into_iter().sum::<usize>();
         for _ in 0..total {
-            original.removal_records.push(random_removal_record());
-            original
-                .membership_proofs
-                .push(random_mutator_set_membership_proof());
+            let datum = data.pop().unwrap();
+            original.removal_records.push(datum.0);
+            original.membership_proofs.push(datum.1);
         }
 
         let split_msa_and_records = original.split_by(split);

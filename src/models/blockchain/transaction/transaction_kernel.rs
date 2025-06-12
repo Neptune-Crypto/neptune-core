@@ -260,6 +260,7 @@ pub mod neptune_arbitrary {
 ///
 /// It is also useful for destructuring kernel fields without cloning.
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct TransactionKernelProxy {
     /// contains the transaction inputs.
     pub inputs: Vec<RemovalRecord>,
@@ -415,52 +416,58 @@ impl TransactionKernelModifier {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use itertools::Itertools;
+    use proptest::collection;
+    use proptest::prelude::any;
     use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
-    use rand::random;
-    use rand::rngs::StdRng;
-    use rand::Rng;
-    use rand::RngCore;
-    use rand::SeedableRng;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
-    use crate::tests::shared::pseudorandom_amount;
-    use crate::tests::shared::pseudorandom_option;
-    use crate::tests::shared::pseudorandom_public_announcement;
-    use crate::tests::shared::random_public_announcement;
-    use crate::tests::shared::random_transaction_kernel;
-    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
-    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
+    use crate::tests::shared::propcompose_txkernel;
 
-    pub fn pseudorandom_transaction_kernel(
-        seed: [u8; 32],
-        num_inputs: usize,
-        num_outputs: usize,
-        num_public_announcements: usize,
-    ) -> TransactionKernel {
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let inputs = (0..num_inputs)
-            .map(|_| pseudorandom_removal_record(rng.random::<[u8; 32]>()))
-            .collect_vec();
-        let outputs = (0..num_outputs)
-            .map(|_| pseudorandom_addition_record(rng.random::<[u8; 32]>()))
-            .collect_vec();
-        let public_announcements = (0..num_public_announcements)
-            .map(|_| pseudorandom_public_announcement(rng.random::<[u8; 32]>()))
-            .collect_vec();
-        let fee = pseudorandom_amount(rng.random::<[u8; 32]>());
-        let coinbase =
-            pseudorandom_option(rng.random(), pseudorandom_amount(rng.random::<[u8; 32]>()));
-        let timestamp: Timestamp = rng.random();
-        let mutator_set_hash: Digest = rng.random();
-        let merge_bit: bool = rng.random();
+    proptest::prop_compose! {
+        pub fn propcompose_txkernel_with_usualtxdata(
+            inputs: Vec<RemovalRecord>,
+            outputs: Vec<AdditionRecord>,
+            fee: NativeCurrencyAmount,
+            timestamp: Timestamp,
+        ) (mutator_set_hash in arb::<Digest>()) -> TransactionKernel {
+            TransactionKernelProxy {
+                inputs: inputs.clone(),
+                outputs: outputs.clone(),
+                public_announcements: vec![],
+                fee,
+                timestamp,
+                coinbase: None,
+                mutator_set_hash,
+                merge_bit: false,
+            }
+            .into_kernel()
+        }
+    }
 
-        TransactionKernelProxy {
+    proptest::prop_compose! {
+        pub fn propcompose_txkernel_with_lengths(
+            num_inputs: usize,
+            num_outputs: usize,
+            num_public_announcements: usize,
+        ) (
+            inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict(), num_inputs),
+            outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
+            public_announcements in collection::vec(collection::vec(arb::<BFieldElement>(), 10..59), num_public_announcements).prop_map(
+                |vecvec| vecvec.into_iter().map(|message| PublicAnnouncement { message }).collect_vec()
+            ),
+            fee in arb::<NativeCurrencyAmount>(),
+            coinbase in arb::<Option<NativeCurrencyAmount>>(),
+            timestamp in arb::<Timestamp>(),
+            mutator_set_hash in arb::<Digest>(),
+            merge_bit in any::<bool>(),
+        ) -> TransactionKernel {TransactionKernelProxy {
             inputs,
             outputs,
             public_announcements,
@@ -470,7 +477,7 @@ pub mod tests {
             mutator_set_hash,
             merge_bit,
         }
-        .into_kernel()
+        .into_kernel()}
     }
 
     #[test]
@@ -543,63 +550,65 @@ pub mod tests {
         );
     }
 
-    #[test]
-    pub fn decode_public_announcement() {
-        let pubscript = random_public_announcement();
+    #[proptest]
+    fn decode_public_announcement(
+        #[strategy(arb::<PublicAnnouncement>())] pubscript: PublicAnnouncement,
+    ) {
         let encoded = pubscript.encode();
         let decoded = *PublicAnnouncement::decode(&encoded).unwrap();
         assert_eq!(pubscript, decoded);
     }
 
-    #[test]
-    pub fn decode_public_announcements() {
-        let pubscripts = vec![random_public_announcement(), random_public_announcement()];
+    #[proptest]
+    fn decode_public_announcements(
+        #[strategy([arb(), arb()])] pubscripts: [PublicAnnouncement; 2],
+    ) {
+        let pubscripts = pubscripts.to_vec();
         let encoded = pubscripts.encode();
         let decoded = *Vec::<PublicAnnouncement>::decode(&encoded).unwrap();
         assert_eq!(pubscripts, decoded);
     }
 
-    #[test]
-    pub fn test_decode_transaction_kernel() {
-        let kernel = random_transaction_kernel();
+    #[proptest]
+    fn test_decode_transaction_kernel(
+        #[strategy(propcompose_txkernel())] kernel: TransactionKernel,
+    ) {
         let encoded = kernel.encode();
         let decoded = *TransactionKernel::decode(&encoded).unwrap();
         assert_eq!(kernel, decoded);
     }
 
-    #[test]
-    pub fn test_decode_transaction_kernel_small() {
-        let mut rng = rand::rng();
-        let absolute_indices = AbsoluteIndexSet::new(
-            &(0..NUM_TRIALS as usize)
-                .map(|_| (u128::from(rng.next_u64()) << 64) ^ u128::from(rng.next_u64()))
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        );
-        let removal_record = RemovalRecord {
-            absolute_indices,
-            target_chunks: Default::default(),
-        };
-        let kernel = TransactionKernelProxy {
-            inputs: vec![removal_record],
-            outputs: vec![AdditionRecord {
-                canonical_commitment: random(),
-            }],
-            public_announcements: Default::default(),
-            fee: NativeCurrencyAmount::one(),
-            coinbase: None,
-            timestamp: Default::default(),
-            mutator_set_hash: rng.random::<Digest>(),
-            merge_bit: true,
+    proptest::proptest! {
+        #[test]
+        fn test_decode_transaction_kernel_small(
+            absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
+            canonical_commitment in arb::<Digest>(),
+            mutator_set_hash in arb::<Digest>(),
+        ) {
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: Default::default(),
+            };
+            let kernel = TransactionKernelProxy {
+                inputs: vec![removal_record],
+                outputs: vec![AdditionRecord {
+                    canonical_commitment
+                }],
+                public_announcements: Default::default(),
+                fee: NativeCurrencyAmount::one(),
+                coinbase: None,
+                timestamp: Default::default(),
+                mutator_set_hash,
+                merge_bit: true,
+            }
+            .into_kernel();
+            let encoded = kernel.encode();
+            println!(
+                "encoded: {}",
+                encoded.iter().map(|x| x.to_string()).join(", ")
+            );
+            let decoded = *TransactionKernel::decode(&encoded).unwrap();
+            assert_eq!(kernel, decoded);
         }
-        .into_kernel();
-        let encoded = kernel.encode();
-        println!(
-            "encoded: {}",
-            encoded.iter().map(|x| x.to_string()).join(", ")
-        );
-        let decoded = *TransactionKernel::decode(&encoded).unwrap();
-        assert_eq!(kernel, decoded);
     }
 }

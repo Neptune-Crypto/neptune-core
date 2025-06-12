@@ -3874,7 +3874,7 @@ mod tests {
             let blocks: [Block; 11] = fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
-                [0u8; 32],
+                Default::default(),
                 network,
             )
             .await;
@@ -4036,9 +4036,10 @@ mod tests {
             let blocks = fake_valid_sequence_of_blocks_for_tests_dyn(
                 &block_1,
                 network.target_block_interval(),
-                rng.random(),
+                (0..rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20))
+                    .map(|_| rng.random())
+                    .collect_vec(),
                 network,
-                rng.random_range(ALICE_SYNC_MODE_THRESHOLD + 1..20),
             )
             .await;
             for block in &blocks {

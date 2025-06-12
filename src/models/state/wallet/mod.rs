@@ -1099,23 +1099,26 @@ mod tests {
             .generate_sender_randomness(BFieldElement::new(10).into(), random());
     }
 
-    #[test]
-    fn master_seed_is_not_sender_randomness() {
-        let secret = rand::rng().random::<XFieldElement>();
-        let secret_as_digest = Digest::new(
-            [
-                secret.coefficients.to_vec(),
-                vec![BFieldElement::new(0); Digest::LEN - EXTENSION_DEGREE],
-            ]
-            .concat()
-            .try_into()
-            .unwrap(),
-        );
-        let wallet = WalletEntropy::new(SecretKeyMaterial(secret));
-        assert_ne!(
-            wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
-            secret_as_digest
-        );
+    proptest::proptest! {
+        #[test]
+        fn master_seed_is_not_sender_randomness(
+            secret in proptest_arbitrary_interop::arb::<XFieldElement>()
+        ) {
+            let secret_as_digest = Digest::new(
+                [
+                    secret.coefficients.to_vec(),
+                    vec![BFieldElement::new(0); Digest::LEN - EXTENSION_DEGREE],
+                ]
+                .concat()
+                .try_into()
+                .unwrap(),
+            );
+            let wallet = WalletEntropy::new(SecretKeyMaterial(secret));
+            assert_ne!(
+                wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
+                secret_as_digest
+            );
+        }
     }
 
     #[test]

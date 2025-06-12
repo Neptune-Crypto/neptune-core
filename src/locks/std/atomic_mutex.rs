@@ -225,7 +225,7 @@ impl<T> AtomicMutex<T> {
     /// let atomic_car = AtomicMutex::from(Car{year: 2016});
     /// let year = atomic_car.lock_guard().year;
     /// ```
-    pub fn lock_guard(&self) -> AtomicMutexGuard<T> {
+    pub fn lock_guard(&self) -> AtomicMutexGuard<'_, T> {
         self.try_acquire_read_cb();
         let guard = self.inner.lock().expect("Read lock should succeed");
         AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Read)
@@ -242,7 +242,7 @@ impl<T> AtomicMutex<T> {
     /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_guard_mut().year = 2022;
     /// ```
-    pub fn lock_guard_mut(&mut self) -> AtomicMutexGuard<T> {
+    pub fn lock_guard_mut(&mut self) -> AtomicMutexGuard<'_, T> {
         self.try_acquire_write_cb();
         let guard = self.inner.lock().expect("Write lock should succeed");
         AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Write)

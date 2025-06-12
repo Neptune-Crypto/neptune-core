@@ -1061,6 +1061,7 @@ pub(crate) async fn mine(
 pub(crate) mod tests {
     use std::hint::black_box;
 
+    use arbitrary::Arbitrary;
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
     use block_header::tests::random_block_header;
@@ -1071,6 +1072,7 @@ pub(crate) mod tests {
     use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
+    use rand::RngCore;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1080,6 +1082,7 @@ pub(crate) mod tests {
     use crate::job_queue::errors::JobHandleError;
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -1095,7 +1098,6 @@ pub(crate) mod tests {
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::random_transaction_kernel;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
@@ -1143,8 +1145,7 @@ pub(crate) mod tests {
     /// update the difficulty field, as this applies to the next block and only
     /// changes as a result of the timestamp of this block.
     pub(crate) fn mine_iteration_for_tests(block: &mut Block, rng: &mut StdRng) {
-        let nonce = rng.random();
-        block.set_header_nonce(nonce);
+        block.set_header_nonce(rng.random());
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds
@@ -2089,10 +2090,17 @@ pub(crate) mod tests {
         let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
         let k = (-4.0 / cofactor).ceil() as usize;
 
+        let mut rng = rand::rng();
+        let mut unstructured_source = vec![0u8; TransactionKernelProxy::size_hint(2).0];
+        rng.fill_bytes(&mut unstructured_source);
+        let mut unstructured = arbitrary::Unstructured::new(&unstructured_source);
+
         let mut predecessor_header = random_block_header();
         predecessor_header.difficulty = Difficulty::from(difficulty);
         let predecessor_body = BlockBody::new(
-            random_transaction_kernel(),
+            TransactionKernelProxy::arbitrary(&mut unstructured)
+                .unwrap()
+                .into_kernel(),
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),
@@ -2109,13 +2117,14 @@ pub(crate) mod tests {
         successor_header.prev_block_digest = predecessor_block.hash();
         // note that successor's difficulty is random
         let successor_body = BlockBody::new(
-            random_transaction_kernel(),
+            TransactionKernelProxy::arbitrary(&mut unstructured)
+                .unwrap()
+                .into_kernel(),
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),
         );
 
-        let mut rng = rand::rng();
         let mut counter = 0;
         let mut successor_block = Block::new(
             successor_header,

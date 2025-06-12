@@ -287,7 +287,7 @@ impl DashboardApp {
         Ok(())
     }
 
-    pub fn current_screen(&mut self) -> RefMut<dyn Screen> {
+    pub fn current_screen(&mut self) -> RefMut<'_, dyn Screen> {
         self.screens
             .get(&self.current_menu_item)
             .unwrap()

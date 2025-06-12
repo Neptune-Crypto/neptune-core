@@ -217,7 +217,7 @@ impl<T> AtomicMutex<T> {
     /// # })
     /// ```
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub async fn lock_guard(&self) -> AtomicMutexGuard<T> {
+    pub async fn lock_guard(&self) -> AtomicMutexGuard<'_, T> {
         self.try_acquire_read_cb();
 
         let try_acquire_at = now();
@@ -233,7 +233,7 @@ impl<T> AtomicMutex<T> {
     /// Attempt to return a read lock and return an `AtomicMutextGuard`. Returns
     /// an error if the lock is already held, otherwise returns Ok(lock).
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub fn try_lock_guard(&self) -> Result<AtomicMutexGuard<T>, tokio::sync::TryLockError> {
+    pub fn try_lock_guard(&self) -> Result<AtomicMutexGuard<'_, T>, tokio::sync::TryLockError> {
         self.try_acquire_try_acquire();
 
         let try_acquire_at = now();
@@ -260,7 +260,7 @@ impl<T> AtomicMutex<T> {
     /// # })
     /// ```
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub async fn lock_guard_mut(&mut self) -> AtomicMutexGuard<T> {
+    pub async fn lock_guard_mut(&mut self) -> AtomicMutexGuard<'_, T> {
         self.try_acquire_write_cb();
 
         let try_acquire_at = now();
