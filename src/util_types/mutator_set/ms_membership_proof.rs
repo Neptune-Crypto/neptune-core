@@ -554,7 +554,7 @@ impl MsMembershipProof {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub mod tests {
     use itertools::Either;
     use itertools::Itertools;
     use macro_rules_attr::apply;
@@ -587,7 +587,7 @@ mod tests {
             sender_randomness in arb::<Digest>(),
             receiver_preimage in arb::<Digest>(),
             (auth_path_aocl, aocl_leaf_index) in propcompose_mmrmembershipproof_with_index(),
-            target_chunks in crate::util_types::mutator_set::chunk_dictionary::chunk_dict_tests::propcompose_chunkdict(),
+            target_chunks in crate::util_types::mutator_set::chunk_dictionary::tests::propcompose_chunkdict(),
         ) -> MsMembershipProof {
             MsMembershipProof {
                 sender_randomness,

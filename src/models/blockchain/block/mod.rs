@@ -1411,7 +1411,8 @@ pub(crate) mod tests {
                 .unwrap()
                 .nth_generation_spending_key_for_tests(0);
             let (new_block, _) = make_mock_block(
-                network, blocks.last().unwrap(),
+                network,
+                blocks.last().unwrap(),
                 None,
                 key,
                 sender_randomness_vec.pop().unwrap(),

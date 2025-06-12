@@ -291,7 +291,7 @@ mod tests {
     use tasm_lib::prelude::Digest;
 
     use super::MsaAndRecords;
-    use crate::util_types::mutator_set::ms_membership_proof::ms_proof_tests::propcompose_msmembershipproof;
+    use crate::util_types::mutator_set::ms_membership_proof::tests::propcompose_msmembershipproof;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
     use crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict;

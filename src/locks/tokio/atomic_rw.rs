@@ -226,7 +226,7 @@ impl<T> AtomicRw<T> {
     /// # })
     ///```
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub async fn lock_guard(&self) -> AtomicRwReadGuard<T> {
+    pub async fn lock_guard(&self) -> AtomicRwReadGuard<'_, T> {
         self.try_acquire_read_cb();
 
         let try_acquire_at = now();
@@ -248,7 +248,7 @@ impl<T> AtomicRw<T> {
     /// # })
     /// ```
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub async fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<T> {
+    pub async fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<'_, T> {
         self.try_acquire_write_cb();
 
         let try_acquire_at = now();
@@ -260,7 +260,7 @@ impl<T> AtomicRw<T> {
     ///
     /// If the lock cannot be acquired without waiting, an error is returned.
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<T>, TryLockError> {
+    pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<'_, T>, TryLockError> {
         self.try_acquire_write_cb();
 
         let try_acquire_at = now();

@@ -1098,6 +1098,7 @@ pub(crate) mod tests {
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;

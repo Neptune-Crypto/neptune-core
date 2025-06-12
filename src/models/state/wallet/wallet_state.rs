@@ -2570,7 +2570,10 @@ pub(crate) mod tests {
                 None,
                 bob_key,
                 mock_block_seed,
-                (guesser_fraction, bob_wallet_secret.guesser_preimage(genesis_block.hash())),
+                (
+                    guesser_fraction,
+                    bob_wallet_secret.guesser_preimage(genesis_block.hash()),
+                ),
             )
             .await;
 

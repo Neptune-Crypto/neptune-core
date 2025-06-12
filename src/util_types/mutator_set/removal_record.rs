@@ -31,7 +31,7 @@ use super::MutatorSetError;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 #[cfg(test)]
-pub use removal_record_tests::propcompose_absindset;
+pub use tests::propcompose_absindset;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Hash)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]

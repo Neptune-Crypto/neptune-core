@@ -105,7 +105,7 @@ impl ChunkDictionary {
         self.dictionary.is_empty()
     }
 
-    pub fn iter(&self) -> Iter<(ChunkIndex, AuthenticatedChunk)> {
+    pub fn iter(&self) -> Iter<'_, (ChunkIndex, AuthenticatedChunk)> {
         self.dictionary.iter()
     }
 
@@ -113,7 +113,7 @@ impl ChunkDictionary {
         self.dictionary.len()
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<(ChunkIndex, AuthenticatedChunk)> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, (ChunkIndex, AuthenticatedChunk)> {
         self.dictionary.iter_mut()
     }
 
@@ -177,7 +177,7 @@ impl IntoIterator for ChunkDictionary {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub mod tests {
     use macro_rules_attr::apply;
     use proptest::collection;
     use proptest::prelude::any;
