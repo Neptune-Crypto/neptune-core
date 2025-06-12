@@ -315,6 +315,10 @@ impl ArchivalState {
         self: &mut ArchivalState,
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
+        // abort early if block is invalid
+        if new_block.mutator_set_update().is_err() {
+            bail!("invalid block: could not get mutator set update");
+        }
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
@@ -1020,11 +1024,18 @@ impl ArchivalState {
         Some(MutatorSetUpdate::new(removal_records, addition_records))
     }
 
-    /// Update the mutator set with a block after this block has been stored to the database.
-    /// Handles rollback of the mutator set if needed but requires that all blocks that are
-    /// rolled back are present in the DB. The input block is considered chain tip. All blocks
-    /// stored in the database are assumed to be valid.
+    /// Update the mutator set with a block after this block has been stored to
+    /// the database. Handles rollback of the mutator set if needed but requires
+    /// that all blocks that are rolled back are present in the DB. The input
+    /// block is considered chain tip. All blocks stored in the database are
+    /// assumed to be valid. The given `new_block` is also assumed to be valid
+    /// and this function may fail if it is not.
     pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+        // cannot get the mutator set update from new block, so abort early
+        if new_block.mutator_set_update().is_err() {
+            bail!("invalid block: could not get mutator set update");
+        }
+
         let (forwards, backwards) = {
             // Get the block digest that the mutator set was most recently synced to
             let ms_block_sync_digest = self.archival_mutator_set.get_sync_label();

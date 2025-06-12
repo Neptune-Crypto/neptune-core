@@ -3724,7 +3724,6 @@ mod tests {
     use macro_rules_attr::apply;
     use num_traits::One;
     use num_traits::Zero;
-    use proptest::prop_assume;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -4453,8 +4452,6 @@ mod tests {
         #[strategy(propcompose_txkernel_with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
-        prop_assume!(!tx_block1.fee.is_negative());
-
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
@@ -4466,17 +4463,28 @@ mod tests {
             kernel: tx_block1,
             proof: TransactionProof::invalid(),
         };
+        let fee = tx_block1.kernel.fee;
         let block1 = invalid_block_with_transaction(&Block::genesis(network), tx_block1);
-        rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
+        let set_new_tip_result = rpc_server.state.set_new_tip(block1.clone()).await;
+        assert!(fee.is_negative() == set_new_tip_result.is_err());
 
         let token = cookie_token(&rpc_server).await;
         let ctx = context::current();
-        let block1_public_announcements = rpc_server
+
+        let Some(block1_public_announcements) = rpc_server
             .clone()
             .public_announcements_in_block(ctx, token, BlockSelector::Height(1u64.into()))
             .await
             .unwrap()
-            .unwrap();
+        else {
+            // If the fee was negative, the block was invalid and not stored.
+            // So the RPC should return None.
+            assert!(fee.is_negative());
+
+            // And in this case we cannot proceed with the test.
+            return Ok(());
+        };
+
         assert_eq!(
             block1.body().transaction_kernel.public_announcements,
             block1_public_announcements,

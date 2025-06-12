@@ -1439,7 +1439,7 @@ impl WalletState {
         let MutatorSetUpdate {
             additions: addition_records,
             removals: _removal_records,
-        } = new_block.mutator_set_update().expect("Block must be valid");
+        } = new_block.mutator_set_update()?;
 
         let offchain_received_outputs = self
             .scan_for_expected_utxos(&addition_records)

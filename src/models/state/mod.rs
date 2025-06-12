@@ -1662,8 +1662,7 @@ impl GlobalState {
         self.chain
             .archival_state_mut()
             .update_mutator_set(&new_block)
-            .await
-            .expect("Updating mutator set must succeed");
+            .await?;
 
         // Get parent of tip for mutator-set data needed for various updates. Parent of the
         // stored block will always exist since all blocks except the genesis block have a
@@ -1696,7 +1695,7 @@ impl GlobalState {
             &tip_parent,
             self.proving_capability(),
             self.cli().compose,
-        );
+        )?;
 
         // update wallet state with relevant UTXOs from this block
         self.wallet_state
