@@ -646,11 +646,11 @@ impl Mempool {
         predecessor_block: &Block,
         tx_proving_capability: TxProvingCapability,
         composing: bool,
-    ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
+    ) -> anyhow::Result<(Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>)> {
         // If the mempool is empty, there is nothing to do.
         if self.is_empty() {
             self.set_tip_digest_sync_label(new_block.hash());
-            return (vec![], vec![]);
+            return Ok((vec![], vec![]));
         }
 
         // If we discover a reorganization, we currently just clear the mempool,
@@ -703,9 +703,7 @@ impl Mempool {
         let mut events = self.retain(keep);
 
         // Prepare a mutator set update to be applied to all retained items
-        let mutator_set_update = new_block
-            .mutator_set_update()
-            .expect("New block must be valid");
+        let mutator_set_update = new_block.mutator_set_update()?;
 
         // Update policy:
         // We update transaction if either of these conditions are true:
@@ -795,7 +793,7 @@ impl Mempool {
         self.shrink_to_max_size();
         self.set_tip_digest_sync_label(new_block.hash());
 
-        (events, update_jobs)
+        Ok((events, update_jobs))
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -1433,12 +1431,14 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        let (_, update_jobs2) = mempool.update_with_block_and_predecessor(
-            &block_2,
-            &block_1,
-            TxProvingCapability::SingleProof,
-            true,
-        );
+        let (_, update_jobs2) = mempool
+            .update_with_block_and_predecessor(
+                &block_2,
+                &block_1,
+                TxProvingCapability::SingleProof,
+                true,
+            )
+            .unwrap();
         mocked_mempool_update_handler(update_jobs2, &mut mempool).await;
         assert_eq!(1, mempool.len());
 
@@ -1465,12 +1465,14 @@ mod tests {
                 make_mock_block(network, &previous_block, None, alice_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
-            let (_, update_jobs_n) = mempool.update_with_block_and_predecessor(
-                &next_block,
-                &previous_block,
-                TxProvingCapability::SingleProof,
-                true,
-            );
+            let (_, update_jobs_n) = mempool
+                .update_with_block_and_predecessor(
+                    &next_block,
+                    &previous_block,
+                    TxProvingCapability::SingleProof,
+                    true,
+                )
+                .unwrap();
             mocked_mempool_update_handler(update_jobs_n, &mut mempool).await;
             previous_block = next_block;
         }
@@ -1517,12 +1519,14 @@ mod tests {
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
-        let (_, update_jobs5) = mempool.update_with_block_and_predecessor(
-            &block_5,
-            &previous_block,
-            TxProvingCapability::SingleProof,
-            true,
-        );
+        let (_, update_jobs5) = mempool
+            .update_with_block_and_predecessor(
+                &block_5,
+                &previous_block,
+                TxProvingCapability::SingleProof,
+                true,
+            )
+            .unwrap();
         mocked_mempool_update_handler(update_jobs5, &mut mempool).await;
 
         assert!(
