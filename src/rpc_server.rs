@@ -4321,6 +4321,47 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
+    async fn utxo_origin_block_test() {
+        let network = Network::Main;
+        let mut rpc_server = test_rpc_server(
+            WalletEntropy::new_random(),
+            2,
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let mut rng = rand::rng();
+        let transaction_kernel = pseudorandom_transaction_kernel(rng.random(), 0, 1, 0);
+        let transaction = Transaction {
+            kernel: transaction_kernel,
+            proof: TransactionProof::invalid(),
+        };
+        let block = invalid_block_with_transaction(&Block::genesis(network), transaction);
+        rpc_server.state.set_new_tip(block.clone()).await.unwrap();
+
+        let token = cookie_token(&rpc_server).await;
+        let origin_block = rpc_server
+            .utxo_origin_block(
+                context::current(),
+                token,
+                block.body().transaction_kernel().outputs[0],
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            origin_block.is_some(),
+            "Expected origin block for included UTXO"
+        );
+        assert_eq!(
+            origin_block.unwrap().hash(),
+            block.hash(),
+            "Origin block hash must match the inclusion block hash"
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
     async fn block_kernel_test() {
         let network = Network::Main;
         let rpc_server = test_rpc_server(
