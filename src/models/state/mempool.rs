@@ -172,6 +172,12 @@ pub struct Mempool {
     /// The digest of the tip's mutator set hash. Used to check transaction
     /// confirmability.
     tip_mutator_set_hash: Digest,
+
+    /// True iff the node acts as a proof upgrader. If set, single-proof backed
+    /// transactions will not be removed from the mempool when they get
+    /// deprecated by a new block. Otherwise, those transactions will be
+    /// removed from the mempool.
+    tx_proof_upgrading: bool,
 }
 
 /// note that all methods that modify state and result in a MempoolEvent
@@ -182,7 +188,12 @@ pub struct Mempool {
 /// forward mempool events to the wallet in atomic fashion.
 impl Mempool {
     /// instantiate a new, empty `Mempool`
-    pub fn new(max_total_size: ByteSize, max_num_transactions: Option<usize>, tip: &Block) -> Self {
+    pub fn new(
+        max_total_size: ByteSize,
+        max_num_transactions: Option<usize>,
+        tx_proof_upgrading: bool,
+        tip: &Block,
+    ) -> Self {
         let table = Default::default();
         let fee_densities = Default::default();
         let upgrade_priorities = Default::default();
@@ -198,6 +209,7 @@ impl Mempool {
             upgrade_priorities,
             tip_digest,
             tip_mutator_set_hash,
+            tx_proof_upgrading,
         }
     }
 
@@ -573,6 +585,23 @@ impl Mempool {
         })
     }
 
+    /// Update the primitive witness of a transaction already in the mempool.
+    /// If transaction is not already present in the mempool, it is inserted as
+    /// a primitive-witness backed transaction in order to ensure that the
+    /// primitive-witness data is not lost if the same transaction is later
+    /// inserted with a higher proof quality.
+    pub(crate) fn update_primitive_witness(
+        &mut self,
+        transaction_id: TransactionKernelId,
+        new_primitive_witness: PrimitiveWitness,
+    ) {
+        if let Some(tx) = self.tx_dictionary.get_mut(&transaction_id) {
+            tx.primitive_witness = Some(new_primitive_witness);
+        } else {
+            self.insert(new_primitive_witness.into(), UpgradePriority::Critical);
+        }
+    }
+
     /// Delete all transactions from the mempool.
     ///
     /// note that this will return a MempoolEvent for every removed Tx.
@@ -793,34 +822,36 @@ impl Mempool {
                 continue;
             }
 
-            let (update_job, remove_from_mempool) = match &tx.transaction.proof {
+            let (update_job, keep_in_mempool) = match &tx.transaction.proof {
                 // Proof-collection backed transaction cannot be updated, but if
                 // the transaction was initiated locally, the primitive witness
                 // will be known, and it can be updated.
                 TransactionProof::ProofCollection(_) => {
                     if let Some(pw) = &tx.primitive_witness {
                         let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned(), true);
-                        (Some(pw_update_job), false)
+                        (Some(pw_update_job), true)
                     } else {
-                        (None, true)
+                        (None, false)
                     }
                 }
 
                 // Primitive witness-backed transactions can easily be updated.
                 TransactionProof::Witness(pw) => {
                     let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned(), false);
-                    (Some(pw_update_job), false)
+                    (Some(pw_update_job), true)
                 }
 
-                // Single proofs can be updated, so we don't kick them out.
-                TransactionProof::SingleProof(_) => (None, false),
+                // Single proofs can be updated. So they are kept in the mempool
+                // if the node acts as a proof upgrader. Otherwise they are
+                // removed.
+                TransactionProof::SingleProof(_) => (None, self.tx_proof_upgrading),
             };
 
             if let Some(update_job) = update_job {
                 update_jobs.push(update_job);
             }
 
-            if remove_from_mempool {
+            if !keep_in_mempool {
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
                 if !tx.upgrade_priority.is_irrelevant() {
@@ -886,7 +917,7 @@ impl Mempool {
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis(network);
-    /// let mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+    /// let mempool = Mempool::new(ByteSize::gb(1), None, false,  &genesis_block);
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_id, fee_density) in mempool.get_sorted_iter() {
@@ -935,13 +966,17 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+    use crate::main_loop::upgrade_incentive::UpgradeIncentive;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
+    use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -963,7 +998,7 @@ mod tests {
     pub async fn insert_then_get_then_remove_then_get() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, false, &genesis_block);
 
         let txs = make_plenty_mock_transaction_supported_by_primitive_witness(2);
         let transaction_digests = txs.iter().map(|tx| tx.kernel.txid()).collect_vec();
@@ -1001,7 +1036,7 @@ mod tests {
     /// All transactions inserted into the mempool this way are invalid and
     /// cannot be included in any block.
     fn setup_mock_mempool(transactions_count: usize, sync_block: &Block) -> Mempool {
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, sync_block);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, false, sync_block);
         let txs =
             make_plenty_mock_transaction_supported_by_invalid_single_proofs(transactions_count);
         let mutator_set_hash = sync_block.mutator_set_accumulator_after().hash();
@@ -1023,28 +1058,65 @@ mod tests {
     async fn mocked_mempool_update_handler(
         update_jobs: Vec<PrimitiveWitnessUpdate>,
         mempool: &mut Mempool,
+        mutator_set_update: MutatorSetUpdate,
     ) -> Vec<MempoolEvent> {
         let mut updated_txs = vec![];
         for job in update_jobs {
-            let updated = job
-                .upgrade(
-                    TritonVmJobQueue::get_instance(),
-                    TritonVmJobPriority::Highest.into(),
-                )
-                .await
-                .unwrap();
-            updated_txs.push(updated);
+            let new_pw = job
+                .old_primitive_witness
+                .update_with_new_ms_data(mutator_set_update.clone());
+            if job.was_proof_collection {
+                let pc_job = PrimitiveWitnessToProofCollection {
+                    primitive_witness: new_pw.clone(),
+                };
+                let upgrade_result = pc_job
+                    .upgrade(
+                        TritonVmJobQueue::get_instance(),
+                        &TritonVmProofJobOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+                updated_txs.push((upgrade_result, new_pw));
+            } else {
+                updated_txs.push((new_pw.clone().into(), new_pw));
+            }
         }
 
         let mut events = vec![];
-        for updated_tx in updated_txs {
-            let txid = updated_tx.kernel.txid();
+        for (new_tx, new_pw) in updated_txs {
+            let txid = new_tx.kernel.txid();
             let tx = mempool.get_mut(txid).unwrap();
-            *tx = updated_tx.clone();
-            events.push(MempoolEvent::UpdateTxMutatorSet(txid, updated_tx));
+            *tx = new_tx.clone();
+            mempool.update_primitive_witness(txid, new_pw);
+            events.push(MempoolEvent::UpdateTxMutatorSet(txid, new_tx));
         }
 
         events
+    }
+
+    /// Update all single-proof backed transactions in the mempool.
+    async fn update_all_sp_txs(mempool: &mut Mempool, previous_block: &Block, new_block: &Block) {
+        while let Some((old_kernel, old_single_proof, upgrade_priority)) =
+            mempool.preferred_update()
+        {
+            let old_mutator_set = previous_block.mutator_set_accumulator_after();
+            let mutator_set_update = new_block.mutator_set_update();
+            let job = UpdateMutatorSetDataJob::new(
+                old_kernel.to_owned(),
+                old_single_proof.to_owned(),
+                old_mutator_set,
+                mutator_set_update,
+                upgrade_priority.incentive_given_gobble_potential(NativeCurrencyAmount::zero()),
+            );
+            let new_tx = job
+                .upgrade(
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+            mempool.insert(new_tx, upgrade_priority);
+        }
     }
 
     #[traced_test]
@@ -1190,7 +1262,7 @@ mod tests {
         let mutator_set_hash = genesis_block.mutator_set_accumulator_after().hash();
 
         for i in 0..5 {
-            let mut mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+            let mut mempool = Mempool::new(ByteSize::gb(1), None, false, &genesis_block);
             let mut txs = make_plenty_mock_transaction_supported_by_invalid_single_proofs(i);
 
             for tx in txs.clone() {
@@ -1229,7 +1301,7 @@ mod tests {
     async fn prune_stale_transactions() {
         let network = Network::Beta;
         let genesis_block = Block::genesis(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, false, &genesis_block);
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -1263,8 +1335,9 @@ mod tests {
         // This test makes valid transaction proofs but not valid block proofs.
         // What is being tested here is the correct mempool update.
 
-        // Bob is premine receiver, Alice is not.
-
+        // Bob is premine receiver, Alice is not. The mempool is that of a
+        // transaction-proof upgrader such that single-proof backed transactions
+        // survive across block updates.
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
         let network = Network::Main;
         let bob_wallet_secret = WalletEntropy::devnet_wallet();
@@ -1344,7 +1417,8 @@ mod tests {
             .await;
 
         // Add this transaction to a mempool
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, &block_1);
+        let tx_proof_upgrading = true;
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, tx_proof_upgrading, &block_1);
         mempool.insert(tx_by_bob.clone(), UpgradePriority::Irrelevant);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
@@ -1423,8 +1497,10 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        let (_, update_jobs2) = mempool.update_with_block(&block_2);
-        mocked_mempool_update_handler(update_jobs2, &mut mempool).await;
+        let _ = mempool.update_with_block(&block_2);
+        assert_eq!(1, mempool.len());
+
+        update_all_sp_txs(&mut mempool, &block_1, &block_2).await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -1449,8 +1525,8 @@ mod tests {
                 make_mock_block(network, &previous_block, None, alice_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
-            let (_, update_jobs_n) = mempool.update_with_block(&next_block);
-            mocked_mempool_update_handler(update_jobs_n, &mut mempool).await;
+            let _ = mempool.update_with_block(&next_block);
+            update_all_sp_txs(&mut mempool, &previous_block, &next_block).await;
             previous_block = next_block;
         }
 
@@ -1489,7 +1565,6 @@ mod tests {
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
         let (_, update_jobs5) = mempool.update_with_block(&block_5);
-        mocked_mempool_update_handler(update_jobs5, &mut mempool).await;
 
         assert!(
             mempool.is_empty(),
@@ -1557,7 +1632,7 @@ mod tests {
         // are the input into the merge.
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, false, &genesis_block);
 
         let ((left, right), merged) = merge_tx_triplet().await;
         mempool.insert(left, UpgradePriority::Irrelevant);
@@ -1605,6 +1680,7 @@ mod tests {
         let cli_with_proof_capability = cli_args::Args {
             tx_proving_capability: Some(proving_capability),
             network,
+            tx_proof_upgrading: true,
             ..Default::default()
         };
         let mut alice = mock_genesis_global_state(2, alice_wallet, cli_with_proof_capability).await;
@@ -1672,11 +1748,15 @@ mod tests {
             .await;
             let update_jobs = alice.set_new_tip(next_block.clone()).await.unwrap();
             assert!(
-                update_jobs.len().is_one(),
-                "Must return exactly one update-job, i = {i}"
+                update_jobs.is_empty(),
+                "Must return zero update jobs, i = {i}"
             );
-            mocked_mempool_update_handler(update_jobs, &mut alice.lock_guard_mut().await.mempool)
-                .await;
+            update_all_sp_txs(
+                &mut alice.lock_guard_mut().await.mempool,
+                &current_block,
+                &next_block,
+            )
+            .await;
 
             let mempool_txs = alice
                 .lock_guard()
@@ -1691,7 +1771,8 @@ mod tests {
             assert!(
                 mempool_txs[0]
                     .is_confirmable_relative_to(&next_block.mutator_set_accumulator_after()),
-                "Mempool tx must stay confirmable after new block of height {} has been applied",
+                "Mempool tx must stay confirmable after new block of height {} has been applied \
+                and SP-backed transactions have been updated.",
                 next_block.header().height
             );
             assert!(
@@ -1707,7 +1788,7 @@ mod tests {
             current_block = next_block;
         }
 
-        // Now make a deep reorganization and verify that nothing crashes
+        // Now make a reorganization and verify that nothing crashes
         let (block_1b, _) = make_mock_block(
             network,
             &genesis_block,
@@ -1848,7 +1929,7 @@ mod tests {
         // Set up mempool with primitive-witness-backed transactions and
         // up-to-date mutator set hash, i.e., cannot use set_up_mempool().
         let txs = make_plenty_mock_transaction_supported_by_primitive_witness(11);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, false, &genesis_block);
 
         let mutator_set_hash = genesis_block.mutator_set_accumulator_after().hash();
         for mut tx in txs {
@@ -1870,7 +1951,7 @@ mod tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let txs = make_plenty_mock_transaction_supported_by_primitive_witness(11);
-        let mut mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, false, &genesis_block);
 
         for tx in txs {
             mempool.insert(tx, UpgradePriority::Irrelevant);
@@ -1895,7 +1976,7 @@ mod tests {
         expected_txs.reverse();
 
         for i in 0..10 {
-            let mut mempool = Mempool::new(ByteSize::gb(1), Some(i), &genesis_block);
+            let mut mempool = Mempool::new(ByteSize::gb(1), Some(i), false, &genesis_block);
             for tx in txs.clone() {
                 mempool.insert(tx, UpgradePriority::Irrelevant);
             }
@@ -2005,7 +2086,9 @@ mod tests {
 
             let mut rng = rand::rng();
             let genesis_block = Block::genesis(network);
-            let mut mempool = setup_mock_mempool(0, &genesis_block);
+            let is_tx_proof_upgrader = true;
+            let mut mempool =
+                Mempool::new(ByteSize::gb(1), None, is_tx_proof_upgrader, &genesis_block);
 
             // Insert synced transaction into mempool, verify no transaction
             // is returned.
@@ -2049,7 +2132,8 @@ mod tests {
             let tx_a = into_single_proof_transaction(tx_a);
             let tx_b = into_single_proof_transaction(tx_b);
 
-            let mut mempool = Mempool::new(ByteSize::gb(1), None, &Block::genesis(Network::Main));
+            let mut mempool =
+                Mempool::new(ByteSize::gb(1), None, false, &Block::genesis(Network::Main));
             mempool.insert(tx_a.clone(), upgrade_priority_a);
             mempool.insert(tx_b.clone(), upgrade_priority_b);
 
@@ -2254,7 +2338,7 @@ mod tests {
             let txid = original_tx.kernel.txid();
 
             let genesis_block = Block::genesis(Network::Main);
-            let mut mempool = Mempool::new(ByteSize::gb(1), None, &genesis_block);
+            let mut mempool = Mempool::new(ByteSize::gb(1), None, false, &genesis_block);
 
             // First insert original transaction, then updated which should
             // always replace the original transaction, regardless of its size.

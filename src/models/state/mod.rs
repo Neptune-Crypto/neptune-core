@@ -75,7 +75,6 @@ use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::locks::tokio::AtomicRwReadGuard;
 use crate::locks::tokio::AtomicRwWriteGuard;
-use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -242,7 +241,7 @@ impl GlobalStateLock {
         &mut self,
         new_block: Block,
         composer_reward_utxo_infos: Vec<ExpectedUtxo>,
-    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    ) -> Result<Vec<PrimitiveWitnessUpdate>> {
         let mut state = self.lock_guard_mut().await;
         state
             .wallet_state
@@ -654,6 +653,7 @@ impl GlobalState {
         let mempool = Mempool::new(
             cli.max_mempool_size,
             cli.max_mempool_num_tx,
+            cli.tx_proof_upgrading,
             chain.light_state(),
         );
 

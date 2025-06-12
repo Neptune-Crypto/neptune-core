@@ -280,7 +280,7 @@ impl Transaction {
     /// PrimitiveWitness::validate and ProofCollection/RemovalRecordsIntegrity.
     /// AOCL membership is a feature of *validity*, which is a pre-requisite to
     /// confirmability.
-    pub(crate) fn is_confirmable_relative_to(
+    pub fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> bool {

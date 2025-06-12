@@ -11,12 +11,12 @@ use std::str::FromStr;
 use neptune_cash::api::export::GlobalStateLock;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::TransactionKernelId;
-use neptune_cash::api::export::TransactionProofType;
 use neptune_cash::config_models::cli_args::Args;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
 use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
+use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
 use tokio::task::JoinHandle;
@@ -291,9 +291,31 @@ impl GenesisNode {
             }
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!(
-                    "tx not in mempool with single-proof after {} seconds",
+                    "tx not in mempool with proof-collection after {} seconds",
                     timeout_secs
                 );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    /// wait until tx in mempool is updated
+    pub async fn wait_until_tx_in_mempool_confirmable(
+        &self,
+        txid: TransactionKernelId,
+        mutator_set: &MutatorSetAccumulator,
+        timeout_secs: u16,
+    ) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(tx) = self.gsl.lock_guard().await.mempool.get(txid) {
+                if tx.is_confirmable_relative_to(mutator_set) {
+                    break;
+                }
+            }
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!("tx not confirmable after {} seconds", timeout_secs);
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }

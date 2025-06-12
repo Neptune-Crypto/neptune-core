@@ -2,16 +2,18 @@ mod common;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
+use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TxProvingCapability;
 use neptune_cash::models::state::mempool::upgrade_priority::UpgradePriority;
+use tasm_lib::twenty_first::bfe;
 use tracing_test::traced_test;
 
 #[traced_test]
 #[tokio::test(flavor = "multi_thread")]
-pub async fn alice_makes_proof_collection_transaction() -> anyhow::Result<()> {
+pub async fn alice_makes_proof_collection_transaction() {
     logging::tracing_logger();
 
     let mut cli_args = GenesisNode::default_args();
@@ -24,7 +26,20 @@ pub async fn alice_makes_proof_collection_transaction() -> anyhow::Result<()> {
         .api_mut()
         .regtest_mut()
         .mine_blocks_to_wallet(2)
-        .await?;
+        .await
+        .unwrap();
+    assert_eq!(
+        BlockHeight::from(2u64),
+        alice
+            .gsl
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height,
+        "Expected block height: 2"
+    );
 
     // Generate an address
     let alice_address = alice
@@ -32,7 +47,8 @@ pub async fn alice_makes_proof_collection_transaction() -> anyhow::Result<()> {
         .api_mut()
         .wallet_mut()
         .next_receiving_address(KeyType::Generation)
-        .await?;
+        .await
+        .unwrap();
 
     // Create transaction to self
     let tx_artifacts = alice
@@ -40,12 +56,16 @@ pub async fn alice_makes_proof_collection_transaction() -> anyhow::Result<()> {
         .api_mut()
         .tx_sender_mut()
         .send(
-            vec![(alice_address, NativeCurrencyAmount::coins_from_str("2.45")?)],
+            vec![(
+                alice_address,
+                NativeCurrencyAmount::coins_from_str("2.45").unwrap(),
+            )],
             Default::default(),
             NativeCurrencyAmount::coins(1),
             Timestamp::now(),
         )
-        .await?;
+        .await
+        .unwrap();
 
     alice
         .gsl
@@ -65,7 +85,8 @@ pub async fn alice_makes_proof_collection_transaction() -> anyhow::Result<()> {
             tx_artifacts.transaction().txid(),
             timeout_secs,
         )
-        .await?;
+        .await
+        .unwrap();
 
     // Mine one block, and verify that transaction stays in the mempool
     alice
@@ -73,8 +94,36 @@ pub async fn alice_makes_proof_collection_transaction() -> anyhow::Result<()> {
         .api_mut()
         .regtest_mut()
         .mine_blocks_to_wallet(1)
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+    let tip = alice.gsl.lock_guard().await.chain.light_state().clone();
+    assert_eq!(
+        BlockHeight::from(3u64),
+        tip.header().height,
+        "Expected block height: 3"
+    );
 
-    Ok(())
+    let tip_msa = tip.mutator_set_accumulator_after();
+    let tx_upgrade_timeout_secs = 20;
+    alice
+        .wait_until_tx_in_mempool_confirmable(
+            tx_artifacts.transaction().txid(),
+            &tip_msa,
+            tx_upgrade_timeout_secs,
+        )
+        .await
+        .unwrap();
+
+    // Verify that transaction is confirmable against tip.
+    let txid = tx_artifacts.transaction().txid();
+    let tx = alice
+        .gsl
+        .lock_guard()
+        .await
+        .mempool
+        .get(txid)
+        .unwrap()
+        .to_owned();
+    assert!(tx.is_confirmable_relative_to(&tip.mutator_set_accumulator_after()));
 }

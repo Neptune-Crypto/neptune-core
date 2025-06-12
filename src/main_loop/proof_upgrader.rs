@@ -118,6 +118,7 @@ pub struct UpdateMutatorSetDataJob {
 }
 
 impl UpdateMutatorSetDataJob {
+    #[cfg(test)]
     pub(crate) fn new(
         old_kernel: TransactionKernel,
         old_single_proof: Proof,
@@ -1228,12 +1229,13 @@ mod tests {
     async fn dont_share_partly_mined_merge_upgrade() {
         let network = Network::Main;
 
-        // Alice is premine recipient and has mined on block, so she can make
+        // Alice is premine recipient and has mined one block, so she can make
         // (at least) two transaction.
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
         let cli_args = cli_args::Args {
             network,
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            tx_proof_upgrading: true,
             ..Default::default()
         };
         let mut alice = state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;

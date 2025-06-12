@@ -517,8 +517,8 @@ impl MainLoopHandler {
             .expect("Receiver for updated txs in main loop must still exist");
     }
 
-    /// Handles a list of transactions whose proof has been updated with new
-    /// mutator set data.
+    /// Handles a list of transactions whose proof collection or primitive
+    /// witness has been updated to be valid under a new mutator set.
     async fn handle_updated_mempool_txs(
         &mut self,
         update_results: Vec<PrimitiveWitnessUpdateResult>,
@@ -541,15 +541,16 @@ impl MainLoopHandler {
                         let txid = new_primitive_witness.kernel.txid();
                         info!("Updated transaction {txid} to be valid under new mutator set");
 
-                        // Insert transaction both as primitive witness and as
-                        // proof-collection backed, if available, since this
-                        // makes the update of the primitive witness simpler if
-                        // we need to do it again.
-                        state.mempool_insert(
-                            new_primitive_witness.to_owned().into(),
-                            UpgradePriority::Critical,
-                        );
-                        state.mempool_insert(new_transaction.to_owned(), UpgradePriority::Critical);
+                        // First update the primitive-witness data associated with the transaction,
+                        // then insert the new transaction into the mempool. This ensures that the
+                        // primitive-witness is as up-to-date as possible in case it has to be
+                        // updated again later.
+                        state
+                            .mempool
+                            .update_primitive_witness(txid, new_primitive_witness.to_owned());
+                        state
+                            .mempool_insert(new_transaction.to_owned(), UpgradePriority::Critical)
+                            .await;
                     }
                 }
             }
@@ -558,8 +559,7 @@ impl MainLoopHandler {
         // Then notify all peers about shareable (proof-collection backed) transactions.
         for updated in update_results {
             if let PrimitiveWitnessUpdateResult::Success {
-                new_primitive_witness,
-                new_transaction,
+                new_transaction, ..
             } = updated
             {
                 if let Ok(pmsg) = (&new_transaction).try_into() {
