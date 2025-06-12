@@ -252,7 +252,8 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     let mempool = Mempool::new(
         cli.max_mempool_size,
         cli.max_mempool_num_tx,
-        genesis_block.hash(),
+        cli.tx_proof_upgrading,
+        &genesis_block,
     );
 
     let configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);

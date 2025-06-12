@@ -72,6 +72,11 @@ impl TransactionProof {
         matches!(self, Self::SingleProof(_))
     }
 
+    /// Convert a transaction proof into a Triton VM proof.
+    ///
+    /// # Panics
+    ///
+    /// - If the proof type is any other than [TransactionProof::SingleProof].
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
@@ -84,7 +89,7 @@ impl TransactionProof {
         }
     }
 
-    pub(crate) fn proof_quality(&self) -> anyhow::Result<TransactionProofQuality> {
+    pub fn proof_quality(&self) -> anyhow::Result<TransactionProofQuality> {
         match self {
             TransactionProof::Witness(_) => {
                 anyhow::bail!("Primitive witness does not have a proof")

@@ -1125,7 +1125,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::TypeScript;
-    use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::mempool::upgrade_priority::UpgradePriority;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
@@ -2019,8 +2019,9 @@ pub(crate) mod tests {
                     .next_unused_spending_key(KeyType::Generation)
                     .await
                     .to_address();
+                let send_amount = NativeCurrencyAmount::coins(1);
                 let tx_outputs = vec![TxOutput::onchain_native_currency(
-                    NativeCurrencyAmount::coins(1),
+                    send_amount,
                     rng.random(),
                     receiving_address,
                     true,
@@ -2052,7 +2053,7 @@ pub(crate) mod tests {
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(transaction.clone(), TransactionOrigin::Own)
+                    .mempool_insert(transaction.clone(), UpgradePriority::Critical)
                     .await;
             }
 
