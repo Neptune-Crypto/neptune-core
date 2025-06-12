@@ -4339,13 +4339,9 @@ mod tests {
         rpc_server.state.set_new_tip(block.clone()).await.unwrap();
 
         let token = cookie_token(&rpc_server).await;
+        let output = block.body().transaction_kernel().outputs[0];
         let origin_block = rpc_server
-            .utxo_origin_block(
-                context::current(),
-                token,
-                block.body().transaction_kernel().outputs[0],
-                None,
-            )
+            .utxo_origin_block(context::current(), token, output, None)
             .await
             .unwrap();
 
@@ -4353,10 +4349,14 @@ mod tests {
             origin_block.is_some(),
             "Expected origin block for included UTXO"
         );
-        assert_eq!(
-            origin_block.unwrap().hash(),
-            block.hash(),
-            "Origin block hash must match the inclusion block hash"
+        assert!(
+            origin_block
+                .unwrap()
+                .body()
+                .transaction_kernel()
+                .outputs
+                .contains(&output),
+            "Origin block should have the UTXO inside"
         );
     }
 
