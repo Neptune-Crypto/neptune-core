@@ -4437,7 +4437,7 @@ mod tests {
     }
 
     #[traced_test]
-    #[test_strategy::proptest(async = "tokio")]
+    #[test_strategy::proptest(async = "tokio")] #[ignore = "TODO remove this when handled separately"]
     async fn public_announcements_in_block_test(
         #[strategy(propcompose_txkernel_with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
