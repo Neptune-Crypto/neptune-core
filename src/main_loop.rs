@@ -2012,6 +2012,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod sync_mode {
         use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
         use test_strategy::proptest;

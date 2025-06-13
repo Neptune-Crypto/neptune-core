@@ -225,6 +225,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod shamir {
         use proptest::prelude::Just;
         use proptest::prop_assert_eq;

@@ -1989,6 +1989,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod proof_quality_tests {
         use proptest::prop_assert_eq;
         use proptest::prop_assert_ne;
