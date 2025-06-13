@@ -1299,7 +1299,11 @@ impl PeerLoopHandler {
 
                     (
                         state.chain.light_state().hash(),
-                        state.chain.light_state().mutator_set_accumulator_after(),
+                        state
+                            .chain
+                            .light_state()
+                            .mutator_set_accumulator_after()
+                            .expect("Block from state must be valid"),
                     )
                 };
                 if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
@@ -1425,6 +1429,7 @@ impl PeerLoopHandler {
                         .chain
                         .light_state()
                         .mutator_set_accumulator_after()
+                        .expect("Block from state must be valid")
                         .hash()
                         != tx_notification.mutator_set_hash
                     {
@@ -1464,7 +1469,7 @@ impl PeerLoopHandler {
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .favor_incoming_block_proposal(
+                    .favor_incoming_block_proposal_legacy(
                         block_proposal_notification.height,
                         block_proposal_notification.guesser_fee,
                     );
@@ -1506,59 +1511,57 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::BlockProposal(block) => {
+            PeerMessage::BlockProposal(new_proposal) => {
                 info!("Got block proposal from peer.");
 
-                let should_punish = {
-                    log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposal::should_punish");
+                // Is the proposal valid?
+                // Lock needs to be held here because race conditions: otherwise
+                // the block proposal that was validated might not match with
+                // the one whose favorability is being computed.
+                let state = self.global_state_lock.lock_guard().await;
+                let tip = state.chain.light_state();
+                let proposal_is_valid = new_proposal
+                    .is_valid(tip, self.now(), self.global_state_lock.cli().network)
+                    .await;
+                if !proposal_is_valid {
+                    drop(state);
+                    self.punish(NegativePeerSanction::InvalidBlockProposal)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
-                    let (verdict, tip) = {
-                        let state = self.global_state_lock.lock_guard().await;
+                // Is block proposal favorable?
+                let is_favorable = state.favor_incoming_block_proposal(
+                    new_proposal.header().prev_block_digest,
+                    new_proposal
+                        .total_guesser_reward()
+                        .expect("Block was validated"),
+                );
+                drop(state);
 
-                        let verdict = state.favor_incoming_block_proposal(
-                            block.header().height,
-                            block.total_guesser_reward(),
-                        );
-                        let tip = state.chain.light_state().to_owned();
-                        (verdict, tip)
-                    };
-
-                    if let Err(rejection_reason) = verdict {
-                        match rejection_reason {
-                            // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
-                            BlockProposalRejectError::InsufficientFee { current, received }
-                                if Some(received) == current =>
-                            {
-                                debug!("ignoring new block proposal because the fee is equal to the present one");
-                                None
-                            }
-                            _ => {
-                                warn!("Rejecting new block proposal:\n{rejection_reason}");
-                                Some(NegativePeerSanction::NonFavorableBlockProposal)
-                            }
-                        }
-                    } else {
-                        // Verify validity and that proposal is child of current tip
-                        if block
-                            .is_valid(&tip, self.now(), self.global_state_lock.cli().network)
-                            .await
+                if let Err(rejection_reason) = is_favorable {
+                    match rejection_reason {
+                        // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
+                        BlockProposalRejectError::InsufficientFee { current, received }
+                            if Some(received) == current =>
                         {
-                            None // all is well, no punishment.
-                        } else {
-                            Some(NegativePeerSanction::InvalidBlockProposal)
+                            debug!("ignoring new block proposal because the fee is equal to the present one");
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        _ => {
+                            warn!("Rejecting new block proposal:\n{rejection_reason}");
+                            self.punish(NegativePeerSanction::NonFavorableBlockProposal)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
                         }
                     }
                 };
 
-                if let Some(sanction) = should_punish {
-                    self.punish(sanction).await?;
-                } else {
-                    self.send_to_main(PeerTaskToMain::BlockProposal(block), line!())
-                        .await?;
+                self.send_to_main(PeerTaskToMain::BlockProposal(new_proposal), line!())
+                    .await?;
 
-                    // Valuable, new, hard-to-produce information. Reward peer.
-                    self.reward(PositivePeerSanction::NewBlockProposal).await?;
-                }
+                // Valuable, new, hard-to-produce information. Reward peer.
+                self.reward(PositivePeerSanction::NewBlockProposal).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }

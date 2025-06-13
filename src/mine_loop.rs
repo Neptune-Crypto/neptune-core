@@ -527,13 +527,17 @@ pub(crate) fn composer_outputs(
 
 /// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
 /// transaction.
+///
+/// # Panics
+///
+///  - If `latest_block` is invalid.
 pub(super) fn prepare_coinbase_transaction_stateless(
     latest_block: &Block,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     network: Network,
 ) -> (TxOutputList, TransactionDetails) {
-    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
+    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().unwrap();
     let next_block_height: BlockHeight = latest_block.header().height.next();
     info!("Creating coinbase for block of height {next_block_height}.");
 
@@ -591,6 +595,8 @@ pub(crate) async fn create_block_transaction(
     .await
 }
 
+/// # Panics
+///  - If predecessor is invalid
 pub(crate) async fn create_block_transaction_from(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,
@@ -600,7 +606,9 @@ pub(crate) async fn create_block_transaction_from(
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
+    let predecessor_block_ms = predecessor_block
+        .mutator_set_accumulator_after()
+        .expect("predecessor should be valid");
     let mutator_set_hash = predecessor_block_ms.hash();
     debug!("Creating block transaction with mutator set hash: {mutator_set_hash}",);
 
@@ -645,7 +653,7 @@ pub(crate) async fn create_block_transaction_from(
     // Guarantees that some merge happens in below loop, which sets merge-bit.
     if transactions_to_merge.is_empty() {
         let nop = TransactionDetails::nop(
-            predecessor_block.mutator_set_accumulator_after(),
+            predecessor_block_ms,
             timestamp,
             global_state_lock.cli().network,
         );
@@ -1178,7 +1186,10 @@ pub(crate) mod tests {
                 make_mock_transaction_with_mutator_set_hash(
                     vec![],
                     outputs,
-                    previous_block.mutator_set_accumulator_after().hash(),
+                    previous_block
+                        .mutator_set_accumulator_after()
+                        .unwrap()
+                        .hash(),
                 ),
                 dummy_expected_utxo(),
             )
@@ -1759,7 +1770,7 @@ pub(crate) mod tests {
             let transaction = make_mock_transaction_with_mutator_set_hash(
                 vec![],
                 vec![],
-                prev_block.mutator_set_accumulator_after().hash(),
+                prev_block.mutator_set_accumulator_after().unwrap().hash(),
             );
 
             let guesser_key = HashLockKey::from_preimage(Digest::default());
@@ -2394,7 +2405,7 @@ pub(crate) mod tests {
             let transaction = make_mock_transaction_with_mutator_set_hash(
                 vec![],
                 vec![],
-                prev_block.mutator_set_accumulator_after().hash(),
+                prev_block.mutator_set_accumulator_after().unwrap().hash(),
             );
 
             // gen guesser key

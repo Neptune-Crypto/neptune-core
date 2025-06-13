@@ -687,7 +687,11 @@ impl GlobalState {
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         let tip_digest = self.chain.light_state().hash();
-        let mutator_set_accumulator = self.chain.light_state().mutator_set_accumulator_after();
+        let mutator_set_accumulator = self
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("block in state should be valid");
         self.wallet_state
             .get_wallet_status(tip_digest, &mutator_set_accumulator)
             .await
@@ -770,7 +774,11 @@ impl GlobalState {
     /// Returns true iff the incoming block proposal is more favorable than the
     /// one we're currently working on. Returns false if client is a composer,
     /// as it's assumed that they prefer guessing on their own block.
-    pub(crate) fn favor_incoming_block_proposal(
+    ///
+    /// Favor [`Self::favor_incoming_block_proposal`] whenever the digests are
+    /// available, as this function can return false positives in case of a
+    /// reorganization.
+    pub(crate) fn favor_incoming_block_proposal_legacy(
         &self,
         incoming_block_height: BlockHeight,
         incoming_guesser_fee: NativeCurrencyAmount,
@@ -787,10 +795,46 @@ impl GlobalState {
             });
         }
 
-        let maybe_existing_fee = self
-            .mining_state
-            .block_proposal
-            .map(|x| x.total_guesser_reward());
+        let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
+            x.total_guesser_reward()
+                .expect("block in state must be valid")
+        });
+        if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
+            || incoming_guesser_fee.is_zero()
+        {
+            Err(BlockProposalRejectError::InsufficientFee {
+                current: maybe_existing_fee,
+                received: incoming_guesser_fee,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns true iff the incoming block proposal is more favorable than the
+    /// one we're currently working on. Returns false if client is a composer,
+    /// as it's assumed that they prefer guessing on their own block.
+    pub(crate) fn favor_incoming_block_proposal(
+        &self,
+        incoming_proposal_prev_block_digest: Digest,
+        incoming_guesser_fee: NativeCurrencyAmount,
+    ) -> Result<(), BlockProposalRejectError> {
+        if self.cli().compose {
+            return Err(BlockProposalRejectError::Composing);
+        }
+
+        let current_tip_digest = self.chain.light_state().hash();
+        if incoming_proposal_prev_block_digest != current_tip_digest {
+            return Err(BlockProposalRejectError::WrongParent {
+                received: incoming_proposal_prev_block_digest,
+                expected: current_tip_digest,
+            });
+        }
+
+        let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
+            x.total_guesser_reward()
+                .expect("block in state must be valid")
+        });
         if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
             || incoming_guesser_fee.is_zero()
         {
@@ -885,7 +929,11 @@ impl GlobalState {
         &self,
     ) -> Vec<(Digest, Timestamp, BlockHeight, NativeCurrencyAmount)> {
         let current_tip_digest = self.chain.light_state().hash();
-        let current_msa = self.chain.light_state().mutator_set_accumulator_after();
+        let current_msa = self
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("block from state should be valid");
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
 
@@ -1241,8 +1289,10 @@ impl GlobalState {
                     .get_block(revert_block.kernel.header.prev_block_digest)
                     .await?
                     .expect("All blocks that are reverted must have a parent, since genesis block can never be reverted.");
-                let previous_mutator_set =
-                    revert_block_parent.mutator_set_accumulator_after().clone();
+                let previous_mutator_set = revert_block_parent
+                    .mutator_set_accumulator_after()
+                    .expect("block from state should be valid")
+                    .clone();
 
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
@@ -1289,13 +1339,18 @@ impl GlobalState {
                     .get_block(apply_block.kernel.header.prev_block_digest)
                     .await?;
                 let mut block_msa = match &predecessor_block {
-                    Some(block) => block.mutator_set_accumulator_after().clone(),
+                    Some(block) => block
+                        .mutator_set_accumulator_after()
+                        .expect("block from archival state should be valid")
+                        .clone(),
                     None => MutatorSetAccumulator::default(),
                 };
                 let MutatorSetUpdate {
                     additions,
                     mut removals,
-                } = apply_block.mutator_set_update();
+                } = apply_block
+                    .mutator_set_update()
+                    .expect("block from archival state should be valid");
 
                 // apply additions
                 for addition_record in &additions {
@@ -1329,10 +1384,12 @@ impl GlobalState {
                     block_msa.remove(&current_removal_record);
                 }
 
-                // sanity check
                 assert_eq!(
                     block_msa.hash(),
-                    apply_block.mutator_set_accumulator_after().hash()
+                    apply_block
+                        .mutator_set_accumulator_after()
+                        .expect("block from archival state should be valid")
+                        .hash()
                 );
             }
 
@@ -1512,8 +1569,7 @@ impl GlobalState {
         self.chain
             .archival_state_mut()
             .update_mutator_set(&new_block)
-            .await
-            .expect("Updating mutator set must succeed");
+            .await?;
 
         // Get parent of tip for mutator-set data needed for various updates. Parent of the
         // stored block will always exist since all blocks except the genesis block have a
@@ -1532,7 +1588,10 @@ impl GlobalState {
             new_block.header().prev_block_digest,
             "Tip parent has must match indicated parent hash"
         );
-        let previous_ms_accumulator = tip_parent.mutator_set_accumulator_after().clone();
+        let previous_ms_accumulator = tip_parent
+            .mutator_set_accumulator_after()
+            .expect("block from archival state should be valid")
+            .clone();
 
         // Update mempool with UTXOs from this block. This is done by
         // removing all transaction that became invalid/was mined by this
@@ -1543,7 +1602,7 @@ impl GlobalState {
             &tip_parent,
             self.proving_capability(),
             self.cli().compose,
-        );
+        )?;
 
         // update wallet state with relevant UTXOs from this block
         self.wallet_state
@@ -2352,6 +2411,7 @@ mod tests {
                     .chain
                     .light_state()
                     .mutator_set_accumulator_after()
+                    .unwrap()
                     .verify(
                         ms_item,
                         &mutxo.get_latest_membership_proof_entry().unwrap().1,
@@ -2482,7 +2542,7 @@ mod tests {
                 .wallet_state
                 .get_wallet_status(
                     mock_block_1a.hash(),
-                    &mock_block_1a.mutator_set_accumulator_after()
+                    &mock_block_1a.mutator_set_accumulator_after().unwrap()
                 )
                 .await
                 .synced_unspent
@@ -2513,7 +2573,7 @@ mod tests {
             .wallet_state
             .get_wallet_status(
                 parent_block.hash(),
-                &parent_block.mutator_set_accumulator_after(),
+                &parent_block.mutator_set_accumulator_after().unwrap(),
             )
             .await;
         assert_eq!(1, alice_wallet_status_after_reorg.synced_unspent.len());
@@ -2568,7 +2628,8 @@ mod tests {
                 };
                 let mut spendable_utxos: Vec<(Utxo, MsMembershipProof, AdditionRecord)> = vec![];
                 for _ in 0..num_blocks_per_branch {
-                    let mut mutator_set_accumulator = block.mutator_set_accumulator_after();
+                    let mut mutator_set_accumulator =
+                        block.mutator_set_accumulator_after().unwrap();
 
                     // produce removal records
                     let num_removal_records = rng.random_range(0..=spendable_utxos.len());
@@ -2621,11 +2682,11 @@ mod tests {
                     )
                     .await;
                     ret.push(next_block.clone());
-                    let mut test_msa = block.mutator_set_accumulator_after();
+                    let mut test_msa = block.mutator_set_accumulator_after().unwrap();
                     block = next_block;
 
                     // update membership proofs
-                    let mutator_set_update = block.mutator_set_update();
+                    let mutator_set_update = block.mutator_set_update().unwrap();
                     let MutatorSetUpdate {
                         additions,
                         mut removals,
@@ -2699,6 +2760,7 @@ mod tests {
 
                     block
                         .mutator_set_update()
+                        .unwrap()
                         .apply_to_accumulator(&mut test_msa)
                         .unwrap();
                     assert_eq!(mutator_set_accumulator, test_msa);
@@ -2742,7 +2804,10 @@ mod tests {
                 3,
                 alice
                     .wallet_state
-                    .get_wallet_status(block_1.hash(), &block_1.mutator_set_accumulator_after())
+                    .get_wallet_status(
+                        block_1.hash(),
+                        &block_1.mutator_set_accumulator_after().unwrap()
+                    )
                     .await
                     .synced_unspent
                     .len()
@@ -2797,7 +2862,7 @@ mod tests {
             .wallet_state
             .get_wallet_status(
                 fork_a_block.hash(),
-                &fork_a_block.mutator_set_accumulator_after(),
+                &fork_a_block.mutator_set_accumulator_after().unwrap(),
             )
             .await;
 
@@ -2814,7 +2879,7 @@ mod tests {
             .wallet_state
             .get_wallet_status(
                 fork_b_block.hash(),
-                &fork_b_block.mutator_set_accumulator_after(),
+                &fork_b_block.mutator_set_accumulator_after().unwrap(),
             )
             .await;
         assert_eq!(
@@ -2837,7 +2902,7 @@ mod tests {
             .wallet_state
             .get_wallet_status(
                 fork_b_block.hash(),
-                &fork_b_block.mutator_set_accumulator_after(),
+                &fork_b_block.mutator_set_accumulator_after().unwrap(),
             )
             .await;
         assert_eq!(3, wallet_status_on_b_fork_after_resync.synced_unspent.len());
@@ -2855,7 +2920,7 @@ mod tests {
             .wallet_state
             .get_wallet_status(
                 fork_c_block.hash(),
-                &fork_c_block.mutator_set_accumulator_after(),
+                &fork_c_block.mutator_set_accumulator_after().unwrap(),
             )
             .await;
         assert_eq!(
@@ -2879,7 +2944,7 @@ mod tests {
             .wallet_state
             .get_wallet_status(
                 fork_c_block.hash(),
-                &fork_c_block.mutator_set_accumulator_after(),
+                &fork_c_block.mutator_set_accumulator_after().unwrap(),
             )
             .await;
         assert_eq!(1, alice_ws_c_after_resync.synced_unspent.len());
@@ -2952,7 +3017,7 @@ mod tests {
 
         assert!(coinbase_transaction.is_valid(network).await);
         assert!(coinbase_transaction
-            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let sender_randomness: Digest = rng.random();
@@ -3023,7 +3088,7 @@ mod tests {
 
         assert!(tx_to_alice_and_bob.is_valid(network).await);
         assert!(tx_to_alice_and_bob
-            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
 
         // Expect change output
         premine_receiver
@@ -3050,7 +3115,7 @@ mod tests {
             .unwrap();
         assert!(block_transaction.is_valid(network).await);
         assert!(block_transaction
-            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
 
         let block_1 = Block::compose(
             &genesis_block,
@@ -3206,7 +3271,8 @@ mod tests {
         );
 
         assert!(tx_from_alice.is_valid(network).await);
-        assert!(tx_from_alice.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
+        assert!(tx_from_alice
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
         // make bob's transaction
         let tx_outputs_from_bob = vec![
@@ -3252,7 +3318,8 @@ mod tests {
         );
 
         assert!(tx_from_bob.is_valid(network).await);
-        assert!(tx_from_bob.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
+        assert!(tx_from_bob
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
@@ -3273,7 +3340,7 @@ mod tests {
         .unwrap();
         assert!(coinbase_transaction2.is_valid(network).await);
         assert!(coinbase_transaction2
-            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
         let block_transaction2 = coinbase_transaction2
             .merge_with(
@@ -3293,9 +3360,8 @@ mod tests {
             .await
             .unwrap();
         assert!(block_transaction2.is_valid(network).await);
-        assert!(
-            block_transaction2.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after())
-        );
+        assert!(block_transaction2
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
 
         let block_2 = Block::compose(
             &block_1,
@@ -3402,7 +3468,9 @@ mod tests {
         )
         .await;
         let small_guesser_fraction = block1_proposal(&global_state_lock_small).await;
+        let small_prev_block_digest = small_guesser_fraction.header().prev_block_digest;
         let big_guesser_fraction = block1_proposal(&global_state_lock_big).await;
+        let big_prev_block_digest = big_guesser_fraction.header().prev_block_digest;
 
         let mut state = global_state_lock_small
             .global_state_lock
@@ -3411,8 +3479,8 @@ mod tests {
         assert!(
             state
                 .favor_incoming_block_proposal(
-                    small_guesser_fraction.header().height,
-                    small_guesser_fraction.total_guesser_reward()
+                    small_prev_block_digest,
+                    small_guesser_fraction.total_guesser_reward().unwrap()
                 )
                 .is_ok(),
             "Must favor low guesser fee over none"
@@ -3423,8 +3491,8 @@ mod tests {
         assert!(
             state
                 .favor_incoming_block_proposal(
-                    big_guesser_fraction.header().height,
-                    big_guesser_fraction.total_guesser_reward()
+                    big_prev_block_digest,
+                    big_guesser_fraction.total_guesser_reward().unwrap()
                 )
                 .is_ok(),
             "Must favor big guesser fee over low"
@@ -3434,13 +3502,13 @@ mod tests {
             BlockProposal::foreign_proposal(big_guesser_fraction.clone());
         assert_eq!(
             BlockProposalRejectError::InsufficientFee {
-                current: Some(big_guesser_fraction.total_guesser_reward()),
-                received: big_guesser_fraction.total_guesser_reward()
+                current: Some(big_guesser_fraction.total_guesser_reward().unwrap()),
+                received: big_guesser_fraction.total_guesser_reward().unwrap()
             },
             state
                 .favor_incoming_block_proposal(
-                    big_guesser_fraction.header().height,
-                    big_guesser_fraction.total_guesser_reward()
+                    big_prev_block_digest,
+                    big_guesser_fraction.total_guesser_reward().unwrap()
                 )
                 .unwrap_err(),
             "Must favor existing over incoming equivalent"
@@ -3474,7 +3542,7 @@ mod tests {
                 "Archival state must have expected sync-label",
             );
             assert_eq!(
-                expected_tip.mutator_set_accumulator_after(),
+                expected_tip.mutator_set_accumulator_after().unwrap(),
                 global_state
                     .chain
                     .archival_state()
@@ -3554,7 +3622,10 @@ mod tests {
             );
 
             // Peek into wallet
-            let tip_msa = expected_tip.mutator_set_accumulator_after().clone();
+            let tip_msa = expected_tip
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .clone();
             let mutxos = global_state
                 .wallet_state
                 .wallet_db
@@ -4082,7 +4153,7 @@ mod tests {
             let tip = old_state.chain.light_state();
             assert_eq!(*tip, new_state.chain.archival_state().get_tip().await);
             assert_eq!(*tip, old_state.chain.archival_state().get_tip().await);
-            let msa = tip.mutator_set_accumulator_after();
+            let msa = tip.mutator_set_accumulator_after().unwrap();
             assert_eq!(
                 old_state
                     .wallet_state

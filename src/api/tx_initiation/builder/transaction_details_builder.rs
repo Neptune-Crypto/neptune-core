@@ -257,7 +257,9 @@ impl TransactionDetailsBuilder {
             fee,
             coinbase,
             timestamp,
-            tip_block.mutator_set_accumulator_after(),
+            tip_block
+                .mutator_set_accumulator_after()
+                .expect("Block from state must be valid"),
             state_lock.cli().network,
         ))
     }

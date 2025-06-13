@@ -89,7 +89,7 @@ pub async fn next_block_incoming_utxos(
         .sum::<NativeCurrencyAmount>()
         + fee;
 
-    let msa = parent.mutator_set_accumulator_after();
+    let msa = parent.mutator_set_accumulator_after().unwrap();
     let wallet_status = sender.get_wallet_status(parent.hash(), &msa).await;
     let change_amt = wallet_status
         .synced_unspent_available_amount(timestamp)
