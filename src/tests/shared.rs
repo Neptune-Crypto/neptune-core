@@ -132,8 +132,12 @@ impl<const BA: usize, const D: usize> rand::distr::Distribution<Randomness<BA, D
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Randomness<BA, D> {
         let mut bytes = [[Default::default(); 32]; BA];
         let mut digests = [Default::default(); D];
-        bytes.iter_mut().for_each(|b| rng.fill_bytes(b));
-        digests.iter_mut().for_each(|d| *d = rng.random());
+        for b in &mut bytes {
+            rng.fill_bytes(b);
+        }
+        for d in &mut digests {
+            *d = rng.random();
+        }
         Randomness {
             bytes_arr: bytes,
             digests,
