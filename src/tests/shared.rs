@@ -253,7 +253,12 @@ pub(crate) async fn mock_genesis_global_state_with_block(
         light_state,
         archival_state,
     }));
-    let mempool = Mempool::new(cli.max_mempool_size, cli.max_mempool_num_tx, &genesis_block);
+    let mempool = Mempool::new(
+        cli.max_mempool_size,
+        cli.max_mempool_num_tx,
+        cli.proving_capability(),
+        &genesis_block,
+    );
 
     let configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);
     let wallet_state = WalletState::try_new(configuration, wallet, &genesis_block)

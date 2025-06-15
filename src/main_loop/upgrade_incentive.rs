@@ -46,7 +46,7 @@ impl PartialOrd for UpgradeIncentive {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
             (UpgradeIncentive::Gobble(self_amt), UpgradeIncentive::Gobble(other_amt)) => {
-                self_amt.partial_cmp(other_amt)
+                Some(self_amt.cmp(other_amt))
             }
             (UpgradeIncentive::Gobble(_), _) => Some(std::cmp::Ordering::Less),
             (UpgradeIncentive::BalanceAffecting(_), UpgradeIncentive::Gobble(_)) => {
@@ -55,7 +55,7 @@ impl PartialOrd for UpgradeIncentive {
             (
                 UpgradeIncentive::BalanceAffecting(self_amt),
                 UpgradeIncentive::BalanceAffecting(other_amt),
-            ) => self_amt.partial_cmp(other_amt),
+            ) => Some(self_amt.cmp(other_amt)),
             (UpgradeIncentive::BalanceAffecting(_), UpgradeIncentive::Critical) => {
                 Some(std::cmp::Ordering::Less)
             }

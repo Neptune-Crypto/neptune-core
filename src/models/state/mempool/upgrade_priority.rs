@@ -8,7 +8,7 @@ use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(serde::Serialize))]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
-pub(crate) enum UpgradePriority {
+pub enum UpgradePriority {
     #[default]
     Irrelevant,
 
