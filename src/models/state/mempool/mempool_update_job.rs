@@ -1,0 +1,19 @@
+use crate::api::export::NeptuneProof;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
+
+/// A task defined by the mempool for updating mutator-set related data for a
+/// transaction such that it is valid under a new block.
+///
+/// Unlike [`crate::main_loop::proof_upgrader::UpgradeJob`] does not contain
+/// the mutator-set related data to actually perform the update. That data must
+/// be fetched by the caller prior to performing the update.
+#[derive(Debug, Clone)]
+pub enum MempoolUpdateJob {
+    PrimitiveWitness(PrimitiveWitnessUpdate),
+    ProofCollection(PrimitiveWitnessUpdate),
+    SingleProof {
+        old_kernel: TransactionKernel,
+        old_single_proof: NeptuneProof,
+    },
+}

@@ -1,4 +1,5 @@
 pub mod proof_upgrader;
+pub(crate) mod upgrade_incentive;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -32,6 +33,9 @@ use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+use crate::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
@@ -50,7 +54,9 @@ use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
-use crate::models::state::mempool::TransactionOrigin;
+use crate::models::state::mempool::mempool_update_job::MempoolUpdateJob;
+use crate::models::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
+use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
@@ -65,11 +71,6 @@ const SYNC_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
 const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
-
-/// Interval for when transaction-upgrade checker is run. Note that this does
-/// *not* define how often a transaction-proof upgrade is actually performed.
-/// Only how often we check if we're ready to perform an upgrade.
-const TRANSACTION_UPGRADE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
 
@@ -154,13 +155,13 @@ struct MutableMainLoopState {
 
     /// A channel that the task updating mempool transactions can use to
     /// communicate its result.
-    update_mempool_receiver: mpsc::Receiver<Vec<Transaction>>,
+    update_mempool_receiver: mpsc::Receiver<Vec<MempoolUpdateJobResult>>,
 }
 
 impl MutableMainLoopState {
     fn new(task_handles: Vec<JoinHandle<()>>) -> Self {
         let (_dummy_sender, dummy_receiver) =
-            mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
+            mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
         Self {
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
@@ -450,30 +451,120 @@ impl MainLoopHandler {
         }
     }
 
-    /// Run a list of Triton VM prover jobs that update the mutator set state
-    /// for transactions.
+    /// Update the mutator set data for a list of primitive witnesses. Will
+    /// produce proof collections if the transactions already where
+    /// proof-collection backed when found in the mempool.
     ///
     /// Sends the result back through the provided channel.
     async fn update_mempool_jobs(
-        update_jobs: Vec<UpdateMutatorSetDataJob>,
+        mut global_state_lock: GlobalStateLock,
+        update_jobs: Vec<MempoolUpdateJob>,
         job_queue: Arc<TritonVmJobQueue>,
-        transaction_update_sender: mpsc::Sender<Vec<Transaction>>,
+        transaction_update_sender: mpsc::Sender<Vec<MempoolUpdateJobResult>>,
         proof_job_options: TritonVmProofJobOptions,
     ) {
         debug!(
-            "Attempting to update transaction proofs of {} transactions",
+            "Attempting to update transaction witnesses of {} transactions",
             update_jobs.len()
         );
         let mut result = vec![];
         for job in update_jobs {
-            // Jobs for updating txs in the mempool have highest priority since
-            // they block the composer from continuing.
-            // TODO: Handle errors better here.
-            let job_result = job
-                .upgrade(job_queue.clone(), proof_job_options.clone())
-                .await
-                .unwrap();
-            result.push(job_result);
+            match &job {
+                MempoolUpdateJob::PrimitiveWitness(pw_update)
+                | MempoolUpdateJob::ProofCollection(pw_update) => {
+                    let old_msa = &pw_update.old_primitive_witness.mutator_set_accumulator;
+                    let txid = pw_update.old_primitive_witness.kernel.txid();
+
+                    // Acquire lock, and drop it immediately.
+                    let msa_update = global_state_lock
+                        .lock_guard_mut()
+                        .await
+                        .chain
+                        .archival_state_mut()
+                        .get_mutator_set_update_to_tip(
+                            old_msa,
+                            SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+                        )
+                        .await;
+                    let Some(msa_update) = msa_update else {
+                        result.push(MempoolUpdateJobResult::Failure(txid));
+                        continue;
+                    };
+                    let new_pw = pw_update
+                        .old_primitive_witness
+                        .clone()
+                        .update_with_new_ms_data(msa_update);
+                    let upgraded_tx = match &job {
+                        MempoolUpdateJob::PrimitiveWitness(_) => Transaction {
+                            kernel: new_pw.kernel.clone(),
+                            proof: TransactionProof::Witness(new_pw.clone()),
+                        },
+                        MempoolUpdateJob::ProofCollection(_) => {
+                            let pc_job = PrimitiveWitnessToProofCollection {
+                                primitive_witness: new_pw.clone(),
+                            };
+
+                            // No locks may be held here!
+                            let upgrade_result =
+                                pc_job.upgrade(job_queue.clone(), &proof_job_options).await;
+                            match upgrade_result {
+                                Ok(upgraded) => upgraded,
+                                Err(_) => {
+                                    result.push(MempoolUpdateJobResult::Failure(txid));
+                                    continue;
+                                }
+                            }
+                        }
+                        MempoolUpdateJob::SingleProof { .. } => unreachable!(),
+                    };
+
+                    result.push(MempoolUpdateJobResult::Success {
+                        new_primitive_witness: Some(Box::new(new_pw)),
+                        new_transaction: Box::new(upgraded_tx),
+                    });
+                }
+                MempoolUpdateJob::SingleProof {
+                    old_kernel,
+                    old_single_proof,
+                } => {
+                    let txid = old_kernel.txid();
+                    let msa_lookup_result = global_state_lock
+                        .lock_guard_mut()
+                        .await
+                        .chain
+                        .archival_state_mut()
+                        .old_mutator_set_and_mutator_set_update_to_tip(
+                            old_kernel.mutator_set_hash,
+                            SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+                        )
+                        .await;
+                    let Some((old_mutator_set, mutator_set_update)) = msa_lookup_result else {
+                        result.push(MempoolUpdateJobResult::Failure(txid));
+                        continue;
+                    };
+                    let update_job = UpdateMutatorSetDataJob::new(
+                        old_kernel.to_owned(),
+                        old_single_proof.to_owned(),
+                        old_mutator_set,
+                        mutator_set_update,
+                        UpgradeIncentive::Critical,
+                    );
+
+                    // No locks may be held here!
+                    let upgrade_result = update_job
+                        .upgrade(job_queue.clone(), proof_job_options.clone())
+                        .await;
+                    let Ok(updated_tx) = upgrade_result else {
+                        result.push(MempoolUpdateJobResult::Failure(txid));
+                        continue;
+                    };
+
+                    result.push(MempoolUpdateJobResult::Success {
+                        new_primitive_witness: None,
+                        new_transaction: Box::new(updated_tx),
+                    });
+                }
+            }
         }
 
         transaction_update_sender
@@ -482,29 +573,58 @@ impl MainLoopHandler {
             .expect("Receiver for updated txs in main loop must still exist");
     }
 
-    /// Handles a list of transactions whose proof has been updated with new
-    /// mutator set data.
-    async fn handle_updated_mempool_txs(&mut self, updated_txs: Vec<Transaction>) {
-        // Update mempool with updated transactions
+    /// Handles a list of transactions whose proof collection or primitive
+    /// witness has been updated to be valid under a new mutator set.
+    async fn handle_updated_mempool_txs(&mut self, update_results: Vec<MempoolUpdateJobResult>) {
         {
             let mut state = self.global_state_lock.lock_guard_mut().await;
-            for updated in &updated_txs {
-                let txid = updated.kernel.txid();
-                if let Some(tx) = state.mempool.get_mut(txid) {
-                    *tx = updated.to_owned();
-                } else {
-                    warn!("Updated transaction which is no longer in mempool");
+            for update_result in &update_results {
+                match update_result {
+                    MempoolUpdateJobResult::Failure(txkid) => {
+                        warn!(
+                            "Failed to update transaction {txkid} to be valid under new mutator \
+                        set. Removing from the mempool."
+                        );
+                        state.mempool_remove(*txkid).await
+                    }
+                    MempoolUpdateJobResult::Success {
+                        new_primitive_witness,
+                        new_transaction,
+                    } => {
+                        let txid = new_transaction.kernel.txid();
+                        info!("Updated transaction {txid} to be valid under new mutator set");
+
+                        // First update the primitive-witness data associated with the transaction,
+                        // then insert the new transaction into the mempool. This ensures that the
+                        // primitive-witness is as up-to-date as possible in case it has to be
+                        // updated again later.
+                        if let Some(new_pw) = new_primitive_witness {
+                            state
+                                .mempool
+                                .update_primitive_witness(txid, *new_pw.to_owned());
+                        }
+                        state
+                            .mempool_insert(*new_transaction.to_owned(), UpgradePriority::Critical)
+                            .await;
+                    }
                 }
             }
         }
 
-        // Then notify all peers
-        for updated in updated_txs {
-            let pmsg = MainToPeerTask::TransactionNotification((&updated).try_into().unwrap());
-            self.main_to_peer_broadcast(pmsg);
+        // Then notify all peers about shareable transactions.
+        for updated in update_results {
+            if let MempoolUpdateJobResult::Success {
+                new_transaction, ..
+            } = updated
+            {
+                if let Ok(pmsg) = new_transaction.as_ref().try_into() {
+                    let pmsg = MainToPeerTask::TransactionNotification(pmsg);
+                    self.main_to_peer_broadcast(pmsg);
+                }
+            }
         }
 
-        // Tell miner that it can now start composing next block.
+        // Tell miner that it can now continue either composing or guessing.
         self.main_to_miner_tx.send(MainToMiner::Continue);
     }
 
@@ -524,11 +644,6 @@ impl MainLoopHandler {
         let new_block_hash = new_block.hash();
 
         // clone block in advance, so lock is held less time.
-        // note that this clone is wasted if block is not more canonical
-        // but that should be the less common case.
-        //
-        // perf: in the future we should use Arc systematically to avoid these
-        // expensive block clones.
         let new_block_clone = (*new_block).clone();
 
         // important!  the is_canonical check and set_new_tip() need to be an
@@ -549,15 +664,11 @@ impl MainLoopHandler {
                 self.main_to_miner_tx.send(MainToMiner::Continue);
                 return Ok(());
             }
-            // set new tip and obtain list of update-jobs to perform.
-            // the jobs update mutator-set data for:
-            //   all tx if we are in composer role.
-            //   else self-owned tx.
-            // see: Mempool::update_with_block_and_predecessor()
+
             let update_jobs = gsm.set_new_tip(new_block_clone).await?;
             gsm.flush_databases().await?;
             update_jobs
-        }; // write-lock is dropped here.
+        };
 
         // Share block with peers right away.
         let pmsg = MainToPeerTask::Block(new_block);
@@ -725,7 +836,7 @@ impl MainLoopHandler {
                         }
                     }
 
-                    let mut update_jobs: Vec<UpdateMutatorSetDataJob> = vec![];
+                    let mut update_jobs: Vec<MempoolUpdateJob> = vec![];
                     for new_block in blocks {
                         debug!(
                             "Storing block {} in database. Height: {}, Mined: {}",
@@ -860,11 +971,10 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
-                    // Insert into mempool
                     global_state_mut
                         .mempool_insert(
                             pt2m_transaction.transaction.to_owned(),
-                            TransactionOrigin::Foreign,
+                            UpgradePriority::Irrelevant,
                         )
                         .await;
                 }
@@ -1313,32 +1423,24 @@ impl MainLoopHandler {
     async fn proof_upgrader(&mut self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         fn attempt_upgrade(
             global_state: &GlobalState,
-            now: SystemTime,
-            tx_upgrade_interval: Option<Duration>,
             main_loop_state: &MutableMainLoopState,
-        ) -> Result<bool> {
-            let duration_since_last_upgrade =
-                now.duration_since(global_state.net.last_tx_proof_upgrade_attempt)?;
+        ) -> bool {
             let previous_upgrade_task_is_still_running = main_loop_state
                 .proof_upgrader_task
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
-            Ok(global_state.net.sync_anchor.is_none()
+            global_state.net.sync_anchor.is_none()
                 && global_state.proving_capability() == TxProvingCapability::SingleProof
                 && !previous_upgrade_task_is_still_running
-                && tx_upgrade_interval
-                    .is_some_and(|upgrade_interval| duration_since_last_upgrade > upgrade_interval))
         }
 
         trace!("Running proof upgrader scheduled task");
 
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
-        let tx_upgrade_interval = self.global_state_lock.cli().tx_upgrade_interval();
-        let (upgrade_candidate, tx_origin) = {
-            let global_state = self.global_state_lock.lock_guard().await;
-            let now = self.now();
-            if !attempt_upgrade(&global_state, now, tx_upgrade_interval, main_loop_state)? {
+        let upgrade_candidate = {
+            let mut global_state = self.global_state_lock.lock_guard_mut().await;
+            if !attempt_upgrade(&global_state, main_loop_state) {
                 trace!("Not attempting upgrade.");
                 return Ok(());
             }
@@ -1346,13 +1448,13 @@ impl MainLoopHandler {
             debug!("Attempting to run transaction-proof-upgrade");
 
             // Find a candidate for proof upgrade
-            let Some((upgrade_candidate, tx_origin)) = get_upgrade_task_from_mempool(&global_state)
+            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&mut global_state).await
             else {
                 debug!("Found no transaction-proof to upgrade");
                 return Ok(());
             };
 
-            (upgrade_candidate, tx_origin)
+            upgrade_candidate
         };
 
         info!(
@@ -1365,8 +1467,6 @@ impl MainLoopHandler {
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
         let vm_job_queue = vm_job_queue();
-        let perform_ms_update_if_needed =
-            self.global_state_lock.cli().proving_capability() == TxProvingCapability::SingleProof;
 
         let global_state_lock_clone = self.global_state_lock.clone();
         let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
@@ -1377,8 +1477,6 @@ impl MainLoopHandler {
                     upgrade_candidate
                         .handle_upgrade(
                             vm_job_queue,
-                            tx_origin,
-                            perform_ms_update_if_needed,
                             global_state_lock_clone,
                             main_to_peer_broadcast_tx_clone,
                         )
@@ -1396,7 +1494,7 @@ impl MainLoopHandler {
     fn spawn_mempool_txs_update_job(
         &self,
         main_loop_state: &mut MutableMainLoopState,
-        update_jobs: Vec<UpdateMutatorSetDataJob>,
+        update_jobs: Vec<MempoolUpdateJob>,
     ) {
         // job completion of the spawned task is communicated through the
         // `update_mempool_txs_handle` channel.
@@ -1405,7 +1503,7 @@ impl MainLoopHandler {
             handle.abort();
         }
         let (update_sender, update_receiver) =
-            mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
+            mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
 
         // note: if this task is cancelled, the job will continue
         // because TritonVmJobOptions::cancel_job_rx is None.
@@ -1414,11 +1512,13 @@ impl MainLoopHandler {
             .global_state_lock
             .cli()
             .proof_job_options(TritonVmJobPriority::Highest);
+        let global_state_lock = self.global_state_lock.clone();
         main_loop_state.update_mempool_txs_handle = Some(
             tokio::task::Builder::new()
                 .name("mempool tx ms-updater")
                 .spawn(async move {
                     Self::update_mempool_jobs(
+                        global_state_lock,
                         update_jobs,
                         vm_job_queue.clone(),
                         update_sender,
@@ -1468,7 +1568,13 @@ impl MainLoopHandler {
         let mut mp_resync_interval = time::interval(MP_RESYNC_INTERVAL);
         mp_resync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut tx_proof_upgrade_interval = time::interval(TRANSACTION_UPGRADE_CHECK_INTERVAL);
+        let mut tx_proof_upgrade_interval = if self.global_state_lock.cli().tx_proof_upgrading {
+            let tx_proof_upgrade_interval =
+                Duration::from_secs(self.global_state_lock.cli().tx_proof_upgrade_interval.get());
+            time::interval(tx_proof_upgrade_interval)
+        } else {
+            time::interval(Duration::MAX)
+        };
         tx_proof_upgrade_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
@@ -1743,8 +1849,6 @@ impl MainLoopHandler {
                         upgrade_job
                             .handle_upgrade(
                                 vm_job_queue.clone(),
-                                TransactionOrigin::Own,
-                                true,
                                 global_state_lock_clone,
                                 main_to_peer_broadcast_tx_clone,
                             )
@@ -1762,7 +1866,7 @@ impl MainLoopHandler {
             RPCServerToMain::BroadcastMempoolTransactions => {
                 info!("Broadcasting transaction notifications for all shareable transactions in mempool");
                 let state = self.global_state_lock.lock_guard().await;
-                let txs = state.mempool.get_sorted_iter().collect_vec();
+                let txs = state.mempool.fee_density_iter().collect_vec();
                 for (txid, _) in txs {
                     // Since a read-lock is held over global state, the
                     // transaction must exist in the mempool.
@@ -2192,6 +2296,7 @@ mod tests {
         async fn upgrade_proof_collection_to_single_proof_foreign_tx() {
             let num_outgoing_connections = 0;
             let num_incoming_connections = 0;
+
             let TestSetup {
                 mut main_loop_handler,
                 mut main_to_peer_rx,
@@ -2202,7 +2307,7 @@ mod tests {
             // weak machines fail.
             let mocked_cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
-                tx_proof_upgrade_interval: 100, // seconds
+                tx_proof_upgrading: true,
                 ..Default::default()
             };
 
@@ -2233,36 +2338,8 @@ mod tests {
                 .global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*proof_collection_tx).clone(), TransactionOrigin::Foreign)
+                .mempool_insert((*proof_collection_tx).clone(), UpgradePriority::Irrelevant)
                 .await;
-
-            assert!(
-                main_loop_handler
-                    .proof_upgrader(&mut mutable_main_loop_state)
-                    .await
-                    .is_ok(),
-                "Scheduled task returns OK when it's not yet time to upgrade"
-            );
-
-            assert!(
-                matches!(
-                    main_loop_handler
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .mempool
-                        .get(proof_collection_tx.kernel.txid())
-                        .unwrap()
-                        .proof,
-                    TransactionProof::ProofCollection(_)
-                ),
-                "Proof in mempool must still be of type proof collection"
-            );
-
-            // Mock that enough time has passed to perform the upgrade. Then
-            // perform the upgrade.
-            let mut main_loop_handler =
-                main_loop_handler.with_mocked_time(SystemTime::now() + Duration::from_secs(300));
             assert!(
                 main_loop_handler
                     .proof_upgrader(&mut mutable_main_loop_state)
@@ -2283,13 +2360,12 @@ mod tests {
             // transaction inserted above and one of the upgrader's fee
             // gobblers. The point is that this transaction is a SingleProof
             // transaction, so test that.
-
             let (merged_txid, _) = main_loop_handler
                 .global_state_lock
                 .lock_guard()
                 .await
                 .mempool
-                .get_sorted_iter()
+                .fee_density_iter()
                 .next_back()
                 .expect("mempool should contain one item here");
 
