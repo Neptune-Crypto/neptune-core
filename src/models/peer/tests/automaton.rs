@@ -123,7 +123,7 @@ impl proptest_state_machine::StateMachineTest for TheSut {
                     .for_each(|j| {
                         rt.block_on(async {
                             j.upgrade(
-                                crate::job_queue::triton_vm::vm_job_queue(),
+                                crate::triton_vm_job_queue::vm_job_queue(),
                                 Default::default(),
                             )
                             .await

@@ -77,7 +77,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
 
         /* TODO is it possible to add a check here that the `Strategy` covers all the variants? */
         /* Weighted strategy to heavily favor safe messages that don't trigger peer banning */
-        
+
         // Safe messages (high weight) - these typically don't cause negative sanctions
         let safe_messages = prop_oneof![
             // `PeerListRequest` - safe, no sanctions
@@ -133,7 +133,8 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                 )),
                 // `BlockNotificationRequest` with new blocks - safe but complex
                 5 => strategy_variants::block_notif_req(),
-            ].boxed()
+            ]
+            .boxed()
         } else {
             prop_oneof![
                 // `TransactionRequest` with random id - might cause minor sanctions
@@ -146,7 +147,8 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                 )),
                 // `BlockNotificationRequest` with new blocks - safe but complex
                 5 => strategy_variants::block_notif_req(),
-            ].boxed()
+            ]
+            .boxed()
         };
 
         // Risky messages (low weight) - likely to cause sanctions but needed for testing
@@ -180,10 +182,11 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
         // Combine all strategies with weights favoring safe messages
         let mut the = prop_oneof![
             70 => safe_messages,      // 70% chance of safe messages
-            20 => moderate_messages,  // 20% chance of moderate messages  
+            20 => moderate_messages,  // 20% chance of moderate messages
             8 => risky_messages,      // 8% chance of risky messages
             2 => very_risky_messages, // 2% chance of very risky messages
-        ].boxed();
+        ]
+        .boxed();
         // `SyncChallenge` from `BlockNotification`
         if let Some(SyncStage::WaitingForChallenge(challenge_pre, tip_of_request)) =
             state.sync_stage.clone()
@@ -230,6 +233,7 @@ impl proptest_state_machine::strategy::ReferenceStateMachine for Automaton {
                 for digest_a in digests {
                     state.blocks.push(
                         rt.block_on(crate::tests::shared::make_mock_block(
+                            state.network,
                             // previous_block: &Block,
                             state.blocks.last().unwrap(),
                             // block_timestamp: Option<Timestamp>,

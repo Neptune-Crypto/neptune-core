@@ -72,7 +72,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    pub fn block_response(current_tip: Block) (
+    pub fn block_response(current_tip: Block, network: crate::api::export::Network) (
         coinbase_sender_randomness in arb::<Digest>(),
         k in arb::<Digest>(),
         claim in arb::<tasm_lib::triton_vm::proof::Claim>()
@@ -87,6 +87,7 @@ prop_compose! {
         BlockResponse seems like a better name. */
         // TODO add a valid block variant here
         let the = Runtime::new().unwrap().block_on(crate::tests::shared::make_mock_block(
+            network,
             &current_tip,
             None,
             GenerationSpendingKey::derive_from_seed(k),
