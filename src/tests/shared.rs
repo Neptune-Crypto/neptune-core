@@ -1312,6 +1312,19 @@ pub(crate) async fn fake_valid_successor_for_tests(
     fake_block_successor(predecessor, timestamp, true, rness, network).await
 }
 
+/// Return a fake, deterministic, empty block for testing purposes, with a
+/// specified successsor and specified network. Does not have valid PoW.
+pub(crate) async fn fake_deterministic_successor(predecessor: &Block, network: Network) -> Block {
+    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    fake_valid_block_proposal_successor_for_test(
+        predecessor,
+        timestamp,
+        Randomness::default(),
+        network,
+    )
+    .await
+}
+
 /// Create a block with coinbase going to self. For testing purposes.
 ///
 /// The block will be valid both in terms of PoW and and will pass the
@@ -1470,6 +1483,10 @@ pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::R
 }
 
 mod tests {
+    use macro_rules_attr::apply;
+
+    use crate::tests::shared_tokio_runtime;
+
     use super::*;
 
     #[test]
@@ -1478,5 +1495,14 @@ mod tests {
         for server in servers {
             println!("read server: {}", server);
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn fake_deterministic_successor_is_deterministic() {
+        let network = Network::Main;
+        let block = Block::genesis(network);
+        let ret0 = fake_deterministic_successor(&block, network).await;
+        let ret1 = fake_deterministic_successor(&block, network).await;
+        assert_eq!(ret0, ret1);
     }
 }
