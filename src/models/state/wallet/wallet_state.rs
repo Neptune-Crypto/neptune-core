@@ -4959,7 +4959,7 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(1_000_000_000, None, true)[0]
+                .get_transactions_for_block_composition(1_000_000_000, None)[0]
                 .clone();
 
             // create block ignoring that transaction. Rando has upgraded tx

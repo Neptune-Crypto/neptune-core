@@ -75,6 +75,15 @@ pub struct Transaction {
     pub proof: TransactionProof,
 }
 
+impl From<PrimitiveWitness> for Transaction {
+    fn from(value: PrimitiveWitness) -> Self {
+        Transaction {
+            kernel: value.kernel.clone(),
+            proof: TransactionProof::Witness(value),
+        }
+    }
+}
+
 // for simpler Arc compatibility with existing tests.
 #[cfg(test)]
 impl From<Arc<Transaction>> for Transaction {
@@ -271,7 +280,7 @@ impl Transaction {
     /// PrimitiveWitness::validate and ProofCollection/RemovalRecordsIntegrity.
     /// AOCL membership is a feature of *validity*, which is a pre-requisite to
     /// confirmability.
-    pub(crate) fn is_confirmable_relative_to(
+    pub fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> bool {

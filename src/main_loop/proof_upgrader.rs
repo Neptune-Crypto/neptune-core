@@ -44,7 +44,7 @@ use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::MainToPeerTask;
 
-const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF: usize = 100;
+pub(super) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 
 /// Enumerates the types of 'proof upgrades' that can be done.
 ///
@@ -53,9 +53,7 @@ const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF: usize = 100;
 /// more likely that a miner picks up this transaction.
 #[derive(Clone, Debug)]
 pub enum UpgradeJob {
-    PrimitiveWitnessToProofCollection {
-        primitive_witness: PrimitiveWitness,
-    },
+    PrimitiveWitnessToProofCollection(PrimitiveWitnessToProofCollection),
     PrimitiveWitnessToSingleProof {
         primitive_witness: PrimitiveWitness,
     },
@@ -75,6 +73,38 @@ pub enum UpgradeJob {
         upgrade_incentive: UpgradeIncentive,
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
+}
+
+#[derive(Clone, Debug)]
+pub struct PrimitiveWitnessToProofCollection {
+    pub primitive_witness: PrimitiveWitness,
+}
+
+impl PrimitiveWitnessToProofCollection {
+    pub(crate) async fn upgrade(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: &TritonVmProofJobOptions,
+    ) -> anyhow::Result<Transaction> {
+        let options = TritonVmProofJobOptionsBuilder::new()
+            .template(proof_job_options)
+            .proof_type(TransactionProofType::ProofCollection)
+            .build();
+
+        info!("Proof-upgrader: Start producing proof collection");
+        let proof_collection = TransactionProofBuilder::new()
+            .primitive_witness_ref(&self.primitive_witness)
+            .job_queue(triton_vm_job_queue.clone())
+            .proof_job_options(options)
+            .build()
+            .await?;
+        info!("Proof-upgrader, proof collection: Done");
+
+        Ok(Transaction {
+            kernel: self.primitive_witness.kernel,
+            proof: proof_collection,
+        })
+    }
 }
 
 /// A job to update an unsynced single-proof backed transaction to a synced one.
@@ -152,7 +182,9 @@ impl UpgradeJob {
     ) -> UpgradeJob {
         match tx_proving_capability {
             TxProvingCapability::ProofCollection => {
-                UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness }
+                UpgradeJob::PrimitiveWitnessToProofCollection(PrimitiveWitnessToProofCollection {
+                    primitive_witness,
+                })
             }
             TxProvingCapability::SingleProof => {
                 UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness }
@@ -182,25 +214,21 @@ impl UpgradeJob {
     fn gobbling_fee(&self) -> NativeCurrencyAmount {
         match self {
             UpgradeJob::ProofCollectionToSingleProof {
-                upgrade_incentive, ..
-            } => match upgrade_incentive {
-                UpgradeIncentive::Gobble(amount) => *amount,
-                _ => NativeCurrencyAmount::zero(),
-            },
+                upgrade_incentive: UpgradeIncentive::Gobble(amount),
+                ..
+            } => *amount,
             UpgradeJob::Merge {
-                upgrade_incentive, ..
-            } => match upgrade_incentive {
-                UpgradeIncentive::Gobble(amount) => *amount,
-                _ => NativeCurrencyAmount::zero(),
-            },
+                upgrade_incentive: UpgradeIncentive::Gobble(amount),
+                ..
+            } => *amount,
             _ => NativeCurrencyAmount::zero(),
         }
     }
 
     fn old_tx_timestamp(&self) -> Timestamp {
         match self {
-            UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness } => {
-                primitive_witness.kernel.timestamp
+            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
+                pw_to_pc.primitive_witness.kernel.timestamp
             }
             UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
                 primitive_witness.kernel.timestamp
@@ -219,9 +247,12 @@ impl UpgradeJob {
 
     fn upgrade_incentive(&self) -> UpgradeIncentive {
         match self {
-            UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness } => {
+            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
                 UpgradeIncentive::BalanceAffecting(
-                    primitive_witness.output_utxos.get_native_currency_amount(),
+                    pw_to_pc
+                        .primitive_witness
+                        .output_utxos
+                        .get_native_currency_amount(),
                 )
             }
             UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
@@ -256,8 +287,8 @@ impl UpgradeJob {
                 right_kernel,
                 ..
             } => vec![left_kernel.txid(), right_kernel.txid()],
-            UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness } => {
-                vec![primitive_witness.kernel.txid()]
+            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
+                vec![pw_to_pc.primitive_witness.kernel.txid()]
             }
             UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
                 vec![primitive_witness.kernel.txid()]
@@ -270,8 +301,8 @@ impl UpgradeJob {
     /// under, after the upgrade.
     fn mutator_set(&self) -> MutatorSetAccumulator {
         match self {
-            UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness } => {
-                primitive_witness.mutator_set_accumulator.clone()
+            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
+                pw_to_pc.primitive_witness.mutator_set_accumulator.clone()
             }
             UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
                 primitive_witness.mutator_set_accumulator.clone()
@@ -453,7 +484,7 @@ impl UpgradeJob {
                     .archival_state_mut()
                     .get_mutator_set_update_to_tip(
                         &mutator_set_for_tx,
-                        SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF,
+                        SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
                     )
                     .await
                 else {
@@ -475,18 +506,20 @@ impl UpgradeJob {
                     UpgradeJob::UpdateMutatorSetData(ms_update_job)
                 } else {
                     match upgrade_job {
-                        UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness } => {
+                        UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
                             // Transaction is proof collection supported but MS data is deprecated.
                             // Since proof collections cannot be updated, we instead update the
                             // primitive witness and create a new job to upgrade the updated
                             // primitive witness to a proof collection.
                             let new_pw = PrimitiveWitness::update_with_new_ms_data(
-                                primitive_witness,
+                                pw_to_pc.primitive_witness,
                                 ms_update,
                             );
-                            UpgradeJob::PrimitiveWitnessToProofCollection {
-                                primitive_witness: new_pw,
-                            }
+                            UpgradeJob::PrimitiveWitnessToProofCollection(
+                                PrimitiveWitnessToProofCollection {
+                                    primitive_witness: new_pw,
+                                },
+                            )
                         }
                         UpgradeJob::PrimitiveWitnessToSingleProof { .. } => unreachable!(),
                         UpgradeJob::ProofCollectionToSingleProof { .. } => unreachable!(),
@@ -531,6 +564,66 @@ impl UpgradeJob {
         (fee_notification_method, receiver_preimage)
     }
 
+    /// Build a single-proof backed gobbler transaction that can be used to
+    /// charge another transaction for upgrading a proof.
+    async fn build_gobbler(
+        gobbling_fee: NativeCurrencyAmount,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+        own_wallet_entropy: &WalletEntropy,
+        current_block_height: BlockHeight,
+        fee_notification_policy: FeeNotificationPolicy,
+        mutator_set: MutatorSetAccumulator,
+        old_tx_timestamp: Timestamp,
+    ) -> anyhow::Result<(Transaction, Vec<ExpectedUtxo>)> {
+        info!("Producing gobbler-transaction for a value of {gobbling_fee}");
+        let (utxo_notification_method, receiver_preimage) =
+            Self::gobbler_notification_method_with_receiver_preimage(
+                own_wallet_entropy,
+                fee_notification_policy,
+            );
+        let receiver_digest = receiver_preimage.hash();
+        let gobbler = TransactionDetails::fee_gobbler(
+            gobbling_fee,
+            own_wallet_entropy.generate_sender_randomness(current_block_height, receiver_digest),
+            mutator_set,
+            old_tx_timestamp,
+            utxo_notification_method,
+            proof_job_options.job_settings.network,
+        );
+
+        let gobbler_witness = gobbler.primitive_witness();
+
+        let expected_utxos = if fee_notification_policy == FeeNotificationPolicy::OffChain {
+            gobbler
+                .tx_outputs
+                .expected_utxos(UtxoNotifier::FeeGobbler, receiver_preimage)
+        } else {
+            vec![]
+        };
+
+        // ensure that proof-type is SingleProof
+        let options = TritonVmProofJobOptionsBuilder::new()
+            .template(&proof_job_options)
+            .proof_type(TransactionProofType::SingleProof)
+            .build();
+
+        let proof = TransactionProofBuilder::new()
+            .primitive_witness_ref(&gobbler_witness)
+            .job_queue(triton_vm_job_queue.clone())
+            .proof_job_options(options)
+            .build()
+            .await?;
+
+        info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
+        let gobbler_tx = Transaction {
+            kernel: gobbler_witness.kernel,
+            proof,
+        };
+
+        Ok((gobbler_tx, expected_utxos))
+    }
+
     /// Execute the proof upgrade.
     ///
     /// Upgrades transactions to a proof of higher quality that is more likely
@@ -550,52 +643,19 @@ impl UpgradeJob {
         let old_tx_timestamp = self.old_tx_timestamp();
 
         let (maybe_gobbler, expected_utxos) = if gobbling_fee.is_positive() {
-            info!("Producing gobbler-transaction for a value of {gobbling_fee}");
-            let (utxo_notification_method, receiver_preimage) =
-                Self::gobbler_notification_method_with_receiver_preimage(
-                    own_wallet_entropy,
-                    fee_notification_policy,
-                );
-            let receiver_digest = receiver_preimage.hash();
-            let gobbler = TransactionDetails::fee_gobbler(
+            let (gobbler, eutxos) = Self::build_gobbler(
                 gobbling_fee,
-                own_wallet_entropy
-                    .generate_sender_randomness(current_block_height, receiver_digest),
+                triton_vm_job_queue.clone(),
+                proof_job_options.clone(),
+                own_wallet_entropy,
+                current_block_height,
+                fee_notification_policy,
                 mutator_set,
                 old_tx_timestamp,
-                utxo_notification_method,
-                proof_job_options.job_settings.network,
-            );
+            )
+            .await?;
 
-            let gobbler_witness = gobbler.primitive_witness();
-
-            let expected_utxos = if fee_notification_policy == FeeNotificationPolicy::OffChain {
-                gobbler
-                    .tx_outputs
-                    .expected_utxos(UtxoNotifier::FeeGobbler, receiver_preimage)
-            } else {
-                vec![]
-            };
-
-            // ensure that proof-type is SingleProof
-            let options = TritonVmProofJobOptionsBuilder::new()
-                .template(&proof_job_options)
-                .proof_type(TransactionProofType::SingleProof)
-                .build();
-
-            let proof = TransactionProofBuilder::new()
-                .primitive_witness_ref(&gobbler_witness)
-                .job_queue(triton_vm_job_queue.clone())
-                .proof_job_options(options)
-                .build()
-                .await?;
-
-            info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
-            let gobbler_tx = Transaction {
-                kernel: gobbler_witness.kernel,
-                proof,
-            };
-            (Some(gobbler_tx), expected_utxos)
+            (Some(gobbler), eutxos)
         } else {
             (None, vec![])
         };
@@ -682,32 +742,12 @@ impl UpgradeJob {
 
                 Ok((ret, expected_utxos))
             }
-            UpgradeJob::PrimitiveWitnessToProofCollection {
-                primitive_witness: witness,
-            } => {
-                // ensure that proof-type is ProofCollection
-                let options = TritonVmProofJobOptionsBuilder::new()
-                    .template(&proof_job_options)
-                    .proof_type(TransactionProofType::ProofCollection)
-                    .build();
-
-                info!("Proof-upgrader: Start producing proof collection");
-                let proof_collection = TransactionProofBuilder::new()
-                    .primitive_witness_ref(&witness)
-                    .job_queue(triton_vm_job_queue.clone())
-                    .proof_job_options(options)
-                    .build()
-                    .await?;
-                info!("Proof-upgrader, proof collection: Done");
-
-                Ok((
-                    Transaction {
-                        kernel: witness.kernel,
-                        proof: proof_collection,
-                    },
-                    vec![],
-                ))
-            }
+            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pw) => Ok((
+                pw_to_pw
+                    .upgrade(triton_vm_job_queue.clone(), &proof_job_options)
+                    .await?,
+                vec![],
+            )),
             UpgradeJob::PrimitiveWitnessToSingleProof {
                 primitive_witness: witness,
             } => {
@@ -1186,12 +1226,13 @@ mod tests {
     async fn dont_share_partly_mined_merge_upgrade() {
         let network = Network::Main;
 
-        // Alice is premine recipient and has mined on block, so she can make
+        // Alice is premine recipient and has mined one block, so she can make
         // (at least) two transaction.
         let mut rng: StdRng = StdRng::seed_from_u64(512777439429);
         let cli_args = cli_args::Args {
             network,
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            tx_proof_upgrading: true,
             ..Default::default()
         };
         let mut alice =

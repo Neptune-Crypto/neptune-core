@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use clap::error::ErrorKind;
 use clap::Parser;
+use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -15,7 +16,7 @@ use crate::models::blockchain::transaction::transaction_proof::TransactionProofT
 /// see also:
 /// * [TransactionProofType]
 /// * [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof)
-#[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, GetSize)]
 pub enum TxProvingCapability {
     LockScript,
     #[default]

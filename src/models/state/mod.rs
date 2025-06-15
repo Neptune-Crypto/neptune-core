@@ -76,13 +76,13 @@ use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::locks::tokio::AtomicRwReadGuard;
 use crate::locks::tokio::AtomicRwWriteGuard;
-use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
+use crate::models::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -242,7 +242,7 @@ impl GlobalStateLock {
         &mut self,
         new_block: Block,
         composer_reward_utxo_infos: Vec<ExpectedUtxo>,
-    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    ) -> Result<Vec<MempoolUpdateJob>> {
         let mut state = self.lock_guard_mut().await;
         state
             .wallet_state
@@ -252,7 +252,7 @@ impl GlobalStateLock {
     }
 
     /// store a block (non coinbase)
-    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
         self.lock_guard_mut().await.set_new_tip(new_block).await
     }
 
@@ -667,6 +667,7 @@ impl GlobalState {
         let mempool = Mempool::new(
             cli.max_mempool_size,
             cli.max_mempool_num_tx,
+            cli.proving_capability(),
             chain.light_state(),
         );
 
@@ -1607,10 +1608,7 @@ impl GlobalState {
     ///
     /// Returns a list of update-jobs that should be
     /// performed by this client.
-    pub(crate) async fn set_new_tip(
-        &mut self,
-        new_block: Block,
-    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    pub(crate) async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
         self.set_new_tip_internal(new_block).await
     }
 
@@ -1637,10 +1635,7 @@ impl GlobalState {
     ///
     /// Returns a list of update-jobs that should be
     /// performed by this client.
-    async fn set_new_tip_internal(
-        &mut self,
-        new_block: Block,
-    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    async fn set_new_tip_internal(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
         // Apply the updates
@@ -1686,12 +1681,7 @@ impl GlobalState {
         // removing all transaction that became invalid/was mined by this
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
-        let (mempool_events, update_jobs) = self.mempool.update_with_block_and_predecessor(
-            &new_block,
-            &tip_parent,
-            self.proving_capability(),
-            self.cli().compose,
-        )?;
+        let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_block)?;
 
         // update wallet state with relevant UTXOs from this block
         self.wallet_state
@@ -1920,11 +1910,7 @@ impl GlobalState {
 
     /// adds Tx to mempool and notifies wallet of change. value represents
     /// the value that the transaction has to caller.
-    pub(crate) async fn mempool_insert(
-        &mut self,
-        transaction: Transaction,
-        value: UpgradePriority,
-    ) {
+    pub async fn mempool_insert(&mut self, transaction: Transaction, value: UpgradePriority) {
         let events = self.mempool.insert(transaction, value);
         self.wallet_state.handle_mempool_events(events).await
     }
