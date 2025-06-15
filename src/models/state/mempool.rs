@@ -2174,13 +2174,73 @@ mod tests {
         transaction
     }
 
+    mod mutator_set_updates {
+        use super::*;
+        use crate::tests::shared::blocks::fake_deterministic_successor;
+
+        #[apply(shared_tokio_runtime)]
+        async fn tx_ms_updating() {
+            let network = Network::Main;
+            let fee = NativeCurrencyAmount::coins(1);
+
+            let genesis_block = Block::genesis(network);
+            let block1 = fake_deterministic_successor(&genesis_block, network).await;
+            for tx_proving_capability in [
+                TxProvingCapability::PrimitiveWitness,
+                TxProvingCapability::ProofCollection,
+                TxProvingCapability::SingleProof,
+            ] {
+                let mut mempool = Mempool::new(
+                    ByteSize::gb(1),
+                    None,
+                    TxProvingCapability::SingleProof,
+                    &genesis_block,
+                );
+
+                // First insert a PW backed transaction to ensure PW is
+                // present, as this determines what MS-data updating jobs are
+                // returned.
+                let pw_tx =
+                    tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee).await;
+                mempool.insert(pw_tx.into(), UpgradePriority::Critical);
+
+                let tx = tx_with_proof_type(tx_proving_capability, network, fee).await;
+                let txid = tx.txid();
+
+                mempool.insert(tx.into(), UpgradePriority::Critical);
+
+                let (_, update_jobs) = mempool.update_with_block(&block1).unwrap();
+                assert_eq!(1, update_jobs.len(), "Must return 1 job for MS-updating");
+
+                mocked_mempool_update_handler(
+                    update_jobs,
+                    &mut mempool,
+                    &block1.mutator_set_update().unwrap(),
+                    &genesis_block.mutator_set_accumulator_after().unwrap(),
+                )
+                .await;
+
+                assert!(
+                    mempool
+                        .get(txid)
+                        .unwrap()
+                        .clone()
+                        .is_confirmable_relative_to(
+                            &block1.mutator_set_accumulator_after().unwrap()
+                        ),
+                    "transaction must be updatable"
+                );
+            }
+        }
+    }
+
     mod proof_upgrade_candidates {
         use proptest::prop_assert;
         use proptest::prop_assert_eq;
         use test_strategy::proptest;
 
         use super::*;
-        use crate::tests::shared::fake_valid_successor_for_tests;
+        use crate::tests::shared::blocks::fake_valid_successor_for_tests;
 
         #[apply(shared_tokio_runtime)]
         async fn sp_update_only_returns_unsynced_txs() {
