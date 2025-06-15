@@ -44,31 +44,30 @@ impl PartialOrd for UpgradeIncentive {
     // Implemented such that balance affecting transactions are always
     // prioritized over the chance to gobble fees.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (UpgradeIncentive::Gobble(self_amt), UpgradeIncentive::Gobble(other_amt)) => {
-                Some(self_amt.cmp(other_amt))
-            }
-            (UpgradeIncentive::Gobble(_), _) => Some(std::cmp::Ordering::Less),
-            (UpgradeIncentive::BalanceAffecting(_), UpgradeIncentive::Gobble(_)) => {
-                Some(std::cmp::Ordering::Greater)
-            }
-            (
-                UpgradeIncentive::BalanceAffecting(self_amt),
-                UpgradeIncentive::BalanceAffecting(other_amt),
-            ) => Some(self_amt.cmp(other_amt)),
-            (UpgradeIncentive::BalanceAffecting(_), UpgradeIncentive::Critical) => {
-                Some(std::cmp::Ordering::Less)
-            }
-            (UpgradeIncentive::Critical, UpgradeIncentive::Critical) => {
-                Some(std::cmp::Ordering::Equal)
-            }
-            (UpgradeIncentive::Critical, _) => Some(std::cmp::Ordering::Greater),
-        }
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for UpgradeIncentive {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).expect("Ord must be implemented.")
+        // self.partial_cmp(other).expect("Ord must be implemented.")
+        match (self, other) {
+            (UpgradeIncentive::Gobble(self_amt), UpgradeIncentive::Gobble(other_amt)) => {
+                self_amt.cmp(other_amt)
+            }
+            (UpgradeIncentive::Gobble(_), _) => std::cmp::Ordering::Less,
+            (UpgradeIncentive::BalanceAffecting(_), UpgradeIncentive::Gobble(_)) => {
+                std::cmp::Ordering::Greater
+            }
+            (
+                UpgradeIncentive::BalanceAffecting(self_amt),
+                UpgradeIncentive::BalanceAffecting(other_amt),
+            ) => self_amt.cmp(other_amt),
+            (UpgradeIncentive::BalanceAffecting(_), UpgradeIncentive::Critical) => {
+                std::cmp::Ordering::Less
+            }
+            (UpgradeIncentive::Critical, UpgradeIncentive::Critical) => std::cmp::Ordering::Equal,
+            (UpgradeIncentive::Critical, _) => std::cmp::Ordering::Greater,
+        }
     }
 }

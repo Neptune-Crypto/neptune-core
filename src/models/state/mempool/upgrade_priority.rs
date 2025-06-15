@@ -35,30 +35,24 @@ impl From<UpgradeIncentive> for UpgradePriority {
 
 impl PartialOrd for UpgradePriority {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (UpgradePriority::Irrelevant, UpgradePriority::Irrelevant) => {
-                Some(std::cmp::Ordering::Equal)
-            }
-            (UpgradePriority::Irrelevant, _) => Some(std::cmp::Ordering::Less),
-            (UpgradePriority::Interested(_), UpgradePriority::Irrelevant) => {
-                Some(std::cmp::Ordering::Greater)
-            }
-            (UpgradePriority::Interested(self_amt), UpgradePriority::Interested(other_amt)) => {
-                self_amt.partial_cmp(other_amt)
-            }
-            (UpgradePriority::Interested(_), UpgradePriority::Critical) => {
-                Some(std::cmp::Ordering::Less)
-            }
-            (UpgradePriority::Critical, UpgradePriority::Critical) => {
-                Some(std::cmp::Ordering::Equal)
-            }
-            (UpgradePriority::Critical, _) => Some(std::cmp::Ordering::Greater),
-        }
+        Some(self.cmp(other))
     }
 }
 impl Ord for UpgradePriority {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).expect("Ord must be implemented.")
+        match (self, other) {
+            (UpgradePriority::Irrelevant, UpgradePriority::Irrelevant) => std::cmp::Ordering::Equal,
+            (UpgradePriority::Irrelevant, _) => std::cmp::Ordering::Less,
+            (UpgradePriority::Interested(_), UpgradePriority::Irrelevant) => {
+                std::cmp::Ordering::Greater
+            }
+            (UpgradePriority::Interested(self_amt), UpgradePriority::Interested(other_amt)) => {
+                self_amt.cmp(other_amt)
+            }
+            (UpgradePriority::Interested(_), UpgradePriority::Critical) => std::cmp::Ordering::Less,
+            (UpgradePriority::Critical, UpgradePriority::Critical) => std::cmp::Ordering::Equal,
+            (UpgradePriority::Critical, _) => std::cmp::Ordering::Greater,
+        }
     }
 }
 
