@@ -112,7 +112,7 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args::Args;
     use crate::models::blockchain::block::block_height::BlockHeight;
-    use crate::tests::shared::unit_test_data_directory;
+    use crate::tests::shared::files::unit_test_data_directory;
     #[test]
     fn scan_mode_is_off_by_default() {
         let network = Network::Main;

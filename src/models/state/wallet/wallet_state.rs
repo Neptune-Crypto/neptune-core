@@ -3617,7 +3617,7 @@ pub(crate) mod tests {
         mod worker {
             use super::*;
             use crate::database::storage::storage_schema::traits::StorageWriter;
-            use crate::tests::shared::unit_test_data_directory;
+            use crate::tests::shared::files::unit_test_data_directory;
 
             /// tests that all known keys are unique for a given key-type
             ///
@@ -3870,7 +3870,7 @@ pub(crate) mod tests {
         mod worker {
             use super::*;
             use crate::database::storage::storage_schema::traits::StorageWriter;
-            use crate::tests::shared::unit_test_data_directory;
+            use crate::tests::shared::files::unit_test_data_directory;
 
             /// implements a test with 2 variations via `persist` param.
             ///
@@ -4184,7 +4184,7 @@ pub(crate) mod tests {
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::transaction_kernel::tests::propcompose_txkernel_with_lengths;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
-        use crate::tests::shared::unit_test_data_directory;
+        use crate::tests::shared::files::unit_test_data_directory;
 
         const NUM_FUTURE_KEYS: usize = 20;
 
@@ -5021,7 +5021,7 @@ pub(crate) mod tests {
 
     mod wallet_db_backup {
         use super::*;
-        use crate::tests::shared::unit_test_data_directory;
+        use crate::tests::shared::files::unit_test_data_directory;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
