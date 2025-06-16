@@ -730,6 +730,7 @@ pub mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use strum::IntoEnumIterator;
     use tasm_lib::triton_vm::proof::Claim;
     use test_strategy::proptest;
 
@@ -737,6 +738,7 @@ pub mod tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -1154,9 +1156,10 @@ pub mod tests {
     }
 
     #[apply(shared_tokio_runtime)]
-    async fn native_currency_failing_proof() {
+    async fn native_currency_proof_happy_path() {
         let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
+
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()

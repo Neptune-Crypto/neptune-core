@@ -681,6 +681,7 @@ pub(crate) mod tests {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use strum::EnumCount;
+    use strum::IntoEnumIterator;
     use tasm_lib::triton_vm::prelude::*;
 
     use super::*;
@@ -688,6 +689,7 @@ pub(crate) mod tests {
     use crate::api::export::Network;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
@@ -698,6 +700,7 @@ pub(crate) mod tests {
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
     // The main tests are actually in [`../../single_proof.rs`].
 
@@ -900,6 +903,7 @@ pub(crate) mod tests {
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> UpdateWitness {
         let mut test_runner = TestRunner::deterministic();
         let num_new_records = (1usize..=10).new_tree(&mut test_runner).unwrap().current();
@@ -912,12 +916,6 @@ pub(crate) mod tests {
         .new_tree(&mut test_runner)
         .unwrap()
         .current();
-        let block_height = arb::<BlockHeight>()
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let network = Network::Main; // explicit assumption
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
         let newly_confirmed_records = mined
             .kernel
@@ -970,6 +968,7 @@ pub(crate) mod tests {
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> UpdateWitness {
         // TODO: Currently only tests a new mutator set with more AOCL leafs.
         // Should also test for removed records in the new mutator set
@@ -987,12 +986,6 @@ pub(crate) mod tests {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let block_height = arb::<BlockHeight>()
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let network = Network::Main; // explicit assumption
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
         let mut new_msa = primitive_witness.mutator_set_accumulator.clone();
         for canonical_commitment in newly_confirmed_records.iter().copied() {
@@ -1036,24 +1029,35 @@ pub(crate) mod tests {
     /// untouched, or at most permuted.
     #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_only_additions() {
-        let update_witness =
-            deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await;
-        assert_eq!(
-            update_witness.old_kernel.txid(),
-            update_witness.new_kernel.txid(),
-            "Txid function must agree before and after transaction update"
-        );
+        for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+            let update_witness = deterministic_update_witness_only_additions_to_mutator_set(
+                4,
+                4,
+                4,
+                consensus_rule_set,
+            )
+            .await;
+            assert_eq!(
+                update_witness.old_kernel.txid(),
+                update_witness.new_kernel.txid(),
+                "Txid function must agree before and after transaction update"
+            );
+        }
     }
 
     /// A test of the simple test generator, that it leaves the expected fields
     /// untouched, or at most permuted.
     #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_additions_and_removals() {
-        let update_witness = deterministic_update_witness_additions_and_removals(4, 4, 4).await;
-        assert_eq!(
-            update_witness.old_kernel.txid(),
-            update_witness.new_kernel.txid(),
-            "Txid function must agree before and after transaction update"
-        );
+        for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+            let update_witness =
+                deterministic_update_witness_additions_and_removals(4, 4, 4, consensus_rule_set)
+                    .await;
+            assert_eq!(
+                update_witness.old_kernel.txid(),
+                update_witness.new_kernel.txid(),
+                "Txid function must agree before and after transaction update"
+            );
+        }
     }
 }

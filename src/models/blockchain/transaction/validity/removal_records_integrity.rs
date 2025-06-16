@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use field_count::FieldCount;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -30,7 +26,11 @@ use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
@@ -1238,6 +1238,7 @@ mod tests {
     #[test]
     fn removal_records_integrity_only_rust_shadowing() {
         let mut test_runner = TestRunner::deterministic();
+
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
@@ -1258,6 +1259,7 @@ mod tests {
     #[test]
     fn removal_records_integrity_unit_test() {
         let mut test_runner = TestRunner::deterministic();
+
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
@@ -1272,6 +1274,7 @@ mod tests {
     #[test]
     fn removal_records_fail_on_bad_ms_acc() {
         let mut test_runner = TestRunner::deterministic();
+
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
@@ -1289,6 +1292,7 @@ mod tests {
     #[test]
     fn removal_records_fail_on_bad_mast_path_inputs() {
         let mut test_runner = TestRunner::deterministic();
+
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
@@ -1328,6 +1332,7 @@ mod tests {
     #[test]
     fn removal_record_fail_on_bad_absolute_indices_unit_test() {
         let mut test_runner = TestRunner::deterministic();
+
         let num_inputs = 2;
         let primitive_witness =
             PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)

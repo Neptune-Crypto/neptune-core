@@ -12,11 +12,18 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 pub struct MutatorSetUpdate {
     // The ordering of the removal/addition records must match that of
     // the block.
+    /// The unpacked removal records
     pub removals: Vec<RemovalRecord>,
+
+    /// Addition records
     pub additions: Vec<AdditionRecord>,
 }
 
 impl MutatorSetUpdate {
+    /// Construct a new [`MutatorSetUpdate`] from the given [`RemovalRecord`]s
+    /// and [`AdditionRecord`]s.
+    ///
+    /// Takes *unpacked* [`RemovalRecord`]s.
     pub fn new(removals: Vec<RemovalRecord>, additions: Vec<AdditionRecord>) -> Self {
         Self {
             additions,
@@ -92,6 +99,8 @@ impl MutatorSetUpdate {
     /// This function should *not* be made public, as the caller should always
     /// explicitly decide if they want the safe or unsafe version which checks
     /// the returned boolean.
+    ///
+    /// Removal records may not be packed.
     fn apply_to_accumulator_and_records_inner(
         &self,
         ms_accumulator: &mut MutatorSetAccumulator,

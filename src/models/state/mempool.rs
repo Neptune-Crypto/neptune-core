@@ -1041,6 +1041,7 @@ mod tests {
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
@@ -1143,7 +1144,7 @@ mod tests {
         network: Network,
     ) -> Vec<MempoolEvent> {
         let mut updated_txs = vec![];
-        let mutator_set_update = new_block.mutator_set_update().unwrap();
+        let mutator_set_update = new_block.mutator_set_update(network).unwrap();
         for job in update_jobs {
             match job {
                 MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
@@ -1216,7 +1217,7 @@ mod tests {
     ) {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block.header().height);
         let old_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
-        let mutator_set_update = new_block.mutator_set_update().unwrap();
+        let mutator_set_update = new_block.mutator_set_update(network).unwrap();
 
         while let Some((old_kernel, old_single_proof, upgrade_priority)) =
             mempool.preferred_update()
@@ -1932,7 +1933,7 @@ mod tests {
             );
             assert!(
                 mempool_txs[0].is_confirmable_relative_to(
-                    &next_block.mutator_set_accumulator_after().unwrap()
+                    &next_block.mutator_set_accumulator_after().unwrap(),
                 ),
                 "Mempool tx must stay confirmable after new block of height {} has been applied \
                 and SP-backed transactions have been updated.",
@@ -1976,7 +1977,7 @@ mod tests {
                 .get_transactions_for_block_composition(usize::MAX, None)
                 .iter()
                 .all(|tx| tx.is_confirmable_relative_to(
-                    &block_1b.mutator_set_accumulator_after().unwrap()
+                    &block_1b.mutator_set_accumulator_after().unwrap(),
                 )),
             "All retained txs in the mempool must be confirmable relative to the new block.
              Or the mempool must be empty."
@@ -2576,6 +2577,7 @@ mod tests {
             #[strategy(PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets(
             [(#_num_inputs_own, #_num_outputs_own, #_num_public_announcements_own),
             (#_num_inputs_mined, #_num_outputs_mined, #_num_public_announcements_mined),],
+
     ))]
             pws: [PrimitiveWitness; 2],
         ) {

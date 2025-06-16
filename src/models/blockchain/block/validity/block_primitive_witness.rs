@@ -7,8 +7,11 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
 /// Wraps all information necessary to produce a block.
 ///
@@ -42,6 +45,10 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 #[derive(Clone, Debug)]
 pub(crate) struct BlockPrimitiveWitness {
     pub(super) predecessor_block: Block,
+
+    /// A transaction without packed inputs.
+    // Should not be public to avoid requiring the caller to know if inputs
+    // should be packed or not.
     transaction: Transaction,
 
     maybe_body: OnceLock<BlockBody>,
@@ -50,6 +57,7 @@ pub(crate) struct BlockPrimitiveWitness {
 }
 
 impl BlockPrimitiveWitness {
+    /// Takes transaction without packed inputs
     pub(crate) fn new(
         predecessor_block: Block,
         transaction: Transaction,
@@ -82,6 +90,9 @@ impl BlockPrimitiveWitness {
         )
     }
 
+    /// Builds the block body from its witness. Does the input packing if
+    ///  needed.
+    ///
     /// # Panics
     ///
     ///  - If predecessor has negative transaction fee
@@ -102,10 +113,7 @@ impl BlockPrimitiveWitness {
             );
 
             let mut mutator_set = predecessor_msa;
-            let mutator_set_update = MutatorSetUpdate::new(
-                self.transaction.kernel.inputs.clone(),
-                self.transaction.kernel.outputs.clone(),
-            );
+            let mutator_set_update = MutatorSetUpdate::new(self.transaction.kernel.inputs.clone(), self.transaction.kernel.outputs.clone());
 
             // Due to tests, we don't verify that the removal records can be applied. That is
             // the caller's responsibility to ensure by e.g. calling block.is_valid(network) after
@@ -117,8 +125,18 @@ impl BlockPrimitiveWitness {
             let mut block_mmr = predecessor_body.block_mmr_accumulator.clone();
             block_mmr.append(self.predecessor_block.hash());
 
+            let block_height = self.predecessor_block.header().height.next();
+            let pack_removal_records = ConsensusRuleSet::infer_from(self.network, block_height).merge_version().pack_removal_records();
+
+            let removal_records = if pack_removal_records {
+                RemovalRecordList::pack(self.transaction.kernel.inputs.clone())
+            } else {
+                self.transaction.kernel.inputs.clone()
+            };
+            let transaction_kernel = TransactionKernelModifier::default().inputs(removal_records).modify(self.transaction.kernel.clone());
+
             BlockBody::new(
-                self.transaction.kernel.clone(),
+                transaction_kernel,
                 mutator_set,
                 lock_free_mmr,
                 block_mmr,
@@ -155,8 +173,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::block_kernel::BlockKernel;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::BlockProof;
-    use crate::models::blockchain::block::BLOCK_HEIGHT_HF_2_MAINNET;
-    use crate::models::blockchain::block::BLOCK_HEIGHT_HF_2_NOT_MAINNET;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -173,9 +189,9 @@ pub(crate) mod tests {
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
-    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
+    /// Returns transactions without packed inputs
     fn arbitrary_block_transaction_from_msa_and_records(
         num_outputs: usize,
         num_announcements: usize,
@@ -196,7 +212,7 @@ pub(crate) mod tests {
                 input_utxos,
                 lock_scripts_and_witnesses,
                 coinbase_amount,
-                timestamp
+                timestamp,
             ),
             arb::<[u8; 32]>(),
         )
@@ -325,7 +341,8 @@ pub(crate) mod tests {
                         .collect_vec();
                         MsaAndRecords::arbitrary_with((removables.clone(), aocl_size))
                             .prop_flat_map(move |msa_and_records| {
-                                let removal_records = msa_and_records.removal_records;
+                                let unpacked_removal_records =
+                                    msa_and_records.unpacked_removal_records();
                                 let membership_proofs = msa_and_records.membership_proofs;
                                 let intermediate_mutator_set_accumulator =
                                     msa_and_records.mutator_set_accumulator;
@@ -338,6 +355,8 @@ pub(crate) mod tests {
                                 let parent_appendix = arb::<BlockAppendix>();
                                 let parent_body = BlockBody::arbitrary_with_mutator_set_accumulator(
                                     intermediate_mutator_set_accumulator.clone(),
+                                    block_height,
+                                    network,
                                 );
                                 (parent_header, parent_body, parent_appendix).prop_flat_map(
                                     move |(header, body, appendix)| {
@@ -365,7 +384,8 @@ pub(crate) mod tests {
                                         let mut mutator_set_accumulator_after_block =
                                             intermediate_mutator_set_accumulator.clone();
                                         let mut membership_proofs = membership_proofs.clone();
-                                        let mut removal_records = removal_records.clone();
+                                        let mut unpacked_removal_records =
+                                            unpacked_removal_records.clone();
 
                                         for addition_record in &miner_fee_records {
                                             MsMembershipProof::batch_update_from_addition(
@@ -376,31 +396,20 @@ pub(crate) mod tests {
                                             )
                                             .expect("update from addition should always work");
                                             RemovalRecord::batch_update_from_addition(
-                                                &mut removal_records.iter_mut().collect_vec(),
+                                                &mut unpacked_removal_records
+                                                    .iter_mut()
+                                                    .collect_vec(),
                                                 &mutator_set_accumulator_after_block,
                                             );
                                             mutator_set_accumulator_after_block
                                                 .add(addition_record);
                                         }
 
-                                        let do_packing = if network == Network::Main {
-                                            block_height >= BLOCK_HEIGHT_HF_2_MAINNET
-                                        } else {
-                                            block_height >= BLOCK_HEIGHT_HF_2_NOT_MAINNET
-                                        };
-                                        let packed_removal_records =
-                                            RemovalRecordList::pack(removal_records.clone());
-
-                                        let msa_and_records_after_block = MsaAndRecords {
-                                            mutator_set_accumulator:
-                                                mutator_set_accumulator_after_block,
-                                            removal_records: if do_packing {
-                                                packed_removal_records
-                                            } else {
-                                                removal_records
-                                            },
+                                        let msa_and_records_after_block = MsaAndRecords::new(
+                                            mutator_set_accumulator_after_block,
+                                            unpacked_removal_records,
                                             membership_proofs,
-                                        };
+                                        );
                                         arbitrary_block_transaction_from_msa_and_records(
                                             2,
                                             2,

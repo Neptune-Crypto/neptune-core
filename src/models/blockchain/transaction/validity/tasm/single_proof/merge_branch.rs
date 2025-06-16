@@ -90,7 +90,7 @@ impl MergeWitness {
             panic!("cannot merge transactions that are not supported by singleproof");
         };
 
-        let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed, merge_version);
+        let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed);
 
         Self {
             left_kernel,
@@ -161,15 +161,10 @@ impl MergeWitness {
     }
 
     /// Generate a new transaction kernel from two transactions.
-    ///
-    /// # Panics
-    ///
-    /// Panics if given unmergable transactions as input.
     pub(super) fn new_kernel(
         left_kernel: &TransactionKernel,
         right_kernel: &TransactionKernel,
         shuffle_seed: [u8; 32],
-        merge_version: MergeVersion,
     ) -> TransactionKernel {
         assert_eq!(
             left_kernel.mutator_set_hash, right_kernel.mutator_set_hash,
@@ -181,24 +176,8 @@ impl MergeWitness {
         );
         let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed);
 
-        let inputs = match merge_version {
-            MergeVersion::Genesis => {
-                let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
-                inputs.shuffle(&mut rng);
-                inputs
-            }
-            MergeVersion::HardFork2 => {
-                let left_unpacked_inputs =
-                    RemovalRecordList::try_unpack(left_kernel.inputs.clone())
-                        .expect("data is trusted, so unpacking must work for left tx.");
-                let right_unpacked_inputs =
-                    RemovalRecordList::try_unpack(right_kernel.inputs.clone())
-                        .expect("data is trusted, so unpacking must work for right tx.");
-                let mut unpacked = [left_unpacked_inputs, right_unpacked_inputs].concat();
-                unpacked.shuffle(&mut rng);
-                RemovalRecordList::pack(unpacked)
-            }
-        };
+        let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
+        inputs.shuffle(&mut rng);
         let mut outputs = [left_kernel.outputs.clone(), right_kernel.outputs.clone()].concat();
         outputs.shuffle(&mut rng);
         let mut public_announcements = [
@@ -1021,6 +1000,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::api::export::BlockHeight;
     use crate::api::export::Network;
+    use crate::models::blockchain::consensus_rule_set;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
@@ -1197,7 +1177,7 @@ pub(crate) mod tests {
     pub(crate) async fn deterministic_merge_witness(
         params_left: (usize, usize, usize),
         params_right: (usize, usize, usize),
-        block_height: BlockHeight,
+        consensus_rule_set: ConsensusRuleSet,
         network: Network,
     ) -> MergeWitness {
         let mut test_runner = TestRunner::deterministic();
@@ -1217,7 +1197,6 @@ pub(crate) mod tests {
             .unwrap()
             .current();
 
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         let left_proof = produce_single_proof(
             &primitive_witness_1,
             TritonVmJobQueue::get_instance(),
@@ -1242,14 +1221,17 @@ pub(crate) mod tests {
         MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed, merge_version)
     }
 
-    pub(crate) async fn deterministic_merge_witness_with_coinbase(
+    pub(crate) async fn deterministic_merge_witness_with_coinbase<const VERSION: usize>(
         num_total_inputs: usize,
         num_total_outputs: usize,
         num_pub_announcements: usize,
-        block_height: BlockHeight,
         network: Network,
     ) -> MergeWitness {
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+        let consensus_rule_set = if VERSION == MergeVersion::Genesis as usize {
+            ConsensusRuleSet::HardFork1
+        } else {
+            ConsensusRuleSet::HardFork2
+        };
 
         let mut test_runner = TestRunner::deterministic();
 

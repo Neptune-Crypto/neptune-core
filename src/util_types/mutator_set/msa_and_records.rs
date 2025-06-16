@@ -1,18 +1,44 @@
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
 
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
+
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
 
+/// A [`MutatorSetAccumulator`] with matching [`RemovalRecord`]s.
 #[derive(Debug, Clone, Default)]
 pub struct MsaAndRecords {
     pub mutator_set_accumulator: MutatorSetAccumulator,
-    pub removal_records: Vec<RemovalRecord>,
+
+    /// Not packed removal records
+    removal_records: Vec<RemovalRecord>,
     pub membership_proofs: Vec<MsMembershipProof>,
 }
 
 impl MsaAndRecords {
+    pub(crate) fn new(
+        mutator_set_accumulator: MutatorSetAccumulator,
+        unpacked_removal_records: Vec<RemovalRecord>,
+        membership_proofs: Vec<MsMembershipProof>,
+    ) -> Self {
+        assert_eq!(unpacked_removal_records.len(), membership_proofs.len());
+        Self {
+            mutator_set_accumulator,
+            removal_records: unpacked_removal_records,
+            membership_proofs,
+        }
+    }
+
+    pub(crate) fn unpacked_removal_records(&self) -> Vec<RemovalRecord> {
+        self.removal_records.clone()
+    }
+
+    pub(crate) fn packed_removal_records(&self) -> Vec<RemovalRecord> {
+        RemovalRecordList::pack(self.removal_records.clone())
+    }
+
     pub fn verify(&self, items: &[Digest]) -> bool {
         let all_removal_records_can_remove = self
             .removal_records
@@ -71,6 +97,7 @@ pub mod neptune_arbitrary {
         type Parameters = (Vec<(Digest, Digest, Digest)>, u64);
         type Strategy = BoxedStrategy<Self>;
 
+        // Returns unpacked removal records. Caller must handle packing.
         fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
             let (removables, aocl_size) = parameters;
 

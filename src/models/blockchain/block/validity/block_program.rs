@@ -535,7 +535,7 @@ pub(crate) mod tests {
             let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
                 tx.kernel,
                 &genesis_block.mutator_set_accumulator_after().unwrap(),
-                &block1.mutator_set_update().unwrap(),
+                &block1.mutator_set_update(network).unwrap(),
                 tx.proof.into_single_proof(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmJobPriority::default().into(),

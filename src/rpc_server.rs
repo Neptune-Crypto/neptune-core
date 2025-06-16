@@ -2043,10 +2043,9 @@ impl NeptuneRPCServer {
         let _enter = span.enter();
 
         // deserialize UtxoTransferEncrypted from bech32m string.
-        let utxo_transfer_encrypted = EncryptedUtxoNotification::from_bech32m(
-            &encrypted_utxo_notification,
-            self.state.cli().network,
-        )?;
+        let network = self.state.cli().network;
+        let utxo_transfer_encrypted =
+            EncryptedUtxoNotification::from_bech32m(&encrypted_utxo_notification, network)?;
 
         // // acquire global state read lock
         let state = self.state.lock_guard().await;
@@ -2109,7 +2108,7 @@ impl NeptuneRPCServer {
                         .num_leafs()
                         - 1;
                     let num_outputs_in_block: u64 = block
-                        .mutator_set_update()
+                        .mutator_set_update(network)
                         .expect("Block from state must have mutator set update")
                         .additions
                         .len()

@@ -566,6 +566,7 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> ReadOnlyAlgorithmInitialState {
+            let mut rng = StdRng::from_seed(seed);
             let [primitive_witness_left, primitive_witness_right] =
                 PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
                     (2, 2, 2),
@@ -578,7 +579,7 @@ mod tests {
             let left_kernel = &primitive_witness_left.kernel;
             let right_kernel = &primitive_witness_right.kernel;
 
-            let new_kernel = if left_kernel.coinbase.is_some() || StdRng::from_seed(seed).random() {
+            let new_kernel = if left_kernel.coinbase.is_some() || rng.random() {
                 left_kernel
             } else {
                 right_kernel

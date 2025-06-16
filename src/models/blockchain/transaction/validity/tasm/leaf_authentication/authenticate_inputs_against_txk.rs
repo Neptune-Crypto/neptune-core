@@ -71,13 +71,17 @@ impl BasicSnippet for AuthenticateInputsAgainstTxk {
 mod tests {
     use std::collections::HashMap;
 
-    use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
     use itertools::Itertools;
     use prop::test_runner::RngAlgorithm;
     use prop::test_runner::TestRng;
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
+    use proptest::strategy::ValueTree;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::TasmObject;
@@ -87,8 +91,10 @@ mod tests {
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 
     use super::*;
+    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -160,11 +166,15 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> ReadOnlyAlgorithmInitialState {
-            let mut rng: TestRng = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
-            let inputs_ptr: BFieldElement = bfe!(rng.gen_range(0..(1 << 30)));
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
+            let inputs_ptr: BFieldElement = bfe!(rng.random_range(0..(1 << 30)));
 
             let primitive_witness: PrimitiveWitness = {
-                let mut test_runner = TestRunner::new_with_rng(Default::default(), rng);
+                let seedd: [u8; 32] = rng.random();
+                let mut test_runner = TestRunner::new_with_rng(
+                    Default::default(),
+                    TestRng::from_seed(RngAlgorithm::ChaCha, &seedd),
+                );
                 PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
                     .new_tree(&mut test_runner)
                     .unwrap()
