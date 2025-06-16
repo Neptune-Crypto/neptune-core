@@ -1307,7 +1307,7 @@ pub(crate) mod tests {
 
         let mut total_amount = NativeCurrencyAmount::zero();
         for state in [state0, state1, state2, state3] {
-            total_amount = total_amount + *NativeCurrency.try_decode_state(&state).unwrap();
+            total_amount += *NativeCurrency.try_decode_state(&state).unwrap();
         }
 
         assert_eq!(NativeCurrencyAmount::coins(128), total_amount);

@@ -140,7 +140,7 @@ impl TxInputListBuilder {
         let zero: NativeCurrencyAmount = NativeCurrencyAmount::zero();
         ordered_iter.scan((zero, spend_amount), |(current_amount, target), input| {
             if *current_amount < *target {
-                *current_amount = *current_amount + input.utxo.get_native_currency_amount();
+                *current_amount += input.utxo.get_native_currency_amount();
                 Some(input.clone())
             } else {
                 None

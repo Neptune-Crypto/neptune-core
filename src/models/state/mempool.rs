@@ -953,16 +953,22 @@ impl Mempool {
     ///
     /// ```
     /// use bytesize::ByteSize;
+    /// use neptune_cash::config_models::network::Network;
     /// use neptune_cash::models::blockchain::block::Block;
     /// use neptune_cash::models::state::mempool::Mempool;
-    /// use neptune_cash::config_models::network::Network;
+    /// use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis(network);
-    /// let mempool = Mempool::new(ByteSize::gb(1), None, false,  &genesis_block);
+    /// let mempool = Mempool::new(
+    ///     ByteSize::gb(1),
+    ///     None,
+    ///     TxProvingCapability::ProofCollection,
+    ///     &genesis_block
+    /// );
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
-    /// for (transaction_id, fee_density) in mempool.get_sorted_iter() {
+    /// for (transaction_id, fee_density) in mempool.fee_density_iter() {
     ///    let t = mempool.get(transaction_id);
     ///    most_valuable_transactions.push(t);
     /// }
@@ -2189,10 +2195,10 @@ mod tests {
                 // First insert a PW backed transaction to ensure PW is
                 // present, as this determines what MS-data updating jobs are
                 // returned.
-                let tx =
+                let pw_tx =
                     genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
                         .await;
-                mempool.insert(tx.into(), UpgradePriority::Critical);
+                mempool.insert(pw_tx.into(), UpgradePriority::Critical);
                 let tx = genesis_tx_with_proof_type(tx_proving_capability, network, fee).await;
                 let txid = tx.txid();
 

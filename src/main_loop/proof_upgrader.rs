@@ -566,6 +566,7 @@ impl UpgradeJob {
 
     /// Build a single-proof backed gobbler transaction that can be used to
     /// charge another transaction for upgrading a proof.
+    #[allow(clippy::too_many_arguments)]
     async fn build_gobbler(
         gobbling_fee: NativeCurrencyAmount,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,

@@ -1936,7 +1936,7 @@ impl WalletState {
             }
 
             // Select the input
-            allocated_amount = allocated_amount + input.utxo.get_native_currency_amount();
+            allocated_amount += input.utxo.get_native_currency_amount();
             input_funds.push(input.into());
         }
 
