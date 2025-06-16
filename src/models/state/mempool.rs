@@ -471,15 +471,36 @@ impl Mempool {
         new_tx: Transaction,
         priority: UpgradePriority,
     ) -> Vec<MempoolEvent> {
-        fn new_tx_has_higher_proof_quality(
+        fn new_tx_should_replace_conflicts(
             new_tx: &Transaction,
             conflicts: &[(TransactionKernelId, &Transaction)],
         ) -> bool {
             match &new_tx.proof {
-                TransactionProof::Witness(_) => false,
-                TransactionProof::ProofCollection(_) => conflicts
-                    .iter()
-                    .any(|x| matches!(&x.1.proof, TransactionProof::Witness(_))),
+                TransactionProof::Witness(witness) => {
+                    // A primitive witness backed transaction *can* replace
+                    // another transaction, if the other transaction is also
+                    // primitive witness backed, *and* it is synced against a
+                    // different mutator set, in which case we assume the new
+                    // transaction is the result of a mutator set update.
+                    conflicts.iter().all(|(_, tx)| {
+                        matches!(&tx.proof, TransactionProof::Witness(_))
+                            && tx.kernel.mutator_set_hash != witness.kernel.mutator_set_hash
+                    })
+                }
+                TransactionProof::ProofCollection(_) => {
+                    // A ProofCollection backed transaction will always replace
+                    // primitive witness backed transaction, and will replace
+                    // other proof collection backed transaction if the mutator
+                    // set is different, as that is assumed to correspond to a
+                    // mutator set update.
+                    conflicts
+                        .iter()
+                        .any(|x| matches!(&x.1.proof, TransactionProof::Witness(_)))
+                        || conflicts.iter().all(|(_, tx)| {
+                            matches!(&tx.proof, TransactionProof::ProofCollection(_))
+                                && tx.kernel.mutator_set_hash != new_tx.kernel.mutator_set_hash
+                        })
+                }
                 TransactionProof::SingleProof(_) => {
                     // A SingleProof-backed transaction kicks out conflicts if
                     // a) any conflicts are not SingleProof, or
@@ -529,7 +550,7 @@ impl Mempool {
         };
 
         let mut events = vec![];
-        let new_tx_has_higher_proof_quality = new_tx_has_higher_proof_quality(&new_tx, &conflicts);
+        let new_tx_has_higher_proof_quality = new_tx_should_replace_conflicts(&new_tx, &conflicts);
         let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
@@ -2141,42 +2162,10 @@ mod tests {
         );
     }
 
-    /// Return a valid, deterministic transaction with a specified proof type.
-    /// Returned transaction is synced to the genesis block.
-    async fn tx_with_proof_type(
-        proof_type: TxProvingCapability,
-        network: Network,
-        fee: NativeCurrencyAmount,
-    ) -> std::sync::Arc<Transaction> {
-        let genesis_block = Block::genesis(network);
-        let bob_wallet_secret = WalletEntropy::devnet_wallet();
-        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let bob = mock_genesis_global_state(
-            2,
-            bob_wallet_secret.clone(),
-            cli_args::Args::default_with_network(network),
-        )
-        .await;
-        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-        let config = TxCreationConfig::default()
-            .recover_change_on_chain(bob_spending_key.into())
-            .with_prover_capability(proof_type);
-
-        // Clippy is wrong here. You can *not* eliminate the binding.
-        #[allow(clippy::let_and_return)]
-        let transaction = bob
-            .api()
-            .tx_initiator_internal()
-            .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
-            .await
-            .unwrap()
-            .transaction;
-        transaction
-    }
-
     mod mutator_set_updates {
         use super::*;
         use crate::tests::shared::blocks::fake_deterministic_successor;
+        use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
         #[apply(shared_tokio_runtime)]
         async fn tx_ms_updating() {
@@ -2200,11 +2189,11 @@ mod tests {
                 // First insert a PW backed transaction to ensure PW is
                 // present, as this determines what MS-data updating jobs are
                 // returned.
-                let pw_tx =
-                    tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee).await;
-                mempool.insert(pw_tx.into(), UpgradePriority::Critical);
-
-                let tx = tx_with_proof_type(tx_proving_capability, network, fee).await;
+                let tx =
+                    genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
+                        .await;
+                mempool.insert(tx.into(), UpgradePriority::Critical);
+                let tx = genesis_tx_with_proof_type(tx_proving_capability, network, fee).await;
                 let txid = tx.txid();
 
                 mempool.insert(tx.into(), UpgradePriority::Critical);
@@ -2241,12 +2230,14 @@ mod tests {
 
         use super::*;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+        use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
         #[apply(shared_tokio_runtime)]
         async fn sp_update_only_returns_unsynced_txs() {
             let network = Network::Main;
             let fee = NativeCurrencyAmount::coins(1);
-            let sp_tx = tx_with_proof_type(TxProvingCapability::SingleProof, network, fee).await;
+            let sp_tx =
+                genesis_tx_with_proof_type(TxProvingCapability::SingleProof, network, fee).await;
 
             let mut rng = rand::rng();
             let genesis_block = Block::genesis(network);
@@ -2333,13 +2324,15 @@ mod tests {
 
         use super::*;
         use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+        use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
         #[apply(shared_tokio_runtime)]
         async fn always_preserve_primitive_witness_if_available() {
             let network = Network::Main;
             let fee = NativeCurrencyAmount::coins(1);
             let pw_tx =
-                tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee).await;
+                genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
+                    .await;
             let txid = pw_tx.txid();
 
             let genesis_block = Block::genesis(network);
@@ -2347,7 +2340,8 @@ mod tests {
             mempool.insert(pw_tx.into(), UpgradePriority::Critical);
 
             let pc_tx =
-                tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee).await;
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
             mempool.insert(pc_tx.into(), UpgradePriority::Critical);
             assert_eq!(
                 1,
@@ -2360,7 +2354,8 @@ mod tests {
                 "proof collection may not delete primitive witness"
             );
 
-            let sp_tx = tx_with_proof_type(TxProvingCapability::SingleProof, network, fee).await;
+            let sp_tx =
+                genesis_tx_with_proof_type(TxProvingCapability::SingleProof, network, fee).await;
             mempool.insert(sp_tx.into(), UpgradePriority::Critical);
             assert_eq!(
                 1,
@@ -2379,7 +2374,7 @@ mod tests {
         #[apply(shared_tokio_runtime)]
         async fn single_proof_always_replaces_primitive_witness() {
             let network = Network::Main;
-            let pw_high_fee = tx_with_proof_type(
+            let pw_high_fee = genesis_tx_with_proof_type(
                 TxProvingCapability::PrimitiveWitness,
                 network,
                 NativeCurrencyAmount::coins(15),
@@ -2392,7 +2387,8 @@ mod tests {
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
-                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+                genesis_tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee)
+                    .await;
             let txid = sp_low_fee.kernel.txid();
             mempool.insert(sp_low_fee.into(), UpgradePriority::Critical);
             assert!(
@@ -2410,7 +2406,7 @@ mod tests {
         #[apply(shared_tokio_runtime)]
         async fn single_proof_always_replaces_proof_collection() {
             let network = Network::Main;
-            let pc_high_fee = tx_with_proof_type(
+            let pc_high_fee = genesis_tx_with_proof_type(
                 TxProvingCapability::ProofCollection,
                 network,
                 NativeCurrencyAmount::coins(15),
@@ -2423,7 +2419,8 @@ mod tests {
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
-                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+                genesis_tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee)
+                    .await;
             let txid = sp_low_fee.kernel.txid();
             mempool.insert(sp_low_fee.into(), UpgradePriority::Irrelevant);
             assert!(
@@ -2441,7 +2438,7 @@ mod tests {
         #[apply(shared_tokio_runtime)]
         async fn proof_collection_always_replaces_proof_primitive_witness() {
             let network = Network::Main;
-            let pc_high_fee = tx_with_proof_type(
+            let pc_high_fee = genesis_tx_with_proof_type(
                 TxProvingCapability::PrimitiveWitness,
                 network,
                 NativeCurrencyAmount::coins(15),
@@ -2454,7 +2451,8 @@ mod tests {
 
             let low_fee = NativeCurrencyAmount::coins(1);
             let sp_low_fee =
-                tx_with_proof_type(TxProvingCapability::ProofCollection, network, low_fee).await;
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, low_fee)
+                    .await;
             let txid = sp_low_fee.kernel.txid();
             mempool.insert(sp_low_fee.into(), UpgradePriority::Critical);
             assert!(

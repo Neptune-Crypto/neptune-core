@@ -1,4 +1,5 @@
 use crate::api::export::NeptuneProof;
+use crate::api::export::TransactionKernelId;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 
@@ -21,4 +22,18 @@ pub enum MempoolUpdateJob {
         old_kernel: TransactionKernel,
         old_single_proof: NeptuneProof,
     },
+}
+
+impl MempoolUpdateJob {
+    pub(crate) fn txid(&self) -> TransactionKernelId {
+        match self {
+            MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
+                primitive_witness_update.old_primitive_witness.kernel.txid()
+            }
+            MempoolUpdateJob::ProofCollection(primitive_witness_update) => {
+                primitive_witness_update.old_primitive_witness.kernel.txid()
+            }
+            MempoolUpdateJob::SingleProof { old_kernel, .. } => old_kernel.txid(),
+        }
+    }
 }

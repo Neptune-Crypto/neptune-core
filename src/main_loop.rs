@@ -451,9 +451,15 @@ impl MainLoopHandler {
         }
     }
 
-    /// Update the mutator set data for a list of primitive witnesses. Will
-    /// produce proof collections if the transactions already where
-    /// proof-collection backed when found in the mempool.
+    /// Update the mutator set data for a list of mempool transactions. Will
+    /// produce transactions with the same proof quality as what was present in
+    /// the mempool, so a primitive witness backed transaction will be updated
+    /// to a new primitive witness backed transaction, a proof-collection to
+    /// proof-collection, and single proof to single proof.
+    ///
+    /// In the case of proof collection, it is not possible to update the
+    /// transaction, so the primitive witness is instead used to accomplish
+    /// this.
     ///
     /// Sends the result back through the provided channel.
     async fn update_mempool_jobs(
@@ -469,11 +475,11 @@ impl MainLoopHandler {
         );
         let mut result = vec![];
         for job in update_jobs {
+            let txid = job.txid();
             match &job {
                 MempoolUpdateJob::PrimitiveWitness(pw_update)
                 | MempoolUpdateJob::ProofCollection(pw_update) => {
                     let old_msa = &pw_update.old_primitive_witness.mutator_set_accumulator;
-                    let txid = pw_update.old_primitive_witness.kernel.txid();
 
                     // Acquire lock, and drop it immediately.
                     let msa_update = global_state_lock
@@ -527,7 +533,6 @@ impl MainLoopHandler {
                     old_kernel,
                     old_single_proof,
                 } => {
-                    let txid = old_kernel.txid();
                     let msa_lookup_result = global_state_lock
                         .lock_guard_mut()
                         .await
@@ -573,8 +578,8 @@ impl MainLoopHandler {
             .expect("Receiver for updated txs in main loop must still exist");
     }
 
-    /// Handles a list of transactions whose proof collection or primitive
-    /// witness has been updated to be valid under a new mutator set.
+    /// Handles a list of transactions whose witness data has been updated to be
+    /// valid under a new mutator set.
     async fn handle_updated_mempool_txs(&mut self, update_results: Vec<MempoolUpdateJobResult>) {
         {
             let mut state = self.global_state_lock.lock_guard_mut().await;
@@ -2003,7 +2008,11 @@ mod tests {
         main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
     }
 
-    async fn setup(num_init_peers_outgoing: u8, num_peers_incoming: u8) -> TestSetup {
+    async fn setup(
+        num_init_peers_outgoing: u8,
+        num_peers_incoming: u8,
+        cli: cli_args::Args,
+    ) -> TestSetup {
         const CHANNEL_CAPACITY_MINER_TO_MAIN: usize = 10;
 
         let network = Network::Main;
@@ -2014,7 +2023,7 @@ mod tests {
             peer_to_main_rx,
             mut state,
             _own_handshake_data,
-        ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli_args::Args::default())
+        ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli)
             .await
             .unwrap();
         assert!(
@@ -2073,7 +2082,7 @@ mod tests {
             mut main_loop_handler,
             mut main_to_peer_rx,
             ..
-        } = setup(1, 0).await;
+        } = setup(1, 0, cli_args::Args::default()).await;
         let network = main_loop_handler.global_state_lock.cli().network;
         let mut mutable_main_loop_state = main_loop_handler.mutable();
 
@@ -2118,6 +2127,118 @@ mod tests {
             );
         } else {
             panic!("Must have sent block notification to peer loops")
+        }
+    }
+
+    mod update_mempool_txs {
+        use crate::api::export::NativeCurrencyAmount;
+        use crate::tests::shared::blocks::fake_deterministic_successor;
+        use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
+
+        use super::*;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn tx_ms_updating() {
+            // Create a transaction, and insert it into the mempool. Receive a
+            // block that does not include the transaction. Verify that the
+            // transaction is updated to be valid under the new mutator set
+            // after the application of the block and the invocation of the
+            // relevant functions.
+            let network = Network::Main;
+            let fee = NativeCurrencyAmount::coins(1);
+
+            let genesis_block = Block::genesis(network);
+            let block1 = fake_deterministic_successor(&genesis_block, network).await;
+            let cli = cli_args::Args {
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                ..Default::default()
+            };
+            for tx_proving_capability in [
+                TxProvingCapability::PrimitiveWitness,
+                TxProvingCapability::ProofCollection,
+                TxProvingCapability::SingleProof,
+            ] {
+                let num_outgoing_connections = 0;
+                let num_incoming_connections = 0;
+                let TestSetup {
+                    mut main_loop_handler,
+                    mut main_to_peer_rx,
+                    ..
+                } = setup(
+                    num_outgoing_connections,
+                    num_incoming_connections,
+                    cli.clone(),
+                )
+                .await;
+
+                // First insert a PW backed transaction to ensure PW is
+                // present, as this determines what MS-data updating jobs are
+                // returned.
+                let pw_tx =
+                    genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
+                        .await;
+                let tx = genesis_tx_with_proof_type(tx_proving_capability, network, fee).await;
+                let update_jobs = {
+                    let mut gsl = main_loop_handler.global_state_lock.lock_guard_mut().await;
+                    gsl.mempool_insert(pw_tx.into(), UpgradePriority::Critical)
+                        .await;
+                    gsl.mempool_insert(tx.clone().into(), UpgradePriority::Critical)
+                        .await;
+                    gsl.set_new_tip(block1.clone()).await.unwrap()
+                };
+
+                assert_eq!(1, update_jobs.len(), "Must return 1 job for MS-updating");
+
+                let (update_sender, mut update_receiver) =
+                    mpsc::channel::<Vec<MempoolUpdateJobResult>>(TX_UPDATER_CHANNEL_CAPACITY);
+                MainLoopHandler::update_mempool_jobs(
+                    main_loop_handler.global_state_lock.clone(),
+                    update_jobs,
+                    vm_job_queue(),
+                    update_sender,
+                    TritonVmProofJobOptions::default(),
+                )
+                .await;
+
+                let msg = update_receiver.recv().await.unwrap();
+                assert_eq!(1, msg.len(), "Must return exactly one update result");
+                assert!(
+                    matches!(msg[0], MempoolUpdateJobResult::Success { .. }),
+                    "Update must be a success"
+                );
+
+                main_loop_handler.handle_updated_mempool_txs(msg).await;
+
+                // Verify that
+                // a) mempool contains the updated transaction, and
+                // b) that peers were informed of the new transaction, if the
+                //    transaction is shareable, i.e. is not only backed by a
+                //    primitive witness.
+                let txid = tx.txid();
+                let block1_msa = block1.mutator_set_accumulator_after().unwrap();
+                assert!(
+                    main_loop_handler
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .mempool
+                        .get(txid)
+                        .unwrap()
+                        .clone()
+                        .is_confirmable_relative_to(&block1_msa),
+                    "transaction must be updatable"
+                );
+
+                if tx_proving_capability != TxProvingCapability::PrimitiveWitness {
+                    let peer_msg = main_to_peer_rx.recv().await.unwrap();
+                    let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
+                        panic!("Outgoing peer message must be tx notification");
+                    };
+                    assert_eq!(txid, tx_notification.txid);
+                    assert_eq!(block1_msa.hash(), tx_notification.mutator_set_hash);
+                }
+            }
         }
     }
 
@@ -2169,7 +2290,12 @@ mod tests {
                 mut main_loop_handler,
                 main_to_peer_rx: _main_to_peer_rx,
                 ..
-            } = setup(num_outgoing_connections, num_incoming_connections).await;
+            } = setup(
+                num_outgoing_connections,
+                num_incoming_connections,
+                cli_args::Args::default(),
+            )
+            .await;
             let mut mutable_main_loop_state = main_loop_handler.mutable();
 
             main_loop_handler
@@ -2306,7 +2432,12 @@ mod tests {
                 mut main_loop_handler,
                 mut main_to_peer_rx,
                 ..
-            } = setup(num_outgoing_connections, num_incoming_connections).await;
+            } = setup(
+                num_outgoing_connections,
+                num_incoming_connections,
+                cli_args::Args::default(),
+            )
+            .await;
 
             // Force instance to create SingleProofs, otherwise CI and other
             // weak machines fail.
@@ -2411,7 +2542,12 @@ mod tests {
                 mut main_loop_handler,
                 mut main_to_peer_rx,
                 ..
-            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
+            } = setup(
+                num_init_peers_outgoing,
+                num_init_peers_incoming,
+                cli_args::Args::default(),
+            )
+            .await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: num_init_peers_outgoing as usize,
@@ -2440,7 +2576,12 @@ mod tests {
                 mut main_loop_handler,
                 main_to_peer_rx,
                 ..
-            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
+            } = setup(
+                num_init_peers_outgoing,
+                num_init_peers_incoming,
+                cli_args::Args::default(),
+            )
+            .await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: 200,
@@ -2464,7 +2605,12 @@ mod tests {
             let TestSetup {
                 mut main_loop_handler,
                 ..
-            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
+            } = setup(
+                num_init_peers_outgoing,
+                num_init_peers_incoming,
+                cli_args::Args::default(),
+            )
+            .await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: 0,
@@ -2492,7 +2638,12 @@ mod tests {
                 mut main_loop_handler,
                 mut main_to_peer_rx,
                 ..
-            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
+            } = setup(
+                num_init_peers_outgoing,
+                num_init_peers_incoming,
+                cli_args::Args::default(),
+            )
+            .await;
 
             // Set CLI to attempt to make more connections
             let mocked_cli = cli_args::Args {
@@ -2558,7 +2709,12 @@ mod tests {
                 mut main_loop_handler,
                 mut main_to_peer_rx,
                 ..
-            } = setup(num_init_peers_outgoing, num_init_peers_incoming).await;
+            } = setup(
+                num_init_peers_outgoing,
+                num_init_peers_incoming,
+                cli_args::Args::default(),
+            )
+            .await;
 
             let mocked_cli = cli_args::Args {
                 max_num_peers: usize::from(num_init_peers_outgoing) + 1,
