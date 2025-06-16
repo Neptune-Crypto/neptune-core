@@ -18,7 +18,7 @@ use crate::api::export::Network;
 /// Consensus logic not captured by this encapsulation lives on
 /// [`Transaction::is_valid`][super::transaction::Transaction::is_valid] and
 /// ultimately [`Block::is_valid`][super::block::Block::is_valid].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Default, strum_macros::Display)]
 pub enum ConsensusRuleSet {
     #[default]
     Genesis,
@@ -97,6 +97,17 @@ impl ConsensusRuleSet {
         match self {
             ConsensusRuleSet::Genesis => None,
             _ => Some(MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    impl ConsensusRuleSet {
+        pub(crate) fn iter_merge_versions() -> std::vec::IntoIter<Self> {
+            vec![Self::Genesis, Self::HardFork2].into_iter()
         }
     }
 }

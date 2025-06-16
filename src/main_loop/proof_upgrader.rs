@@ -470,11 +470,14 @@ impl UpgradeJob {
                 let transaction_is_up_to_date =
                     upgraded.kernel.mutator_set_hash == tip_mutator_set.hash();
 
+                let network = global_state.cli().network;
+                let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
                 if transaction_is_up_to_date {
                     // Did the transaction get mined while the proof upgrade
                     // job was running? If so, don't share it or insert it into
                     // the mempool. Notice that this double-spend check can
                     // only be made if the mutator set is up to date.
+
                     if !upgraded.is_confirmable_relative_to(&tip_mutator_set) {
                         let verbose_log_msg = upgrade_job.double_spend_warn_msg();
                         warn!("Upgraded transaction is no longer confirmable. {verbose_log_msg}");
@@ -529,9 +532,6 @@ impl UpgradeJob {
                     info!("Couldn't find path from old mutator set to current tip. Did a reorganization happen?");
                     return;
                 };
-
-                let network = global_state.cli().network;
-                let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
                 if let TransactionProof::SingleProof(single_proof) = upgraded.proof {
                     // Transaction is single-proof supported but MS data is deprecated. Create new
@@ -974,7 +974,6 @@ mod tests {
     use std::collections::HashSet;
 
     use macro_rules_attr::apply;
-    use strum::IntoEnumIterator;
     use tokio::sync::broadcast;
     use tokio::sync::broadcast::error::TryRecvError;
     use tracing_test::traced_test;
@@ -1191,10 +1190,7 @@ mod tests {
             TxProvingCapability::ProofCollection,
             TxProvingCapability::SingleProof,
         ];
-        for (proving_capability, consensus_rule_set) in proving_capabilities
-            .into_iter()
-            .cartesian_product(ConsensusRuleSet::iter())
-        {
+        for proving_capability in proving_capabilities {
             let mut cli = cli_args::Args::default_with_network(network);
             cli.tx_proving_capability = Some(proving_capability);
 
@@ -1209,6 +1205,13 @@ mod tests {
                 NativeCurrencyAmount::from_nau(100),
             )
             .await;
+            assert!(
+                pwtx.is_valid(
+                    network,
+                    ConsensusRuleSet::infer_from(network, BlockHeight::genesis())
+                )
+                .await
+            );
             alice
                 .lock_guard_mut()
                 .await
@@ -1226,7 +1229,13 @@ mod tests {
             let genesis_block = Block::genesis(network);
             let block1 =
                 invalid_empty_block_with_timestamp(&genesis_block, pwtx.kernel.timestamp, network);
-            alice.set_new_tip(block1).await.unwrap();
+            let block1_msu = block1.mutator_set_update(network).unwrap();
+            println!(
+                "block1_msu #addition records: {}; block1_msu #removal records: {}",
+                block1_msu.additions.len(),
+                block1_msu.removals.len()
+            );
+            alice.set_new_tip(block1.clone()).await.unwrap();
 
             upgrade_job
                 .handle_upgrade(
@@ -1268,6 +1277,7 @@ mod tests {
                 ),
             }
 
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
             assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
 
             // Ensure tx was updated to latest mutator set

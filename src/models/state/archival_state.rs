@@ -17,6 +17,7 @@ pub(crate) mod bootstrap_from_block_files;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
+use crate::api::export::Network;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::create_db_if_missing;
 use crate::database::storage::storage_schema::traits::*;
@@ -78,6 +79,9 @@ pub(crate) struct ArchivalState {
 
     /// Archival-MMR of the block digests belonging to the canonical chain.
     pub(crate) archival_block_mmr: RustyArchivalBlockMmr,
+
+    /// The network that this node is on. Used to simplify method interfaces.
+    network: Network,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -88,6 +92,7 @@ impl core::fmt::Debug for ArchivalState {
             .field("data_dir", &self.data_dir)
             .field("block_index_db", &self.block_index_db)
             .field("genesis_block", &self.genesis_block)
+            .field("network", &self.network)
             .finish()
     }
 }
@@ -232,7 +237,11 @@ impl ArchivalState {
         (leaving, luca, arriving)
     }
 
-    pub(crate) async fn new(data_dir: DataDirectory, genesis_block: Block) -> Self {
+    pub(crate) async fn new(
+        data_dir: DataDirectory,
+        genesis_block: Block,
+        network: Network,
+    ) -> Self {
         let mut archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)
             .await
             .expect("Must be able to initialize archival mutator set");
@@ -276,6 +285,7 @@ impl ArchivalState {
             genesis_block,
             archival_mutator_set,
             archival_block_mmr,
+            network,
         }
     }
 
@@ -315,7 +325,7 @@ impl ArchivalState {
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
         // abort early if mutator set update is invalid.
-        if new_block.mutator_set_update().is_err() {
+        if new_block.mutator_set_update(self.network).is_err() {
             bail!("invalid block: could not get mutator set update");
         }
 
@@ -407,7 +417,7 @@ impl ArchivalState {
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
-            .mutator_set_update()
+            .mutator_set_update(self.network)
             .expect("MS update for new block must exist")
             .additions
             .len()
@@ -955,7 +965,7 @@ impl ArchivalState {
                 removals,
                 additions,
             } = haystack
-                .mutator_set_update()
+                .mutator_set_update(self.network)
                 .expect("Block from state must have mutator set update");
             block_mutations.push((additions, removals));
 
@@ -1077,7 +1087,7 @@ impl ArchivalState {
     /// mutator set update.
     pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         // cannot get the mutator set update from new block, so abort early
-        if new_block.mutator_set_update().is_err() {
+        if new_block.mutator_set_update(self.network).is_err() {
             bail!("invalid block: could not get mutator set update");
         }
 
@@ -1118,7 +1128,7 @@ impl ArchivalState {
                 additions,
                 removals,
             } = rollback_block
-                .mutator_set_update()
+                .mutator_set_update(self.network)
                 .expect("Block from state must have mutator set update");
 
             // Roll back all removal records contained in block
@@ -1171,7 +1181,7 @@ impl ArchivalState {
                 mut additions,
                 mut removals,
             } = apply_forward_block
-                .mutator_set_update()
+                .mutator_set_update(self.network)
                 .expect("Block from state must have mutator set update");
             additions.reverse();
             removals.reverse();
@@ -1273,7 +1283,7 @@ pub(super) mod tests {
         let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
 
         let genesis_block = Block::genesis(network);
-        ArchivalState::new(data_dir, genesis_block).await
+        ArchivalState::new(data_dir, genesis_block, network).await
     }
 
     #[traced_test]

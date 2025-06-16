@@ -653,7 +653,7 @@ impl GlobalState {
         cli: cli_args::Args,
         wallet_state: WalletState,
     ) -> Result<Self> {
-        let archival_state = ArchivalState::new(data_directory.clone(), genesis).await;
+        let archival_state = ArchivalState::new(data_directory.clone(), genesis, cli.network).await;
         debug!("Got archival state");
 
         // Get latest block. Use hardcoded genesis block if nothing is in database.
@@ -1320,6 +1320,8 @@ impl GlobalState {
         &mut self,
         tip_hash: Digest,
     ) -> Result<()> {
+        let network = self.cli().network;
+
         // loop over all monitored utxos
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
 
@@ -1453,7 +1455,7 @@ impl GlobalState {
                     additions,
                     mut removals,
                 } = apply_block
-                    .mutator_set_update()
+                    .mutator_set_update(network)
                     .expect("block from archival state must have mutator set update");
 
                 // apply additions
@@ -2849,7 +2851,7 @@ mod tests {
                         block = next_block;
 
                         // update membership proofs
-                        let mutator_set_update = block.mutator_set_update().unwrap();
+                        let mutator_set_update = block.mutator_set_update(network).unwrap();
                         let MutatorSetUpdate {
                             additions,
                             mut removals,
@@ -2926,7 +2928,7 @@ mod tests {
                         }
 
                         block
-                            .mutator_set_update()
+                            .mutator_set_update(network)
                             .unwrap()
                             .apply_to_accumulator(&mut test_msa)
                             .unwrap();
@@ -3221,7 +3223,7 @@ mod tests {
                 .await
         );
         assert!(coinbase_transaction
-            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap(),));
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let sender_randomness: Digest = rng.random();
@@ -3298,7 +3300,7 @@ mod tests {
                 .await
         );
         assert!(tx_to_alice_and_bob
-            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap(),));
 
         // Expect change output
         premine_receiver
@@ -3330,7 +3332,7 @@ mod tests {
                 .await
         );
         assert!(block_transaction
-            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap(),));
 
         let block_1 = Block::compose(
             &genesis_block,
@@ -3488,7 +3490,7 @@ mod tests {
 
         assert!(tx_from_alice.is_valid(network, consensus_rule_set).await);
         assert!(tx_from_alice
-            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
         // make bob's transaction
         let tx_outputs_from_bob = vec![
@@ -3536,7 +3538,7 @@ mod tests {
 
         assert!(tx_from_bob.is_valid(network, consensus_rule_set).await);
         assert!(tx_from_bob
-            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
@@ -3561,7 +3563,7 @@ mod tests {
                 .await
         );
         assert!(coinbase_transaction2
-            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
         let block_transaction2 = coinbase_transaction2
             .merge_with(
@@ -3588,7 +3590,7 @@ mod tests {
                 .await
         );
         assert!(block_transaction2
-            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap()));
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
         let block_2 = Block::compose(
             &block_1,

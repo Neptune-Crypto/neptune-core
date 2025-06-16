@@ -169,12 +169,14 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
-    use proptest::prelude::Rng;
-    use proptest::prelude::RngCore;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -184,6 +186,7 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
+    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -217,16 +220,16 @@ mod tests {
 
         fn pseudorandom_initial_state(
             &self,
-            _seed: [u8; 32],
+            seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut test_runner = TestRunner::deterministic();
 
             // Use test-runner's rng to avoid having to build too many proofs
-            let mut rng = test_runner.new_rng();
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
 
             let num_inputs = 2;
-            let primitive_witness = if rng.gen_bool(0.5) {
+            let primitive_witness = if rng.random_bool(0.5) {
                 PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)
                     .new_tree(&mut test_runner)
                     .unwrap()

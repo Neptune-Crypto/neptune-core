@@ -941,21 +941,26 @@ pub(crate) mod tests {
         #[apply(shared_tokio_runtime)]
         async fn disallow_set_merge_bit_in_pc_path() {
             let mut test_runner = TestRunner::deterministic();
-            let good_primitive_witness =
-                PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(Some(6), 6, 7, false)
+
+            for_each_version!({
+                let good_primitive_witness =
+                    PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(
+                        Some(6),
+                        6,
+                        7,
+                        false,
+                    )
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();
 
-            let good_proof_collection = ProofCollection::produce(
-                &good_primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
-
-            for_each_version!({
+                let good_proof_collection = ProofCollection::produce(
+                    &good_primitive_witness,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmJobPriority::default().into(),
+                )
+                .await
+                .unwrap();
                 let good_witness =
                     SingleProofWitness::<VERSION>::from_collection(good_proof_collection.clone());
                 positive_prop(good_witness);
@@ -1001,22 +1006,24 @@ pub(crate) mod tests {
         async fn can_verify_via_valid_proof_collection() {
             let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
-            let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            let txk_mast_hash = primitive_witness.kernel.mast_hash();
-
-            let proof_collection = ProofCollection::produce(
-                &primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash, network).await);
 
             for_each_version!({
+                let primitive_witness =
+                    PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+                        .new_tree(&mut test_runner)
+                        .unwrap()
+                        .current();
+                let txk_mast_hash = primitive_witness.kernel.mast_hash();
+
+                let proof_collection = ProofCollection::produce(
+                    &primitive_witness,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmJobPriority::default().into(),
+                )
+                .await
+                .unwrap();
+                assert!(proof_collection.verify(txk_mast_hash, network).await);
+
                 let witness =
                     SingleProofWitness::<VERSION>::from_collection(proof_collection.clone());
                 let claim = witness.claim();
@@ -1041,27 +1048,27 @@ pub(crate) mod tests {
         async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
             let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
-            let deterministic_now = arb::<Timestamp>()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            let primitive_witness =
-                arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, deterministic_now)
+            for_each_version!({
+                let deterministic_now = arb::<Timestamp>()
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();
-            let txk_mast_hash = primitive_witness.kernel.mast_hash();
+                let primitive_witness =
+                    arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, deterministic_now)
+                        .new_tree(&mut test_runner)
+                        .unwrap()
+                        .current();
+                let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-            let proof_collection = ProofCollection::produce(
-                &primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash, network).await);
+                let proof_collection = ProofCollection::produce(
+                    &primitive_witness,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmJobPriority::default().into(),
+                )
+                .await
+                .unwrap();
+                assert!(proof_collection.verify(txk_mast_hash, network).await);
 
-            for_each_version!({
                 let witness =
                     SingleProofWitness::<VERSION>::from_collection(proof_collection.clone());
                 let claim = witness.claim();
@@ -1085,8 +1092,10 @@ pub(crate) mod tests {
         async fn can_verify_transaction_merger_without_coinbase() {
             let network = Network::Main;
             let block_height = BlockHeight::new(bfe!(100000));
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
             let merge_witness =
-                deterministic_merge_witness((2, 2, 2), (2, 2, 2), block_height, network).await;
+                deterministic_merge_witness((2, 2, 2), (2, 2, 2), consensus_rule_set, network)
+                    .await;
 
             for_each_version!({
                 let merge_witness = SingleProofWitness::<VERSION>::Merger(merge_witness.clone());
@@ -1105,11 +1114,10 @@ pub(crate) mod tests {
         #[apply(shared_tokio_runtime)]
         async fn can_verify_transaction_merger_with_coinbase() {
             let network = Network::Main;
-            let block_height = BlockHeight::new(bfe!(100000));
 
             for_each_version!({
                 let merge_witness =
-                    deterministic_merge_witness_with_coinbase(3, 3, 3, block_height, network).await;
+                    deterministic_merge_witness_with_coinbase::<VERSION>(3, 3, 3, network).await;
                 let merge_witness = SingleProofWitness::<VERSION>::Merger(merge_witness.clone());
 
                 let claim = merge_witness.claim();
@@ -1136,71 +1144,141 @@ pub(crate) mod tests {
 
         use super::*;
 
-        fn positive_prop<const VERSION: usize>(witness: UpdateWitness) {
-            let witness = SingleProofWitness::<VERSION>::from_update(witness);
-            let claim = witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = witness.nondeterminism();
+        fn positive_prop(witness: UpdateWitness, consensus_rule_set: ConsensusRuleSet) {
+            let (claim, input, nondeterminism) = if consensus_rule_set.merge_version()
+                == MergeVersion::Genesis
+            {
+                let witness =
+                    SingleProofWitness::<{ MergeVersion::Genesis as usize }>::from_update(witness);
+                let claim = witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = witness.nondeterminism();
+                (claim, input, nondeterminism)
+            } else {
+                let witness =
+                    SingleProofWitness::<{ MergeVersion::HardFork2 as usize }>::from_update(
+                        witness,
+                    );
+                let claim = witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = witness.nondeterminism();
+                (claim, input, nondeterminism)
+            };
 
-            let rust_result = SingleProof::<VERSION>.run_rust(&input, nondeterminism.clone());
+            let (rust_result, tasm_result) =
+                if consensus_rule_set.merge_version() == MergeVersion::Genesis {
+                    let rust_result = SingleProof::<{ MergeVersion::Genesis as usize }>
+                        .run_rust(&input, nondeterminism.clone());
 
-            let tasm_result = SingleProof::<VERSION>.run_tasm(&input, nondeterminism);
+                    let tasm_result = SingleProof::<{ MergeVersion::Genesis as usize }>
+                        .run_tasm(&input, nondeterminism);
+                    (rust_result, tasm_result)
+                } else {
+                    let rust_result = SingleProof::<{ MergeVersion::HardFork2 as usize }>
+                        .run_rust(&input, nondeterminism.clone());
+
+                    let tasm_result = SingleProof::<{ MergeVersion::HardFork2 as usize }>
+                        .run_tasm(&input, nondeterminism);
+                    (rust_result, tasm_result)
+                };
 
             assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
         }
 
         #[apply(shared_tokio_runtime)]
         async fn only_additions_small() {
-            for_each_version!({
-                positive_prop::<VERSION>(
-                    deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await,
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                positive_prop(
+                    deterministic_update_witness_only_additions_to_mutator_set(
+                        2,
+                        2,
+                        2,
+                        consensus_rule_set,
+                    )
+                    .await,
+                    consensus_rule_set,
                 );
-            });
+            }
         }
 
         #[apply(shared_tokio_runtime)]
         async fn only_additions_medium() {
-            for_each_version!({
-                positive_prop::<VERSION>(
-                    deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await,
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                positive_prop(
+                    deterministic_update_witness_only_additions_to_mutator_set(
+                        4,
+                        4,
+                        4,
+                        consensus_rule_set,
+                    )
+                    .await,
+                    consensus_rule_set,
                 );
-            });
+            }
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_tiny() {
-            for_each_version!({
-                positive_prop::<VERSION>(
-                    deterministic_update_witness_additions_and_removals(1, 1, 1).await,
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                positive_prop(
+                    deterministic_update_witness_additions_and_removals(
+                        1,
+                        1,
+                        1,
+                        consensus_rule_set,
+                    )
+                    .await,
+                    consensus_rule_set,
                 );
-            });
+            }
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_small() {
-            for_each_version!({
-                positive_prop::<VERSION>(
-                    deterministic_update_witness_additions_and_removals(2, 2, 2).await,
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                positive_prop(
+                    deterministic_update_witness_additions_and_removals(
+                        2,
+                        2,
+                        2,
+                        consensus_rule_set,
+                    )
+                    .await,
+                    consensus_rule_set,
                 );
-            });
+            }
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_midi() {
-            for_each_version!({
-                positive_prop::<VERSION>(
-                    deterministic_update_witness_additions_and_removals(3, 3, 3).await,
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                positive_prop(
+                    deterministic_update_witness_additions_and_removals(
+                        3,
+                        3,
+                        3,
+                        consensus_rule_set,
+                    )
+                    .await,
+                    consensus_rule_set,
                 );
-            });
+            }
         }
 
         #[apply(shared_tokio_runtime)]
         async fn addition_and_removals_medium() {
-            for_each_version!({
-                positive_prop::<VERSION>(
-                    deterministic_update_witness_additions_and_removals(4, 4, 4).await,
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                positive_prop(
+                    deterministic_update_witness_additions_and_removals(
+                        4,
+                        4,
+                        4,
+                        consensus_rule_set,
+                    )
+                    .await,
+                    consensus_rule_set,
                 );
-            });
+            }
         }
 
         fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
@@ -1365,52 +1443,96 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn update_witness_negative_tests() {
-            // It takes a long time to generate the witness, so we reuse it across
-            // multiple tests
-            let good_witness =
-                deterministic_update_witness_only_additions_to_mutator_set(2, 2, 2).await;
-            for_each_version!({
-                positive_prop::<VERSION>(good_witness.clone());
-            });
-            new_timestamp_older_than_old(&good_witness);
-            bad_new_aocl(&good_witness);
-            bad_old_aocl(&good_witness);
-            bad_absolute_index_set_value(&good_witness);
-            bad_absolute_index_set_length_too_short(&good_witness);
-            proptest::proptest! {
-                ProptestConfig { cases: 3, .. ProptestConfig::default() },
-                |(rr in arb::<RemovalRecord>())| {
-                    bad_absolute_index_set_length_too_long(&good_witness, rr);
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                // It takes a long time to generate the witness, so we reuse it across
+                // multiple tests
+                let good_witness = deterministic_update_witness_only_additions_to_mutator_set(
+                    2,
+                    2,
+                    2,
+                    consensus_rule_set,
+                )
+                .await;
+                positive_prop(good_witness.clone(), consensus_rule_set);
+                new_timestamp_older_than_old(&good_witness);
+                bad_new_aocl(&good_witness);
+                bad_old_aocl(&good_witness);
+                bad_absolute_index_set_value(&good_witness);
+                bad_absolute_index_set_length_too_short(&good_witness);
+                proptest::proptest! {
+                    ProptestConfig { cases: 3, .. ProptestConfig::default() },
+                    |(rr in arb::<RemovalRecord>())| {
+                        bad_absolute_index_set_length_too_long(&good_witness, rr);
+                    }
                 }
             }
         }
 
         #[apply(shared_tokio_runtime)]
         async fn disallow_update_of_tx_with_zero_inputs() {
-            let only_new_additions_0_outputs =
-                deterministic_update_witness_only_additions_to_mutator_set(0, 0, 0).await;
-            let only_new_additions_2_outputs =
-                deterministic_update_witness_only_additions_to_mutator_set(0, 2, 2).await;
-            let new_additions_and_removals_2_outputs =
-                deterministic_update_witness_additions_and_removals(0, 2, 2).await;
-            for_each_version!({
-                for bad_witness in [
-                    only_new_additions_0_outputs.clone(),
-                    only_new_additions_2_outputs.clone(),
-                    new_additions_and_removals_2_outputs.clone(),
-                ] {
-                    let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness);
-                    let claim = bad_witness.claim();
-                    let input = PublicInput::new(claim.input.clone());
-                    let nondeterminism = bad_witness.nondeterminism();
-                    let test_result = SingleProof::<VERSION>.test_assertion_failure(
-                        input,
-                        nondeterminism,
-                        &[UpdateBranch::INPUT_SET_IS_EMPTY_ERROR],
-                    );
-                    test_result.unwrap();
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                let only_new_additions_0_outputs =
+                    deterministic_update_witness_only_additions_to_mutator_set(
+                        0,
+                        0,
+                        0,
+                        consensus_rule_set,
+                    )
+                    .await;
+                let only_new_additions_2_outputs =
+                    deterministic_update_witness_only_additions_to_mutator_set(
+                        0,
+                        2,
+                        2,
+                        consensus_rule_set,
+                    )
+                    .await;
+                let new_additions_and_removals_2_outputs =
+                    deterministic_update_witness_additions_and_removals(
+                        0,
+                        2,
+                        2,
+                        consensus_rule_set,
+                    )
+                    .await;
+                if consensus_rule_set.merge_version() == MergeVersion::Genesis {
+                    const VERSION: usize = MergeVersion::Genesis as usize;
+                    for bad_witness in [
+                        only_new_additions_0_outputs.clone(),
+                        only_new_additions_2_outputs.clone(),
+                        new_additions_and_removals_2_outputs.clone(),
+                    ] {
+                        let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness);
+                        let claim = bad_witness.claim();
+                        let input = PublicInput::new(claim.input.clone());
+                        let nondeterminism = bad_witness.nondeterminism();
+                        let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                            input,
+                            nondeterminism,
+                            &[UpdateBranch::INPUT_SET_IS_EMPTY_ERROR],
+                        );
+                        test_result.unwrap();
+                    }
+                } else {
+                    const VERSION: usize = MergeVersion::HardFork2 as usize;
+                    for bad_witness in [
+                        only_new_additions_0_outputs.clone(),
+                        only_new_additions_2_outputs.clone(),
+                        new_additions_and_removals_2_outputs.clone(),
+                    ] {
+                        let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness);
+                        let claim = bad_witness.claim();
+                        let input = PublicInput::new(claim.input.clone());
+                        let nondeterminism = bad_witness.nondeterminism();
+                        let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                            input,
+                            nondeterminism,
+                            &[UpdateBranch::INPUT_SET_IS_EMPTY_ERROR],
+                        );
+                        test_result.unwrap();
+                    }
                 }
-            });
+            }
         }
     }
 

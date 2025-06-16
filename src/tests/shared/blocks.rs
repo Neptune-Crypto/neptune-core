@@ -22,6 +22,7 @@ use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
+use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
@@ -35,6 +36,7 @@ use crate::tests::shared::Randomness;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// Create a block containing the supplied transaction kernel, starting from
@@ -522,6 +524,21 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
         predecessor = blocks.last().unwrap();
     }
     blocks
+}
+
+pub(crate) fn block_mutator_set_update_from_transaction(
+    tx_kernel: &TransactionKernel,
+    merge_version: MergeVersion,
+) -> MutatorSetUpdate {
+    let pack_removal_records = merge_version.pack_removal_records();
+    let removals = if pack_removal_records {
+        RemovalRecordList::pack(tx_kernel.inputs.clone())
+    } else {
+        tx_kernel.inputs.clone()
+    };
+    let additions = tx_kernel.outputs.clone();
+
+    MutatorSetUpdate::new(removals, additions)
 }
 
 mod tests {

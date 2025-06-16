@@ -1357,6 +1357,12 @@ impl PeerLoopHandler {
                                 .await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
+                        Err(TransactionConfirmabilityError::RemovalRecordUnpackFailure) => {
+                            warn!("Failed to unpack removal records");
+                            self.punish(NegativePeerSanction::InvalidTransaction)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
                     };
                 }
 
@@ -3758,7 +3764,7 @@ mod tests {
 
                 // Mempool should now contain the unsynced transaction. Tip is block 1.
                 let pw_block1 =
-                    pw_genesis.update_with_new_ms_data(block1.mutator_set_update().unwrap());
+                    pw_genesis.update_with_new_ms_data(block1.mutator_set_update(network).unwrap());
                 let tx_synced_to_block1 = upgrade(pw_block1, consensus_rule_set).await;
 
                 let tx_notification: TransactionNotification =

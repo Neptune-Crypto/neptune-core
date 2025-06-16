@@ -59,6 +59,7 @@ use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1437,8 +1438,14 @@ impl WalletState {
 
         let MutatorSetUpdate {
             additions: addition_records,
-            removals: _removal_records,
-        } = new_block.mutator_set_update()?;
+            removals: removal_records,
+        } = new_block
+            .mutator_set_update(self.configuration.network())
+            .expect("Block received as argument must have mutator set update");
+        let mut removal_records = removal_records;
+        removal_records.reverse();
+        let mut removal_records: Vec<&mut RemovalRecord> =
+            removal_records.iter_mut().collect::<Vec<_>>();
 
         let offchain_received_outputs = self
             .scan_for_expected_utxos(&addition_records)
@@ -1498,11 +1505,6 @@ impl WalletState {
         // b) Register incoming transactions and derive their membership proofs
         let mut changed_mps = vec![];
         let mut msa_state = previous_mutator_set_accumulator.clone();
-
-        let mut removal_records = tx_kernel.inputs.clone();
-        removal_records.reverse();
-        let mut removal_records: Vec<&mut RemovalRecord> =
-            removal_records.iter_mut().collect::<Vec<_>>();
 
         for addition_record in &addition_records {
             // Don't pull this declaration out of the for-loop since the hash map can grow
@@ -5017,7 +5019,7 @@ pub(crate) mod tests {
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
                 genesis_mutator_set,
-                block_one.mutator_set_update().unwrap(),
+                block_one.mutator_set_update(network).unwrap(),
                 upgrade_incentive,
                 consensus_rule_set,
             ));

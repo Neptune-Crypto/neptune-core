@@ -67,6 +67,7 @@ use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
 /// Block height for 1st hardfork that increases block size limit to allow for
 /// more inputs per transaction. Specifies the 1st block under which the new
@@ -792,46 +793,51 @@ impl Block {
         }
 
         // 2.a)
+        let merge_version = consensus_rule_set.merge_version();
+        let inputs = if merge_version.pack_removal_records() {
+            RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
+                .map_err(BlockValidationError::from)?
+        } else {
+            self.body().transaction_kernel.inputs.clone()
+        };
+
+        // 2.b)
         let msa_before = previous_block.mutator_set_accumulator_after()?;
-        for removal_record in &self.kernel.body.transaction_kernel.inputs {
+        for removal_record in &inputs {
             if !msa_before.can_remove(removal_record) {
                 return Err(BlockValidationError::RemovalRecordsValid);
             }
         }
 
-        // 2.b)
-        let mut absolute_index_sets = self
-            .kernel
-            .body
-            .transaction_kernel
-            .inputs
+        // 2.c)
+        let mut absolute_index_sets = inputs
             .iter()
             .map(|removal_record| removal_record.absolute_indices.to_vec())
             .collect_vec();
         absolute_index_sets.sort();
         absolute_index_sets.dedup();
-        if absolute_index_sets.len() != self.kernel.body.transaction_kernel.inputs.len() {
+        if absolute_index_sets.len() != inputs.len() {
             return Err(BlockValidationError::RemovalRecordsUnique);
         }
 
         let mutator_set_update = MutatorSetUpdate::new(
-            self.body().transaction_kernel.inputs.clone(),
+            inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
         let mut msa = msa_before;
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
 
-        // 2.c)
+        // 2.d)
         if ms_update_result.is_err() {
             return Err(BlockValidationError::MutatorSetUpdatePossible);
         };
 
-        // 2.d)
+        // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
             return Err(BlockValidationError::MutatorSetUpdateIntegral);
         }
 
-        // 2.e)
+        // 2.f)
         if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
             return Err(BlockValidationError::TransactionTimestamp);
         }
@@ -839,32 +845,32 @@ impl Block {
         let block_subsidy = Self::block_subsidy(self.kernel.header.height);
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
         if let Some(coinbase) = coinbase {
-            // 2.f)
+            // 2.g)
             if coinbase > block_subsidy {
                 return Err(BlockValidationError::CoinbaseTooBig);
             }
 
-            // 2.g)
+            // 2.h)
             if coinbase.is_negative() {
                 return Err(BlockValidationError::CoinbaseTooSmall);
             }
         }
 
-        // 2.h)
+        // 2.i)
         let fee = self.kernel.body.transaction_kernel.fee;
         if fee.is_negative() {
             return Err(BlockValidationError::NegativeFee);
         }
 
-        // 2.i)
+        // 2.j)
         if consensus_rule_set
             .max_num_inputs()
-            .is_some_and(|max| self.body().transaction_kernel.inputs.len() > max)
+            .is_some_and(|max| inputs.len() > max)
         {
             return Err(BlockValidationError::TooManyInputs);
         }
 
-        // 2.j)
+        // 2.k)
         if consensus_rule_set
             .max_num_outputs()
             .is_some_and(|max| self.body().transaction_kernel.outputs.len() > max)
@@ -872,7 +878,7 @@ impl Block {
             return Err(BlockValidationError::TooManyOutputs);
         }
 
-        // 2.k)
+        // 2.l)
         if consensus_rule_set
             .max_num_public_announcements()
             .is_some_and(|max| self.body().transaction_kernel.public_announcements.len() > max)
@@ -1065,14 +1071,24 @@ impl Block {
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
-    pub(crate) fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
-        let mut mutator_set_update = MutatorSetUpdate::new(
-            self.body().transaction_kernel.inputs.clone(),
-            self.body().transaction_kernel.outputs.clone(),
-        );
+    pub(crate) fn mutator_set_update(
+        &self,
+        network: Network,
+    ) -> Result<MutatorSetUpdate, BlockValidationError> {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+        let inputs = if consensus_rule_set.merge_version().pack_removal_records() {
+            RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
+                .map_err(BlockValidationError::from)?
+        } else {
+            self.body().transaction_kernel.inputs.clone()
+        };
+        let mut mutator_set_update =
+            MutatorSetUpdate::new(inputs, self.body().transaction_kernel.outputs.clone());
 
-        let extra_addition_records = self.guesser_fee_addition_records()?;
-        mutator_set_update.additions.extend(extra_addition_records);
+        let guesser_addition_records = self.guesser_fee_addition_records()?;
+        mutator_set_update
+            .additions
+            .extend(guesser_addition_records);
 
         Ok(mutator_set_update)
     }
@@ -1965,7 +1981,7 @@ pub(crate) mod tests {
             let MutatorSetUpdate {
                 removals: _,
                 additions,
-            } = block1.mutator_set_update().unwrap();
+            } = block1.mutator_set_update(network).unwrap();
             assert!(
                 ars.iter().all(|ar| additions.contains(ar)),
                 "All addition records must be present in block's mutator set update"
@@ -2090,6 +2106,7 @@ pub(crate) mod tests {
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
+            // Assumes no packing of mutator set happens on block level.
             let mutator_set_update_guesser_fees =
                 MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records().unwrap());
             let mut mutator_set_update_tx = MutatorSetUpdate::new(

@@ -23,12 +23,15 @@ use super::utxo::Utxo;
 use super::TransactionDetails;
 use crate::api::export::TxInputList;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 
@@ -266,27 +269,8 @@ impl PrimitiveWitness {
 
     /// Verify the transaction directly from primitive witness
     ///
-    /// this is a wrapper for `validate()` that just returns bool.
-    pub async fn is_valid(&self) -> bool {
-        self.validate().await.is_ok()
-    }
-
-    /// Verify the transaction directly from primitive witness
-    ///
     /// (without proofs or decomposing into subclaims).
-    ///
-    /// This method is an important part of the transaction initiation process
-    /// as it is the "final say" with regards to whether most new transactions
-    /// gets accepted into the mempool or not.  As such, it returns a detailed
-    /// error type for the caller.
     pub async fn validate(&self) -> Result<(), WitnessValidationError> {
-        // note: This method used to just return `bool` but callers need more
-        // detail than that when initiating a transaction if something goes
-        // wrong.
-        //
-        // We should consider adding detailed validation errors for the other
-        // proof types as well (if possible).
-
         for lock_script_and_witness in &self.lock_scripts_and_witnesses {
             let lock_script = lock_script_and_witness.program.clone();
             let secret_input = lock_script_and_witness.nondeterminism();
@@ -319,8 +303,7 @@ impl PrimitiveWitness {
 
         // Verify correct computation of removal records. Also, collect the removal
         // records' hashes in order to validate them against those provided in the
-        // transaction kernel later. We only check internal consistency not removability
-        // relative to a given mutator set accumulator.
+        // transaction kernel later.
         let mut witnessed_removal_records = vec![];
         for (input_utxo, membership_proof) in self
             .input_utxos
@@ -405,22 +388,10 @@ impl PrimitiveWitness {
             }
         }
 
-        let witnessed_removal_record_hashes = witnessed_removal_records
-            .iter()
-            .map(|rr| Hash::hash_varlen(&rr.encode()))
-            .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-            .collect_vec();
-        let kernel_removal_record_hashes = self
-            .kernel
-            .inputs
-            .iter()
-            .map(|rr| Hash::hash_varlen(&rr.encode()))
-            .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-            .collect_vec();
-        if witnessed_removal_record_hashes != kernel_removal_record_hashes {
+        if witnessed_removal_records != self.kernel.inputs {
             let error = WitnessValidationError::RemovalRecordsMismatch {
-                witnessed_removal_record_hashes,
-                kernel_removal_record_hashes,
+                witnessed_removal_records,
+                kernel_removal_records: self.kernel.inputs.clone(),
             };
             warn!("{} - {:#?}", error, error);
             return Err(error);
@@ -543,8 +514,8 @@ pub enum WitnessValidationError {
 
     #[error("removal records generated from witness do not match transaction kernel inputs")]
     RemovalRecordsMismatch {
-        witnessed_removal_record_hashes: Vec<Digest>,
-        kernel_removal_record_hashes: Vec<Digest>,
+        witnessed_removal_records: Vec<RemovalRecord>,
+        kernel_removal_records: Vec<RemovalRecord>,
     },
 
     #[error("transaction mutator set does not match witness mutator set")]
@@ -576,6 +547,7 @@ pub mod neptune_arbitrary {
     use super::super::PublicAnnouncement;
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -586,6 +558,7 @@ pub mod neptune_arbitrary {
     use crate::models::state::wallet::address::generation_address;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
     impl PrimitiveWitness {
         /// Strategy for generating a `PrimitiveWitness` with the given number of
@@ -873,11 +846,6 @@ pub mod neptune_arbitrary {
             outputs_salt: [BFieldElement; 3],
             merge_bit: bool,
         ) -> Self {
-            let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
-            let input_membership_proofs = msa_and_records.membership_proofs;
-            let input_removal_records = msa_and_records.removal_records;
-            assert_eq!(input_membership_proofs.len(), input_removal_records.len());
-
             let output_commitments = output_utxos
                 .iter()
                 .zip(output_sender_randomnesses.clone())
@@ -886,6 +854,11 @@ pub mod neptune_arbitrary {
                     commit(Hash::hash(utxo), sender_randomness, receiver_digest)
                 })
                 .collect_vec();
+
+            // Removal records are only packed in blocks, never in transactions.
+            let input_removal_records = msa_and_records.unpacked_removal_records();
+            let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
+            let input_membership_proofs = msa_and_records.membership_proofs;
 
             let kernel = TransactionKernelProxy {
                 inputs: input_removal_records.clone(),
@@ -1096,11 +1069,13 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use strum::IntoEnumIterator;
     use test_strategy::proptest;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
@@ -1418,7 +1393,9 @@ mod tests {
             coinbase_amount: NativeCurrencyAmount,
             timestamp: Timestamp,
         ) -> BoxedStrategy<(Self, Self)> {
-            let input_removal_records = msa_and_records.removal_records;
+            // Always unpacked in tx-context
+            let input_removal_records = msa_and_records.unpacked_removal_records();
+
             let input_membership_proofs = msa_and_records.membership_proofs;
             let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
             ((0..total_num_outputs), (0..total_num_announcements))
@@ -1757,7 +1734,7 @@ mod tests {
         #[strategy(3usize..10)] _num_public_announcements: usize,
         #[strategy(0usize..#_num_inputs)] mutated_lockscript_witness: usize,
         #[strategy(arb())] bad_preimage: Digest,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements,
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
@@ -1774,7 +1751,7 @@ mod tests {
         #[strategy(3usize..10)] _num_outputs: usize,
         #[strategy(3usize..10)] _num_public_announcements: usize,
         #[strategy(arb())] rng_seed: u64,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements,
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
@@ -1791,7 +1768,7 @@ mod tests {
         #[strategy(3usize..10)] _num_inputs: usize,
         #[strategy(3usize..10)] _num_outputs: usize,
         #[strategy(3usize..10)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements,
         ))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {
@@ -1851,7 +1828,7 @@ mod tests {
 
     #[proptest(cases = 5)]
     fn total_amount_is_valid(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2,))]
         primitive_witness: PrimitiveWitness,
     ) {
         let mut total = if let Some(amount) = primitive_witness.kernel.coinbase {

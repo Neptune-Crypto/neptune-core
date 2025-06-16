@@ -14,12 +14,15 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::primitive_witness::PrimitiveWitness;
 use super::PublicAnnouncement;
 use crate::api::export::TransactionDetails;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// TransactionKernel is immutable and its hash never changes.
@@ -138,9 +141,18 @@ pub(crate) enum TransactionConfirmabilityError {
     InvalidRemovalRecord(usize),
     DuplicateInputs,
     AlreadySpentInput(usize),
+    RemovalRecordUnpackFailure,
+}
+
+impl From<RemovalRecordListUnpackError> for TransactionConfirmabilityError {
+    fn from(_: RemovalRecordListUnpackError) -> Self {
+        Self::RemovalRecordUnpackFailure
+    }
 }
 
 impl TransactionKernel {
+    /// Check if transaction is confirmable. Inputs must be unpacked before this
+    /// check is performed.
     pub(crate) fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
@@ -148,11 +160,9 @@ impl TransactionKernel {
         // check validity of removal records
         //       ^^^^^^^^
 
-        // TODO: Try to unpack
-
         // meaning: a) all required membership proofs exist; and b) are valid.
-        let maybe_invalid_removal_record = self
-            .inputs
+        let inputs = &self.inputs;
+        let maybe_invalid_removal_record = inputs
             .iter()
             .enumerate()
             .find(|(_, rr)| !rr.validate(mutator_set_accumulator));
@@ -161,19 +171,14 @@ impl TransactionKernel {
         }
 
         // check for duplicates
-        let has_unique_inputs = self
-            .inputs
-            .iter()
-            .unique_by(|rr| rr.absolute_indices)
-            .count()
-            == self.inputs.len();
+        let has_unique_inputs =
+            inputs.iter().unique_by(|rr| rr.absolute_indices).count() == inputs.len();
         if !has_unique_inputs {
             return Err(TransactionConfirmabilityError::DuplicateInputs);
         }
 
         // check for already-spent inputs
-        let already_spent_removal_record = self
-            .inputs
+        let already_spent_removal_record = inputs
             .iter()
             .enumerate()
             .find(|(_, rr)| !mutator_set_accumulator.can_remove(rr));
@@ -486,6 +491,7 @@ pub mod tests {
     #[test]
     fn can_identify_double_spends() {
         let mut test_runner = TestRunner::deterministic();
+
         let pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()

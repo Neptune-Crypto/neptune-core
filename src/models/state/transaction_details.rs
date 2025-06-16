@@ -12,6 +12,8 @@ use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+use crate::models::blockchain::consensus_rule_set;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;

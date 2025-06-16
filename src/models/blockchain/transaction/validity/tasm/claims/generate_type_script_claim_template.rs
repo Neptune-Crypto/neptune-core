@@ -103,6 +103,7 @@ mod tests {
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
+    use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
@@ -158,6 +159,7 @@ mod tests {
             _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut test_runner = TestRunner::deterministic();
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
             let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
                 .new_tree(&mut test_runner)
                 .unwrap()
@@ -172,7 +174,6 @@ mod tests {
                 ))
                 .unwrap();
 
-            let mut rng: StdRng = SeedableRng::from_seed(seed);
             // Sample an address for primitive witness pointer from first page,
             // but leave enough margin till the end so we don't accidentally
             // overwrite memory in the next page.
