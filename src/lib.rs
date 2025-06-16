@@ -143,11 +143,12 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
             bootstrap_directory.to_string_lossy()
         );
 
+        let flush_period = global_state_lock.cli().bootstrap_flush_period;
         let validate_blocks = !global_state_lock.cli().disable_bootstrap_block_validation;
         let num_blocks_read = global_state_lock
             .lock_guard_mut()
             .await
-            .bootstrap_from_directory(&bootstrap_directory, validate_blocks)
+            .bootstrap_from_directory(&bootstrap_directory, flush_period, validate_blocks)
             .await?;
         info!("Successfully bootstrapped {num_blocks_read} blocks.");
     }

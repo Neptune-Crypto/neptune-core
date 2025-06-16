@@ -1793,6 +1793,7 @@ impl GlobalState {
     pub(crate) async fn bootstrap_from_directory(
         &mut self,
         directory: &Path,
+        flush_period: usize,
         validate_blocks: bool,
     ) -> Result<usize> {
         debug!(
@@ -1866,6 +1867,11 @@ impl GlobalState {
                 info!("Updated state with block of height {block_height}.");
                 num_stored_blocks += 1;
                 predecessor = block;
+
+                if flush_period != 0 && num_stored_blocks % flush_period == 0 {
+                    self.flush_databases().await?;
+                    info!("Flushed databases after {num_stored_blocks} blocks.");
+                }
             }
         }
 
@@ -4046,7 +4052,7 @@ mod tests {
             let block_dir = old_state.chain.archival_state().block_dir_path();
             let validate_blocks = true;
             assert!(new_state
-                .bootstrap_from_directory(&block_dir, validate_blocks)
+                .bootstrap_from_directory(&block_dir, 0, validate_blocks)
                 .await
                 .is_err());
         }
@@ -4074,7 +4080,7 @@ mod tests {
             let block_dir = old_state.chain.archival_state().block_dir_path();
             let validate_blocks = false;
             new_state
-                .bootstrap_from_directory(&block_dir, validate_blocks)
+                .bootstrap_from_directory(&block_dir, 0, validate_blocks)
                 .await
                 .unwrap();
 
@@ -4145,7 +4151,7 @@ mod tests {
 
             let validate_blocks = true;
             state
-                .bootstrap_from_directory(&test_data_dir, validate_blocks)
+                .bootstrap_from_directory(&test_data_dir, 0, validate_blocks)
                 .await
                 .unwrap();
             let restored_block_height = state.chain.light_state().header().height;
