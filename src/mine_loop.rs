@@ -530,7 +530,7 @@ pub(crate) fn composer_outputs(
 ///
 /// # Panics
 ///
-///  - If `latest_block` is invalid.
+///  - If `latest_block` has a negative transaction fee
 pub(super) fn prepare_coinbase_transaction_stateless(
     latest_block: &Block,
     composer_parameters: ComposerParameters,
@@ -596,7 +596,7 @@ pub(crate) async fn create_block_transaction(
 }
 
 /// # Panics
-///  - If predecessor is invalid
+///  - If predecessor has a negative transaction fee
 pub(crate) async fn create_block_transaction_from(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,

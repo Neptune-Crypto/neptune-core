@@ -315,10 +315,11 @@ impl ArchivalState {
         self: &mut ArchivalState,
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
-        // abort early if block is invalid
+        // abort early if mutator set update is invalid.
         if new_block.mutator_set_update().is_err() {
             bail!("invalid block: could not get mutator set update");
         }
+
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
@@ -408,7 +409,7 @@ impl ArchivalState {
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
             .mutator_set_update()
-            .expect("New block must be valid")
+            .expect("MS update for new block must exist")
             .additions
             .len()
             .try_into()
@@ -422,7 +423,7 @@ impl ArchivalState {
             },
             min_aocl_index: new_block
                 .mutator_set_accumulator_after()
-                .expect("New block must be valid")
+                .expect("MS update for new block must exist")
                 .aocl
                 .num_leafs()
                 - num_additions,
