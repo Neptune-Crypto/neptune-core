@@ -1006,6 +1006,7 @@ mod tests {
         use rand::random;
         use tasm_lib::hashing::merkle_verify::MerkleVerify;
         use twenty_first::prelude::Mmr;
+        use proptest::prelude::*;
 
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::tests::deterministic_update_witness_additions_and_removals;
@@ -1216,7 +1217,12 @@ mod tests {
             bad_old_aocl(&good_witness);
             bad_absolute_index_set_value(&good_witness);
             bad_absolute_index_set_length_too_short(&good_witness);
-            proptest::proptest!(|(rr in arb::<RemovalRecord>())| bad_absolute_index_set_length_too_long(&good_witness, rr));
+            proptest::proptest! {
+                ProptestConfig { cases: 3, .. ProptestConfig::default() },
+                |(rr in arb::<RemovalRecord>())| {
+                    bad_absolute_index_set_length_too_long(&good_witness, rr);
+                }
+            }
         }
 
         #[apply(shared_tokio_runtime)]

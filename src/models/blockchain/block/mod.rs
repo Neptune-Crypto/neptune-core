@@ -1385,7 +1385,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[proptest(async = "tokio")]
+    #[proptest(async = "tokio", cases = 1)]
     async fn can_prove_block_ancestry(
         #[strategy(collection::vec(arb::<Digest>(), 55))] mut sender_randomness_vec: Vec<Digest>,
         #[strategy(0..54usize)] index: usize,

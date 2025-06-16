@@ -4172,10 +4172,11 @@ pub(crate) mod tests {
     }
 
     pub(crate) mod scan_mode {
+        use std::hint::black_box;
+
         use proptest::collection;
         use proptest::prelude::any;
         use proptest_arbitrary_interop::arb;
-        use std::hint::black_box;
 
         use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;

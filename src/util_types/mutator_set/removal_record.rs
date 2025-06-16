@@ -14,6 +14,8 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
+#[cfg(test)]
+pub use tests::propcompose_absindset;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::mmr;
@@ -30,8 +32,6 @@ use super::shared::NUM_TRIALS;
 use super::MutatorSetError;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
-#[cfg(test)]
-pub use tests::propcompose_absindset;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Hash)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
