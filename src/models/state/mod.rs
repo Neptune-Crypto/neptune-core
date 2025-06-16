@@ -3996,9 +3996,9 @@ mod tests {
         use std::io::Write;
 
         use super::*;
+        use crate::tests::shared::files::test_helper_data_dir;
+        use crate::tests::shared::files::try_fetch_file_from_server;
         use crate::tests::shared::mock_genesis_global_state_with_block;
-        use crate::tests::shared::test_helper_data_dir;
-        use crate::tests::shared::try_fetch_file_from_server;
 
         async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
             // Ensure more than one file is used to store blocks.
