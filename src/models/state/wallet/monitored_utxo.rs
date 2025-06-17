@@ -117,7 +117,8 @@ impl MonitoredUtxo {
         msmp.aocl_leaf_index
     }
 
-    // determine whether the attached membership proof is synced to the given block
+    /// Determine whether the attached membership proof is synced to the given
+    /// block.
     pub fn is_synced_to(&self, block_hash: Digest) -> bool {
         self.get_membership_proof_for_block(block_hash).is_some()
     }
