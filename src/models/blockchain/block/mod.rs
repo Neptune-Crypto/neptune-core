@@ -1172,7 +1172,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn genesis_block_hasnt_changed() {
+    fn genesis_block_hasnt_changed_main_net() {
         // Ensure that code changes does not modify the hash of main net's
         // genesis block.
 
@@ -1183,6 +1183,19 @@ pub(crate) mod tests {
         let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
         assert_eq!(
             "3eeaed3acdd8765b9a3e689d74f745365d6a3de57fb4a9a19c46ac432ce419a92fb82d47dc0d3f54",
+            genesis_block.hash().to_hex()
+        );
+    }
+
+    #[test]
+    fn genesis_block_hasnt_changed_test_net() {
+        // Insert the real difficulty such that the block's hash can be
+        // compared to the one found in block explorers and other real
+        // instances, otherwise the hash would only be valid for test code.
+        let network = Network::Testnet;
+        let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
+        assert_eq!(
+            "380df1ec5895553d056acb7a35a6eb9967c893ccc1e7c6e86995459e4d20e4f99800f04c86711d53",
             genesis_block.hash().to_hex()
         );
     }
