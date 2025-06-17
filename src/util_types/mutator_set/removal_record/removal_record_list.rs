@@ -12,8 +12,6 @@ use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use thiserror::Error;
-use twenty_first::util_types::merkle_tree::MerkleTreeHeight;
-use twenty_first::util_types::merkle_tree::MerkleTreeNodeIndex;
 
 use super::chunk::Chunk;
 use super::chunk::ChunkUnpackError;
@@ -77,7 +75,7 @@ impl RemovalRecordList {
         }
 
         // compile sparse view of MMR
-        let mut sparse_mmr = HashMap::<(MerkleTreeHeight, MerkleTreeNodeIndex), Digest>::new();
+        let mut sparse_mmr: HashMap<_, Digest> = HashMap::new();
         for removal_record in removal_records {
             for target_chunk in removal_record.target_chunks {
                 let (chunk_index, (chunk_mmr_mp, chunk)) = target_chunk;
@@ -429,7 +427,7 @@ impl RemovalRecordList {
             );
 
             // populate sparse MMR with chunk hashes
-            let mut sparse_mmr = HashMap::<(MerkleTreeHeight, MerkleTreeNodeIndex), Digest>::new();
+            let mut sparse_mmr: HashMap<_, Digest> = HashMap::new();
             let active_window_start = u128::from(num_leafs_swbfi) * u128::from(CHUNK_SIZE);
             let all_inactive_indices = self
                 .index_sets
