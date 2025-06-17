@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use itertools::Itertools;
 use num_traits::Zero;
@@ -363,12 +362,6 @@ impl UpgradeJob {
         // the current tx, then we can move on to the next, and so on.
         loop {
             /* Prepare upgrade */
-            global_state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .last_tx_proof_upgrade_attempt = SystemTime::now();
-
             let affected_txids = upgrade_job.affected_txids();
             let mutator_set_for_tx = upgrade_job.mutator_set();
 
