@@ -70,6 +70,7 @@ const PEER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(2 * 60);
 const SYNC_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
+const PROOF_UPGRADE_INTERVAL: Duration = Duration::from_secs(10);
 const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
 
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
@@ -1436,7 +1437,8 @@ impl MainLoopHandler {
                 .proof_upgrader_task
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
-            global_state.net.sync_anchor.is_none()
+            global_state.cli().tx_proof_upgrading
+                && global_state.net.sync_anchor.is_none()
                 && global_state.proving_capability() == TxProvingCapability::SingleProof
                 && !previous_upgrade_task_is_still_running
         }
@@ -1575,16 +1577,7 @@ impl MainLoopHandler {
         let mut mp_resync_interval = time::interval(MP_RESYNC_INTERVAL);
         mp_resync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut tx_proof_upgrade_interval = if self.global_state_lock.cli().tx_proof_upgrading {
-            let tx_proof_upgrade_interval =
-                Duration::from_secs(self.global_state_lock.cli().tx_proof_upgrade_interval.get());
-            time::interval(tx_proof_upgrade_interval)
-        } else {
-            // Use a large but safe duration (1.000.000 years). If this value is
-            // too big (like Duration::MAX), the code can panic as it overflows
-            // when adding duration to instant.
-            time::interval(Duration::from_secs(60 * 60 * 24 * 365 * 1_000_000))
-        };
+        let mut tx_proof_upgrade_interval = time::interval(PROOF_UPGRADE_INTERVAL);
         tx_proof_upgrade_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
@@ -1788,7 +1781,8 @@ impl MainLoopHandler {
                     self.global_state_lock.resync_membership_proofs().await?;
                 }
 
-                // run the proof upgrader
+                // run the proof upgrader. The callee checks if proof upgrading
+                // should be done.
                 _ = tx_proof_upgrade_interval.tick() => {
                     log_slow_scope!(fn_name!() + "::select::tx_proof_upgrade_interval");
 

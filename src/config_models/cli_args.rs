@@ -1,6 +1,5 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::num::NonZeroU64;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -129,15 +128,6 @@ pub struct Args {
     /// You should have plenty of cores and probably at least 128 GB of RAM.
     #[clap(long)]
     pub(crate) tx_proof_upgrading: bool,
-
-    /// The number of seconds between each attempt to upgrade transactions in
-    /// the mempool to proofs of a higher quality. Ignored unless proof
-    /// upgrading is activated.
-    ///
-    /// Regardless of what this value is set to, two transaction proof upgrades
-    /// will never be performed simultaneously.
-    #[structopt(long, default_value = "10")]
-    pub(crate) tx_proof_upgrade_interval: NonZeroU64,
 
     /// Determines the fraction of the transaction fee consumed by this node as
     /// a reward either for upgrading transaction proofs. Ignored unless
@@ -608,7 +598,6 @@ impl From<&Args> for TritonVmProofJobOptions {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::net::Ipv6Addr;
-    use std::num::NonZero;
     use std::ops::RangeBounds;
 
     use super::*;
@@ -650,10 +639,6 @@ mod tests {
             default_args.listen_addr
         );
         assert_eq!(None, default_args.max_mempool_num_tx);
-        assert_eq!(
-            NonZero::new(10u64).unwrap(),
-            default_args.tx_proof_upgrade_interval
-        );
     }
 
     #[test]
