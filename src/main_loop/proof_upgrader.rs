@@ -22,7 +22,6 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -624,6 +623,8 @@ impl UpgradeJob {
     /// to be picked up by a miner. Returns the upgraded proof, or an error if
     /// the prover is already in use and the proof_job_options is set to not wait if
     /// prover is busy.
+    ///
+    /// Charges a fee for the upgrade task if this is desirable.
     pub(crate) async fn upgrade(
         self,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
@@ -660,10 +661,8 @@ impl UpgradeJob {
 
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
-                let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());
-
                 let single_proof = TransactionProofBuilder::new()
-                    .single_proof_witness(&single_proof_witness)
+                    .proof_collection(proof)
                     .job_queue(triton_vm_job_queue.clone())
                     .proof_job_options(proof_job_options.clone())
                     .build()
@@ -724,6 +723,7 @@ impl UpgradeJob {
                 info!("Proof-upgrader, merge: Done");
 
                 if let Some(gobbler) = maybe_gobbler {
+                    info!("Proof-upgrader: Start merging with gobbler");
                     ret = gobbler
                         .merge_with(
                             ret,
@@ -731,7 +731,8 @@ impl UpgradeJob {
                             triton_vm_job_queue,
                             proof_job_options,
                         )
-                        .await?
+                        .await?;
+                    info!("Proof-upgrader merging with gobbler: Done");
                 };
 
                 Ok((ret, expected_utxos))
