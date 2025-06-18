@@ -315,6 +315,11 @@ impl ArchivalState {
         self: &mut ArchivalState,
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
+        // abort early if mutator set update is invalid.
+        if new_block.mutator_set_update().is_err() {
+            bail!("invalid block: could not get mutator set update");
+        }
+
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
@@ -404,6 +409,7 @@ impl ArchivalState {
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
             .mutator_set_update()
+            .expect("MS update for new block must exist")
             .additions
             .len()
             .try_into()
@@ -415,7 +421,11 @@ impl ArchivalState {
                 offset: file_offset,
                 block_length: serialized_block_size as usize,
             },
-            min_aocl_index: new_block.mutator_set_accumulator_after().aocl.num_leafs()
+            min_aocl_index: new_block
+                .mutator_set_accumulator_after()
+                .expect("MS update for new block must exist")
+                .aocl
+                .num_leafs()
                 - num_additions,
             num_additions,
             block_hash_witness: HeaderToBlockHashWitness::from(new_block),
@@ -920,7 +930,10 @@ impl ArchivalState {
         let mut haystack = self.get_tip().await;
         let mut parent = self.get_tip_parent().await;
         loop {
-            if haystack.mutator_set_accumulator_after().hash() == mutator_set.hash() {
+            let haystack_msa = haystack
+                .mutator_set_accumulator_after()
+                .expect("Block from state must have mutator set after");
+            if haystack_msa.hash() == mutator_set.hash() {
                 break;
             }
 
@@ -930,8 +943,7 @@ impl ArchivalState {
             // just its hash allows us to do early return here. Parent == None
             // indicates that we've gone all the way back to genesis, with no
             // match.
-            if mutator_set.aocl.num_leafs()
-                > haystack.mutator_set_accumulator_after().aocl.num_leafs()
+            if mutator_set.aocl.num_leafs() > haystack_msa.aocl.num_leafs()
                 || search_depth > max_search_depth
                 || parent.is_none()
             {
@@ -941,7 +953,9 @@ impl ArchivalState {
             let MutatorSetUpdate {
                 removals,
                 additions,
-            } = haystack.mutator_set_update();
+            } = haystack
+                .mutator_set_update()
+                .expect("Block from state must have mutator set update");
             block_mutations.push((additions, removals));
 
             haystack = parent.unwrap();
@@ -1011,11 +1025,19 @@ impl ArchivalState {
         Some(MutatorSetUpdate::new(removal_records, addition_records))
     }
 
-    /// Update the mutator set with a block after this block has been stored to the database.
-    /// Handles rollback of the mutator set if needed but requires that all blocks that are
-    /// rolled back are present in the DB. The input block is considered chain tip. All blocks
-    /// stored in the database are assumed to be valid.
+    /// Update the mutator set with a block after this block has been stored to
+    /// the database. Handles rollback of the mutator set if needed but requires
+    /// that all blocks that are rolled back are present in the DB. The input
+    /// block is considered chain tip. All blocks stored in the database are
+    /// assumed to be valid. The given `new_block` is also assumed to be valid.
+    /// This function will return an error if the new block does not have a
+    /// mutator set update.
     pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+        // cannot get the mutator set update from new block, so abort early
+        if new_block.mutator_set_update().is_err() {
+            bail!("invalid block: could not get mutator set update");
+        }
+
         let (forwards, backwards) = {
             // Get the block digest that the mutator set was most recently synced to
             let ms_block_sync_digest = self.archival_mutator_set.get_sync_label();
@@ -1052,7 +1074,9 @@ impl ArchivalState {
             let MutatorSetUpdate {
                 additions,
                 removals,
-            } = rollback_block.mutator_set_update();
+            } = rollback_block
+                .mutator_set_update()
+                .expect("Block from state must have mutator set update");
 
             // Roll back all removal records contained in block
             for removal_record in &removals {
@@ -1103,7 +1127,9 @@ impl ArchivalState {
             let MutatorSetUpdate {
                 mut additions,
                 mut removals,
-            } = apply_forward_block.mutator_set_update();
+            } = apply_forward_block
+                .mutator_set_update()
+                .expect("Block from state must have mutator set update");
             additions.reverse();
             removals.reverse();
 
@@ -1141,7 +1167,7 @@ impl ArchivalState {
         debug!("sanity check: was AMS updated consistently with new block?");
         assert_eq!(
             new_block
-                .mutator_set_accumulator_after()
+                .mutator_set_accumulator_after().unwrap()
                 .hash(),
             self.archival_mutator_set.ams().hash().await,
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash()
@@ -1542,7 +1568,7 @@ pub(super) mod tests {
         );
 
         assert_eq!(
-            num_premine_utxos + block_1b.guesser_fee_utxos().len(),
+            num_premine_utxos + block_1b.guesser_fee_utxos().unwrap().len(),
             alice
                 .lock_guard()
                 .await
@@ -1621,7 +1647,7 @@ pub(super) mod tests {
             .hash()
             .await;
         positive_prop_ms_update_to_tip(
-            &genesis_block.mutator_set_accumulator_after(),
+            &genesis_block.mutator_set_accumulator_after().unwrap(),
             alice.lock_guard_mut().await.chain.archival_state_mut(),
             num_blocks,
         )
@@ -1678,7 +1704,7 @@ pub(super) mod tests {
             let (mock_block_1b, _) =
                 make_mock_block(network, &genesis_block, None, alice_key, rng.random()).await;
             expected_num_utxos += mock_block_1b.body().transaction_kernel.outputs.len()
-                + mock_block_1b.guesser_fee_addition_records().len();
+                + mock_block_1b.guesser_fee_addition_records().unwrap().len();
 
             // 4. Update mutator set with this new block of height 1.
             alice
@@ -2208,7 +2234,7 @@ pub(super) mod tests {
             let state = state_lock.lock_guard().await;
 
             assert_eq!(
-                block_2.mutator_set_accumulator_after().hash(),
+                block_2.mutator_set_accumulator_after().unwrap().hash(),
                 state
                     .chain
                     .archival_state()
@@ -2229,7 +2255,7 @@ pub(super) mod tests {
         // Test that the MS-update to tip functions works for blocks with inputs
         // and outputs.
         positive_prop_ms_update_to_tip(
-            &genesis_block.mutator_set_accumulator_after(),
+            &genesis_block.mutator_set_accumulator_after().unwrap(),
             premine_rec
                 .lock_guard_mut()
                 .await
@@ -2239,7 +2265,7 @@ pub(super) mod tests {
         )
         .await;
         positive_prop_ms_update_to_tip(
-            &block_1.mutator_set_accumulator_after(),
+            &block_1.mutator_set_accumulator_after().unwrap(),
             premine_rec
                 .lock_guard_mut()
                 .await
@@ -2464,7 +2490,10 @@ pub(super) mod tests {
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(network).await;
         let mut current_block = Block::genesis(network);
-        let genesis_msa = current_block.mutator_set_accumulator_after().clone();
+        let genesis_msa = current_block
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .clone();
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
         for _block_height in 1..=5 {
             let next_block = make_mock_block(
@@ -2482,7 +2511,7 @@ pub(super) mod tests {
             current_block = next_block;
         }
 
-        let current_msa = current_block.mutator_set_accumulator_after().clone();
+        let current_msa = current_block.mutator_set_accumulator_after().unwrap();
         for search_depth in 0..10 {
             println!("{search_depth}");
             if search_depth < 5 {
@@ -2535,7 +2564,11 @@ pub(super) mod tests {
             // After each applied block, all AOCL leaf indices must match
             // expected values.
             for block in &blocks {
-                let min_aocl_index_next = block.mutator_set_accumulator_after().aocl.num_leafs();
+                let min_aocl_index_next = block
+                    .mutator_set_accumulator_after()
+                    .unwrap()
+                    .aocl
+                    .num_leafs();
                 for aocl_index in min_aocl_index..min_aocl_index_next {
                     let found_block_digest = archival_state
                         .canonical_block_digest_of_aocl_index(aocl_index)
@@ -2651,7 +2684,7 @@ pub(super) mod tests {
         let wallet = WalletEntropy::new_random();
         let mut archival_state = make_test_archival_state(network).await;
         let genesis_block = Block::genesis(network);
-        let genesis_msa = &genesis_block.mutator_set_accumulator_after();
+        let genesis_msa = &genesis_block.mutator_set_accumulator_after().unwrap();
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
 
         let block_1a = make_mock_block(
@@ -2672,8 +2705,8 @@ pub(super) mod tests {
         )
         .await
         .0;
-        let block_1a_msa = &block_1a.mutator_set_accumulator_after();
-        let block_1b_msa = &block_1b.mutator_set_accumulator_after();
+        let block_1a_msa = &block_1a.mutator_set_accumulator_after().unwrap();
+        let block_1b_msa = &block_1b.mutator_set_accumulator_after().unwrap();
 
         // 1a is tip
         let search_depth = 1;
@@ -2707,7 +2740,7 @@ pub(super) mod tests {
         let wallet = WalletEntropy::new_random();
         let mut archival_state = make_test_archival_state(network).await;
         let genesis_block = Block::genesis(network);
-        let genesis_msa = &genesis_block.mutator_set_accumulator_after();
+        let genesis_msa = &genesis_block.mutator_set_accumulator_after().unwrap();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
 
         let block_1a = make_mock_block(network, &genesis_block, None, cb_beneficiary, rng.random())
@@ -2722,10 +2755,10 @@ pub(super) mod tests {
         let block_2b = make_mock_block(network, &block_1b, None, cb_beneficiary, rng.random())
             .await
             .0;
-        let block_1a_msa = &block_1a.mutator_set_accumulator_after();
-        let block_2a_msa = &block_2a.mutator_set_accumulator_after();
-        let block_1b_msa = &block_1b.mutator_set_accumulator_after();
-        let block_2b_msa = &block_2b.mutator_set_accumulator_after();
+        let block_1a_msa = &block_1a.mutator_set_accumulator_after().unwrap();
+        let block_2a_msa = &block_2a.mutator_set_accumulator_after().unwrap();
+        let block_1b_msa = &block_1b.mutator_set_accumulator_after().unwrap();
+        let block_2b_msa = &block_2b.mutator_set_accumulator_after().unwrap();
 
         // 1a is tip
         let search_depth = 10;

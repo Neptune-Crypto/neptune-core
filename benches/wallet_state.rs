@@ -133,7 +133,7 @@ mod maintain_membership_proofs {
             rt.block_on(async {
                 wallet_state
                     .update_wallet_state_with_new_block(
-                        &genesis.mutator_set_accumulator_after(),
+                        &genesis.mutator_set_accumulator_after().unwrap(),
                         &block1,
                     )
                     .await
@@ -156,7 +156,7 @@ mod maintain_membership_proofs {
                 rt.block_on(async {
                     wallet_state
                         .update_wallet_state_with_new_block(
-                            &block1.mutator_set_accumulator_after(),
+                            &block1.mutator_set_accumulator_after().unwrap(),
                             &block2,
                         )
                         .await
