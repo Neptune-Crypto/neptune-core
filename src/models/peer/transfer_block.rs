@@ -83,8 +83,8 @@ mod tests {
     use super::*;
     use crate::models::peer::Network;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
-    use crate::tests::shared::invalid_empty_block;
+    use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared_tokio_runtime;
 
     #[test]

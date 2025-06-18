@@ -1879,9 +1879,9 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::tests::shared::get_dummy_peer_incoming;
-    use crate::tests::shared::get_test_genesis_setup;
-    use crate::tests::shared::invalid_empty_block;
+    use crate::tests::shared::blocks::invalid_empty_block;
+    use crate::tests::shared::globalstate::get_dummy_peer_incoming;
+    use crate::tests::shared::globalstate::get_test_genesis_setup;
     use crate::tests::shared_tokio_runtime;
     use crate::MINER_CHANNEL_CAPACITY;
 
@@ -2020,7 +2020,7 @@ mod tests {
         use test_strategy::proptest;
 
         use super::*;
-        use crate::tests::shared::get_dummy_socket_address;
+        use crate::tests::shared::globalstate::get_dummy_socket_address;
 
         #[proptest]
         fn batch_request_heights_prop(#[strategy(0u64..100_000_000_000)] own_height: u64) {
@@ -2461,7 +2461,7 @@ mod tests {
         use super::*;
         use crate::models::peer::PeerMessage;
         use crate::models::peer::TransferConnectionStatus;
-        use crate::tests::shared::get_dummy_peer_connection_data_genesis;
+        use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
         use crate::tests::shared::to_bytes;
 
         #[apply(shared_tokio_runtime)]

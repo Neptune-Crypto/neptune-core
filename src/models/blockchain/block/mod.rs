@@ -1144,11 +1144,11 @@ pub(crate) mod tests {
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::fake_valid_successor_for_tests;
-    use crate::tests::shared::invalid_block_with_transaction;
-    use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_transaction;
-    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+    use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::make_mock_block;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::archival_mmr::ArchivalMmr;
@@ -1508,7 +1508,7 @@ pub(crate) mod tests {
         use crate::mine_loop::tests::make_coinbase_transaction_from_state;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::KeyType;
-        use crate::tests::shared::fake_valid_successor_for_tests;
+        use crate::tests::shared::blocks::fake_valid_successor_for_tests;
         use crate::triton_vm_job_queue::TritonVmJobPriority;
 
         #[traced_test]
@@ -1815,7 +1815,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
-        use crate::tests::shared::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
+        use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
 
         #[apply(shared_tokio_runtime)]
         async fn guesser_fee_addition_records_are_consistent() {

@@ -1957,13 +1957,13 @@ mod tests {
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::fake_valid_block_for_tests;
-    use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
-    use crate::tests::shared::get_dummy_handshake_data_for_genesis;
-    use crate::tests::shared::get_dummy_peer_connection_data_genesis;
-    use crate::tests::shared::get_dummy_socket_address;
-    use crate::tests::shared::get_test_genesis_setup;
-    use crate::tests::shared::invalid_empty_single_proof_transaction;
+    use crate::tests::shared::blocks::fake_valid_block_for_tests;
+    use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
+    use crate::tests::shared::globalstate::get_dummy_handshake_data_for_genesis;
+    use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
+    use crate::tests::shared::globalstate::get_dummy_socket_address;
+    use crate::tests::shared::globalstate::get_test_genesis_setup;
+    use crate::tests::shared::mock_tx::invalid_empty_single_proof_transaction;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
     use crate::tests::shared_tokio_runtime;
@@ -3584,7 +3584,6 @@ mod tests {
 
     mod block_proposals {
         use super::*;
-        use crate::tests::shared::get_dummy_handshake_data_for_genesis;
 
         struct TestSetup {
             peer_loop_handler: PeerLoopHandler,
@@ -3711,7 +3710,7 @@ mod tests {
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::state::wallet::transaction_output::TxOutput;
-        use crate::tests::shared::mock_genesis_global_state;
+        use crate::tests::shared::globalstate::mock_genesis_global_state;
 
         async fn tx_of_proof_quality(
             network: Network,
@@ -3854,7 +3853,7 @@ mod tests {
 
     mod sync_challenges {
         use super::*;
-        use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn;
+        use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

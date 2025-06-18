@@ -45,7 +45,7 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
     use crate::models::state::Digest;
-    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::mock_tx::make_mock_transaction;
 
     /// tests scanning for announced utxos with a symmetric key
     #[proptest]

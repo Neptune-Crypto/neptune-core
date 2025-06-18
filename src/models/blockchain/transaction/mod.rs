@@ -307,8 +307,8 @@ pub(crate) mod tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::tests::shared::make_mock_transaction;
-    use crate::tests::shared::mock_block_from_transaction_and_msa;
+    use crate::tests::shared::blocks::mock_block_from_transaction_and_msa;
+    use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;

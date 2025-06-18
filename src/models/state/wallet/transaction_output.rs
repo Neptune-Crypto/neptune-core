@@ -671,7 +671,7 @@ mod tests {
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
 
     impl TxOutput {
