@@ -240,7 +240,9 @@ impl ProofOfWorkPuzzle {
     /// Return a PoW puzzle assuming that the caller has already set the correct
     /// guesser digest.
     fn new(block_proposal: Block, latest_block_header: BlockHeader) -> Self {
-        let guesser_reward = block_proposal.total_guesser_reward();
+        let guesser_reward = block_proposal
+            .total_guesser_reward()
+            .expect("Block proposal must have well-defined guesser reward");
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block_proposal);
         let threshold = latest_block_header.difficulty.target();
         let prev_block = block_proposal.header().prev_block_digest;
@@ -2101,10 +2103,15 @@ impl NeptuneRPCServer {
             Some(block) => {
                 let aocl_leaf_index = {
                     // Find matching AOCL leaf index that must be in this block
-                    let last_aocl_index_in_block =
-                        block.mutator_set_accumulator_after().aocl.num_leafs() - 1;
+                    let last_aocl_index_in_block = block
+                        .mutator_set_accumulator_after()
+                        .expect("Block from state must have mutator set after")
+                        .aocl
+                        .num_leafs()
+                        - 1;
                     let num_outputs_in_block: u64 = block
                         .mutator_set_update()
+                        .expect("Block from state must have mutator set update")
                         .additions
                         .len()
                         .try_into()
@@ -3360,7 +3367,9 @@ impl RPC for NeptuneRPCServer {
         let state = self.state.lock_guard().await;
         let tip = state.chain.light_state();
         let tip_hash = tip.hash();
-        let tip_msa = tip.mutator_set_accumulator_after();
+        let tip_msa = tip
+            .mutator_set_accumulator_after()
+            .expect("Block from state must have mutator set after");
 
         Ok(state
             .wallet_state
@@ -3574,6 +3583,7 @@ impl RPC for NeptuneRPCServer {
             .chain
             .light_state()
             .mutator_set_accumulator_after()
+            .expect("Block from state must have mutator set after")
             .hash();
 
         let mempool_transactions = mempool_txkids
@@ -3753,20 +3763,21 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::transaction_kernel::tests::pseudorandom_transaction_kernel;
+    use crate::models::blockchain::transaction::transaction_kernel::tests::propcompose_txkernel_with_lengths;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::rpc_server::NeptuneRPCServer;
+    use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::random_transaction_kernel;
-    use crate::tests::shared::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
     use crate::Block;
+
+    const NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1: usize = 7;
 
     async fn test_rpc_server(
         wallet_entropy: WalletEntropy,
@@ -3918,7 +3929,7 @@ mod tests {
         let _ = rpc_server.clone().mempool_overview(ctx, token, 0, 20).await;
         let _ = rpc_server
             .clone()
-            .mempool_tx_kernel(ctx, token, random_transaction_kernel().txid())
+            .mempool_tx_kernel(ctx, token, Default::default())
             .await;
         let _ = rpc_server.clone().clear_all_standings(ctx, token).await;
         let _ = rpc_server
@@ -4506,8 +4517,11 @@ mod tests {
     }
 
     #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn public_announcements_in_block_test() {
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn public_announcements_in_block_test(
+        #[strategy(propcompose_txkernel_with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
+        tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+    ) {
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
@@ -4515,38 +4529,39 @@ mod tests {
             cli_args::Args::default_with_network(network),
         )
         .await;
-        let mut rng = rand::rng();
-        let num_public_announcements_block1 = 7;
-        let num_inputs = 0;
-        let num_outputs = 2;
-        let tx_block1 = pseudorandom_transaction_kernel(
-            rng.random(),
-            num_inputs,
-            num_outputs,
-            num_public_announcements_block1,
-        );
         let tx_block1 = Transaction {
             kernel: tx_block1,
             proof: TransactionProof::invalid(),
         };
+        let fee = tx_block1.kernel.fee;
         let block1 = invalid_block_with_transaction(&Block::genesis(network), tx_block1);
-        rpc_server.state.set_new_tip(block1.clone()).await.unwrap();
+        let set_new_tip_result = rpc_server.state.set_new_tip(block1.clone()).await;
+        assert!(fee.is_negative() == set_new_tip_result.is_err());
 
         let token = cookie_token(&rpc_server).await;
         let ctx = context::current();
-        let block1_public_announcements = rpc_server
+
+        let Some(block1_public_announcements) = rpc_server
             .clone()
             .public_announcements_in_block(ctx, token, BlockSelector::Height(1u64.into()))
             .await
             .unwrap()
-            .unwrap();
+        else {
+            // If the fee was negative, the block was invalid and not stored.
+            // So the RPC should return None.
+            assert!(fee.is_negative());
+
+            // And in this case we cannot proceed with the test.
+            return Ok(());
+        };
+
         assert_eq!(
             block1.body().transaction_kernel.public_announcements,
             block1_public_announcements,
             "Must return expected public announcements"
         );
         assert_eq!(
-            num_public_announcements_block1,
+            NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1,
             block1_public_announcements.len(),
             "Must return expected number of public announcements"
         );
@@ -4912,7 +4927,7 @@ mod tests {
                 block1.set_header_guesser_digest(guesser_digest);
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
-                    block1.total_guesser_reward(),
+                    block1.total_guesser_reward().unwrap(),
                     pow_puzzle.total_guesser_reward
                 );
 

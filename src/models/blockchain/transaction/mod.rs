@@ -454,7 +454,7 @@ pub(crate) mod tests {
                 mined.mutator_set_accumulator,
                 Network::Main,
             );
-            let ms_update = block.mutator_set_update();
+            let ms_update = block.mutator_set_update().unwrap();
             Transaction::new_with_primitive_witness_ms_data(
                 to_be_updated,
                 ms_update.additions,

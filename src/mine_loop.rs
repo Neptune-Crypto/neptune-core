@@ -527,13 +527,17 @@ pub(crate) fn composer_outputs(
 
 /// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
 /// transaction.
+///
+/// # Panics
+///
+///  - If `latest_block` has a negative transaction fee
 pub(super) fn prepare_coinbase_transaction_stateless(
     latest_block: &Block,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     network: Network,
 ) -> (TxOutputList, TransactionDetails) {
-    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
+    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().unwrap();
     let next_block_height: BlockHeight = latest_block.header().height.next();
     info!("Creating coinbase for block of height {next_block_height}.");
 
@@ -591,6 +595,8 @@ pub(crate) async fn create_block_transaction(
     .await
 }
 
+/// # Panics
+///  - If predecessor has a negative transaction fee
 pub(crate) async fn create_block_transaction_from(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,
@@ -600,7 +606,9 @@ pub(crate) async fn create_block_transaction_from(
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
+    let predecessor_block_ms = predecessor_block
+        .mutator_set_accumulator_after()
+        .expect("predecessor should be valid");
     let mutator_set_hash = predecessor_block_ms.hash();
     debug!("Creating block transaction with mutator set hash: {mutator_set_hash}",);
 
@@ -645,7 +653,7 @@ pub(crate) async fn create_block_transaction_from(
     // Guarantees that some merge happens in below loop, which sets merge-bit.
     if transactions_to_merge.is_empty() {
         let nop = TransactionDetails::nop(
-            predecessor_block.mutator_set_accumulator_after(),
+            predecessor_block_ms,
             timestamp,
             global_state_lock.cli().network,
         );
@@ -1061,6 +1069,7 @@ pub(crate) async fn mine(
 pub(crate) mod tests {
     use std::hint::black_box;
 
+    use arbitrary::Arbitrary;
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
     use block_header::tests::random_block_header;
@@ -1071,6 +1080,7 @@ pub(crate) mod tests {
     use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
+    use rand::RngCore;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1080,6 +1090,7 @@ pub(crate) mod tests {
     use crate::job_queue::errors::JobHandleError;
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -1095,7 +1106,6 @@ pub(crate) mod tests {
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::random_transaction_kernel;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
@@ -1143,8 +1153,7 @@ pub(crate) mod tests {
     /// update the difficulty field, as this applies to the next block and only
     /// changes as a result of the timestamp of this block.
     pub(crate) fn mine_iteration_for_tests(block: &mut Block, rng: &mut StdRng) {
-        let nonce = rng.random();
-        block.set_header_nonce(nonce);
+        block.set_header_nonce(rng.random());
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds
@@ -1177,7 +1186,10 @@ pub(crate) mod tests {
                 make_mock_transaction_with_mutator_set_hash(
                     vec![],
                     outputs,
-                    previous_block.mutator_set_accumulator_after().hash(),
+                    previous_block
+                        .mutator_set_accumulator_after()
+                        .unwrap()
+                        .hash(),
                 ),
                 dummy_expected_utxo(),
             )
@@ -1758,7 +1770,7 @@ pub(crate) mod tests {
             let transaction = make_mock_transaction_with_mutator_set_hash(
                 vec![],
                 vec![],
-                prev_block.mutator_set_accumulator_after().hash(),
+                prev_block.mutator_set_accumulator_after().unwrap().hash(),
             );
 
             let guesser_key = HashLockKey::from_preimage(Digest::default());
@@ -2089,10 +2101,17 @@ pub(crate) mod tests {
         let cofactor = (1.0 - (1.0 / f64::from(difficulty))).log10();
         let k = (-4.0 / cofactor).ceil() as usize;
 
+        let mut rng = rand::rng();
+        let mut unstructured_source = vec![0u8; TransactionKernelProxy::size_hint(2).0];
+        rng.fill_bytes(&mut unstructured_source);
+        let mut unstructured = arbitrary::Unstructured::new(&unstructured_source);
+
         let mut predecessor_header = random_block_header();
         predecessor_header.difficulty = Difficulty::from(difficulty);
         let predecessor_body = BlockBody::new(
-            random_transaction_kernel(),
+            TransactionKernelProxy::arbitrary(&mut unstructured)
+                .unwrap()
+                .into_kernel(),
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),
@@ -2109,13 +2128,14 @@ pub(crate) mod tests {
         successor_header.prev_block_digest = predecessor_block.hash();
         // note that successor's difficulty is random
         let successor_body = BlockBody::new(
-            random_transaction_kernel(),
+            TransactionKernelProxy::arbitrary(&mut unstructured)
+                .unwrap()
+                .into_kernel(),
             random_mutator_set_accumulator(),
             random_mmra(),
             random_mmra(),
         );
 
-        let mut rng = rand::rng();
         let mut counter = 0;
         let mut successor_block = Block::new(
             successor_header,
@@ -2385,7 +2405,7 @@ pub(crate) mod tests {
             let transaction = make_mock_transaction_with_mutator_set_hash(
                 vec![],
                 vec![],
-                prev_block.mutator_set_accumulator_after().hash(),
+                prev_block.mutator_set_accumulator_after().unwrap().hash(),
             );
 
             // gen guesser key

@@ -1,14 +1,8 @@
 use std::collections::HashMap;
-use std::env;
 use std::fmt::Debug;
-use std::fs::File;
-use std::io::Read;
 use std::net::SocketAddr;
-use std::path::Path;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -23,18 +17,12 @@ use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use proptest::collection::vec;
+use proptest::prelude::BoxedStrategy;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
 use proptest_arbitrary_interop::arb;
-use rand::distr::Alphanumeric;
-use rand::distr::SampleString;
-use rand::random;
-use rand::rngs::StdRng;
-use rand::seq::SliceRandom;
 use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -44,8 +32,7 @@ use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
-use tracing::debug;
-use tracing::Span;
+use tracing::warn;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -71,7 +58,8 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::transaction_kernel::tests::pseudorandom_transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel::tests::propcompose_txkernel_with_lengths;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
@@ -79,7 +67,6 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -112,6 +99,7 @@ use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::tests::shared::files::unit_test_data_directory;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -120,6 +108,43 @@ use crate::HandshakeData;
 use crate::RPCServerToMain;
 use crate::PEER_CHANNEL_CAPACITY;
 use crate::VERSION;
+
+pub mod files;
+
+/// Ubiquitous container holding any combination of randomness used in the test helpers; implements both
+/// random and `proptest` generation. Useful when helper needs few random values and a call to it becomes
+/// cluttered.
+#[derive(arbitrary::Arbitrary, Debug, Clone, PartialEq, Eq)]
+pub struct Randomness<const BA: usize, const D: usize> {
+    pub bytes_arr: [[u8; 32]; BA],
+    pub digests: [Digest; D],
+}
+impl<const BA: usize, const D: usize> rand::distr::Distribution<Randomness<BA, D>>
+    for rand::distr::StandardUniform
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Randomness<BA, D> {
+        let mut bytes = [[Default::default(); 32]; BA];
+        let mut digests = [Default::default(); D];
+        for b in &mut bytes {
+            rng.fill_bytes(b);
+        }
+        for d in &mut digests {
+            *d = rng.random();
+        }
+        Randomness {
+            bytes_arr: bytes,
+            digests,
+        }
+    }
+}
+impl<const BA: usize, const D: usize> Default for Randomness<BA, D> {
+    fn default() -> Self {
+        Self {
+            bytes_arr: [[Default::default(); 32]; BA],
+            digests: [Default::default(); D],
+        }
+    }
+}
 
 /// Return an empty peer map
 pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
@@ -262,10 +287,9 @@ pub(crate) async fn mock_genesis_global_state(
 /// A state with a premine UTXO and self-mined blocks. Both composing and
 /// guessing was done by the returned entity. Tip has height of
 /// `num_blocks_mined`.
-pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
+pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MINED: usize>(
     cli_args: cli_args::Args,
-    rng: &mut T,
-    num_blocks_mined: usize,
+    coinbase_sender_randomness_coll: [Digest; NUM_BLOCKS_MINED],
 ) -> GlobalStateLock {
     let network = cli_args.network;
     let wallet = WalletEntropy::devnet_wallet();
@@ -274,8 +298,7 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
         mock_genesis_global_state(2, wallet.clone(), cli_args.clone()).await;
     let mut previous_block = Block::genesis(network);
 
-    for _ in 0..num_blocks_mined {
-        let guesser_preimage = wallet.guesser_preimage(previous_block.hash());
+    for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) =
             make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 network,
@@ -284,8 +307,8 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
                 vec![],
                 None,
                 own_key,
-                rng.random(),
-                (0.5, guesser_preimage),
+                coinbase_sender_randomness,
+                (0.5, wallet.guesser_preimage(previous_block.hash())),
             )
             .await;
 
@@ -346,21 +369,6 @@ pub(crate) async fn add_block_to_archival_state(
         .await;
 
     Ok(())
-}
-
-/// Create a randomly named `DataDirectory` so filesystem-bound tests can run
-/// in parallel. If this is not done, parallel execution of unit tests will
-/// fail as they each hold a lock on the database.
-///
-/// For now we use databases on disk. In-memory databases would be nicer.
-pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
-    let mut rng = rand::rng();
-    let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
-    let tmp_root: PathBuf = env::temp_dir()
-        .join(format!("neptune-unit-tests-{}", user))
-        .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
-
-    DataDirectory::get(Some(tmp_root), network)
 }
 
 // Box<Vec<T>> is unnecessary because Vec<T> is already heap-allocated.
@@ -453,217 +461,12 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
-/// Return path for the directory containing test data, like proofs and block
-/// data.
-pub(crate) fn test_helper_data_dir() -> PathBuf {
-    const TEST_DATA_DIR_NAME: &str = "test_data/";
-    let mut path = PathBuf::new();
-    path.push(TEST_DATA_DIR_NAME);
-    path
-}
-
-/// Load a list of proof-servers from test data directory
-fn load_servers() -> Vec<String> {
-    let mut server_list_path = test_helper_data_dir();
-    server_list_path.push(Path::new("proof_servers").with_extension("txt"));
-    let Ok(mut input_file) = File::open(server_list_path.clone()) else {
-        debug!(
-            "cannot proof-server list '{}' -- file might not exist",
-            server_list_path.display()
-        );
-        return vec![];
-    };
-    let mut file_contents = vec![];
-    if input_file.read_to_end(&mut file_contents).is_err() {
-        debug!("cannot read file '{}'", server_list_path.display());
-        return vec![];
+// TODO ditch this by rewriting the underlying `Strategy` with `IntoRange`
+proptest::prop_compose! {
+    pub fn propcompose_txkernel() (num_inputs in 1usize..=5, num_outputs in 1usize..=6, num_public_announcements in 0usize..5)
+    (r in propcompose_txkernel_with_lengths(num_inputs, num_outputs, num_public_announcements)) -> TransactionKernel {
+        r
     }
-    let Ok(file_as_string) = String::from_utf8(file_contents) else {
-        debug!(
-            "cannot parse file '{}' -- is it valid utf8?",
-            server_list_path.display()
-        );
-        return vec![];
-    };
-    file_as_string.lines().map(|s| s.to_string()).collect()
-}
-
-/// Tries to load a file from disk, returns the bytes if successful.
-pub(crate) fn try_load_file_from_disk(path: &Path) -> Option<Vec<u8>> {
-    let Ok(mut input_file) = File::open(path) else {
-        debug!("cannot open file '{}' -- might not exist", path.display());
-        return None;
-    };
-
-    let mut file_contents = vec![];
-    if input_file.read_to_end(&mut file_contents).is_err() {
-        debug!("cannot read file '{}'", path.display());
-        return None;
-    }
-
-    Some(file_contents)
-}
-
-/// Return the specified file from a server, along with the name of the server
-/// providing the result.
-pub(crate) fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, String)> {
-    const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
-
-    fn get_test_name_from_tracing() -> String {
-        match Span::current().metadata().map(|x| x.name()) {
-            Some(test_name) => test_name.to_owned(),
-            None => "unknown".to_owned(),
-        }
-    }
-
-    fn attempt_to_get_test_name() -> String {
-        let thread = std::thread::current();
-        match thread.name() {
-            Some(test_name) => {
-                if test_name.eq("tokio-runtime-worker") {
-                    get_test_name_from_tracing()
-                } else {
-                    test_name.to_owned()
-                }
-            }
-            None => get_test_name_from_tracing(),
-        }
-    }
-
-    let mut servers = load_servers();
-    servers.shuffle(&mut rand::rng());
-
-    // Add test name to request allow server to see which test requires this
-    // file.
-    let mut headers = clienter::HttpHeaders::default();
-    headers.insert(
-        TEST_NAME_HTTP_HEADER_KEY.to_string(),
-        attempt_to_get_test_name(),
-    );
-
-    for server in servers {
-        let server_ = server.clone();
-        let filename_ = filename.clone();
-        let headers_ = headers.clone();
-        let handle = std::thread::spawn(move || {
-            let url = format!("{}{}", server_, filename_);
-
-            debug!("requesting: <{url}>");
-
-            let uri: clienter::Uri = url.into();
-
-            let mut http_client = clienter::HttpClient::new();
-            http_client.timeout = Some(Duration::from_secs(10));
-            http_client.headers = headers_;
-            let request = http_client.request(clienter::HttpMethod::GET, uri);
-
-            // note: send() blocks
-            let Ok(mut response) = http_client.send(&request) else {
-                println!(
-                    "server '{}' failed for file '{}'; trying next ...",
-                    server_.clone(),
-                    filename_
-                );
-
-                return None;
-            };
-
-            // only retrieve body if we got a 2xx code.
-            // addresses #477
-            // https://github.com/Neptune-Crypto/neptune-core/issues/477
-            let body = if response.status.is_success() {
-                response.body()
-            } else {
-                Ok(vec![])
-            };
-
-            Some((response.status, body))
-        });
-
-        let Some((status_code, body)) = handle.join().unwrap() else {
-            eprintln!("Could not connect to server {server}.");
-            continue;
-        };
-
-        if !status_code.is_success() {
-            eprintln!("{server} responded with {status_code}");
-            continue;
-        }
-
-        let Ok(file_contents) = body else {
-            eprintln!(
-                "error reading file '{}' from server '{}'; trying next ...",
-                filename, server
-            );
-
-            continue;
-        };
-
-        return Some((file_contents, server));
-    }
-
-    println!("No known servers serve file `{}`", filename);
-
-    None
-}
-
-pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    if rng.next_u32() % 2 == 0 {
-        None
-    } else {
-        Some(thing)
-    }
-}
-
-pub fn pseudorandom_amount(seed: [u8; 32]) -> NativeCurrencyAmount {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let number: u128 = rng.random::<u128>() >> 10;
-    NativeCurrencyAmount::from_nau(number.try_into().unwrap())
-}
-
-pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    (
-        rng.random(),
-        NativeCurrencyAmount::coins(rng.random_range(0..42000000)).to_native_coins(),
-    )
-        .into()
-}
-
-pub fn random_transaction_kernel() -> TransactionKernel {
-    let mut rng = rand::rng();
-    let num_inputs = 1 + (rng.next_u32() % 5) as usize;
-    let num_outputs = 1 + (rng.next_u32() % 6) as usize;
-    let num_public_announcements = (rng.next_u32() % 5) as usize;
-    pseudorandom_transaction_kernel(
-        rng.random(),
-        num_inputs,
-        num_outputs,
-        num_public_announcements,
-    )
-}
-
-pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let len = 10 + (rng.next_u32() % 50) as usize;
-    let message = (0..len).map(|_| rng.random()).collect_vec();
-    PublicAnnouncement { message }
-}
-
-pub fn random_public_announcement() -> PublicAnnouncement {
-    let mut rng = rand::rng();
-    pseudorandom_public_announcement(rng.random::<[u8; 32]>())
-}
-
-pub fn random_amount() -> NativeCurrencyAmount {
-    let mut rng = rand::rng();
-    pseudorandom_amount(rng.random::<[u8; 32]>())
-}
-
-pub fn random_option<T>(thing: T) -> Option<T> {
-    let mut rng = rand::rng();
-    pseudorandom_option(rng.random::<[u8; 32]>(), thing)
 }
 
 pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
@@ -791,14 +594,6 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     }
 }
 
-pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
-    let mut rng = rand::rng();
-    let item: Digest = rng.random();
-    let sender_randomness: Digest = rng.random();
-    let receiver_preimage: Digest = rng.random();
-    (item, sender_randomness, receiver_preimage)
-}
-
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord>,
@@ -806,27 +601,21 @@ pub fn make_mock_transaction_with_wallet(
     fee: NativeCurrencyAmount,
     _wallet_state: &WalletState,
     timestamp: Option<Timestamp>,
-) -> Transaction {
-    let timestamp = match timestamp {
-        Some(ts) => ts,
-        None => Timestamp::now(),
-    };
-    let kernel = TransactionKernelProxy {
+) -> BoxedStrategy<Transaction> {
+    transaction_kernel::tests::propcompose_txkernel_with_usualtxdata(
         inputs,
         outputs,
-        public_announcements: vec![],
         fee,
-        timestamp,
-        coinbase: None,
-        mutator_set_hash: random(),
-        merge_bit: false,
-    }
-    .into_kernel();
-
-    Transaction {
+        match timestamp {
+            Some(ts) => ts,
+            None => Timestamp::now(),
+        },
+    )
+    .prop_map(|kernel| Transaction {
         kernel,
         proof: TransactionProof::invalid(),
-    }
+    })
+    .boxed()
 }
 
 /// Create a block containing the supplied transaction kernel, starting from
@@ -883,7 +672,7 @@ pub(crate) fn invalid_block_with_transaction(
         difficulty: previous_block.header().difficulty,
     };
 
-    let mut next_mutator_set = previous_block.mutator_set_accumulator_after().clone();
+    let mut next_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmr.append(previous_block.hash());
 
@@ -918,12 +707,10 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
     outputs: Vec<AdditionRecord>,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
-    seed: [u8; 32],
+    coinbase_sender_randomness: Digest,
     guesser_parameters: (f64, Digest),
 ) -> (Block, Vec<ExpectedUtxo>) {
     let (guesser_fraction, guesser_preimage) = guesser_parameters;
-
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
 
     // Build coinbase UTXO and associated data
     let block_timestamp = match block_timestamp {
@@ -931,7 +718,6 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         None => previous_block.kernel.header.timestamp + network.target_block_interval(),
     };
 
-    let coinbase_sender_randomness: Digest = rng.random();
     let composer_parameters = ComposerParameters::new(
         composer_key.to_address().into(),
         coinbase_sender_randomness,
@@ -997,7 +783,7 @@ pub(crate) async fn make_mock_block(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
-    seed: [u8; 32],
+    coinbase_sender_randomness: Digest,
 ) -> (Block, Vec<ExpectedUtxo>) {
     make_mock_block_with_inputs_and_outputs(
         network,
@@ -1006,7 +792,7 @@ pub(crate) async fn make_mock_block(
         vec![],
         block_timestamp,
         composer_key,
-        seed,
+        coinbase_sender_randomness,
     )
     .await
 }
@@ -1022,7 +808,7 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
     outputs: Vec<AdditionRecord>,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
-    seed: [u8; 32],
+    coinbase_sender_randomness: Digest,
 ) -> (Block, Vec<ExpectedUtxo>) {
     make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
         network,
@@ -1031,7 +817,7 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
         outputs,
         block_timestamp,
         composer_key,
-        seed,
+        coinbase_sender_randomness,
         (0f64, Digest::default()),
     )
     .await
@@ -1112,7 +898,7 @@ pub(crate) fn invalid_empty_block(network: Network, predecessor: &Block) -> Bloc
     let tx = make_mock_transaction_with_mutator_set_hash(
         vec![],
         vec![],
-        predecessor.mutator_set_accumulator_after().hash(),
+        predecessor.mutator_set_accumulator_after().unwrap().hash(),
     );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, network.target_block_interval())
@@ -1138,7 +924,7 @@ pub(crate) fn invalid_empty_block_with_timestamp(
     let tx = make_mock_transaction_with_mutator_set_hash_and_timestamp(
         vec![],
         vec![],
-        predecessor.mutator_set_accumulator_after().hash(),
+        predecessor.mutator_set_accumulator_after().unwrap().hash(),
         timestamp,
     );
     Block::block_template_invalid_proof(predecessor, tx, timestamp, network.target_block_interval())
@@ -1178,7 +964,7 @@ pub(crate) async fn fake_valid_block_from_tx_for_tests(
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(network, predecessor, tx).await;
 
-    let mut rng = StdRng::from_seed(seed);
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
     while !block.has_proof_of_work(network, predecessor.header()) {
         mine_iteration_for_tests(&mut block, &mut rng);
     }
@@ -1254,7 +1040,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         // create the nop-tx and merge into the coinbase transaction to set the
         // merge bit to allow the tx to be included in a block.
         let nop_details = TransactionDetails::nop(
-            predecessor_block.mutator_set_accumulator_after(),
+            predecessor_block.mutator_set_accumulator_after().unwrap(),
             timestamp,
             network,
         );
@@ -1263,10 +1049,9 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         selected_mempool_txs = vec![nop_transaction];
     }
 
-    let mut rng = StdRng::from_seed(shuffle_seed);
     for tx_to_include in selected_mempool_txs {
         block_transaction =
-            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.random())
+            fake_merge_transactions_for_tests(block_transaction, tx_to_include, shuffle_seed)
                 .await
                 .expect("Must be able to merge transactions in mining context");
     }
@@ -1277,16 +1062,16 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
 async fn fake_block_successor(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
     with_valid_pow: bool,
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
     fake_block_successor_with_merged_tx(
         predecessor,
         timestamp,
-        seed,
         with_valid_pow,
         vec![],
+        rness,
         network,
     )
     .await
@@ -1295,16 +1080,15 @@ async fn fake_block_successor(
 pub async fn fake_block_successor_with_merged_tx(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
     with_valid_pow: bool,
     txs: Vec<Transaction>,
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
-    let mut rng = StdRng::from_seed(seed);
-
+    let (mut seed_bytes, mut seed_digests) = (rness.bytes_arr.to_vec(), rness.digests.to_vec());
     let composer_parameters = ComposerParameters::new(
-        GenerationReceivingAddress::derive_from_seed(rng.random()).into(),
-        rng.random(),
+        GenerationReceivingAddress::derive_from_seed(seed_digests.pop().unwrap()).into(),
+        seed_digests.pop().unwrap(),
         None,
         0.5f64,
         FeeNotificationPolicy::OffChain,
@@ -1313,7 +1097,7 @@ pub async fn fake_block_successor_with_merged_tx(
         predecessor,
         composer_parameters,
         timestamp,
-        rng.random(),
+        seed_bytes.pop().unwrap(),
         txs,
         network,
     )
@@ -1321,7 +1105,13 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(network, predecessor, block_tx, rng.random()).await
+        fake_valid_block_from_tx_for_tests(
+            network,
+            predecessor,
+            block_tx,
+            seed_bytes.pop().unwrap(),
+        )
+        .await
     } else {
         fake_valid_block_proposal_from_tx(network, predecessor, block_tx).await
     }
@@ -1330,19 +1120,19 @@ pub async fn fake_block_successor_with_merged_tx(
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, false, network).await
+    fake_block_successor(predecessor, timestamp, false, rness, network).await
 }
 
 pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
-    seed: [u8; 32],
+    rness: Randomness<2, 2>,
     network: Network,
 ) -> Block {
-    fake_block_successor(predecessor, timestamp, seed, true, network).await
+    fake_block_successor(predecessor, timestamp, true, rness, network).await
 }
 
 /// Create a block with coinbase going to self. For testing purposes.
@@ -1352,13 +1142,13 @@ pub(crate) async fn fake_valid_successor_for_tests(
 /// will not pass `triton_vm::verify`, as its validity is only mocked.
 pub(crate) async fn fake_valid_block_for_tests(
     state_lock: &GlobalStateLock,
-    seed: [u8; 32],
+    rness: Randomness<2, 2>,
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
-        seed,
+        rness,
         state_lock.cli().network,
     )
     .await
@@ -1373,13 +1163,18 @@ pub(crate) async fn fake_valid_block_for_tests(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     predecessor: &Block,
     block_interval: Timestamp,
-    seed: [u8; 32],
+    rness: [Randomness<2, 2>; N],
     network: Network,
 ) -> [Block; N] {
-    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, seed, network, N)
-        .await
-        .try_into()
-        .unwrap()
+    fake_valid_sequence_of_blocks_for_tests_dyn(
+        predecessor,
+        block_interval,
+        rness.to_vec(),
+        network,
+    )
+    .await
+    .try_into()
+    .unwrap()
 }
 
 /// Create a deterministic sequence of valid blocks.
@@ -1391,17 +1186,15 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     mut predecessor: &Block,
     block_interval: Timestamp,
-    seed: [u8; 32],
+    mut rness_vec: Vec<Randomness<2, 2>>,
     network: Network,
-    n: usize,
 ) -> Vec<Block> {
     let mut blocks = vec![];
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    for _ in 0..n {
+    while let Some(rness) = rness_vec.pop() {
         let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
-            rng.random(),
+            rness,
             network,
         )
         .await;
@@ -1423,12 +1216,17 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
             Some(mp) => {
                 if !tip_block
                     .mutator_set_accumulator_after()
+                    .unwrap()
                     .verify(Tip5::hash(&monitored_utxo.utxo), &mp)
                 {
+                    warn!("Invalid MSMP");
                     return false;
                 }
             }
-            None => return false,
+            None => {
+                warn!("No MSMP");
+                return false;
+            }
         }
     }
 
@@ -1479,16 +1277,4 @@ where
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     Ok(())
-}
-
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_load_servers() {
-        let servers = load_servers();
-        for server in servers {
-            println!("read server: {}", server);
-        }
-    }
 }

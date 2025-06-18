@@ -74,11 +74,17 @@ impl BlockPrimitiveWitness {
         )
     }
 
+    /// # Panics
+    ///
+    ///  - If predecessor has negative transaction fee
     pub(crate) fn body(&self) -> &BlockBody {
         self.maybe_body.get_or_init(|| {
-            let predecessor_msa_digest = self.predecessor_block
-            .mutator_set_accumulator_after()
-            .hash();
+            let predecessor_msa = self
+                .predecessor_block
+                .mutator_set_accumulator_after()
+                .expect("Predecessor must have mutator set after");
+            let predecessor_msa_digest = predecessor_msa
+                .hash();
             let tx_msa_digest = self.transaction.kernel.mutator_set_hash;
             assert_eq!(
                 predecessor_msa_digest,
@@ -87,7 +93,7 @@ impl BlockPrimitiveWitness {
                 \nPredecessor block had {predecessor_msa_digest};\ntransaction had {tx_msa_digest}\n\n"
             );
 
-            let mut mutator_set = self.predecessor_block.mutator_set_accumulator_after();
+            let mut mutator_set = predecessor_msa;
             let mutator_set_update = MutatorSetUpdate::new(
                 self.transaction.kernel.inputs.clone(),
                 self.transaction.kernel.outputs.clone(),
@@ -317,8 +323,9 @@ pub(crate) mod tests {
                                         let timestamp = predecessor_block.header().timestamp
                                             + network.target_block_interval();
 
-                                        let miner_fee_records =
-                                            predecessor_block.guesser_fee_addition_records();
+                                        let miner_fee_records = predecessor_block
+                                            .guesser_fee_addition_records()
+                                            .unwrap();
 
                                         let mut mutator_set_accumulator_after_block =
                                             intermediate_mutator_set_accumulator.clone();

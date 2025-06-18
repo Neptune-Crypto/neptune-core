@@ -374,12 +374,16 @@ impl Block {
     ///
     /// Includes the guesser-fee UTXOs which are not included by the
     /// `mutator_set_accumulator` field on the block body.
-    pub fn mutator_set_accumulator_after(&self) -> MutatorSetAccumulator {
+    pub fn mutator_set_accumulator_after(
+        &self,
+    ) -> Result<MutatorSetAccumulator, BlockValidationError> {
         let mut msa = self.kernel.body.mutator_set_accumulator.clone();
-        let mutator_set_update = MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records());
+        let mutator_set_update =
+            MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records()?);
         mutator_set_update.apply_to_accumulator(&mut msa)
             .expect("mutator set update derived from guesser fees should be applicable to mutator set accumulator contained in body");
-        msa
+
+        Ok(msa)
     }
 
     #[inline]
@@ -819,11 +823,9 @@ impl Block {
         }
 
         // 2.a)
+        let msa_before = previous_block.mutator_set_accumulator_after()?;
         for removal_record in &self.kernel.body.transaction_kernel.inputs {
-            if !previous_block
-                .mutator_set_accumulator_after()
-                .can_remove(removal_record)
-            {
+            if !msa_before.can_remove(removal_record) {
                 return Err(BlockValidationError::RemovalRecordsValid);
             }
         }
@@ -847,7 +849,7 @@ impl Block {
             self.body().transaction_kernel.inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
-        let mut msa = previous_block.mutator_set_accumulator_after();
+        let mut msa = msa_before;
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
 
         // 2.c)
@@ -1025,8 +1027,14 @@ impl Block {
 
     /// The amount rewarded to the guesser who finds a valid nonce for this
     /// block.
-    pub(crate) fn total_guesser_reward(&self) -> NativeCurrencyAmount {
-        self.body().transaction_kernel.fee
+    pub(crate) fn total_guesser_reward(
+        &self,
+    ) -> Result<NativeCurrencyAmount, BlockValidationError> {
+        if self.body().transaction_kernel.fee.is_negative() {
+            return Err(BlockValidationError::NegativeFee);
+        }
+
+        Ok(self.body().transaction_kernel.fee)
     }
 
     /// Get the block's guesser fee UTXOs.
@@ -1034,17 +1042,17 @@ impl Block {
     /// The amounts in the UTXOs are taken from the transaction fee.
     ///
     /// The genesis block does not have a guesser reward.
-    pub(crate) fn guesser_fee_utxos(&self) -> Vec<Utxo> {
+    pub(crate) fn guesser_fee_utxos(&self) -> Result<Vec<Utxo>, BlockValidationError> {
         const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
 
         if self.header().height.is_genesis() {
-            return vec![];
+            return Ok(vec![]);
         }
 
         let lock = self.header().guesser_digest;
         let lock_script = HashLockKey::lock_script_from_after_image(lock);
 
-        let total_guesser_reward = self.total_guesser_reward();
+        let total_guesser_reward = self.total_guesser_reward()?;
         let mut value_locked = total_guesser_reward;
         value_locked.div_two();
         let value_unlocked = total_guesser_reward.checked_sub(&value_locked).unwrap();
@@ -1056,15 +1064,18 @@ impl Block {
         let locked_utxo = Utxo::new(lock_script.clone(), coins);
         let unlocked_utxo = Utxo::new_native_currency(lock_script, value_unlocked);
 
-        vec![locked_utxo, unlocked_utxo]
+        Ok(vec![locked_utxo, unlocked_utxo])
     }
 
     /// Compute the addition records that correspond to the UTXOs generated for
     /// the block's guesser
     ///
     /// The genesis block does not have this addition record.
-    pub(crate) fn guesser_fee_addition_records(&self) -> Vec<AdditionRecord> {
-        self.guesser_fee_utxos()
+    pub(crate) fn guesser_fee_addition_records(
+        &self,
+    ) -> Result<Vec<AdditionRecord>, BlockValidationError> {
+        Ok(self
+            .guesser_fee_utxos()?
             .into_iter()
             .map(|utxo| {
                 let item = Tip5::hash(&utxo);
@@ -1078,33 +1089,38 @@ impl Block {
 
                 commit(item, sender_randomness, receiver_digest)
             })
-            .collect_vec()
+            .collect_vec())
     }
 
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
-    pub(crate) fn mutator_set_update(&self) -> MutatorSetUpdate {
+    pub(crate) fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
         let mut mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
 
-        let extra_addition_records = self.guesser_fee_addition_records();
+        let extra_addition_records = self.guesser_fee_addition_records()?;
         mutator_set_update.additions.extend(extra_addition_records);
-        mutator_set_update
+
+        Ok(mutator_set_update)
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 pub(crate) mod tests {
     use macro_rules_attr::apply;
+    use proptest::collection;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
+    use test_strategy::proptest;
     use tracing_test::traced_test;
     use twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 
@@ -1168,7 +1184,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn genesis_block_hasnt_changed() {
+    fn genesis_block_hasnt_changed_main_net() {
         // Ensure that code changes does not modify the hash of main net's
         // genesis block.
 
@@ -1184,11 +1200,25 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn block_subsidy_calculation_terminates() {
-        Block::block_subsidy(BFieldElement::MAX.into());
+    fn genesis_block_hasnt_changed_test_net() {
+        // Insert the real difficulty such that the block's hash can be
+        // compared to the one found in block explorers and other real
+        // instances, otherwise the hash would only be valid for test code.
+        let network = Network::Testnet;
+        let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
+        assert_eq!(
+            "380df1ec5895553d056acb7a35a6eb9967c893ccc1e7c6e86995459e4d20e4f99800f04c86711d53",
+            genesis_block.hash().to_hex()
+        );
+    }
 
-        let random_height: BFieldElement = random();
-        Block::block_subsidy(random_height.into());
+    proptest::proptest! {
+        #[test]
+        fn block_subsidy_calculation_terminates(height_arb in arb::<BFieldElement>()) {
+            Block::block_subsidy(BFieldElement::MAX.into());
+
+            Block::block_subsidy(height_arb.into());
+        }
     }
 
     #[test]
@@ -1240,7 +1270,7 @@ pub(crate) mod tests {
                 block_proof_witness.appendix(),
                 BlockProof::Invalid,
             );
-            let total_guesser_reward = block1.total_guesser_reward();
+            let total_guesser_reward = block1.total_guesser_reward().unwrap();
             let total_miner_reward = total_composer_reward + total_guesser_reward;
             assert_eq!(NativeCurrencyAmount::coins(128), total_miner_reward);
 
@@ -1380,9 +1410,14 @@ pub(crate) mod tests {
         }
     }
 
-    #[apply(shared_tokio_runtime)]
-    async fn can_prove_block_ancestry() {
-        let mut rng = rand::rng();
+    #[proptest(async = "tokio", cases = 1)]
+    async fn can_prove_block_ancestry(
+        #[strategy(collection::vec(arb::<Digest>(), 55))] mut sender_randomness_vec: Vec<Digest>,
+        #[strategy(0..54usize)] index: usize,
+        #[strategy(collection::vec(arb::<WalletEntropy>(), 55))] mut wallet_secret_vec: Vec<
+            WalletEntropy,
+        >,
+    ) {
         let network = Network::RegTest;
         let genesis_block = Block::genesis(network);
         let mut blocks = vec![];
@@ -1397,10 +1432,18 @@ pub(crate) mod tests {
         let mut mmra = MmrAccumulator::new_from_leafs(vec![genesis_block.hash()]);
 
         for i in 0..55 {
-            let wallet_secret = WalletEntropy::new_random();
-            let key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let (new_block, _) =
-                make_mock_block(network, blocks.last().unwrap(), None, key, rng.random()).await;
+            let key = wallet_secret_vec
+                .pop()
+                .unwrap()
+                .nth_generation_spending_key_for_tests(0);
+            let (new_block, _) = make_mock_block(
+                network,
+                blocks.last().unwrap(),
+                None,
+                key,
+                sender_randomness_vec.pop().unwrap(),
+            )
+            .await;
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
@@ -1415,7 +1458,6 @@ pub(crate) mod tests {
         let last_block_mmra = blocks.last().unwrap().body().block_mmr_accumulator.clone();
         assert_eq!(mmra, last_block_mmra);
 
-        let index = rand::rng().random_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
 
         let leaf_index = index as u64;
@@ -1796,9 +1838,10 @@ pub(crate) mod tests {
                 (0.4, guesser_preimage),
             )
             .await;
-            let ars = block1.guesser_fee_addition_records();
+            let ars = block1.guesser_fee_addition_records().unwrap();
             let ars_from_wallet = block1
                 .guesser_fee_utxos()
+                .unwrap()
                 .iter()
                 .map(|utxo| commit(Tip5::hash(utxo), block1.hash(), guesser_preimage.hash()))
                 .collect_vec();
@@ -1807,7 +1850,7 @@ pub(crate) mod tests {
             let MutatorSetUpdate {
                 removals: _,
                 additions,
-            } = block1.mutator_set_update();
+            } = block1.mutator_set_update().unwrap();
             assert!(
                 ars.iter().all(|ar| additions.contains(ar)),
                 "All addition records must be present in block's mutator set update"
@@ -1828,7 +1871,7 @@ pub(crate) mod tests {
             let preimage = rand::rng().random::<Digest>();
             block.set_header_guesser_digest(preimage.hash());
 
-            let guesser_fee_utxos = block.guesser_fee_utxos();
+            let guesser_fee_utxos = block.guesser_fee_utxos().unwrap();
 
             let lock_script_and_witness =
                 HashLockKey::from_preimage(preimage).lock_script_and_witness();
@@ -1851,7 +1894,7 @@ pub(crate) mod tests {
             let network = Network::Main;
             let genesis_block = Block::genesis(network);
             assert!(
-                genesis_block.guesser_fee_utxos().is_empty(),
+                genesis_block.guesser_fee_utxos().unwrap().is_empty(),
                 "Genesis block has no guesser fee UTXOs"
             );
 
@@ -1915,7 +1958,7 @@ pub(crate) mod tests {
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
             let mutator_set_update_guesser_fees =
-                MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records());
+                MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records().unwrap());
             let mut mutator_set_update_tx = MutatorSetUpdate::new(
                 block2.body().transaction_kernel.inputs.clone(),
                 block2.body().transaction_kernel.outputs.clone(),

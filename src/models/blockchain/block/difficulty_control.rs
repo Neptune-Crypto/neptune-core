@@ -484,6 +484,7 @@ pub(crate) fn max_cumulative_pow_after(
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;

@@ -277,30 +277,15 @@ pub mod neptune_arbitrary {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 mod tests {
     use proptest::prelude::*;
-    use rand::Rng;
+    use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::triton_vm::prelude::*;
-
-    fn make_random_utxo() -> Utxo {
-        let mut rng = rand::rng();
-        let lock_script = LockScript::anyone_can_spend();
-        let lock_script_hash = lock_script.hash();
-        let num_coins = rng.random_range(0..10);
-        let mut coins = vec![];
-        for _i in 0..num_coins {
-            let amount = NativeCurrencyAmount::from_raw_i128(
-                rng.random_range(0i128..=NativeCurrencyAmount::MAX_NAU),
-            );
-            coins.push(Coin::new_native_currency(amount));
-        }
-
-        (lock_script_hash, coins).into()
-    }
 
     impl Utxo {
         pub(crate) fn with_coin(mut self, coin: Coin) -> Self {
@@ -318,16 +303,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn hash_utxo_test() {
-        let output = make_random_utxo();
-        let _digest = crate::Hash::hash(&output);
+    proptest::proptest! {
+        #[test]
+        fn hash_utxo_test(output in arb::<Utxo>()) {
+            let _digest = crate::Hash::hash(&output);
+        }
     }
 
     #[traced_test]
-    #[test]
-    fn serialization_test() {
-        let utxo = make_random_utxo();
+    #[proptest]
+    fn serialization_test(#[strategy(arb::<Utxo>())] utxo: Utxo) {
         let serialized: String = serde_json::to_string(&utxo).unwrap();
         let utxo_again: Utxo = serde_json::from_str(&serialized).unwrap();
         assert_eq!(utxo, utxo_again);

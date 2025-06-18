@@ -58,12 +58,12 @@ impl Api {
     }
 
     /// retrieve a transaction recipient in mutable context.
-    pub fn wallet_mut(&mut self) -> api::wallet::Wallet {
+    pub fn wallet_mut(&mut self) -> api::wallet::Wallet<'_> {
         self.global_state_lock.clone().into()
     }
 
     /// retrieve a transaction recipient in immutable context.
-    pub fn wallet(&self) -> api::wallet::Wallet {
+    pub fn wallet(&self) -> api::wallet::Wallet<'_> {
         self.global_state_lock.clone().into()
     }
 }

@@ -1,9 +1,11 @@
 use std::fmt;
 
+use tasm_lib::prelude::Digest;
+
+use crate::api::export::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::models::state::BlockHeight;
 
 /// A proposed block to extend the block chain with.
 ///
@@ -85,7 +87,10 @@ pub(crate) enum BlockProposalRejectError {
     /// Denotes that this instance is itself composing blocks
     Composing,
 
-    /// Incoming block proposal does not have height matching current tip
+    /// Incoming block proposal does not have prev_block_digest matching current tip
+    WrongParent { received: Digest, expected: Digest },
+
+    /// Incoming block proposal wrong height
     WrongHeight {
         received: BlockHeight,
         expected: BlockHeight,
@@ -105,6 +110,11 @@ impl fmt::Display for BlockProposalRejectError {
             BlockProposalRejectError::WrongHeight { received, expected } => write!(
                 f,
                 "Expected block height: {}\nProposal block height: {}",
+                expected, received
+            ),
+            BlockProposalRejectError::WrongParent { received, expected } => write!(
+                f,
+                "Expected block prev_block_digest: {}\nProposal prev_block_digest: {}",
                 expected, received
             ),
             BlockProposalRejectError::InsufficientFee { current, received } => write!(

@@ -192,9 +192,9 @@ pub mod tests {
     use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::tests::shared::test_helper_data_dir;
-    use crate::tests::shared::try_fetch_file_from_server;
-    use crate::tests::shared::try_load_file_from_disk;
+    use crate::tests::shared::files::test_helper_data_dir;
+    use crate::tests::shared::files::try_fetch_file_from_server;
+    use crate::tests::shared::files::try_load_file_from_disk;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm::stark::Stark;
 

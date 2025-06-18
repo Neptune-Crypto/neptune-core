@@ -286,37 +286,32 @@ mod tests {
         assert!(s_back.relative_indices.is_empty());
     }
 
-    #[test]
-    fn test_indices() {
-        let mut chunk = Chunk::empty_chunk();
-        let mut rng = rand::rng();
-        let num_insertions = 100;
-        for _ in 0..num_insertions {
-            let index = rng.next_u32() % (CHUNK_SIZE);
-            chunk.insert(index);
+    proptest::proptest! {
+        #[test]
+        fn test_indices(indices in proptest::collection::vec(0u32..CHUNK_SIZE, 100)) {
+            let mut chunk = Chunk::empty_chunk();
+            for index in indices {
+                chunk.insert(index);
+            }
+
+            let chunk_indices = chunk.to_indices();
+            let reconstructed_chunk = Chunk::from_indices(&chunk_indices);
+
+            proptest::prop_assert_eq!(chunk, reconstructed_chunk);
         }
 
-        let indices = chunk.to_indices();
+        #[test]
+        fn test_chunk_decode(indices in proptest::collection::vec(0u32..CHUNK_SIZE, 100)) {
+            let mut chunk = Chunk::empty_chunk();
+            for index in indices {
+                chunk.insert(index);
+            }
 
-        let reconstructed_chunk = Chunk::from_indices(&indices);
+            let encoded = chunk.encode();
+            let decoded = *Chunk::decode(&encoded).unwrap();
 
-        assert_eq!(chunk, reconstructed_chunk);
-    }
-
-    #[test]
-    fn test_chunk_decode() {
-        let mut chunk = Chunk::empty_chunk();
-        let mut rng = rand::rng();
-        let num_insertions = 100;
-        for _ in 0..num_insertions {
-            let index = rng.next_u32() % (CHUNK_SIZE);
-            chunk.insert(index);
+            proptest::prop_assert_eq!(chunk, decoded);
         }
-
-        let encoded = chunk.encode();
-        let decoded = *Chunk::decode(&encoded).unwrap();
-
-        assert_eq!(chunk, decoded);
     }
 
     /// Collect statistics about the typical number of elements in a `Chunk`.

@@ -6,10 +6,6 @@ use std::vec::IntoIter;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -109,7 +105,7 @@ impl ChunkDictionary {
         self.dictionary.is_empty()
     }
 
-    pub fn iter(&self) -> Iter<(ChunkIndex, AuthenticatedChunk)> {
+    pub fn iter(&self) -> Iter<'_, (ChunkIndex, AuthenticatedChunk)> {
         self.dictionary.iter()
     }
 
@@ -117,7 +113,7 @@ impl ChunkDictionary {
         self.dictionary.len()
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<(ChunkIndex, AuthenticatedChunk)> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, (ChunkIndex, AuthenticatedChunk)> {
         self.dictionary.iter_mut()
     }
 
@@ -179,37 +175,13 @@ impl IntoIterator for ChunkDictionary {
     }
 }
 
-/// Generate pseudorandom chunk dictionary from the given seed, for testing purposes.
-pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-    let mut dictionary = vec![];
-    for _ in 0..37 {
-        let key = rng.next_u64();
-        let authpath: Vec<Digest> = (0..rng.random_range(0..6))
-            .map(|_| rng.random())
-            .collect_vec();
-        let chunk: Vec<u32> = (0..rng.random_range(0..17))
-            .map(|_| rng.random())
-            .collect_vec();
-
-        dictionary.push((
-            key,
-            (
-                MmrMembershipProof::new(authpath),
-                Chunk {
-                    relative_indices: chunk,
-                },
-            ),
-        ));
-    }
-    ChunkDictionary::new(dictionary)
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub mod tests {
     use macro_rules_attr::apply;
+    use proptest::collection;
+    use proptest::prelude::any;
+    use proptest::prop_compose;
     use twenty_first::math::other::random_elements;
     use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -218,7 +190,22 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::archival_mmr::tests::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
+
+    prop_compose! {
+        pub fn propcompose_chunkdict() (dictionary in collection::vec((
+            any::<u64>(), collection::vec(proptest_arbitrary_interop::arb::<Digest>(), 0..6), collection::vec(any::<u32>(), 0..17),
+        ), 37)) -> ChunkDictionary {
+            ChunkDictionary::new(dictionary.into_iter().map(|(key, authpath, chunk)| (
+                key,
+                (
+                    MmrMembershipProof::new(authpath),
+                    Chunk {
+                        relative_indices: chunk,
+                    },
+                )
+            )).collect_vec())
+        }
+    }
 
     #[apply(shared_tokio_runtime)]
     async fn hash_test() {
@@ -311,10 +298,11 @@ mod tests {
         assert_eq!((mp, chunk), s_back_non_empty.get(&key).unwrap().clone());
     }
 
-    #[test]
-    fn test_chunk_dictionary_decode() {
-        let chunk_dictionary = random_chunk_dictionary();
-
+    #[test_strategy::proptest]
+    fn test_chunk_dictionary_decode(
+        #[strategy(proptest_arbitrary_interop::arb::<ChunkDictionary>())]
+        chunk_dictionary: ChunkDictionary,
+    ) {
         let encoded = chunk_dictionary.encode();
         let decoded = *ChunkDictionary::decode(&encoded).unwrap();
 

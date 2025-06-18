@@ -893,8 +893,10 @@ impl MainLoopHandler {
                     info!("Received new favorable block proposal for mining operation.");
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
-                        block.header().height,
-                        block.total_guesser_reward(),
+                        block.header().prev_block_digest,
+                        block
+                            .total_guesser_reward()
+                            .expect("block received by main loop must have guesser reward"),
                     );
                     if let Err(reject_reason) = verdict {
                         warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
@@ -2012,6 +2014,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod sync_mode {
         use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
         use test_strategy::proptest;

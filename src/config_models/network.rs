@@ -89,7 +89,7 @@ impl Network {
     /// - mainnet, others: None
     pub fn difficulty_reset_interval(&self) -> Option<Timestamp> {
         match *self {
-            Self::Testnet | Self::TestnetMock => Some(self.target_block_interval() * 2),
+            Self::TestnetMock => Some(self.target_block_interval() * 2),
             _ => None,
         }
     }
@@ -104,9 +104,6 @@ impl Network {
     }
 
     /// difficulty setting for the Genesis block
-    ///
-    /// - regtest: [Difficulty::MINIMUM]
-    /// - mainnet and others: 1,000,000,000
     pub fn genesis_difficulty(&self) -> Difficulty {
         match *self {
             Self::RegTest => Difficulty::MINIMUM,

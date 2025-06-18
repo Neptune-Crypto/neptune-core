@@ -380,7 +380,8 @@ impl UpgradeJob {
                 let tip_mutator_set = global_state
                     .chain
                     .light_state()
-                    .mutator_set_accumulator_after();
+                    .mutator_set_accumulator_after()
+                    .expect("Block from state must have mutator set after");
 
                 let transaction_is_up_to_date =
                     upgraded.kernel.mutator_set_hash == tip_mutator_set.hash();
@@ -740,7 +741,8 @@ pub(super) fn get_upgrade_task_from_mempool(
     let tip_mutator_set = global_state
         .chain
         .light_state()
-        .mutator_set_accumulator_after();
+        .mutator_set_accumulator_after()
+        .expect("Block from state must have mutator set after");
     let gobbling_fraction = global_state.gobbling_fraction();
     let min_gobbling_fee = global_state.min_gobbling_fee();
     let num_proofs_threshold = global_state.max_num_proofs();
@@ -1123,7 +1125,8 @@ mod tests {
                 .await
                 .chain
                 .light_state()
-                .mutator_set_accumulator_after();
+                .mutator_set_accumulator_after()
+                .unwrap();
             assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
         }
     }
@@ -1141,7 +1144,8 @@ mod tests {
             tx_proving_capability: Some(TxProvingCapability::SingleProof),
             ..Default::default()
         };
-        let mut alice = state_with_premine_and_self_mined_blocks(cli_args, &mut rng, 1).await;
+        let mut alice =
+            state_with_premine_and_self_mined_blocks(cli_args, rng.random::<[Digest; 1]>()).await;
 
         let mut transactions = vec![];
         for _ in 0..=1 {
@@ -1193,9 +1197,9 @@ mod tests {
         let block2 = fake_block_successor_with_merged_tx(
             &block1,
             now,
-            rng.random(),
             false,
             vec![mined_tx.into()],
+            rng.random(),
             network,
         )
         .await;

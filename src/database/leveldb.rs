@@ -327,7 +327,7 @@ impl<'a> Iterable<'a> for DbIntMut {
 }
 
 impl Snapshots for DbIntMut {
-    fn snapshot(&self) -> Snapshot {
+    fn snapshot(&self) -> Snapshot<'_> {
         self.db.as_ref().unwrap().snapshot()
     }
 }
@@ -567,7 +567,7 @@ impl<'a> Iterable<'a> for DB {
 }
 
 impl Snapshots for DB {
-    fn snapshot(&self) -> Snapshot {
+    fn snapshot(&self) -> Snapshot<'_> {
         self.0.snapshot()
     }
 }

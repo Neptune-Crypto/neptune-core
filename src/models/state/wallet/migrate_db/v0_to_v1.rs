@@ -157,7 +157,7 @@ mod tests {
     use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
     use crate::models::state::Timestamp;
-    use crate::tests::shared::unit_test_data_directory;
+    use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
     use crate::DataDirectory;
 

@@ -646,11 +646,11 @@ impl Mempool {
         predecessor_block: &Block,
         tx_proving_capability: TxProvingCapability,
         composing: bool,
-    ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
+    ) -> anyhow::Result<(Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>)> {
         // If the mempool is empty, there is nothing to do.
         if self.is_empty() {
             self.set_tip_digest_sync_label(new_block.hash());
-            return (vec![], vec![]);
+            return Ok((vec![], vec![]));
         }
 
         // If we discover a reorganization, we currently just clear the mempool,
@@ -703,7 +703,7 @@ impl Mempool {
         let mut events = self.retain(keep);
 
         // Prepare a mutator set update to be applied to all retained items
-        let mutator_set_update = new_block.mutator_set_update();
+        let mutator_set_update = new_block.mutator_set_update()?;
 
         // Update policy:
         // We update transaction if either of these conditions are true:
@@ -711,8 +711,10 @@ impl Mempool {
         // b) We initiated this transaction *and* client is capable of creating
         //    these proofs.
         // If we cannot update the transaction, we kick it out regardless.
-        let previous_mutator_set_accumulator =
-            predecessor_block.mutator_set_accumulator_after().clone();
+        let previous_mutator_set_accumulator = predecessor_block
+            .mutator_set_accumulator_after()
+            .expect("Predecessor block must have mutator set after")
+            .clone();
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];
         for (tx_id, tx) in &mut self.tx_dictionary {
@@ -791,7 +793,7 @@ impl Mempool {
         self.shrink_to_max_size();
         self.set_tip_digest_sync_label(new_block.hash());
 
-        (events, update_jobs)
+        Ok((events, update_jobs))
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -947,7 +949,7 @@ mod tests {
     ) -> Mempool {
         let mut mempool = Mempool::new(ByteSize::gb(1), None, sync_block.hash());
         let txs = make_plenty_mock_transaction_supported_by_primitive_witness(transactions_count);
-        let mutator_set_hash = sync_block.mutator_set_accumulator_after().hash();
+        let mutator_set_hash = sync_block.mutator_set_accumulator_after().unwrap().hash();
         for mut tx in txs {
             tx.kernel = TransactionKernelModifier::default()
                 .mutator_set_hash(mutator_set_hash)
@@ -998,7 +1000,7 @@ mod tests {
         let network = Network::Main;
         let sync_block = Block::genesis(network);
         let mempool = setup_mock_mempool(num_txs, TransactionOrigin::Foreign, &sync_block);
-        let mutator_set_hash = sync_block.mutator_set_accumulator_after().hash();
+        let mutator_set_hash = sync_block.mutator_set_accumulator_after().unwrap().hash();
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1021,7 +1023,7 @@ mod tests {
         let network = Network::Main;
         let sync_block = Block::genesis(network);
         let mempool = setup_mock_mempool(num_txs, TransactionOrigin::Foreign, &sync_block);
-        let mutator_set_hash = sync_block.mutator_set_accumulator_after().hash();
+        let mutator_set_hash = sync_block.mutator_set_accumulator_after().unwrap().hash();
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -1119,7 +1121,7 @@ mod tests {
         let sync_block = Block::genesis(network);
         let num_txs = 12;
         let mempool = setup_mock_mempool(num_txs, TransactionOrigin::Foreign, &sync_block);
-        let mutator_set_hash = sync_block.mutator_set_accumulator_after().hash();
+        let mutator_set_hash = sync_block.mutator_set_accumulator_after().unwrap().hash();
 
         for i in 0..num_txs {
             assert_eq!(
@@ -1429,18 +1431,20 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        let (_, update_jobs2) = mempool.update_with_block_and_predecessor(
-            &block_2,
-            &block_1,
-            TxProvingCapability::SingleProof,
-            true,
-        );
+        let (_, update_jobs2) = mempool
+            .update_with_block_and_predecessor(
+                &block_2,
+                &block_1,
+                TxProvingCapability::SingleProof,
+                true,
+            )
+            .unwrap();
         mocked_mempool_update_handler(update_jobs2, &mut mempool).await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
         // updated and valid-again mutator set data
-        let block2_msa = block_2.mutator_set_accumulator_after();
+        let block2_msa = block_2.mutator_set_accumulator_after().unwrap();
         let mut tx_by_alice_updated: Transaction =
             mempool.get_transactions_for_block(usize::MAX, None, true, block2_msa.hash())[0]
                 .clone();
@@ -1461,12 +1465,14 @@ mod tests {
                 make_mock_block(network, &previous_block, None, alice_key, rng.random()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
-            let (_, update_jobs_n) = mempool.update_with_block_and_predecessor(
-                &next_block,
-                &previous_block,
-                TxProvingCapability::SingleProof,
-                true,
-            );
+            let (_, update_jobs_n) = mempool
+                .update_with_block_and_predecessor(
+                    &next_block,
+                    &previous_block,
+                    TxProvingCapability::SingleProof,
+                    true,
+                )
+                .unwrap();
             mocked_mempool_update_handler(update_jobs_n, &mut mempool).await;
             previous_block = next_block;
         }
@@ -1475,7 +1481,10 @@ mod tests {
             usize::MAX,
             None,
             true,
-            previous_block.mutator_set_accumulator_after().hash(),
+            previous_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash(),
         )[0]
         .clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
@@ -1510,12 +1519,14 @@ mod tests {
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
-        let (_, update_jobs5) = mempool.update_with_block_and_predecessor(
-            &block_5,
-            &previous_block,
-            TxProvingCapability::SingleProof,
-            true,
-        );
+        let (_, update_jobs5) = mempool
+            .update_with_block_and_predecessor(
+                &block_5,
+                &previous_block,
+                TxProvingCapability::SingleProof,
+                true,
+            )
+            .unwrap();
         mocked_mempool_update_handler(update_jobs5, &mut mempool).await;
 
         assert!(
@@ -1682,9 +1693,8 @@ mod tests {
             .unwrap()
             .transaction;
         assert!(unmined_tx.is_valid(network).await);
-        assert!(
-            unmined_tx.is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after())
-        );
+        assert!(unmined_tx
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap()));
 
         alice
             .lock_guard_mut()
@@ -1715,7 +1725,7 @@ mod tests {
             mocked_mempool_update_handler(update_jobs, &mut alice.lock_guard_mut().await.mempool)
                 .await;
 
-            let mutator_set_hash = next_block.mutator_set_accumulator_after().hash();
+            let mutator_set_hash = next_block.mutator_set_accumulator_after().unwrap().hash();
             let mempool_txs = alice.lock_guard().await.mempool.get_transactions_for_block(
                 usize::MAX,
                 None,
@@ -1728,8 +1738,9 @@ mod tests {
                 "The inserted tx must stay in the mempool"
             );
             assert!(
-                mempool_txs[0]
-                    .is_confirmable_relative_to(&next_block.mutator_set_accumulator_after()),
+                mempool_txs[0].is_confirmable_relative_to(
+                    &next_block.mutator_set_accumulator_after().unwrap()
+                ),
                 "Mempool tx must stay confirmable after new block of height {} has been applied",
                 next_block.header().height
             );
@@ -1763,7 +1774,7 @@ mod tests {
 
         // Verify that all retained txs (if any) are confirmable against
         // the new tip.
-        let mutator_set_hash = block_1b.mutator_set_accumulator_after().hash();
+        let mutator_set_hash = block_1b.mutator_set_accumulator_after().unwrap().hash();
         assert!(
             alice
                 .lock_guard()
@@ -1771,7 +1782,9 @@ mod tests {
                 .mempool
                 .get_transactions_for_block(usize::MAX, None, false, mutator_set_hash)
                 .iter()
-                .all(|tx| tx.is_confirmable_relative_to(&block_1b.mutator_set_accumulator_after())),
+                .all(|tx| tx.is_confirmable_relative_to(
+                    &block_1b.mutator_set_accumulator_after().unwrap()
+                )),
             "All retained txs in the mempool must be confirmable relative to the new block.
              Or the mempool must be empty."
         );
@@ -1885,7 +1898,10 @@ mod tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let mempool = setup_mock_mempool(11, TransactionOrigin::Foreign, &genesis_block);
-        let mutator_set_hash = genesis_block.mutator_set_accumulator_after().hash();
+        let mutator_set_hash = genesis_block
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .hash();
 
         assert!(mempool
             .get_transactions_for_block(usize::MAX, None, true, mutator_set_hash)
@@ -1989,6 +2005,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod proof_quality_tests {
         use proptest::prop_assert_eq;
         use proptest::prop_assert_ne;

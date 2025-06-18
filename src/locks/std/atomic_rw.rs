@@ -209,7 +209,7 @@ impl<T> AtomicRw<T> {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
     /// let year = atomic_car.lock_guard().year;
     /// ```
-    pub fn lock_guard(&self) -> AtomicRwReadGuard<T> {
+    pub fn lock_guard(&self) -> AtomicRwReadGuard<'_, T> {
         self.try_acquire_read_cb();
         let guard = self.inner.read().expect("Read lock should succeed");
         AtomicRwReadGuard::new(guard, &self.lock_callback_info)
@@ -226,7 +226,7 @@ impl<T> AtomicRw<T> {
     /// let mut atomic_car = AtomicRw::from(Car{year: 2016});
     /// atomic_car.lock_guard_mut().year = 2022;
     /// ```
-    pub fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<T> {
+    pub fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<'_, T> {
         self.try_acquire_write_cb();
         let guard = self.inner.write().expect("Write lock should succeed");
         AtomicRwWriteGuard::new(guard, &self.lock_callback_info)
