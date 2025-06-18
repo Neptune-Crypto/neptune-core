@@ -32,6 +32,7 @@ use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
+use tracing::warn;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -1217,10 +1218,14 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
                     .mutator_set_accumulator_after()
                     .verify(Tip5::hash(&monitored_utxo.utxo), &mp)
                 {
+                    warn!("Invalid MSMP");
                     return false;
                 }
             }
-            None => return false,
+            None => {
+                warn!("No MSMP");
+                return false;
+            }
         }
     }
 
