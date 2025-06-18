@@ -39,7 +39,7 @@ pub enum ProverJobError {
     #[error("triton-vm program complexity limit exceeded. result: {result}, limit: {limit}")]
     ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
-    #[error("external proving process failed")]
+    #[error("external proving process failed: {0}")]
     TritonVmProverFailed(#[from] VmProcessError),
 
     #[error("machine's capability {capability} is not sufficient to produce proof: {proof_type}")]
