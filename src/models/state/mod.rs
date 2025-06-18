@@ -705,7 +705,7 @@ impl GlobalState {
             .chain
             .light_state()
             .mutator_set_accumulator_after()
-            .expect("block in state should be valid");
+            .expect("block in state must have mutator set after");
         self.wallet_state
             .get_wallet_status(tip_digest, &mutator_set_accumulator)
             .await
@@ -947,7 +947,7 @@ impl GlobalState {
             .chain
             .light_state()
             .mutator_set_accumulator_after()
-            .expect("block from state should be valid");
+            .expect("block from state must have mutator set after");
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
 
@@ -1384,7 +1384,7 @@ impl GlobalState {
                     .expect("All blocks that are reverted must have a parent, since genesis block can never be reverted.");
                 let previous_mutator_set = revert_block_parent
                     .mutator_set_accumulator_after()
-                    .expect("block from state should be valid")
+                    .expect("block from state must have mutator set after")
                     .clone();
 
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
@@ -1434,7 +1434,7 @@ impl GlobalState {
                 let mut block_msa = match &predecessor_block {
                     Some(block) => block
                         .mutator_set_accumulator_after()
-                        .expect("block from archival state should be valid")
+                        .expect("block from archival state must have mutator set after")
                         .clone(),
                     None => MutatorSetAccumulator::default(),
                 };
@@ -1443,7 +1443,7 @@ impl GlobalState {
                     mut removals,
                 } = apply_block
                     .mutator_set_update()
-                    .expect("block from archival state should be valid");
+                    .expect("block from archival state must have mutator set update");
 
                 // apply additions
                 for addition_record in &additions {
@@ -1479,10 +1479,7 @@ impl GlobalState {
 
                 assert_eq!(
                     block_msa.hash(),
-                    apply_block
-                        .mutator_set_accumulator_after()
-                        .expect("block from archival state should be valid")
-                        .hash()
+                    apply_block.mutator_set_accumulator_after().unwrap().hash()
                 );
             }
 
@@ -1683,7 +1680,7 @@ impl GlobalState {
         );
         let previous_ms_accumulator = tip_parent
             .mutator_set_accumulator_after()
-            .expect("block from archival state should be valid")
+            .expect("block from archival state must have mutator set after")
             .clone();
 
         // Update mempool with UTXOs from this block. This is done by

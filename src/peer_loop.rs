@@ -1303,7 +1303,7 @@ impl PeerLoopHandler {
                             .chain
                             .light_state()
                             .mutator_set_accumulator_after()
-                            .expect("Block from state must be valid"),
+                            .expect("Block from state must have mutator set after"),
                     )
                 };
                 if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
@@ -1429,7 +1429,7 @@ impl PeerLoopHandler {
                         .chain
                         .light_state()
                         .mutator_set_accumulator_after()
-                        .expect("Block from state must be valid")
+                        .expect("Block from state must have mutator set after")
                         .hash()
                         != tx_notification.mutator_set_hash
                     {

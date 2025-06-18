@@ -887,7 +887,7 @@ impl WalletState {
             let sender_randomness = block.hash();
             block
                 .guesser_fee_utxos()
-                .expect("Block must be valid")
+                .expect("Block argument must have guesser fee UTXOs")
                 .into_iter()
                 .map(|utxo| IncomingUtxo {
                     utxo,
@@ -1672,10 +1672,10 @@ impl WalletState {
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
-            new_block.mutator_set_accumulator_after().expect("Block must be valid").clone().hash(),
+            new_block.mutator_set_accumulator_after().expect("Block must have mutator set after").clone().hash(),
             msa_state.hash(),
             "\n\nMutator set in applied block:\n{}\n\nmust agree with that in wallet handler:\n{}\n\n",
-            new_block.mutator_set_accumulator_after().expect("Block must be valid").clone().hash(),
+            new_block.mutator_set_accumulator_after().expect("Block must have mutator set after").clone().hash(),
             msa_state.hash(),
         );
 

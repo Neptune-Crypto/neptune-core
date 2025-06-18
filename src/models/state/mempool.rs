@@ -713,7 +713,7 @@ impl Mempool {
         // If we cannot update the transaction, we kick it out regardless.
         let previous_mutator_set_accumulator = predecessor_block
             .mutator_set_accumulator_after()
-            .expect("Predecessor block must be valid")
+            .expect("Predecessor block must have mutator set after")
             .clone();
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];

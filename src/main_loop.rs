@@ -896,7 +896,7 @@ impl MainLoopHandler {
                         block.header().prev_block_digest,
                         block
                             .total_guesser_reward()
-                            .expect("block received by main loop should be valid"),
+                            .expect("block received by main loop must have guesser reward"),
                     );
                     if let Err(reject_reason) = verdict {
                         warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");

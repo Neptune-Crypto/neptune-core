@@ -74,12 +74,15 @@ impl BlockPrimitiveWitness {
         )
     }
 
+    /// # Panics
+    ///
+    ///  - If predecessor has negative transaction fee
     pub(crate) fn body(&self) -> &BlockBody {
         self.maybe_body.get_or_init(|| {
             let predecessor_msa = self
                 .predecessor_block
                 .mutator_set_accumulator_after()
-                .expect("Predecessor must be valid");
+                .expect("Predecessor must have mutator set after");
             let predecessor_msa_digest = predecessor_msa
                 .hash();
             let tx_msa_digest = self.transaction.kernel.mutator_set_hash;

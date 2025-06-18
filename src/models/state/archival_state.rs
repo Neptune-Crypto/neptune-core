@@ -932,7 +932,7 @@ impl ArchivalState {
         loop {
             let haystack_msa = haystack
                 .mutator_set_accumulator_after()
-                .expect("Block from state must be valid");
+                .expect("Block from state must have mutator set after");
             if haystack_msa.hash() == mutator_set.hash() {
                 break;
             }
@@ -955,7 +955,7 @@ impl ArchivalState {
                 additions,
             } = haystack
                 .mutator_set_update()
-                .expect("Block from state must be valid");
+                .expect("Block from state must have mutator set update");
             block_mutations.push((additions, removals));
 
             haystack = parent.unwrap();
@@ -1029,8 +1029,9 @@ impl ArchivalState {
     /// the database. Handles rollback of the mutator set if needed but requires
     /// that all blocks that are rolled back are present in the DB. The input
     /// block is considered chain tip. All blocks stored in the database are
-    /// assumed to be valid. The given `new_block` is also assumed to be valid
-    /// and this function may fail if it is not.
+    /// assumed to be valid. The given `new_block` is also assumed to be valid.
+    /// This function will return an error if the new block does not have a
+    /// mutator set update.
     pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         // cannot get the mutator set update from new block, so abort early
         if new_block.mutator_set_update().is_err() {
@@ -1075,7 +1076,7 @@ impl ArchivalState {
                 removals,
             } = rollback_block
                 .mutator_set_update()
-                .expect("Block from state must be valid");
+                .expect("Block from state must have mutator set update");
 
             // Roll back all removal records contained in block
             for removal_record in &removals {
@@ -1128,7 +1129,7 @@ impl ArchivalState {
                 mut removals,
             } = apply_forward_block
                 .mutator_set_update()
-                .expect("Block from state must be valid");
+                .expect("Block from state must have mutator set update");
             additions.reverse();
             removals.reverse();
 
@@ -1166,7 +1167,7 @@ impl ArchivalState {
         debug!("sanity check: was AMS updated consistently with new block?");
         assert_eq!(
             new_block
-                .mutator_set_accumulator_after().expect("New block must be valid")
+                .mutator_set_accumulator_after().unwrap()
                 .hash(),
             self.archival_mutator_set.ams().hash().await,
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash()

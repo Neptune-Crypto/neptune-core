@@ -242,10 +242,6 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     assert_eq!(archival_state.get_tip().await.hash(), genesis_block.hash());
 
     let light_state: LightState = LightState::from(genesis_block.to_owned());
-    println!(
-        "Genesis light state MSA hash: {}",
-        light_state.mutator_set_accumulator_after().unwrap().hash()
-    );
     let chain = BlockchainState::Archival(Box::new(BlockchainArchivalState {
         light_state,
         archival_state,

@@ -241,7 +241,7 @@ impl ProofOfWorkPuzzle {
     fn new(block_proposal: Block, latest_block_header: BlockHeader) -> Self {
         let guesser_reward = block_proposal
             .total_guesser_reward()
-            .expect("Block proposal must be valid");
+            .expect("Block proposal must have well-defined guesser reward");
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block_proposal);
         let threshold = latest_block_header.difficulty.target();
         let prev_block = block_proposal.header().prev_block_digest;
@@ -2097,13 +2097,13 @@ impl NeptuneRPCServer {
                     // Find matching AOCL leaf index that must be in this block
                     let last_aocl_index_in_block = block
                         .mutator_set_accumulator_after()
-                        .expect("Block from state must be valid")
+                        .expect("Block from state must have mutator set after")
                         .aocl
                         .num_leafs()
                         - 1;
                     let num_outputs_in_block: u64 = block
                         .mutator_set_update()
-                        .expect("Block from state must be valid")
+                        .expect("Block from state must have mutator set update")
                         .additions
                         .len()
                         .try_into()
@@ -3340,7 +3340,7 @@ impl RPC for NeptuneRPCServer {
         let tip_hash = tip.hash();
         let tip_msa = tip
             .mutator_set_accumulator_after()
-            .expect("Block from state must be valid");
+            .expect("Block from state must have mutator set after");
 
         Ok(state
             .wallet_state
@@ -3554,7 +3554,7 @@ impl RPC for NeptuneRPCServer {
             .chain
             .light_state()
             .mutator_set_accumulator_after()
-            .expect("Block from state must be valid")
+            .expect("Block from state must have mutator set after")
             .hash();
 
         let mempool_transactions = mempool_txkids

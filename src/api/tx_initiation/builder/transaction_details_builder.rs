@@ -259,7 +259,7 @@ impl TransactionDetailsBuilder {
             timestamp,
             tip_block
                 .mutator_set_accumulator_after()
-                .expect("Block from state must be valid"),
+                .expect("Block from state must have mutator set after"),
             state_lock.cli().network,
         ))
     }
