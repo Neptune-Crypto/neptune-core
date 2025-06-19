@@ -1826,10 +1826,7 @@ impl MainLoopHandler {
                 } else {
                     // Otherwise, upgrade its proof quality, and share it by
                     // spinning up the proof upgrader.
-                    let TransactionProof::Witness(primitive_witness) = transaction.proof.clone()
-                    else {
-                        panic!("Expected Primitive witness. Got: {:?}", transaction.proof);
-                    };
+                    let primitive_witness = transaction.proof.clone().into_primitive_witness();
 
                     let vm_job_queue = vm_job_queue();
 

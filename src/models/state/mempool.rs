@@ -228,24 +228,41 @@ impl Mempool {
     /// proof quality.
     ///
     /// Returns true if transaction is already known *and* if the proof quality
-    /// contained in the mempool is higher than the argument.
+    /// contained in the mempool is higher than the argument. Returns false if
+    /// the transaction represents a mutator set update.
     pub(crate) fn contains_with_higher_proof_quality(
         &self,
-        transaction_id: TransactionKernelId,
-        proof_quality: TransactionProofQuality,
+        new_tx_txid: TransactionKernelId,
+        new_tx_proof_quality: TransactionProofQuality,
+        new_tx_mutator_set_hash: Digest,
     ) -> bool {
-        if let Some(tx) = self.tx_dictionary.get(&transaction_id) {
+        if let Some(tx) = self.tx_dictionary.get(&new_tx_txid) {
             match tx.transaction.proof.proof_quality() {
-                Ok(mempool_proof_quality) => mempool_proof_quality >= proof_quality,
+                Ok(mempool_proof_quality) => {
+                    if mempool_proof_quality > new_tx_proof_quality {
+                        // New tx has lower proof quality.
+                        true
+                    } else if mempool_proof_quality == new_tx_proof_quality {
+                        // New tx has same proof quality. If new tx has
+                        // different mutator set, assume new tx represents a
+                        // mutator set update.
+                        tx.transaction.kernel.mutator_set_hash == new_tx_mutator_set_hash
+                    } else {
+                        // New tx has higher proof quality.
+                        false
+                    }
+                }
                 Err(_) => {
                     // Any proof quality is better than none.
                     // This would indicate that this client has a transaction with
                     // e.g. primitive witness in mempool and now the same transaction
                     // with an associated proof is queried. That probably shouldn't
-                    // happen.
+                    // happen. Only if two nodes share the same secret key can
+                    // this happen, in which case, we want to accept the new
+                    // transaction, so we return false here.
                     error!(
                         "Failed to read proof quality for tx in mempool. txid: {}",
-                        transaction_id
+                        new_tx_txid
                     );
                     false
                 }
@@ -2318,6 +2335,7 @@ mod tests {
 
     #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod proof_quality_tests {
+        use proptest::prop_assert;
         use proptest::prop_assert_eq;
         use proptest::prop_assert_ne;
         use test_strategy::proptest;
@@ -2518,15 +2536,39 @@ mod tests {
 
             // First insert original transaction, then updated which should
             // always replace the original transaction, regardless of its size.
+            prop_assert!(
+                !mempool.contains_with_higher_proof_quality(
+                    txid,
+                    original_tx.proof.proof_quality().unwrap(),
+                    original_tx.kernel.mutator_set_hash
+                ),
+                "Must return false since tx not known"
+            );
             mempool.insert(original_tx.clone(), upgrade_priority);
             let in_mempool_start = mempool.get(txid).map(|tx| tx.to_owned()).unwrap();
             prop_assert_eq!(&original_tx, &in_mempool_start);
             prop_assert_ne!(&updated_tx, &in_mempool_start);
 
+            prop_assert!(
+                !mempool.contains_with_higher_proof_quality(
+                    txid,
+                    updated_tx.proof.proof_quality().unwrap(),
+                    updated_tx.kernel.mutator_set_hash
+                ),
+                "Must return false since tx updated"
+            );
             mempool.insert(updated_tx.clone(), upgrade_priority);
             let in_mempool_end = mempool.get(txid).map(|tx| tx.to_owned()).unwrap();
             prop_assert_eq!(&updated_tx, &in_mempool_end);
             prop_assert_ne!(&original_tx, &in_mempool_end);
+            prop_assert!(
+                mempool.contains_with_higher_proof_quality(
+                    txid,
+                    updated_tx.proof.proof_quality().unwrap(),
+                    updated_tx.kernel.mutator_set_hash
+                ),
+                "Must return true after insertion"
+            );
         }
     }
 }

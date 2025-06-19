@@ -734,8 +734,8 @@ impl UpgradeJob {
 
                 Ok((ret, expected_utxos))
             }
-            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pw) => Ok((
-                pw_to_pw
+            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => Ok((
+                pw_to_pc
                     .upgrade(triton_vm_job_queue.clone(), &proof_job_options)
                     .await?,
                 vec![],
