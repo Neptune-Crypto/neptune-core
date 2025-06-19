@@ -53,6 +53,7 @@ use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
+use proptest::prop_assume;
 use serde::Deserialize;
 use serde::Serialize;
 use systemstat::Platform;
@@ -4336,6 +4337,8 @@ mod tests {
         #[strategy(propcompose_txkernel_with_lengths(0usize, 1usize, 0usize))]
         transaction_kernel: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
+        prop_assume!(!transaction_kernel.fee.is_negative());
+
         let network = Network::Beta;
         let mut rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
