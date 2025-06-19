@@ -183,7 +183,6 @@ impl<'a> Arbitrary<'a> for AbsoluteIndexSet {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;

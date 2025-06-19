@@ -328,6 +328,7 @@ pub mod neptune_arbitrary {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use crate::tests::shared::strategies;
     use crate::util_types::mutator_set::commit;
     use itertools::Itertools;
     use proptest::collection::vec;
@@ -344,11 +345,9 @@ mod tests {
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::MsaAndRecords;
-    use crate::util_types::mutator_set::ms_membership_proof::tests::propcompose_msmembershipproof;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
-    use crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict;
 
     impl MsaAndRecords {
         /// Split an [MsaAndRecords] into multiple instances of the same type.
@@ -627,11 +626,11 @@ mod tests {
 
     #[test]
     fn split_msa_and_records() {
-        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 1))| split_prop([1], data));
-        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 0))| split_prop([0], data));
-        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 5))| split_prop([0, 5], data));
-        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 7))| split_prop([3, 4], data));
-        proptest::proptest!(|(data in vec((propcompose_rr_with_independent_absindset_chunkdict(), propcompose_msmembershipproof()), 19))| split_prop([12, 2, 5], data));
+        proptest::proptest!(|(data in vec((strategies::removalrecord(), strategies::msmembershipproof()), 1))| split_prop([1], data));
+        proptest::proptest!(|(data in vec((strategies::removalrecord(), strategies::msmembershipproof()), 0))| split_prop([0], data));
+        proptest::proptest!(|(data in vec((strategies::removalrecord(), strategies::msmembershipproof()), 5))| split_prop([0, 5], data));
+        proptest::proptest!(|(data in vec((strategies::removalrecord(), strategies::msmembershipproof()), 7))| split_prop([3, 4], data));
+        proptest::proptest!(|(data in vec((strategies::removalrecord(), strategies::msmembershipproof()), 19))| split_prop([12, 2, 5], data));
     }
 
     fn split_prop<const N: usize>(

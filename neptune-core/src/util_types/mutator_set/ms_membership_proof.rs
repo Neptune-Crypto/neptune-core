@@ -566,7 +566,6 @@ pub mod tests {
     use proptest::collection;
     use proptest::prelude::any;
     use proptest::prelude::*;
-    use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
@@ -586,35 +585,6 @@ pub mod tests {
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
 
     const N: usize = 100;
-
-    prop_compose! {
-        /// Generate a pseudorandom mutator set membership proof from the given seed, for testing purposes.
-        pub fn propcompose_msmembershipproof() (
-            sender_randomness in arb::<Digest>(),
-            receiver_preimage in arb::<Digest>(),
-            (auth_path_aocl, aocl_leaf_index) in propcompose_mmrmembershipproof_with_index(),
-            target_chunks in crate::util_types::mutator_set::removal_record::chunk_dictionary::tests::propcompose_chunkdict(),
-        ) -> MsMembershipProof {
-            MsMembershipProof {
-                sender_randomness,
-                receiver_preimage,
-                aocl_leaf_index,
-                auth_path_aocl,
-                target_chunks,
-            }
-        }
-    }
-
-    prop_compose! {
-        /// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
-        /// for testing purposes.
-        pub fn propcompose_mmrmembershipproof_with_index() (len in 0..15usize) (
-            authentication_path in collection::vec(arb::<Digest>(), len),
-            leaf_index in any::<u64>()
-        ) -> (MmrMembershipProof, u64) {
-            (MmrMembershipProof {authentication_path}, leaf_index)
-        }
-    }
 
     #[test]
     fn mp_equality_test() {
@@ -1405,7 +1375,7 @@ pub mod tests {
             cases: 100, .. ProptestConfig::default()
           })]
         #[test]
-        fn test_decode_mutator_set_membership_proof(msmp in propcompose_msmembershipproof()) {
+        fn test_decode_mutator_set_membership_proof(msmp in crate::tests::shared::strategies::msmembershipproof()) {
             let encoded = msmp.encode();
             let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
             assert_eq!(msmp, decoded);

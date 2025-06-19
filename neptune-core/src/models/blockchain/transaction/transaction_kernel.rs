@@ -642,7 +642,8 @@ pub mod tests {
 
     #[proptest]
     fn test_decode_transaction_kernel(
-        #[strategy(crate::tests::shared::strategies::txkernel())] kernel: TransactionKernel,
+        #[strategy(crate::tests::shared::strategies::txkernel::default(false))]
+        kernel: TransactionKernel,
     ) {
         let encoded = kernel.encode();
         let decoded = *TransactionKernel::decode(&encoded).unwrap();
@@ -652,7 +653,7 @@ pub mod tests {
     proptest::proptest! {
         #[test]
         fn test_decode_transaction_kernel_small(
-            absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
+            absolute_indices in crate::tests::shared::strategies::absindset(),
             canonical_commitment in arb::<Digest>(),
             mutator_set_hash in arb::<Digest>(),
         ) {
