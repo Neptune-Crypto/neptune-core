@@ -146,9 +146,9 @@ impl Utxo {
             .any(|coin| coin.type_script_hash == NativeCurrency.hash())
     }
 
-    /// Get the amount of Neptune coins that are encapsulated in this UTXO,
+    /// Get the amount of native currency that are encapsulated in this UTXO,
     /// regardless of which other coins are present. (Even if that makes the
-    /// Neptune coins unspendable.)
+    /// native currency unspendable.)
     pub fn get_native_currency_amount(&self) -> NativeCurrencyAmount {
         crate::macros::log_slow_scope!();
         self.coins

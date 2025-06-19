@@ -245,18 +245,15 @@ impl UpgradeJob {
 
     fn upgrade_incentive(&self) -> UpgradeIncentive {
         match self {
-            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
-                UpgradeIncentive::BalanceAffecting(
-                    pw_to_pc
-                        .primitive_witness
-                        .output_utxos
-                        .get_native_currency_amount(),
-                )
+            UpgradeJob::PrimitiveWitnessToProofCollection(_) => {
+                // If primitive witness is known, transaction must originate
+                // from this node.
+                UpgradeIncentive::Critical
             }
-            UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
-                UpgradeIncentive::BalanceAffecting(
-                    primitive_witness.output_utxos.get_native_currency_amount(),
-                )
+            UpgradeJob::PrimitiveWitnessToSingleProof { .. } => {
+                // If primitive witness is known, transaction must originate
+                // from this node.
+                UpgradeIncentive::Critical
             }
             UpgradeJob::ProofCollectionToSingleProof {
                 upgrade_incentive, ..
@@ -558,7 +555,7 @@ impl UpgradeJob {
 
     /// Build a single-proof backed gobbler transaction that can be used to
     /// charge another transaction for upgrading a proof.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn build_gobbler(
         gobbling_fee: NativeCurrencyAmount,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,

@@ -516,7 +516,7 @@ impl<I: Into<TxOutput>, T: IntoIterator<Item = I>> From<T> for TxOutputList {
 
 impl TxOutputList {
     /// calculates total amount in native currency, regardless of which other
-    /// coins are present (even if that makes the Neptune coins unspendable).
+    /// coins are present (even if that makes the native currency unspendable).
     pub fn total_native_coins(&self) -> NativeCurrencyAmount {
         self.0
             .iter()

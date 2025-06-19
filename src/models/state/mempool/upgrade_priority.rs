@@ -1,11 +1,13 @@
 use std::ops::Add;
 
+use get_size2::GetSize;
+
 use crate::api::export::NativeCurrencyAmount;
 use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 
 /// Used by memory pool subscribers to indicate how interested they are in
 /// a specific transaction.
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, GetSize)]
 #[cfg_attr(test, derive(serde::Serialize))]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub enum UpgradePriority {
@@ -38,20 +40,19 @@ impl PartialOrd for UpgradePriority {
         Some(self.cmp(other))
     }
 }
+
 impl Ord for UpgradePriority {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        use UpgradePriority::{Critical, Interested, Irrelevant};
         match (self, other) {
-            (UpgradePriority::Irrelevant, UpgradePriority::Irrelevant) => std::cmp::Ordering::Equal,
-            (UpgradePriority::Irrelevant, _) => std::cmp::Ordering::Less,
-            (UpgradePriority::Interested(_), UpgradePriority::Irrelevant) => {
-                std::cmp::Ordering::Greater
-            }
-            (UpgradePriority::Interested(self_amt), UpgradePriority::Interested(other_amt)) => {
-                self_amt.cmp(other_amt)
-            }
-            (UpgradePriority::Interested(_), UpgradePriority::Critical) => std::cmp::Ordering::Less,
-            (UpgradePriority::Critical, UpgradePriority::Critical) => std::cmp::Ordering::Equal,
-            (UpgradePriority::Critical, _) => std::cmp::Ordering::Greater,
+            (Irrelevant, Irrelevant) => Equal,
+            (Irrelevant, _) => Less,
+            (Interested(_), Irrelevant) => Greater,
+            (Interested(self_amt), Interested(other_amt)) => self_amt.cmp(other_amt),
+            (Interested(_), Critical) => Less,
+            (Critical, Critical) => Equal,
+            (Critical, _) => Greater,
         }
     }
 }
@@ -59,7 +60,7 @@ impl Ord for UpgradePriority {
 impl UpgradePriority {
     /// Returns true if the priority is irrelevant.
     pub(crate) fn is_irrelevant(&self) -> bool {
-        matches!(self, UpgradePriority::Irrelevant)
+        *self == UpgradePriority::Irrelevant
     }
 
     /// Given the gobbling potential of the transaction, return the incentive to
@@ -68,12 +69,13 @@ impl UpgradePriority {
         &self,
         gobbling_potential: NativeCurrencyAmount,
     ) -> UpgradeIncentive {
+        use UpgradePriority::{Critical, Interested, Irrelevant};
         match self {
-            UpgradePriority::Irrelevant => UpgradeIncentive::Gobble(gobbling_potential),
-            UpgradePriority::Interested(native_currency_amount) => {
+            Irrelevant => UpgradeIncentive::Gobble(gobbling_potential),
+            Interested(native_currency_amount) => {
                 UpgradeIncentive::BalanceAffecting(*native_currency_amount)
             }
-            UpgradePriority::Critical => UpgradeIncentive::Critical,
+            Critical => UpgradeIncentive::Critical,
         }
     }
 }
@@ -82,15 +84,12 @@ impl Add for UpgradePriority {
     type Output = Self;
 
     fn add(self, other: Self) -> Self::Output {
+        use UpgradePriority::{Critical, Interested, Irrelevant};
         match (self, other) {
-            (UpgradePriority::Irrelevant, _) => other,
-            (_, UpgradePriority::Irrelevant) => self,
-            (UpgradePriority::Interested(self_amt), UpgradePriority::Interested(other_amt)) => {
-                UpgradePriority::Interested(self_amt + other_amt)
-            }
-            (_, UpgradePriority::Critical) | (UpgradePriority::Critical, _) => {
-                UpgradePriority::Critical
-            }
+            (Irrelevant, _) => other,
+            (_, Irrelevant) => self,
+            (Interested(self_amt), Interested(other_amt)) => Interested(self_amt + other_amt),
+            (_, Critical) | (Critical, _) => Critical,
         }
     }
 }

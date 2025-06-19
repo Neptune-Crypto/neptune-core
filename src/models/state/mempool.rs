@@ -18,7 +18,6 @@ pub mod upgrade_priority;
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::iter::Rev;
 
 use bytesize::ByteSize;
 use get_size2::GetSize;
@@ -42,7 +41,6 @@ use itertools::Itertools;
 /// TransactionC }.
 use num_rational::BigRational as FeeDensity;
 use num_traits::Zero;
-use priority_queue::double_priority_queue::iterators::IntoSortedIter as DoubleEndedIterator;
 use priority_queue::priority_queue::iterators::IntoSortedIter as SingleEndedIterator;
 use priority_queue::DoublePriorityQueue;
 use priority_queue::PriorityQueue;
@@ -261,7 +259,8 @@ impl Mempool {
     /// proof upgrade. Returns a transaction that is not synced to the tip
     /// such that the caller can make the transaction synced again.
     ///
-    /// Will always prioritize transactions with a positive upgrade priority.
+    /// Favors transactions based on upgrade priority first, fee density
+    /// second.
     pub(crate) fn preferred_update(
         &self,
     ) -> Option<(&TransactionKernel, &NeptuneProof, UpgradePriority)> {
@@ -289,11 +288,10 @@ impl Mempool {
         None
     }
 
-    /// Return the preferred proof collection for proof upgrading. Will always
-    /// prioritize transactions with a positive upgrade priority first, then
-    /// transactions with higher fee density. This means that transactions
-    /// initialized by this node's wallet will always be targeted for
-    /// proof-upgrading first.
+    /// Return the preferred proof collection for proof upgrading. Favors
+    /// transactions based on upgrade priority first, fee density second. This
+    /// means that transactions initialized by this node's wallet will always be
+    /// targeted for proof-upgrading first.
     ///
     /// Will only return transactions that are synced to the latest tip.
     ///
@@ -381,20 +379,12 @@ impl Mempool {
             }
         }
 
-        let Ok(ret) = <Vec<_> as TryInto<[_; 2]>>::try_into(ret) else {
-            return None;
-        };
-
-        Some((
-            ret.map(|txid| {
-                let candidate = self.tx_dictionary.get(&txid).unwrap();
-                (
-                    candidate.transaction.kernel.to_owned(),
-                    candidate.transaction.proof.to_owned().into_single_proof(),
-                )
-            }),
-            priority,
-        ))
+        let [left, right] = ret.try_into().ok()?;
+        let left = &self.tx_dictionary.get(&left).unwrap().transaction;
+        let right = &self.tx_dictionary.get(&right).unwrap().transaction;
+        let candidates =
+            [left, right].map(|t| (t.kernel.to_owned(), t.proof.to_owned().into_single_proof()));
+        Some((candidates, priority))
     }
 
     /// check if transaction exists in mempool
@@ -845,9 +835,13 @@ impl Mempool {
             }
 
             let (update_job, keep_in_mempool) = match &tx.transaction.proof {
-                // Proof-collection backed transaction cannot be updated, but if
-                // the transaction was initiated locally, the primitive witness
-                // will be known, and it can be updated.
+                // Proof-collection backed transaction cannot be updated
+                // directly. But if the transaction was initiated locally, the
+                // primitive witness will be known, and it can be updated. Also,
+                // if the proof collection is first upgraded to a SingleProof,
+                // and then update, it could also become synced again that way.
+                // So we could consider keeping PC-backed transactions around
+                // even if we don't have the primitive witness.
                 TransactionProof::ProofCollection(_) => {
                     if let Some(pw) = &tx.primitive_witness {
                         let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned());
@@ -979,7 +973,7 @@ impl Mempool {
     /// Computes in O(N lg N)
     pub fn fee_density_iter(
         &self,
-    ) -> Rev<DoubleEndedIterator<TransactionKernelId, FeeDensity, RandomState>> {
+    ) -> impl std::iter::DoubleEndedIterator<Item = (TransactionKernelId, FeeDensity)> {
         let dpq_clone = self.fee_densities.clone();
         dpq_clone.into_sorted_iter().rev()
     }
