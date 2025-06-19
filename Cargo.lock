@@ -838,12 +838,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deranged"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c9e6a11ca8224451684bc0d7d5a7adbf8f2fd6887261a1cfc3c0432f9d4068e"
-
-[[package]]
 name = "derive-where"
 version = "1.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1764,7 +1758,6 @@ dependencies = [
  "clienter",
  "console-subscriber",
  "crossterm 0.27.0",
- "deranged 0.4.0",
  "directories",
  "divan",
  "field_count",
@@ -3105,7 +3098,7 @@ version = "0.3.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35e7868883861bd0e56d9ac6efcaaca0d6d5d82a2a7ec8209ff492c07cf37b21"
 dependencies = [
- "deranged 0.3.11",
+ "deranged",
  "itoa",
  "num-conv",
  "powerfmt",
