@@ -3434,6 +3434,8 @@ mod tests {
 
     mod transactions {
         use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+        use crate::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
+        use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
@@ -3671,100 +3673,114 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
-        async fn accepts_proof_collection_with_updated_mutator_set() {
-            // Scenario: node knows transaction and receives transaction
-            // notification and transaction for transaction with updated
-            // mutator set data. The updated transaction must find its way into
-            // the mempool.
+        async fn accepts_tx_with_updated_mutator_set() {
+            // Scenario: node has transaction in mempool and receives
+            // transaction notification for the same transaction with an updated
+            // mutator set. The node must request the new transaction and it
+            // must be passed on to main loop.
+            //
+            // Both ProofCollection and SingleProof backed transactions are
+            // tested.
+
+            enum ProofType {
+                ProofCollection,
+                SingleProof,
+            }
+
             let network = Network::Main;
-            let (
-                _peer_broadcast_tx,
-                from_main_rx_clone,
-                to_main_tx,
-                mut to_main_rx1,
-                mut state_lock,
-                _hsd,
-            ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
-                .await
-                .unwrap();
-            let fee = NativeCurrencyAmount::from_nau(500);
-            let primitive_witness =
-                genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
+
+            for proof_type in [ProofType::ProofCollection, ProofType::SingleProof] {
+                let proof_job_options = TritonVmProofJobOptions::default();
+                let upgrade = async |primitive_witness: PrimitiveWitness| match proof_type {
+                    ProofType::ProofCollection => {
+                        PrimitiveWitnessToProofCollection { primitive_witness }
+                            .upgrade(vm_job_queue(), &proof_job_options)
+                            .await
+                            .unwrap()
+                    }
+                    ProofType::SingleProof => PrimitiveWitnessToSingleProof { primitive_witness }
+                        .upgrade(vm_job_queue(), &proof_job_options)
+                        .await
+                        .unwrap(),
+                };
+
+                let (
+                    _peer_broadcast_tx,
+                    from_main_rx_clone,
+                    to_main_tx,
+                    mut to_main_rx1,
+                    mut state_lock,
+                    _hsd,
+                ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
                     .await
-                    .proof
-                    .clone()
-                    .into_primitive_witness();
+                    .unwrap();
+                let fee = NativeCurrencyAmount::from_nau(500);
+                let pw_genesis =
+                    genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
+                        .await
+                        .proof
+                        .clone()
+                        .into_primitive_witness();
 
-            let proof_job_options = TritonVmProofJobOptions::default();
-            let pc_tx_synced_to_genesis = PrimitiveWitnessToProofCollection {
-                primitive_witness: primitive_witness.clone(),
+                let tx_synced_to_genesis = upgrade(pw_genesis.clone()).await;
+
+                let genesis_block = Block::genesis(network);
+                let block1 = fake_deterministic_successor(&genesis_block, network).await;
+                state_lock
+                    .lock_guard_mut()
+                    .await
+                    .set_new_tip(block1.clone())
+                    .await
+                    .unwrap();
+
+                state_lock
+                    .lock_guard_mut()
+                    .await
+                    .mempool_insert(tx_synced_to_genesis, UpgradePriority::Irrelevant)
+                    .await;
+
+                // Mempool should now contain the unsynced transaction. Tip is block 1.
+                let pw_block1 =
+                    pw_genesis.update_with_new_ms_data(block1.mutator_set_update().unwrap());
+                let tx_synced_to_block1 = upgrade(pw_block1).await;
+
+                let tx_notification: TransactionNotification =
+                    (&tx_synced_to_block1).try_into().unwrap();
+                let mock = Mock::new(vec![
+                    Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                    Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
+                    Action::Read(PeerMessage::Transaction(Box::new(
+                        (&tx_synced_to_block1).try_into().unwrap(),
+                    ))),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+
+                // Mock a timestamp to allow transaction to be considered valid
+                let now = tx_synced_to_block1.kernel.timestamp;
+                let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
+                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                    to_main_tx,
+                    state_lock.clone(),
+                    get_dummy_socket_address(0),
+                    hsd_1.clone(),
+                    true,
+                    1,
+                    now,
+                );
+
+                let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+                peer_loop_handler
+                    .run(mock, from_main_rx_clone, &mut peer_state)
+                    .await
+                    .unwrap();
+
+                // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
+                // by the `main_loop`.
+                match to_main_rx1.recv().await {
+                    Some(PeerTaskToMain::Transaction(_)) => (),
+                    _ => panic!("Main loop must receive new transaction"),
+                };
             }
-            .upgrade(vm_job_queue(), &proof_job_options)
-            .await
-            .unwrap();
-
-            let genesis_block = Block::genesis(network);
-            let block1 = fake_deterministic_successor(&genesis_block, network).await;
-            state_lock
-                .lock_guard_mut()
-                .await
-                .set_new_tip(block1.clone())
-                .await
-                .unwrap();
-
-            state_lock
-                .lock_guard_mut()
-                .await
-                .mempool_insert(pc_tx_synced_to_genesis, UpgradePriority::Irrelevant)
-                .await;
-
-            // Mempool should now contain the unsynced proof-collection backed
-            // transaction. Tip is block 1.
-            let pw_block1 =
-                primitive_witness.update_with_new_ms_data(block1.mutator_set_update().unwrap());
-            let pc_tx_synced_to_block1 = PrimitiveWitnessToProofCollection {
-                primitive_witness: pw_block1.clone(),
-            }
-            .upgrade(vm_job_queue(), &proof_job_options)
-            .await
-            .unwrap();
-
-            let tx_notification: TransactionNotification =
-                (&pc_tx_synced_to_block1).try_into().unwrap();
-            let mock = Mock::new(vec![
-                Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-                Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
-                Action::Read(PeerMessage::Transaction(Box::new(
-                    (&pc_tx_synced_to_block1).try_into().unwrap(),
-                ))),
-                Action::Read(PeerMessage::Bye),
-            ]);
-
-            // Mock a timestamp to allow transaction to be considered valid
-            let now = pc_tx_synced_to_block1.kernel.timestamp;
-            let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
-                to_main_tx,
-                state_lock.clone(),
-                get_dummy_socket_address(0),
-                hsd_1.clone(),
-                true,
-                1,
-                now,
-            );
-
-            let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
-            peer_loop_handler
-                .run(mock, from_main_rx_clone, &mut peer_state)
-                .await
-                .unwrap();
-
-            // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
-            // by the `main_loop`.
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::Transaction(_)) => (),
-                _ => panic!("Main loop must receive new transaction"),
-            };
         }
     }
 

@@ -52,9 +52,7 @@ pub(super) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 #[derive(Clone, Debug)]
 pub enum UpgradeJob {
     PrimitiveWitnessToProofCollection(PrimitiveWitnessToProofCollection),
-    PrimitiveWitnessToSingleProof {
-        primitive_witness: PrimitiveWitness,
-    },
+    PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof),
     ProofCollectionToSingleProof {
         kernel: TransactionKernel,
         proof: ProofCollection,
@@ -71,6 +69,42 @@ pub enum UpgradeJob {
         upgrade_incentive: UpgradeIncentive,
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
+}
+
+#[derive(Clone, Debug)]
+pub struct PrimitiveWitnessToSingleProof {
+    pub primitive_witness: PrimitiveWitness,
+}
+
+impl PrimitiveWitnessToSingleProof {
+    /// Execute the upgrade from a primitive witness to a single proof.
+    ///
+    /// Takes a very long time to execute, so no locks maybe be held when this
+    /// is invoked.
+    pub(crate) async fn upgrade(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: &TritonVmProofJobOptions,
+    ) -> anyhow::Result<Transaction> {
+        let options = TritonVmProofJobOptionsBuilder::new()
+            .template(proof_job_options)
+            .proof_type(TransactionProofType::SingleProof)
+            .build();
+
+        info!("Proof-upgrader: Start producing single proof");
+        let single_proof = TransactionProofBuilder::new()
+            .primitive_witness_ref(&self.primitive_witness)
+            .job_queue(triton_vm_job_queue.clone())
+            .proof_job_options(options)
+            .build()
+            .await?;
+        info!("Proof-upgrader, single proof: Done");
+
+        Ok(Transaction {
+            kernel: self.primitive_witness.kernel,
+            proof: single_proof,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -185,10 +219,14 @@ impl UpgradeJob {
                 })
             }
             TxProvingCapability::SingleProof => {
-                UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness }
+                UpgradeJob::PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof {
+                    primitive_witness,
+                })
             }
             TxProvingCapability::PrimitiveWitness if network.use_mock_proof() => {
-                UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness }
+                UpgradeJob::PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof {
+                    primitive_witness,
+                })
             }
             TxProvingCapability::PrimitiveWitness => {
                 panic!("Client cannot have primitive witness capability only")
@@ -228,8 +266,8 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
                 pw_to_pc.primitive_witness.kernel.timestamp
             }
-            UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
-                primitive_witness.kernel.timestamp
+            UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => {
+                pw_to_sp.primitive_witness.kernel.timestamp
             }
             UpgradeJob::ProofCollectionToSingleProof { kernel, .. } => kernel.timestamp,
             UpgradeJob::Merge {
@@ -285,8 +323,8 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
                 vec![pw_to_pc.primitive_witness.kernel.txid()]
             }
-            UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
-                vec![primitive_witness.kernel.txid()]
+            UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => {
+                vec![pw_to_sp.primitive_witness.kernel.txid()]
             }
             UpgradeJob::UpdateMutatorSetData(update_job) => vec![update_job.old_kernel.txid()],
         }
@@ -299,8 +337,8 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
                 pw_to_pc.primitive_witness.mutator_set_accumulator.clone()
             }
-            UpgradeJob::PrimitiveWitnessToSingleProof { primitive_witness } => {
-                primitive_witness.mutator_set_accumulator.clone()
+            UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => {
+                pw_to_sp.primitive_witness.mutator_set_accumulator.clone()
             }
             UpgradeJob::ProofCollectionToSingleProof { mutator_set, .. } => mutator_set.clone(),
             UpgradeJob::Merge { mutator_set, .. } => mutator_set.clone(),
@@ -738,39 +776,19 @@ impl UpgradeJob {
                 pw_to_pc
                     .upgrade(triton_vm_job_queue.clone(), &proof_job_options)
                     .await?,
-                vec![],
+                expected_utxos,
             )),
-            UpgradeJob::PrimitiveWitnessToSingleProof {
-                primitive_witness: witness,
-            } => {
-                // ensure that proof-type is SingleProof
-                let options = TritonVmProofJobOptionsBuilder::new()
-                    .template(&proof_job_options)
-                    .proof_type(TransactionProofType::SingleProof)
-                    .build();
-
-                info!("Proof-upgrader: Start producing single proof");
-                let proof = TransactionProofBuilder::new()
-                    .primitive_witness_ref(&witness)
-                    .job_queue(triton_vm_job_queue.clone())
-                    .proof_job_options(options)
-                    .build()
-                    .await?;
-
-                info!("Proof-upgrader, single proof: Done");
-                Ok((
-                    Transaction {
-                        kernel: witness.kernel,
-                        proof,
-                    },
-                    vec![],
-                ))
-            }
+            UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => Ok((
+                pw_to_sp
+                    .upgrade(triton_vm_job_queue.clone(), &proof_job_options)
+                    .await?,
+                expected_utxos,
+            )),
             UpgradeJob::UpdateMutatorSetData(update_job) => {
                 let ret = update_job
                     .upgrade(triton_vm_job_queue, proof_job_options)
                     .await?;
-                Ok((ret, vec![]))
+                Ok((ret, expected_utxos))
             }
         }
     }
