@@ -53,7 +53,6 @@ use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
-use proptest::prop_assume;
 use serde::Deserialize;
 use serde::Serialize;
 use systemstat::Platform;
@@ -3754,6 +3753,7 @@ mod tests {
     use macro_rules_attr::apply;
     use num_traits::One;
     use num_traits::Zero;
+    use proptest::prop_assume;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
