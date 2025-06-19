@@ -892,11 +892,11 @@ mod tests {
     use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
-    use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
-    use crate::tests::shared::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
-    use crate::tests::shared::make_plenty_mock_transaction_supported_by_primitive_witness;
-    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::blocks::make_mock_block;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_tx::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
+    use crate::tests::shared::mock_tx::testrunning::make_mock_txs_with_primitive_witness_with_timestamp;
+    use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;

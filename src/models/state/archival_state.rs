@@ -1214,12 +1214,12 @@ pub(super) mod tests {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::add_block_to_archival_state;
+    use crate::tests::shared::archival::add_block_to_archival_state;
+    use crate::tests::shared::archival::mock_genesis_archival_state;
+    use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
-    use crate::tests::shared::invalid_block_with_transaction;
-    use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::mock_genesis_archival_state;
-    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
@@ -3675,7 +3675,7 @@ pub(super) mod tests {
 
     mod block_hash_witness {
         use super::*;
-        use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
+        use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

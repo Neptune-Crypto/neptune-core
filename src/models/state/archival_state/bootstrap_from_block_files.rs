@@ -123,7 +123,7 @@ mod tests {
     use super::*;
     use crate::api::export::Network;
     use crate::models::state::archival_state::tests::make_test_archival_state;
-    use crate::tests::shared::invalid_empty_blocks;
+    use crate::tests::shared::blocks::invalid_empty_blocks;
     use crate::tests::shared_tokio_runtime;
 
     #[test]

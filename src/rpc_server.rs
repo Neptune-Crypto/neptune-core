@@ -3734,17 +3734,17 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::transaction_kernel::tests::propcompose_txkernel_with_lengths;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::rpc_server::NeptuneRPCServer;
+    use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
-    use crate::tests::shared::invalid_block_with_transaction;
-    use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::strategies::txkernel_with_lengths;
     use crate::tests::shared_tokio_runtime;
     use crate::Block;
 
@@ -4449,7 +4449,7 @@ mod tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn public_announcements_in_block_test(
-        #[strategy(propcompose_txkernel_with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
+        #[strategy(txkernel_with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;
@@ -4658,7 +4658,7 @@ mod tests {
         use crate::mine_loop::fast_kernel_mast_hash;
         use crate::models::state::block_proposal::BlockProposal;
         use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
-        use crate::tests::shared::invalid_empty_block;
+        use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
         fn pow_puzzle_is_consistent_with_block_hash() {
@@ -4950,8 +4950,8 @@ mod tests {
 
             use super::*;
             use crate::models::state::tx_proving_capability::TxProvingCapability;
-            use crate::tests::shared::invalid_block_with_transaction;
-            use crate::tests::shared::invalid_empty_block;
+            use crate::tests::shared::blocks::invalid_block_with_transaction;
+            use crate::tests::shared::blocks::invalid_empty_block;
 
             pub(super) async fn claim_utxo_unowned(claim_after_confirmed: bool) -> Result<()> {
                 let network = Network::Main;
@@ -5329,7 +5329,7 @@ mod tests {
     mod send_tests {
         use super::*;
         use crate::rpc_server::error::RpcError;
-        use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
+        use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]

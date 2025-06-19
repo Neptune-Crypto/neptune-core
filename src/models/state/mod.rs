@@ -2070,13 +2070,13 @@ mod tests {
     use crate::models::state::wallet::address::BaseSpendingKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::tests::shared::fake_valid_successor_for_tests;
-    use crate::tests::shared::invalid_empty_block;
-    use crate::tests::shared::invalid_empty_blocks;
-    use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_with_inputs_and_outputs;
-    use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::state_with_premine_and_self_mined_blocks;
+    use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+    use crate::tests::shared::blocks::invalid_empty_block;
+    use crate::tests::shared::blocks::invalid_empty_blocks;
+    use crate::tests::shared::blocks::make_mock_block;
+    use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
@@ -4252,7 +4252,7 @@ mod tests {
         use super::*;
         use crate::tests::shared::files::test_helper_data_dir;
         use crate::tests::shared::files::try_fetch_file_from_server;
-        use crate::tests::shared::mock_genesis_global_state_with_block;
+        use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
 
         async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
             // Ensure more than one file is used to store blocks.
