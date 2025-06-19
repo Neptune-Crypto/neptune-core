@@ -89,7 +89,7 @@ impl BlockPrimitiveWitness {
     ///
     /// # Panics
     ///
-    ///  - If predecessor has negative transaction fee
+    ///  - If predecessor has negative transaction fee.
     pub(crate) fn body(&self) -> &BlockBody {
         self.maybe_body.get_or_init(|| {
             let predecessor_msa = self
@@ -112,7 +112,7 @@ impl BlockPrimitiveWitness {
             let mutator_set_update = MutatorSetUpdate::new(inputs, self.transaction.kernel.outputs.clone());
 
             // Due to tests, we don't verify that the removal records can be applied. That is
-            // the caller's responsibility to ensure by e.g. calling block.is_valid(network) after
+            // the caller's responsibility to ensure by e.g. calling `block.is_valid(network)` after
             // constructing a block.
             let mut mutator_set = predecessor_msa;
             mutator_set_update.apply_to_accumulator_unsafe(&mut mutator_set);

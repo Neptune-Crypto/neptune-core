@@ -61,6 +61,7 @@ impl HasDiscriminant for BlockBodyField {
 // We likewise skip the field for `BFieldCodec`, and `GetSize` because there
 // exist no impls for `OnceLock<_>` so derive fails.
 #[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize, TasmObject)]
+// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm. The inputs

@@ -34,7 +34,7 @@ use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::HashSet<Claim>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
-/// Verify a Triton VM (claim,proof) pair for default STARK parameters.
+/// Verify a Triton VM (claim, proof) pair for default STARK parameters.
 ///
 /// When the test flag is set, this function checks whether the claim is present
 /// in the `CLAIMS_CACHE` and if so returns true early (*i.e.*, without running
@@ -54,19 +54,20 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
         return true;
     }
 
+    #[cfg(test)]
     let claim_clone = claim.clone();
-    let verdict = task::spawn_blocking(move || {
-        triton_vm::verify(Stark::default(), &claim_clone, &proof.into())
-    })
-    .await
-    .expect("should be able to verify proof in new tokio task");
+
+    let verdict =
+        task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim, &proof.into()))
+            .await
+            .expect("should be able to verify proof in new tokio task");
 
     // tbd: we might want to enable a cache for mainnet usage.
     // but we should probably use a cache that has a configurable max
     // size, so we don't blow up RAM.
     #[cfg(test)]
     if verdict {
-        cache_true_claim(claim).await;
+        cache_true_claim(claim_clone).await;
     }
 
     verdict

@@ -370,7 +370,7 @@ mod tests {
         let mut prng = rand::rng();
         for _ in 0..CHUNK_SIZE {
             let index = prng.next_u32() % CHUNK_SIZE;
-            let set = prng.next_u32() % 2 == 0;
+            let set = prng.next_u32().is_multiple_of(2);
             if set {
                 aw.insert(index);
             }
