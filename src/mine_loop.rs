@@ -397,7 +397,9 @@ fn guess_nonce_iteration(
     let nonce: Digest = rng.random();
 
     // Check every N guesses if task has been cancelled.
-    if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
+    if (sleepy_guessing || nonce.values()[0].raw_u64().is_multiple_of(1 << 16))
+        && sender.is_canceled()
+    {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
@@ -1124,7 +1126,6 @@ pub(crate) mod tests {
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;

@@ -25,10 +25,10 @@ type ChunkIndex = u64;
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct ChunkDictionary {
-    // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
-    // This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
-    // don't care about the cost of reallocation when `insert`ing or
-    // `remove`ing.
+    /// {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
+    /// This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
+    /// don't care about the cost of reallocation when `insert`ing or
+    /// `remove`ing.
     pub(crate) dictionary: Vec<(u64, (MmrMembershipProof, Chunk))>,
 }
 
@@ -192,6 +192,21 @@ pub mod tests {
         pub fn propcompose_chunkdict() (dictionary in collection::vec((
             any::<u64>(), collection::vec(proptest_arbitrary_interop::arb::<Digest>(), 0..6), collection::vec(any::<u32>(), 0..17),
         ), 37)) -> ChunkDictionary {
+            ChunkDictionary::new(dictionary.into_iter().map(|(key, authpath, chunk)| (
+                key,
+                (
+                    MmrMembershipProof::new(authpath),
+                    Chunk {
+                        relative_indices: chunk,
+                    },
+                )
+            )).collect_vec())
+        }
+    }
+    prop_compose! {
+        pub fn propcompose_chunkdict_with_leafs_limit(leafs_limit: u64) (dictionary in collection::vec((
+            ..=leafs_limit, collection::vec(proptest_arbitrary_interop::arb::<Digest>(), 0..6), collection::vec(any::<u32>(), 0..17),
+        ), 1..=(crate::util_types::mutator_set::shared::NUM_TRIALS as usize))) -> ChunkDictionary {
             ChunkDictionary::new(dictionary.into_iter().map(|(key, authpath, chunk)| (
                 key,
                 (

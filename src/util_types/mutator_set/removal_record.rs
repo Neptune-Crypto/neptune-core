@@ -22,8 +22,6 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
-#[cfg(test)]
-pub use tests::propcompose_absindset;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
@@ -291,6 +289,15 @@ mod tests {
         vec(arb::<u8>(), 16_usize + (NUM_TRIALS as usize) * 4)
             .prop_map(|bytes| AbsoluteIndexSet::arbitrary(&mut Unstructured::new(&bytes)).unwrap())
     }
+    prop_compose! {
+        pub fn propcompose_absindset_with_limit(l: u64) (inner in [..=u128::from(l); NUM_TRIALS as usize]) -> AbsoluteIndexSet {
+            AbsoluteIndexSet::new(&inner)
+        }
+    }
+
+    // prop_compose! {
+    //     pub fn propcompose_rr_()
+    // }
 
     #[test]
     fn increment_bloom_filter_index_behaves_as_expected() {

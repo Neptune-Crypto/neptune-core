@@ -111,8 +111,8 @@ pub fn random_mmra() -> MmrAccumulator {
 
 proptest::prop_compose! {
     pub fn propcompose_rr_with_independent_absindset_chunkdict() (
-        absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
-        target_chunks in crate::util_types::mutator_set::removal_record::chunk_dictionary::tests::propcompose_chunkdict()
+        absolute_indices in crate::util_types::mutator_set::removal_record::tests::propcompose_absindset(),
+        target_chunks in crate::util_types::mutator_set::chunk_dictionary::tests::propcompose_chunkdict()
     ) -> RemovalRecord {RemovalRecord {absolute_indices, target_chunks}}
 }
 

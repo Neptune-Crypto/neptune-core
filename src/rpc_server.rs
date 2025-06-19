@@ -3768,7 +3768,7 @@ mod tests {
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::strategies::txkernel_with_lengths;
+    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::Block;
 
@@ -4515,8 +4515,8 @@ mod tests {
 
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
-    async fn announcements_in_block_test(
-        #[strategy(txkernel_with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1))]
+    async fn public_announcements_in_block_test(
+        #[strategy(txkernel::with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1, false))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;

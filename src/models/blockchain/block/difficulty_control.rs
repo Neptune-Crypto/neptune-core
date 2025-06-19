@@ -502,9 +502,8 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest::test_runner::TestRng;
     use proptest_arbitrary_interop::arb;
-    use rand::Rng;
-    use rand_distr::Bernoulli;
-    use rand_distr::Distribution;
+    use rand::distr::Distribution;
+    use rand::{distr::Bernoulli, Rng};
     use rand_distr::Geometric;
     use test_strategy::proptest;
 
