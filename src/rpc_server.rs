@@ -745,12 +745,12 @@ pub trait RPC {
     /// ```
     async fn utxo_digest(token: rpc_auth::Token, leaf_index: u64) -> RpcResult<Option<Digest>>;
 
-    /// Returns the block in which the specified UTXO was created, if available
+    /// Returns the block digest in which the specified UTXO was created, if available
     async fn utxo_origin_block(
         token: rpc_auth::Token,
         addition_record: AdditionRecord,
         max_search_depth: Option<u64>,
-    ) -> RpcResult<Option<Block>>;
+    ) -> RpcResult<Option<Digest>>;
 
     /// Return the block header for the specified block
     ///
@@ -2334,7 +2334,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
         addition_record: AdditionRecord,
         max_search_depth: Option<u64>,
-    ) -> RpcResult<Option<Block>> {
+    ) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2345,7 +2345,7 @@ impl RPC for NeptuneRPCServer {
             .find_canonical_block_with_output(addition_record, max_search_depth)
             .await;
 
-        Ok(block)
+        Ok(block.map(|block| block.hash()))
     }
 
     // documented in trait. do not add doc-comment.
@@ -4331,17 +4331,18 @@ mod tests {
     }
 
     #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn utxo_origin_block_test() {
-        let network = Network::Main;
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn utxo_origin_block_test(
+        #[strategy(propcompose_txkernel_with_lengths(0usize, 1usize, 0usize))]
+        transaction_kernel: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+    ) {
+        let network = Network::Beta;
         let mut rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
             2,
             cli_args::Args::default_with_network(network),
         )
         .await;
-        let mut rng = rand::rng();
-        let transaction_kernel = pseudorandom_transaction_kernel(rng.random(), 0, 1, 0);
         let transaction = Transaction {
             kernel: transaction_kernel,
             proof: TransactionProof::invalid(),
@@ -4360,14 +4361,10 @@ mod tests {
             origin_block.is_some(),
             "Expected origin block for included UTXO"
         );
-        assert!(
-            origin_block
-                .unwrap()
-                .body()
-                .transaction_kernel()
-                .outputs
-                .contains(&output),
-            "Origin block should have the UTXO inside"
+        assert_eq!(
+            origin_block.unwrap(),
+            block.hash(),
+            "UTXOs inclusion digest should match the origin block"
         );
     }
 
