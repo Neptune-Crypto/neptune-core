@@ -1102,10 +1102,10 @@ pub(crate) mod tests {
     use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::dummy_expected_utxo;
-    use crate::tests::shared::invalid_empty_block;
-    use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
-    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobQueue;

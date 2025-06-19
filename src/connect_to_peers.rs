@@ -576,11 +576,11 @@ mod tests {
     use crate::models::peer::PeerMessage;
     use crate::models::peer::PeerStanding;
     use crate::prelude::twenty_first;
-    use crate::tests::shared::get_dummy_handshake_data_for_genesis;
-    use crate::tests::shared::get_dummy_peer_connection_data_genesis;
-    use crate::tests::shared::get_dummy_peer_incoming;
-    use crate::tests::shared::get_dummy_socket_address;
-    use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::globalstate::get_dummy_handshake_data_for_genesis;
+    use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
+    use crate::tests::shared::globalstate::get_dummy_peer_incoming;
+    use crate::tests::shared::globalstate::get_dummy_socket_address;
+    use crate::tests::shared::globalstate::get_test_genesis_setup;
     use crate::tests::shared::to_bytes;
     use crate::tests::shared_tokio_runtime;
     use crate::MAGIC_STRING_REQUEST;

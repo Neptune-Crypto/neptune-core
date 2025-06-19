@@ -416,8 +416,6 @@ impl TransactionKernelModifier {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use itertools::Itertools;
-    use proptest::collection;
-    use proptest::prelude::any;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -428,57 +426,6 @@ pub mod tests {
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
-    use crate::tests::shared::propcompose_txkernel;
-
-    proptest::prop_compose! {
-        pub fn propcompose_txkernel_with_usualtxdata(
-            inputs: Vec<RemovalRecord>,
-            outputs: Vec<AdditionRecord>,
-            fee: NativeCurrencyAmount,
-            timestamp: Timestamp,
-        ) (mutator_set_hash in arb::<Digest>()) -> TransactionKernel {
-            TransactionKernelProxy {
-                inputs: inputs.clone(),
-                outputs: outputs.clone(),
-                public_announcements: vec![],
-                fee,
-                timestamp,
-                coinbase: None,
-                mutator_set_hash,
-                merge_bit: false,
-            }
-            .into_kernel()
-        }
-    }
-
-    proptest::prop_compose! {
-        pub fn propcompose_txkernel_with_lengths(
-            num_inputs: usize,
-            num_outputs: usize,
-            num_public_announcements: usize,
-        ) (
-            inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict(), num_inputs),
-            outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
-            public_announcements in collection::vec(collection::vec(arb::<BFieldElement>(), 10..59), num_public_announcements).prop_map(
-                |vecvec| vecvec.into_iter().map(|message| PublicAnnouncement { message }).collect_vec()
-            ),
-            fee in arb::<NativeCurrencyAmount>(),
-            coinbase in arb::<Option<NativeCurrencyAmount>>(),
-            timestamp in arb::<Timestamp>(),
-            mutator_set_hash in arb::<Digest>(),
-            merge_bit in any::<bool>(),
-        ) -> TransactionKernel {TransactionKernelProxy {
-            inputs,
-            outputs,
-            public_announcements,
-            fee,
-            coinbase,
-            timestamp,
-            mutator_set_hash,
-            merge_bit,
-        }
-        .into_kernel()}
-    }
 
     #[test]
     pub fn arbitrary_tx_kernel_is_deterministic() {
@@ -571,7 +518,7 @@ pub mod tests {
 
     #[proptest]
     fn test_decode_transaction_kernel(
-        #[strategy(propcompose_txkernel())] kernel: TransactionKernel,
+        #[strategy(crate::tests::shared::strategies::txkernel())] kernel: TransactionKernel,
     ) {
         let encoded = kernel.encode();
         let decoded = *TransactionKernel::decode(&encoded).unwrap();

@@ -2013,10 +2013,10 @@ pub(crate) mod tests {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::GlobalStateLock;
-    use crate::tests::shared::invalid_block_with_transaction;
-    use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
-    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::make_mock_block;
+    use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
@@ -3001,9 +3001,9 @@ pub(crate) mod tests {
         use crate::mine_loop::GuessingConfiguration;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::channel::NewBlockFound;
+        use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
+        use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::fake_create_block_transaction_for_tests;
-        use crate::tests::shared::fake_valid_block_proposal_from_tx;
-        use crate::tests::shared::fake_valid_block_proposal_successor_for_test;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -3335,7 +3335,7 @@ pub(crate) mod tests {
         use crate::models::state::wallet::address::ReceivingAddress;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::models::state::TransactionOrigin;
-        use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
+        use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
         ///
@@ -3770,7 +3770,7 @@ pub(crate) mod tests {
     mod expected_utxos {
         use super::*;
         use crate::models::blockchain::transaction::lock_script::LockScript;
-        use crate::tests::shared::make_mock_transaction;
+        use crate::tests::shared::mock_tx::make_mock_transaction;
         use crate::util_types::mutator_set::commit;
 
         #[traced_test]
@@ -3991,7 +3991,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-        use crate::tests::shared::invalid_empty_block;
+        use crate::tests::shared::blocks::invalid_empty_block;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -4243,9 +4243,9 @@ pub(crate) mod tests {
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
-        use crate::models::blockchain::transaction::transaction_kernel::tests::propcompose_txkernel_with_lengths;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
+        use crate::tests::shared::strategies::txkernel_with_lengths;
 
         const NUM_FUTURE_KEYS: usize = 20;
 
@@ -4445,7 +4445,7 @@ pub(crate) mod tests {
         #[traced_test]
         #[test_strategy::proptest(async = "tokio")]
         async fn scan_for_utxos_announced_to_future_keys_behaves(
-            #[strategy(propcompose_txkernel_with_lengths(10, 10, 10))] kernel: TransactionKernel,
+            #[strategy(txkernel_with_lengths(10, 10, 10))] kernel: TransactionKernel,
             #[strategy(arb())] wallet_secret: WalletEntropy,
             #[strategy(collection::vec(
                 0_usize..100,
