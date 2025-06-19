@@ -136,7 +136,7 @@ impl Display for PrimitiveWitness {
         };
         let utxo_digests = self.input_utxos.utxos.iter().map(Hash::hash);
         let kernel_merkle_tree = self.kernel.merkle_tree();
-        let kernel_mt_leafs = kernel_merkle_tree.leafs();
+        let mut kernel_mt_leafs = kernel_merkle_tree.leafs();
         write!(
             f,
             "inputs: [{}]\noutputs: [{}]\ncoinbase: {}\nfee: {}\n\
@@ -152,7 +152,7 @@ impl Display for PrimitiveWitness {
                 .zip_eq(utxo_digests)
                 .map(|(msmp, utxo_digest)| msmp.addition_record(utxo_digest).canonical_commitment)
                 .join("\n"),
-            kernel_mt_leafs.iter().join("\n"),
+            kernel_mt_leafs.join("\n"),
         )
     }
 }

@@ -151,7 +151,7 @@ mod tests {
             .map(|(idx, digest)| (idx as usize, digest));
         for (path, indexed_leaf) in root_and_paths.paths.into_iter().zip(indexed_leafs) {
             let inclusion_proof = MerkleTreeInclusionProof {
-                tree_height,
+                tree_height: tree_height.try_into().unwrap(),
                 indexed_leafs: vec![indexed_leaf],
                 authentication_structure: path,
             };
