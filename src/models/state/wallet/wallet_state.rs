@@ -64,7 +64,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::mempool::MempoolEvent;
+use crate::models::state::mempool::mempool_event::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -1936,7 +1936,7 @@ impl WalletState {
             }
 
             // Select the input
-            allocated_amount = allocated_amount + input.utxo.get_native_currency_amount();
+            allocated_amount += input.utxo.get_native_currency_amount();
             input_funds.push(input.into());
         }
 
@@ -3331,10 +3331,10 @@ pub(crate) mod tests {
         use crate::config_models::cli_args;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::Transaction;
+        use crate::models::state::mempool::upgrade_priority::UpgradePriority;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-        use crate::models::state::TransactionOrigin;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
@@ -3431,7 +3431,7 @@ pub(crate) mod tests {
             global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx).clone(), TransactionOrigin::Own)
+                .mempool_insert((*tx).clone(), UpgradePriority::Critical)
                 .await;
 
             {
@@ -3578,9 +3578,10 @@ pub(crate) mod tests {
             );
 
             // generate one transaction
+            let send_amt1 = NativeCurrencyAmount::coins(1);
             let tx1 = outgoing_transaction(
                 &mut alice,
-                NativeCurrencyAmount::coins(1),
+                send_amt1,
                 NativeCurrencyAmount::coins(1),
                 now,
                 change_key,
@@ -3592,13 +3593,14 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx1).clone(), TransactionOrigin::Own)
+                .mempool_insert((*tx1).clone(), UpgradePriority::Critical)
                 .await;
 
             // generate a second transaction
+            let send_amt2 = NativeCurrencyAmount::coins(1);
             let tx2 = outgoing_transaction(
                 &mut alice,
-                NativeCurrencyAmount::coins(1),
+                send_amt2,
                 NativeCurrencyAmount::coins(1),
                 now,
                 change_key,
@@ -3610,7 +3612,7 @@ pub(crate) mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*tx2).clone(), TransactionOrigin::Own)
+                .mempool_insert((*tx2).clone(), UpgradePriority::Critical)
                 .await;
 
             // verify that the mempool contains two transactions
@@ -4698,11 +4700,11 @@ pub(crate) mod tests {
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
         use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::main_loop::proof_upgrader::UpgradeJob;
+        use crate::main_loop::upgrade_incentive::UpgradeIncentive;
         use crate::mine_loop::create_block_transaction;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-        use crate::models::state::mempool::TransactionOrigin;
         use crate::MainToPeerTask;
         use crate::PEER_CHANNEL_CAPACITY;
 
@@ -4929,13 +4931,12 @@ pub(crate) mod tests {
             let rando_cli_args = cli_args::Args {
                 fee_notification: upgrade_fee_notification_policy,
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
-                // necessary to allow proof-collection -> single-proof upgrades for foreign transactions
-                compose: true,
                 network,
                 ..Default::default()
             };
             let mut rando =
                 mock_genesis_global_state(2, rando_wallet_secret.clone(), rando_cli_args).await;
+            let upgrade_incentive = UpgradeIncentive::Gobble(fee);
             let upgrade_job_one = UpgradeJob::ProofCollectionToSingleProof {
                 kernel: proof_collection_transaction.kernel.clone(),
                 proof: proof_collection_transaction
@@ -4943,20 +4944,23 @@ pub(crate) mod tests {
                     .clone()
                     .into_proof_collection(),
                 mutator_set: genesis_block.mutator_set_accumulator_after().unwrap(),
-                gobbling_fee: fee,
+                upgrade_incentive,
             };
             let (channel_to_nowhere_one, nowhere_one) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
             upgrade_job_one
-                .handle_upgrade(
-                    dummy_queue.clone(),
-                    TransactionOrigin::Foreign,
-                    true,
-                    rando.clone(),
-                    channel_to_nowhere_one,
-                )
+                .handle_upgrade(dummy_queue.clone(), rando.clone(), channel_to_nowhere_one)
                 .await;
             drop(nowhere_one); // drop must occur after message is sent
+
+            // Get the "raised" transaction, which must now be in rando's
+            // mempool.
+            let single_proof_transaction = rando
+                .lock_guard()
+                .await
+                .mempool
+                .get_transactions_for_block_composition(1_000_000_000, None)[0]
+                .clone();
 
             // create block ignoring that transaction. Rando has upgraded tx
             // in mempool, alice does not. Alice composes block.
@@ -4993,38 +4997,26 @@ pub(crate) mod tests {
             // upgrade transaction again
             // this time mutator set data
             let genesis_mutator_set = genesis_block.mutator_set_accumulator_after().unwrap();
-            let single_proof_transaction = rando
-                .lock_guard()
-                .await
-                .mempool
-                .get_transactions_for_block(10_000_000, None, true, genesis_mutator_set.hash())[0]
-                .clone();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
                 genesis_mutator_set,
                 block_one.mutator_set_update().unwrap(),
+                upgrade_incentive,
             ));
             let (channel_to_nowhere_two, nowhere_two) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
             upgrade_job_two
-                .handle_upgrade(
-                    dummy_queue.clone(),
-                    TransactionOrigin::Foreign,
-                    true,
-                    rando.clone(),
-                    channel_to_nowhere_two,
-                )
+                .handle_upgrade(dummy_queue.clone(), rando.clone(), channel_to_nowhere_two)
                 .await;
             drop(nowhere_two); // drop must occur after message is sent
 
             // get upgraded transaction
-            let block_one_mutator_set = block_one.mutator_set_accumulator_after().unwrap();
             let transactions_for_block = rando
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(10_000_000, None, true, block_one_mutator_set.hash());
+                .get_transactions_for_block_composition(10_000_000, None);
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
             let new_num_public_announcements =

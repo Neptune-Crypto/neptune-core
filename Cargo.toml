@@ -77,7 +77,7 @@ crossterm = "0.27"
 directories = "5.0"
 field_count = "0.1"
 futures = "0.3"
-get-size2 = { version = "=0.1.3", features = ["derive"] }
+get-size2 = { version = "0.3", features = ["derive"] }
 itertools = "0.11"
 memmap2 = "0.9"
 num-bigint = { version = "0.4", features = ["serde"] }
@@ -101,7 +101,7 @@ tarpc = { version = "^0.34", features = [
     "serde-transport-json",
     "tcp",
 ] }
-tasm-lib = "0.48.0"
+tasm-lib = "0.49.0"
 tiny-bip39 = "1.0"
 tokio = { version = "1.41", features = ["full", "tracing"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
@@ -124,12 +124,6 @@ sysinfo = "0.31.4"
 thread-priority = "1.2.0"
 rayon = "1.10"
 humantime = "2.1.0"
-
-# Temporary workaround: exactly specify version of transitive dependency.
-# See also: https://github.com/jhpratt/deranged/issues/18
-#
-# Once the issue is resolved, this unused dependency can be removed.
-deranged = "=0.4.0"
 
 [dev-dependencies]
 

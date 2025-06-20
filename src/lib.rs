@@ -104,6 +104,13 @@ const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Causes compilation failures on targets where `u32` does not fit within a
+/// `usize`.
+const _MIN_PTR_WIDTH: () = {
+    #[cfg(target_pointer_width = "16")]
+    compile_error!("This crate requires a target pointer width of at least 32 bits.");
+};
+
 pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);

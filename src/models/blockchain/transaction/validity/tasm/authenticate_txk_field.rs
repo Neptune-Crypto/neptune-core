@@ -250,7 +250,7 @@ mod tests {
             let auth_path = (0..tree_height).map(|i| nd_digests[i]).collect_vec();
 
             let mt_proof = MerkleTreeInclusionProof {
-                tree_height,
+                tree_height: tree_height.try_into().unwrap(),
                 indexed_leafs: vec![(self.0 as usize, field_digest)],
                 authentication_structure: auth_path,
             };

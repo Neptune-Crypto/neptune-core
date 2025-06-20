@@ -531,8 +531,7 @@ mod tests {
 
             let mut assert_coinbase_integrity = move |merkle_root, coinbase| {
                 let leaf_index = TransactionKernelField::Coinbase as u32;
-                let tree_height =
-                    TransactionKernelField::COUNT.next_power_of_two().ilog2() as usize;
+                let tree_height = TransactionKernelField::COUNT.next_power_of_two().ilog2();
                 let mut authentication_structure = vec![];
                 for _ in 0..tree_height {
                     authentication_structure.push(nd_digests.pop_front().unwrap());

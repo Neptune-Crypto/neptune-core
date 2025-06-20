@@ -193,7 +193,7 @@ impl TransactionInitiator {
 
         // note: acquires write-lock.
         // note: tx is validated internally.
-        self.global_state_lock.record_transaction(tx).await?;
+        self.global_state_lock.record_own_transaction(tx).await?;
 
         // note: cheap arc clone of tx.
         self.worker()

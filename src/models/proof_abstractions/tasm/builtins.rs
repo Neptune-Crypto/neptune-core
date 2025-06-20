@@ -212,7 +212,7 @@ pub fn tasmlib_hashing_merkle_verify(
     });
 
     let mt_inclusion_proof = MerkleTreeInclusionProof {
-        tree_height: tree_height as usize,
+        tree_height,
         indexed_leafs: vec![(leaf_index as usize, leaf)],
         authentication_structure: path.clone(),
     };

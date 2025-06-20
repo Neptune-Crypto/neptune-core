@@ -66,7 +66,7 @@ impl UpdateWitness {
         let msah_path = new_kernel.mast_path(TransactionKernelField::MutatorSetHash);
         assert!(
             MerkleTreeInclusionProof {
-                tree_height: TransactionKernel::MAST_HEIGHT,
+                tree_height: TransactionKernel::MAST_HEIGHT.try_into().unwrap(),
                 indexed_leafs: vec![(
                     TransactionKernelField::MutatorSetHash as usize,
                     Tip5::hash(&new_msa.hash())
