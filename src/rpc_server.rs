@@ -116,6 +116,7 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::DataDirectory;
 
 /// result returned by RPC methods
@@ -743,6 +744,13 @@ pub trait RPC {
     /// # }
     /// ```
     async fn utxo_digest(token: rpc_auth::Token, leaf_index: u64) -> RpcResult<Option<Digest>>;
+
+    /// Returns the block digest in which the specified UTXO was created, if available
+    async fn utxo_origin_block(
+        token: rpc_auth::Token,
+        addition_record: AdditionRecord,
+        max_search_depth: Option<u64>,
+    ) -> RpcResult<Option<Digest>>;
 
     /// Return the block header for the specified block
     ///
@@ -2320,6 +2328,27 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn utxo_origin_block(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        addition_record: AdditionRecord,
+        max_search_depth: Option<u64>,
+    ) -> RpcResult<Option<Digest>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let block = state
+            .chain
+            .archival_state()
+            .find_canonical_block_with_output(addition_record, max_search_depth)
+            .await;
+
+        Ok(block.map(|block| block.hash()))
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn block_digest(
         self,
         _: context::Context,
@@ -3725,6 +3754,7 @@ mod tests {
     use macro_rules_attr::apply;
     use num_traits::One;
     use num_traits::Zero;
+    use proptest::prop_assume;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -4300,6 +4330,46 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[traced_test]
+    #[test_strategy::proptest(async = "tokio", cases = 5)]
+    async fn utxo_origin_block_test(
+        #[strategy(txkernel_with_lengths(0usize, 1usize, 0usize))]
+        transaction_kernel: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+    ) {
+        prop_assume!(!transaction_kernel.fee.is_negative());
+
+        let network = Network::Beta;
+        let mut rpc_server = test_rpc_server(
+            WalletEntropy::new_random(),
+            2,
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let transaction = Transaction {
+            kernel: transaction_kernel,
+            proof: TransactionProof::invalid(),
+        };
+        let block = invalid_block_with_transaction(&Block::genesis(network), transaction);
+        rpc_server.state.set_new_tip(block.clone()).await.unwrap();
+
+        let token = cookie_token(&rpc_server).await;
+        let output = block.body().transaction_kernel().outputs[0];
+        let origin_block = rpc_server
+            .utxo_origin_block(context::current(), token, output, None)
+            .await
+            .unwrap();
+
+        assert!(
+            origin_block.is_some(),
+            "Expected origin block for included UTXO"
+        );
+        assert_eq!(
+            origin_block.unwrap(),
+            block.hash(),
+            "UTXOs inclusion digest should match the origin block"
+        );
     }
 
     #[traced_test]
