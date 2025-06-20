@@ -293,7 +293,7 @@ impl GlobalStateLock {
     }
 
     /// stores/records a locally-initiated transaction into the global state.
-    pub async fn record_transaction(
+    pub async fn record_own_transaction(
         &mut self,
         tx_artifacts: &TxCreationArtifacts,
     ) -> std::result::Result<(), RecordTransactionError> {
