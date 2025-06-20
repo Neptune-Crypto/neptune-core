@@ -51,8 +51,14 @@ impl RegTest {
     ///
     /// The timestamp of each block will be the current system time, meaning
     /// that they will be temporally very close to eachother.
-    pub async fn mine_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<(), RegTestError> {
-        self.worker.mine_blocks_to_wallet(n_blocks).await
+    pub async fn mine_blocks_to_wallet(
+        &mut self,
+        n_blocks: u32,
+        mine_mempool_txs: bool,
+    ) -> Result<(), RegTestError> {
+        self.worker
+            .mine_blocks_to_wallet(n_blocks, mine_mempool_txs)
+            .await
     }
 
     /// mine a single block to the node's wallet with a custom timestamp
@@ -68,8 +74,11 @@ impl RegTest {
     pub async fn mine_block_to_wallet(
         &mut self,
         timestamp: Timestamp,
+        mine_mempool_sp_txs: bool,
     ) -> Result<Digest, RegTestError> {
-        self.worker.mine_block_to_wallet(timestamp).await
+        self.worker
+            .mine_block_to_wallet(timestamp, mine_mempool_sp_txs)
+            .await
     }
 }
 
@@ -84,15 +93,24 @@ impl RegTestPrivate {
     }
 
     // see description in [RegTest]
-    async fn mine_blocks_to_wallet(&mut self, n_blocks: u32) -> Result<(), RegTestError> {
+    async fn mine_blocks_to_wallet(
+        &mut self,
+        n_blocks: u32,
+        mine_mempool_sp_txs: bool,
+    ) -> Result<(), RegTestError> {
         for _ in 0..n_blocks {
-            self.mine_block_to_wallet(Timestamp::now()).await?;
+            self.mine_block_to_wallet(Timestamp::now(), mine_mempool_sp_txs)
+                .await?;
         }
         Ok(())
     }
 
     // see description in [RegTest]
-    async fn mine_block_to_wallet(&mut self, timestamp: Timestamp) -> Result<Digest, RegTestError> {
+    async fn mine_block_to_wallet(
+        &mut self,
+        timestamp: Timestamp,
+        include_mempool_txs: bool,
+    ) -> Result<Digest, RegTestError> {
         let gsl = &mut self.global_state_lock;
 
         if !gsl.cli().network.use_mock_proof() {
@@ -118,9 +136,14 @@ impl RegTestPrivate {
             .guesser_spending_key(tip_block.hash());
 
         // retrieve selected tx from mempool for block inclusion.
-        let txs_from_mempool = gs
-            .mempool
-            .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, Some(MAX_NUM_TXS_TO_MERGE));
+        let txs_from_mempool = if include_mempool_txs {
+            gs.mempool.get_transactions_for_block_composition(
+                SIZE_20MB_IN_BYTES,
+                Some(MAX_NUM_TXS_TO_MERGE),
+            )
+        } else {
+            vec![]
+        };
 
         drop(gs);
 

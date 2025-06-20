@@ -3232,11 +3232,12 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let include_mempool_txs = true;
         Ok(self
             .state
             .api_mut()
             .regtest_mut()
-            .mine_blocks_to_wallet(n_blocks)
+            .mine_blocks_to_wallet(n_blocks, include_mempool_txs)
             .await?)
     }
 
