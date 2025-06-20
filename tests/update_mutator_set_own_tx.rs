@@ -147,6 +147,12 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             .await
             .unwrap();
 
+        // Sleep to give application time to send all messages before receivers
+        // are dropped. When the application shuts down after it goes out of
+        // scope all messages must have been sent, otherwise there might be a
+        // sender without a receiver and that causes a panic.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
         // Verify that transaction is confirmable against tip.
         let txid = tx_artifacts.transaction().txid();
         let tx = alice
