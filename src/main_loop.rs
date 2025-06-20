@@ -606,8 +606,8 @@ impl MainLoopHandler {
                         // updated again later.
                         if let Some(new_pw) = new_primitive_witness {
                             state
-                                .mempool
-                                .update_primitive_witness(txid, *new_pw.to_owned());
+                                .mempool_update_primitive_witness(txid, *new_pw.to_owned())
+                                .await;
                         }
                         state
                             .mempool_insert(*new_transaction.to_owned(), UpgradePriority::Critical)

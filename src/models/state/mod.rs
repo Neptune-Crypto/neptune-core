@@ -79,6 +79,7 @@ use crate::locks::tokio::AtomicRwWriteGuard;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
@@ -1918,6 +1919,19 @@ impl GlobalState {
     /// prunes stale tx in mempool and notifies wallet of changes.
     pub async fn mempool_prune_stale_transactions(&mut self) {
         let events = self.mempool.prune_stale_transactions();
+        self.wallet_state.handle_mempool_events(events).await
+    }
+
+    /// Update the primitive witness of a mempool transaction. Inserts the
+    /// transaction into the mempool if it's not already there.
+    pub(crate) async fn mempool_update_primitive_witness(
+        &mut self,
+        transaction_id: TransactionKernelId,
+        new_primitive_witness: PrimitiveWitness,
+    ) {
+        let events = self
+            .mempool
+            .update_primitive_witness(transaction_id, new_primitive_witness);
         self.wallet_state.handle_mempool_events(events).await
     }
 

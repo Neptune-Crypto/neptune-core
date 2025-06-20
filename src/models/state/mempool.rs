@@ -117,13 +117,19 @@ struct MempoolTransaction {
 /// However, this value is not used to determine which transactions gets to stay
 /// in the mempool in the case of a full mempool, since such a value is
 /// subjective, and a goal is to have different nodes running with the same
-/// mempool policy to agree on the content of the mempool at any time.
+/// mempool policy to agree on the content of the mempool at any time, up to
+/// networking conditions.
 ///
 /// The mempool does not attempt to confirm validity or confirmability of its
 /// transactions, that must be handled by the caller. It does, however,
 /// guarantee that no conflicting transactions can be contained in the mempool.
 /// This means that two transactions that spend the same input will never be
 /// allowed into the mempool simultaneously.
+///
+/// The mempool returns a list of events which should be handled by associated
+/// wallets to see unconfirmed balance updates. So all functions that can
+/// return events should be invoked from a context where listeners (like
+/// wallets) can be informed.
 #[derive(Debug, GetSize)]
 pub struct Mempool {
     /// Maximum size this data structure may take up in memory.
@@ -203,7 +209,7 @@ impl Mempool {
     ///
     /// Returns an error if the provided block does not have a mutator set
     /// after.
-    pub(super) fn set_sync_labels(&mut self, tip: &Block) -> anyhow::Result<()> {
+    fn set_sync_labels(&mut self, tip: &Block) -> anyhow::Result<()> {
         self.tip_digest = tip.hash();
         self.tip_mutator_set_hash = tip.mutator_set_accumulator_after()?.hash();
         Ok(())
@@ -451,8 +457,7 @@ impl Mempool {
     /// The caller must also ensure that the transaction does not have a timestamp
     /// in the too distant future, as such a transaction cannot be mined.
     ///
-    /// Caller must specify the value of the transaction to them. Only
-    /// transactions initiated locally should be inserted with a non-zero value.
+    /// Caller must specify the priority of the transaction to them.
     ///
     /// this method may return:
     ///   n events: RemoveTx,AddTx.  tx replaces a list of older txs with lower fee.
@@ -529,24 +534,25 @@ impl Mempool {
         // Ensure we never throw away a primitive witness if we have one. This
         // must happen before conflicting transactions are removed.
         let primitive_witness = if let TransactionProof::Witness(pw) = &new_tx.proof {
-            Some(pw.to_owned())
+            Some(pw.clone())
         } else {
             self.tx_dictionary
                 .get(&txid)
                 .and_then(|tx| tx.primitive_witness.clone())
         };
-        let as_mempool_transaction = MempoolTransaction {
-            transaction: new_tx.clone(),
+        let new_tx = MempoolTransaction {
+            transaction: new_tx,
             upgrade_priority: priority,
             primitive_witness,
         };
 
         let mut events = vec![];
-        let new_tx_has_higher_proof_quality = new_tx_should_replace_conflicts(&new_tx, &conflicts);
+        let new_tx_has_higher_proof_quality =
+            new_tx_should_replace_conflicts(&new_tx.transaction, &conflicts);
         let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
-            let better_fee_density = min_fee_of_conflicting_tx < new_tx.fee_density();
+            let better_fee_density = min_fee_of_conflicting_tx < new_tx.transaction.fee_density();
             if new_tx_has_higher_proof_quality || better_fee_density {
                 for conflicting_txid in conflicts {
                     if let Some(e) = self.remove(conflicting_txid) {
@@ -564,12 +570,14 @@ impl Mempool {
             }
         }
 
-        self.fee_densities.push(txid, new_tx.fee_density());
-        self.tx_dictionary.insert(txid, as_mempool_transaction);
+        // Insert the new transaction
+        self.fee_densities
+            .push(txid, new_tx.transaction.fee_density());
+        events.push(MempoolEvent::AddTx(new_tx.transaction.clone()));
+        self.tx_dictionary.insert(txid, new_tx);
         if !priority.is_irrelevant() {
             self.upgrade_priorities.push(txid, priority);
         }
-        events.push(MempoolEvent::AddTx(new_tx));
 
         assert_eq!(
             self.tx_dictionary.len(),
@@ -580,8 +588,8 @@ impl Mempool {
             self.upgrade_priorities.len() <= self.tx_dictionary.len(),
             "Length of upgrade priority queue may not exceed num txs"
         );
-        self.shrink_to_max_size();
-        self.shrink_to_max_length();
+        events.extend(self.shrink_to_max_size());
+        events.extend(self.shrink_to_max_length());
         assert_eq!(
             self.tx_dictionary.len(),
             self.fee_densities.len(),
@@ -596,6 +604,8 @@ impl Mempool {
     }
 
     /// remove a transaction from the `Mempool`
+    ///
+    /// Does nothing if the transaction cannot be found in the mempool.
     pub(super) fn remove(&mut self, transaction_id: TransactionKernelId) -> Option<MempoolEvent> {
         self.tx_dictionary.remove(&transaction_id).map(|tx| {
             self.fee_densities.remove(&transaction_id);
@@ -610,15 +620,22 @@ impl Mempool {
     /// a primitive-witness backed transaction in order to ensure that the
     /// primitive-witness data is not lost if the same transaction is later
     /// inserted with a higher proof quality.
-    pub(crate) fn update_primitive_witness(
+    ///
+    /// Returns the events, which will at maximum be 1 event adding a
+    /// transaction.
+    pub(super) fn update_primitive_witness(
         &mut self,
         transaction_id: TransactionKernelId,
         new_primitive_witness: PrimitiveWitness,
-    ) {
+    ) -> Vec<MempoolEvent> {
         if let Some(tx) = self.tx_dictionary.get_mut(&transaction_id) {
             tx.primitive_witness = Some(new_primitive_witness);
+            vec![]
         } else {
-            self.insert(new_primitive_witness.into(), UpgradePriority::Critical);
+            // All transactions where the primitive witness is known are
+            // considered critical, because knowing the primitive witness
+            // implies that the transaction originated from this node.
+            self.insert(new_primitive_witness.into(), UpgradePriority::Critical)
         }
     }
 
@@ -789,9 +806,11 @@ impl Mempool {
         // as we don't have the ability to roll transaction removal record integrity
         // proofs back to previous blocks. It would be nice if we could handle a
         // reorganization that's at least a few blocks deep though.
+        let mut events: Vec<_> = vec![];
         let previous_block_digest = new_block.header().prev_block_digest;
         if self.tip_digest != previous_block_digest {
-            self.clear();
+            let removed = self.clear();
+            events.extend(removed);
         }
 
         // The general strategy is to check whether the SWBF index set of a
@@ -824,15 +843,19 @@ impl Mempool {
         };
 
         // Remove the transactions that become invalid with this block
-        let mut events = self.retain(still_valid);
+        {
+            let removed = self.retain(still_valid);
+            events.extend(removed);
+        }
 
-        let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
+        // Build a list of jobs to update critical transactions to the mutator
+        // set of the new block.
         let mut update_jobs = vec![];
+        let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         for (tx_id, tx) in &self.tx_dictionary {
             if tx.transaction.kernel.inputs.is_empty() {
                 debug!("Not updating transaction since empty transactions cannot be updated.");
                 kick_outs.push(*tx_id);
-                events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
                 continue;
             }
 
@@ -891,14 +914,16 @@ impl Mempool {
 
             if !keep_in_mempool {
                 kick_outs.push(*tx_id);
-                events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
                 if !tx.upgrade_priority.is_irrelevant() {
                     warn!("Unable to update own transaction to new mutator set. You may need to create this transaction again. Removing {tx_id} from mempool.");
                 }
             }
         }
 
-        self.retain(|(tx_id, _)| !kick_outs.contains(&tx_id));
+        {
+            let removed = self.retain(|(tx_id, _)| !kick_outs.contains(&tx_id));
+            events.extend(removed);
+        }
 
         // Maintaining the mutator set data could have increased the size of the
         // transactions in the mempool. So we should shrink it to max size after
@@ -913,21 +938,45 @@ impl Mempool {
 
     /// Shrink the memory pool to the value of its `max_size` field.
     /// Likely computes in O(n).
-    fn shrink_to_max_size(&mut self) {
+    ///
+    /// Returns events for removed transactions.
+    fn shrink_to_max_size(&mut self) -> Vec<MempoolEvent> {
         // Repeately remove the least valuable transaction
-        while self.get_size() > self.max_total_size && self.pop_min().is_some() {}
+        let mut removal_events: Vec<_> = vec![];
+        while self.get_size() > self.max_total_size {
+            let Some((removed, _)) = self.pop_min() else {
+                error!("Mempool is empty but exceeds max allowed size");
+                return removal_events;
+            };
+
+            removal_events.push(removed);
+        }
 
         self.shrink_to_fit();
+
+        removal_events
     }
 
     /// Shrink the memory pool to the value of its `max_length` field,
     /// if that field is set.
-    fn shrink_to_max_length(&mut self) {
+    ///
+    /// Returns events for removed transactions.
+    fn shrink_to_max_length(&mut self) -> Vec<MempoolEvent> {
+        let mut removal_events: Vec<_> = vec![];
         if let Some(max_length) = self.max_length {
-            while self.len() > max_length && self.pop_min().is_some() {}
+            while self.len() > max_length {
+                let Some((removed, _)) = self.pop_min() else {
+                    error!("Mempool is empty but exceeds max allowed length");
+                    return removal_events;
+                };
+
+                removal_events.push(removed);
+            }
         }
 
-        self.shrink_to_fit()
+        self.shrink_to_fit();
+
+        removal_events
     }
 
     /// Shrinks internal data structures as much as possible.
@@ -2123,6 +2172,35 @@ mod tests {
                 assert_eq!(expected_tx.fee_density(), fee_density);
             }
         }
+    }
+
+    #[test]
+    fn txs_kicked_out_bc_max_len_exceeded_return_events() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network);
+        let max_num_txs = 7;
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            Some(max_num_txs),
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+
+        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(20);
+        let mut all_events = vec![];
+        for tx in txs {
+            all_events.extend(mempool.insert(tx, UpgradePriority::Critical));
+        }
+
+        let removal_events = all_events
+            .into_iter()
+            .filter(|x| matches!(x, MempoolEvent::RemoveTx(_)))
+            .collect_vec();
+        assert_eq!(
+            13,
+            removal_events.len(),
+            "13 txs must have been removed from mempool"
+        );
     }
 
     #[traced_test]
