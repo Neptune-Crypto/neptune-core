@@ -1291,7 +1291,7 @@ mod tests {
                                         *utxo = utxo.clone().with_time_lock(
                                             max_timestamp + MINING_REWARD_TIME_LOCK_PERIOD,
                                         );
-                                        timelocked_cb_acc = timelocked_cb_acc + amount;
+                                        timelocked_cb_acc += amount;
                                     }
                                 }
                             });
@@ -1915,7 +1915,7 @@ mod tests {
                 | (u128::from(u32s[1]) << 32)
                 | (u128::from(u32s[2]) << 64)
                 | (u128::from(u32s[3]) << 96);
-            total = total + NativeCurrencyAmount::from_nau(amount.try_into().unwrap());
+            total += NativeCurrencyAmount::from_nau(amount.try_into().unwrap());
         }
         prop_assert!(total <= NativeCurrencyAmount::coins(42000000));
     }

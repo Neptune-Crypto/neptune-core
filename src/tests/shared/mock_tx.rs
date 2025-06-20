@@ -2,8 +2,12 @@ use anyhow::bail;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::Network;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
+use crate::api::export::TxProvingCapability;
+use crate::config_models::cli_args;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -11,6 +15,10 @@ use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::verifier::cache_true_claim;
+use crate::models::state::tx_creation_config::TxCreationConfig;
+use crate::models::state::wallet::transaction_output::TxOutput;
+use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -123,4 +131,38 @@ pub(super) async fn fake_merge_transactions_for_tests(
         kernel: new_kernel,
         proof: TransactionProof::SingleProof(Proof::invalid()),
     })
+}
+
+/// Return a valid, deterministic transaction with a specified proof type.
+/// Returned transaction is synced to the genesis block.
+pub(crate) async fn genesis_tx_with_proof_type(
+    proof_type: TxProvingCapability,
+    network: Network,
+    fee: NativeCurrencyAmount,
+) -> std::sync::Arc<Transaction> {
+    let genesis_block = Block::genesis(network);
+    let bob_wallet_secret = WalletEntropy::devnet_wallet();
+    let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+    let bob = mock_genesis_global_state(
+        2,
+        bob_wallet_secret.clone(),
+        cli_args::Args::default_with_network(network),
+    )
+    .await;
+    let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+    let config = TxCreationConfig::default()
+        .recover_change_on_chain(bob_spending_key.into())
+        .with_prover_capability(proof_type);
+
+    // Clippy is wrong here. You can *not* eliminate the binding.
+    #[allow(clippy::let_and_return)]
+    let transaction = bob
+        .api()
+        .tx_initiator_internal()
+        .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
+        .await
+        .unwrap()
+        .transaction;
+
+    transaction
 }

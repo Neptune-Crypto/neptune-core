@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::iter::Sum;
 use std::ops::Add;
+use std::ops::AddAssign;
 use std::ops::Neg;
 use std::ops::Sub;
 use std::str::FromStr;
@@ -103,6 +104,7 @@ impl NativeCurrencyAmount {
     }
 
     /// Return the element that corresponds to 1 nau. Use in tests only.
+    #[cfg(test)]
     pub fn one() -> NativeCurrencyAmount {
         NativeCurrencyAmount(1i128)
     }
@@ -338,6 +340,12 @@ impl Add for NativeCurrencyAmount {
 
     fn add(self, rhs: Self) -> Self::Output {
         Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign for NativeCurrencyAmount {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs
     }
 }
 
@@ -962,6 +970,19 @@ pub(crate) mod tests {
         let as_string = amount.display_lossless();
         let parsed = NativeCurrencyAmount::coins_from_str(&as_string).unwrap();
         prop_assert_eq!(parsed, amount);
+    }
+
+    #[proptest]
+    fn add_and_assign_add_equivalence(
+        #[strategy(0..=NativeCurrencyAmount::MAX_NAU >> 1)] lhs: i128,
+        #[strategy(0..=NativeCurrencyAmount::MAX_NAU >> 1)] rhs: i128,
+    ) {
+        let lhs = NativeCurrencyAmount(lhs);
+        let rhs = NativeCurrencyAmount(rhs);
+        let add_result = lhs + rhs;
+        let mut add_assign = lhs;
+        add_assign += rhs;
+        prop_assert_eq!(add_result, add_assign);
     }
 
     #[test]

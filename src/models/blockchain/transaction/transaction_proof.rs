@@ -72,6 +72,11 @@ impl TransactionProof {
         matches!(self, Self::SingleProof(_))
     }
 
+    /// Convert a transaction proof into a Triton VM proof.
+    ///
+    /// # Panics
+    ///
+    /// - If the proof type is any other than [TransactionProof::SingleProof].
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
@@ -80,6 +85,23 @@ impl TransactionProof {
             }
             TransactionProof::ProofCollection(_) => {
                 panic!("Expected SingleProof, got ProofCollection")
+            }
+        }
+    }
+
+    /// Convert a transaction proof into a primitive witness
+    ///
+    /// # Panics
+    ///
+    /// - If the proof type is any other than [TransactionProof::Witness].
+    pub(crate) fn into_primitive_witness(self) -> PrimitiveWitness {
+        match self {
+            TransactionProof::Witness(primitive_witness) => primitive_witness,
+            TransactionProof::SingleProof(_) => {
+                panic!("Expected primitive witness, got SingleProof")
+            }
+            TransactionProof::ProofCollection(_) => {
+                panic!("Expected primitive witness, got ProofCollection")
             }
         }
     }

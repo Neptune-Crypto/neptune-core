@@ -3232,11 +3232,12 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let include_mempool_txs = true;
         Ok(self
             .state
             .api_mut()
             .regtest_mut()
-            .mine_blocks_to_wallet(n_blocks)
+            .mine_blocks_to_wallet(n_blocks, include_mempool_txs)
             .await?)
     }
 
@@ -3538,7 +3539,7 @@ impl RPC for NeptuneRPCServer {
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state
             .mempool
-            .get_sorted_iter()
+            .fee_density_iter()
             .skip(start_index)
             .take(number)
             .map(|(txkid, _)| txkid)

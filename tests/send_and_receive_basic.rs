@@ -39,7 +39,7 @@ pub async fn alice_sends_to_self() -> anyhow::Result<()> {
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_blocks_to_wallet(3)
+        .mine_blocks_to_wallet(3, false)
         .await?;
 
     tracing::info!("alice mined 3 blocks!");
@@ -154,7 +154,7 @@ pub async fn alice_sends_to_bob(
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_blocks_to_wallet(3)
+        .mine_blocks_to_wallet(3, false)
         .await?;
 
     tracing::info!("alice mined 3 blocks!");
@@ -237,11 +237,12 @@ pub async fn alice_sends_to_bob(
     assert!(bob_balances.confirmed_available.is_zero());
 
     // alice mines another block to her wallet
+    let include_mempool_txs = true;
     alice
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_blocks_to_wallet(1)
+        .mine_blocks_to_wallet(1, include_mempool_txs)
         .await?;
 
     // alice checks that confirmed and unconfirmed balances are equal.
@@ -289,7 +290,7 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_blocks_to_wallet(3)
+        .mine_blocks_to_wallet(3, false)
         .await?;
 
     tracing::info!("alice mined 3 blocks!");
@@ -359,11 +360,12 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
         .await?;
 
     // alice mines another block to her wallet.
+    let include_mempool_txs = true;
     alice
         .gsl
         .api_mut()
         .regtest_mut()
-        .mine_blocks_to_wallet(1)
+        .mine_blocks_to_wallet(1, include_mempool_txs)
         .await?;
 
     // alice checks that confirmed and unconfirmed balances are now equal.

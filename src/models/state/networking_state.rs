@@ -91,11 +91,6 @@ pub struct NetworkingState {
     /// Read-only value set at random during startup
     pub instance_id: u128,
 
-    /// Timestamp for when the last tx-proof upgrade was attempted. Does not
-    /// record latest successful upgrade, merely latest attempt. This is to
-    /// prevent excessive runs of the proof-upgrade functionality.
-    pub last_tx_proof_upgrade_attempt: std::time::SystemTime,
-
     /// Disconnection times of past peers. Can be used to determine if a connection
     /// request should be accepted or rejected.
     ///
@@ -115,10 +110,6 @@ impl NetworkingState {
             peer_databases,
             sync_anchor: None,
             instance_id: rand::random(),
-
-            // Initialize to now to prevent tx proof upgrade to run immediately
-            // after startup of the client.
-            last_tx_proof_upgrade_attempt: SystemTime::now(),
             disconnection_times: HashMap::new(),
         }
     }
