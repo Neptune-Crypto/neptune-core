@@ -64,7 +64,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::mempool::MempoolEvent;
+use crate::models::state::mempool::mempool_event::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;

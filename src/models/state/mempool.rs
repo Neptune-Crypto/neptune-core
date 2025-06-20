@@ -10,6 +10,7 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
+pub mod mempool_event;
 pub(crate) mod mempool_update_job;
 pub(crate) mod mempool_update_job_result;
 pub(crate) mod primitive_witness_update;
@@ -61,6 +62,7 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::mempool::mempool_event::MempoolEvent;
 use crate::models::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::models::state::mempool::upgrade_priority::UpgradePriority;
@@ -75,23 +77,6 @@ pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 type LookupItem<'a> = (TransactionKernelId, &'a Transaction);
-
-/// Represents a mempool state change.
-///
-/// For purpose of notifying interested parties
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MempoolEvent {
-    /// a transaction was added to the mempool
-    AddTx(Transaction),
-
-    /// a transaction was removed from the mempool
-    RemoveTx(Transaction),
-
-    /// the mutator-set of a transaction was updated in the mempool.
-    ///
-    /// (kernel-ID, Tx after mutator-set updated)
-    UpdateTxMutatorSet(TransactionKernelId, Transaction),
-}
 
 #[derive(Debug, GetSize, Clone)]
 #[cfg_attr(test, derive(serde::Serialize))]
