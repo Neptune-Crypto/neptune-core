@@ -4335,7 +4335,7 @@ mod tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn utxo_origin_block_test(
-        #[strategy(propcompose_txkernel_with_lengths(0usize, 1usize, 0usize))]
+        #[strategy(txkernel_with_lengths(0usize, 1usize, 0usize))]
         transaction_kernel: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         prop_assume!(!transaction_kernel.fee.is_negative());
