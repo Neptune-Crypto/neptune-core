@@ -943,7 +943,10 @@ impl Mempool {
     fn shrink_to_max_size(&mut self) -> Vec<MempoolEvent> {
         // Repeately remove the least valuable transaction
         let mut removal_events: Vec<_> = vec![];
-        while self.get_size() > self.max_total_size {
+
+        // You have to dereference before calling `get_size` here, otherwise
+        // you get the size of the pointer.
+        while (*self).get_size() > self.max_total_size {
             let Some((removed, _)) = self.pop_min() else {
                 error!("Mempool is empty but exceeds max allowed size");
                 return removal_events;
