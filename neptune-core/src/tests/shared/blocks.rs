@@ -1,9 +1,11 @@
+use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first;
 use tasm_lib::twenty_first::bfe;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
@@ -21,6 +23,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
+use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::pow::Pow;
@@ -29,6 +32,7 @@ use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
@@ -40,7 +44,50 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::Randomness;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+/// Create an invalid block with the provided transaction kernel, using the
+/// provided mutator set as the predessor block's mutator set. Invalid block in
+/// most ways you can think of but the mutator set evolution is consistent.
+pub(crate) fn invalid_block_with_kernel_and_mutator_set(
+    transaction_kernel: TransactionKernel,
+    predecessor_mutator_set: MutatorSetAccumulator,
+) -> Block {
+    let new_block_height: BlockHeight = 1u64.into();
+    let block_header = BlockHeader {
+        version: bfe!(0),
+        height: new_block_height,
+        prev_block_digest: Digest::default(),
+        timestamp: transaction_kernel.timestamp,
+        pow: Pow::default(),
+        guesser_receiver_data: GuesserReceiverData::default(),
+        cumulative_proof_of_work: ProofOfWork::zero(),
+        difficulty: Difficulty::MINIMUM,
+    };
+
+    let block_mmr = MmrAccumulator::new_from_leafs(vec![]);
+    let ms_update = MutatorSetUpdate::new(
+        transaction_kernel.inputs.clone(),
+        transaction_kernel.outputs.clone(),
+    );
+
+    let mut mutator_set = predecessor_mutator_set;
+    ms_update.apply_to_accumulator(&mut mutator_set).unwrap();
+
+    let transaction = BlockTransaction::from_tx_kernel(transaction_kernel);
+
+    let lock_free_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
+    let body = BlockBody::new(
+        transaction.kernel.into(),
+        mutator_set,
+        lock_free_mmr_accumulator,
+        block_mmr,
+    );
+    let appendix = BlockAppendix::default();
+
+    Block::new(block_header, body, appendix, BlockProof::Invalid)
+}
 
 /// Create a block containing the supplied transaction.
 ///
