@@ -667,7 +667,6 @@ impl GlobalState {
         let chain = BlockchainState::Archival(Box::new(chain));
         let mempool = Mempool::new(
             cli.max_mempool_size,
-            cli.max_mempool_num_tx,
             cli.proving_capability(),
             chain.light_state(),
         );
