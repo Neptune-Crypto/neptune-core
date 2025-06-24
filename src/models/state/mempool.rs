@@ -95,8 +95,7 @@ struct MempoolTransaction {
 /// Unpersisted view of valid transactions that have not been confirmed yet.
 ///
 /// Transactions can be inserted into the mempool, and a max size of the
-/// mempool can be declared, either in number of bytes, or in number of
-/// transactions allowed into the mempool.
+/// mempool can be declared.
 ///
 /// The mempool uses [`TransactionKernelId`] as its main key, meaning that two
 /// different transactions with the same [`TransactionKernelId`] can never be
@@ -162,6 +161,14 @@ pub struct Mempool {
     /// self-initiated single-proof backed transactions should be updated when
     /// a new block is processed.
     tx_proving_capability: TxProvingCapability,
+
+    /// A list of single-proof backed transactions that were removed from the
+    /// mempool because they were inputs to a merge. So they are not in the
+    /// mempool because they conflict with another transaction there. When a
+    /// new block comes in, however, some of these transactions maybe become
+    /// "unconflicted" again. This list can only grow when [`Self::insert`] is
+    /// called and can only shrink when [`Self::update_with_block`] is called.
+    merge_input_cache: Vec<(TransactionKernel, NeptuneProof)>,
 }
 
 /// note that all methods that modify state and result in a MempoolEvent
@@ -186,6 +193,7 @@ impl Mempool {
             .mutator_set_accumulator_after()
             .expect("Provided block must have mutator set after")
             .hash();
+        let merge_input_cache = Vec::default();
 
         Self {
             max_total_size,
@@ -195,6 +203,7 @@ impl Mempool {
             tip_digest,
             tip_mutator_set_hash,
             tx_proving_capability,
+            merge_input_cache,
         }
     }
 
@@ -444,6 +453,70 @@ impl Mempool {
         conflict_txs_in_mempool
     }
 
+    /// Return the single-proof backed transactions from the merge cache that
+    /// were not mined in the latest block.
+    fn restore_from_merge_inputs(
+        &self,
+        swbf_set_union: &HashSet<u128>,
+    ) -> Vec<(TransactionKernel, NeptuneProof)> {
+        let mut ret = vec![];
+        for (cached_tx_kernel, proof) in &self.merge_input_cache {
+            let transaction_index_sets: HashSet<_> = cached_tx_kernel
+                .inputs
+                .iter()
+                .map(|rr| rr.absolute_indices.to_array())
+                .collect();
+
+            if transaction_index_sets.iter().all(|index_set| {
+                index_set
+                    .iter()
+                    .any(|index| !swbf_set_union.contains(index))
+            }) {
+                ret.push((cached_tx_kernel.to_owned(), proof.to_owned()));
+            }
+        }
+
+        ret
+    }
+
+    fn preserve_merge_input(
+        new_tx: &Transaction,
+        existing_tx: &Transaction,
+    ) -> Option<(TransactionKernel, NeptuneProof)> {
+        if !(new_tx.proof.is_single_proof() && existing_tx.proof.is_single_proof()) {
+            return None;
+        }
+
+        if new_tx.kernel.inputs.len() <= existing_tx.kernel.inputs.len() {
+            return None;
+        }
+
+        if new_tx.kernel.outputs.len() <= existing_tx.kernel.outputs.len() {
+            return None;
+        }
+
+        // If the inputs to the existing tx is a true subset of the new tx, then
+        // the new tx is assumed to be the output of a merge with the existing
+        // tx as one of its outputs.
+        let new_txs_inputs: HashSet<_> = new_tx
+            .kernel
+            .inputs
+            .iter()
+            .map(|x| x.absolute_indices)
+            .collect();
+        for old_tx_input in existing_tx.kernel.inputs.iter() {
+            if !new_txs_inputs.contains(&old_tx_input.absolute_indices) {
+                return None;
+            }
+        }
+
+        let TransactionProof::SingleProof(proof) = &existing_tx.proof else {
+            panic!("Transaction proof must be of type single proof");
+        };
+
+        Some((existing_tx.kernel.clone(), proof.to_owned()))
+    }
+
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
     /// the transaction.
     ///
@@ -546,9 +619,22 @@ impl Mempool {
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
             let better_fee_density = min_fee_of_conflicting_tx < new_tx.transaction.fee_density();
-            if new_tx_has_higher_proof_quality || better_fee_density {
+            let should_replace_conflict = new_tx_has_higher_proof_quality || better_fee_density;
+            if should_replace_conflict {
                 for conflicting_txid in conflicts {
                     if let Some(e) = self.remove(conflicting_txid) {
+                        let MempoolEvent::RemoveTx(removed) = &e else {
+                            panic!("remove must return remove event");
+                        };
+
+                        // Conditionally store existing transaction in conflic
+                        // cache.
+                        if let Some(tx_conflict_cache) =
+                            Self::preserve_merge_input(&new_tx.transaction, removed)
+                        {
+                            self.merge_input_cache.push(tx_conflict_cache);
+                        }
+
                         events.push(e);
                     }
                 }
@@ -792,7 +878,7 @@ impl Mempool {
         new_block: &Block,
     ) -> anyhow::Result<(Vec<MempoolEvent>, Vec<MempoolUpdateJob>)> {
         // If the mempool is empty, there is nothing to do.
-        if self.is_empty() {
+        if self.is_empty() && self.merge_input_cache.is_empty() {
             self.set_sync_labels(new_block)?;
             return Ok((vec![], vec![]));
         }
@@ -927,6 +1013,23 @@ impl Mempool {
 
         // Update the sync-label to keep track of reorganizations
         self.set_sync_labels(new_block)?;
+
+        let restored_from_cache = self.restore_from_merge_inputs(&swbf_index_set_union);
+        // Insert the new transaction
+
+        for (tx_kernel, tx_proof) in restored_from_cache {
+            let restored_tx = Transaction {
+                kernel: tx_kernel,
+                proof: TransactionProof::SingleProof(tx_proof)
+            };
+            self.fee_densities
+                .push((restored_tx.txid(), restored_tx.fee_density());
+            events.push(MempoolEvent::AddTx(new_tx.transaction.clone()));
+            self.tx_dictionary.insert(txid, new_tx);
+            if !priority.is_irrelevant() {
+                self.upgrade_priorities.push(txid, priority);
+            }
+        }
 
         Ok((events, update_jobs))
     }
