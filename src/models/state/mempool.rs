@@ -1280,23 +1280,32 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn get_densest_transactions_with_tx_cap() {
-        // Verify that transactions are returned ordered by fee density, with highest fee density first
-        let num_txs = 12;
+        // Verify that transactions are returned ordered by fee density, with
+        // highest fee density first, and that the transaction cap is respected.
+        let num_txs_in_mempool = 12;
         let network = Network::Main;
         let sync_block = Block::genesis(network);
-        let mempool = setup_mock_mempool(num_txs, &sync_block);
+        let mempool = setup_mock_mempool(num_txs_in_mempool, &sync_block);
 
-        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
-        let mut prev_fee_density = max_fee_density;
-        for curr_transaction in
-            mempool.get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, Some(num_txs))
-        {
-            let curr_fee_density = curr_transaction.fee_density();
-            assert!(curr_fee_density <= prev_fee_density);
-            prev_fee_density = curr_fee_density;
+        for num_mergers in 0..=num_txs_in_mempool {
+            let returned_transactions = mempool
+                .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, Some(num_mergers));
+            assert_eq!(num_mergers, returned_transactions.len());
+
+            let max_fee_density: FeeDensity =
+                FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
+            let mut prev_fee_density = max_fee_density;
+            for curr_transaction in returned_transactions {
+                let curr_fee_density = curr_transaction.fee_density();
+                assert!(curr_fee_density <= prev_fee_density);
+                prev_fee_density = curr_fee_density;
+            }
         }
 
-        assert!(!mempool.is_empty())
+        assert!(
+            !mempool.is_empty(),
+            "Getting transactions for composition may not empty mempool."
+        )
     }
 
     #[traced_test]

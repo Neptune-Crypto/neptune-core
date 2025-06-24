@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZero;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -147,6 +148,14 @@ pub struct Args {
     /// cores and probably at least 128 GB of RAM.
     #[clap(long)]
     pub(crate) compose: bool,
+
+    /// When compsing, the maximum number of single proof backed transactions
+    /// that will be merged from the mempool.
+    ///
+    /// Increasing this beyond the default value of 1 will slow down
+    /// composition.
+    #[clap(long, default_value = "1")]
+    pub(crate) max_num_compose_mergers: NonZero<usize>,
 
     /// Whether to engage in guess-nonce-and-hash, which is the 3rd step in
     /// three-step mining. If this flag is set and the `compose` flag is not
@@ -638,7 +647,7 @@ mod tests {
             IpAddr::from(Ipv6Addr::UNSPECIFIED),
             default_args.listen_addr
         );
-        assert_eq!(None, default_args.max_mempool_num_tx);
+        assert_eq!(1, default_args.max_num_compose_mergers.get());
     }
 
     #[test]
