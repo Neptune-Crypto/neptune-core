@@ -84,7 +84,6 @@ struct MempoolTransaction {
     transaction: Transaction,
 
     /// The value of a transaction for the node operator.
-    #[get_size(ignore)]
     upgrade_priority: UpgradePriority,
 
     /// Primitive witness of the transaction. Can be used to update proof-
@@ -135,10 +134,6 @@ pub struct Mempool {
     /// Maximum size this data structure may take up in memory.
     max_total_size: usize,
 
-    /// If set, represents the maximum number of transactions allowed in the
-    /// mempool. If None, mempool is only restricted by size.
-    max_length: Option<usize>,
-
     /// Contains transactions, with a mapping from transaction ID to transaction.
     /// Maintain for constant lookup
     tx_dictionary: HashMap<TransactionKernelId, MempoolTransaction>,
@@ -179,7 +174,6 @@ impl Mempool {
     /// instantiate a new, empty `Mempool`
     pub fn new(
         max_total_size: ByteSize,
-        max_num_transactions: Option<usize>,
         tx_proving_capability: TxProvingCapability,
         tip: &Block,
     ) -> Self {
@@ -195,7 +189,6 @@ impl Mempool {
 
         Self {
             max_total_size,
-            max_length: max_num_transactions,
             tx_dictionary: table,
             fee_densities,
             upgrade_priorities,
@@ -588,8 +581,10 @@ impl Mempool {
             self.upgrade_priorities.len() <= self.tx_dictionary.len(),
             "Length of upgrade priority queue may not exceed num txs"
         );
-        events.extend(self.shrink_to_max_size());
-        events.extend(self.shrink_to_max_length());
+
+        let dropped_bc_size_restriction = self.shrink_to_max_size();
+        events.extend(dropped_bc_size_restriction);
+
         assert_eq!(
             self.tx_dictionary.len(),
             self.fee_densities.len(),
@@ -960,28 +955,6 @@ impl Mempool {
         removal_events
     }
 
-    /// Shrink the memory pool to the value of its `max_length` field,
-    /// if that field is set.
-    ///
-    /// Returns events for removed transactions.
-    fn shrink_to_max_length(&mut self) -> Vec<MempoolEvent> {
-        let mut removal_events: Vec<_> = vec![];
-        if let Some(max_length) = self.max_length {
-            while self.len() > max_length {
-                let Some((removed, _)) = self.pop_min() else {
-                    error!("Mempool is empty but exceeds max allowed length");
-                    return removal_events;
-                };
-
-                removal_events.push(removed);
-            }
-        }
-
-        self.shrink_to_fit();
-
-        removal_events
-    }
-
     /// Shrinks internal data structures as much as possible.
     /// Computes in O(n) (Likely)
     fn shrink_to_fit(&mut self) {
@@ -1010,7 +983,6 @@ impl Mempool {
     /// let genesis_block = Block::genesis(network);
     /// let mempool = Mempool::new(
     ///     ByteSize::gb(1),
-    ///     None,
     ///     TxProvingCapability::ProofCollection,
     ///     &genesis_block
     /// );
@@ -1085,6 +1057,7 @@ mod tests {
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
+    use crate::tests::shared::mock_tx::mock_transactions_with_sized_single_proof;
     use crate::tests::shared::mock_tx::testrunning::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared_tokio_runtime;
@@ -1098,7 +1071,6 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
-            None,
             TxProvingCapability::ProofCollection,
             &genesis_block,
         );
@@ -1141,7 +1113,6 @@ mod tests {
     fn setup_mock_mempool(transactions_count: usize, sync_block: &Block) -> Mempool {
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
-            None,
             TxProvingCapability::ProofCollection,
             sync_block,
         );
@@ -1412,7 +1383,6 @@ mod tests {
         for i in 0..5 {
             let mut mempool = Mempool::new(
                 ByteSize::gb(1),
-                None,
                 TxProvingCapability::ProofCollection,
                 &genesis_block,
             );
@@ -1456,7 +1426,6 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
-            None,
             TxProvingCapability::ProofCollection,
             &genesis_block,
         );
@@ -1575,12 +1544,7 @@ mod tests {
             .await;
 
         // Add this transaction to a mempool
-        let mut mempool = Mempool::new(
-            ByteSize::gb(1),
-            None,
-            TxProvingCapability::SingleProof,
-            &block_1,
-        );
+        let mut mempool = Mempool::new(ByteSize::gb(1), TxProvingCapability::SingleProof, &block_1);
         mempool.insert(tx_by_bob.clone(), UpgradePriority::Irrelevant);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
@@ -1796,7 +1760,6 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
-            None,
             TxProvingCapability::SingleProof,
             &genesis_block,
         );
@@ -2101,7 +2064,6 @@ mod tests {
         let txs = make_plenty_mock_transaction_supported_by_primitive_witness(11);
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
-            None,
             TxProvingCapability::SingleProof,
             &genesis_block,
         );
@@ -2125,13 +2087,12 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn max_len_none() {
+    async fn insert_11_transactions() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
         let txs = make_plenty_mock_transaction_supported_by_primitive_witness(11);
         let mut mempool = Mempool::new(
             ByteSize::gb(1),
-            None,
             TxProvingCapability::ProofCollection,
             &genesis_block,
         );
@@ -2149,56 +2110,56 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn max_len_is_respected() {
+    async fn max_size_is_respected() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(20);
+        let num_insertions = 20;
+        let txs = mock_transactions_with_sized_single_proof(num_insertions, ByteSize::kb(100));
 
         let mut expected_txs = txs.clone();
         expected_txs.sort_by_key(|x| x.fee_density());
         expected_txs.reverse();
 
-        for i in 0..10 {
-            let mut mempool = Mempool::new(
-                ByteSize::gb(1),
-                Some(i),
-                TxProvingCapability::ProofCollection,
-                &genesis_block,
-            );
-            for tx in txs.clone() {
-                mempool.insert(tx, UpgradePriority::Irrelevant);
-            }
+        let max_size = ByteSize::mb(1);
+        let mut mempool = Mempool::new(
+            max_size,
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+        for tx in txs.clone() {
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+            println!("mempool len: {}", mempool.len());
+            println!("mempool size: {}", mempool.get_size());
+        }
 
-            assert_eq!(
-                i,
-                mempool.len(),
-                "Only {i} transactions are permitted in the mempool"
-            );
+        assert!(
+            num_insertions > mempool.len(),
+            "Test assumption: Transactions' sizes must exceed max allowed size"
+        );
+        assert!(!mempool.is_empty(), "Test assumption: Mempool not empty");
 
-            let expected_txs = expected_txs.iter().take(i).cloned().collect_vec();
+        let max_size: usize = max_size.0.try_into().unwrap();
+        assert!(mempool.get_size() < max_size);
 
-            let mut mempool_iter = mempool.fee_density_iter();
-            for expected_tx in &expected_txs {
-                let (txid, fee_density) = mempool_iter.next().unwrap();
-                assert_eq!(expected_tx, mempool.get(txid).unwrap());
-                assert_eq!(expected_tx.fee_density(), fee_density);
-            }
+        let mempool_iter = mempool.fee_density_iter();
+        for (expected, (txid, fee_density)) in expected_txs.iter().zip(mempool_iter) {
+            assert_eq!(expected.txid(), txid);
+            assert_eq!(expected.fee_density(), fee_density);
         }
     }
 
     #[test]
-    fn txs_kicked_out_bc_max_len_exceeded_return_events() {
+    fn txs_kicked_out_bc_max_size_exceeded_return_events() {
         let network = Network::Main;
         let genesis_block = Block::genesis(network);
-        let max_num_txs = 7;
         let mut mempool = Mempool::new(
-            ByteSize::gb(1),
-            Some(max_num_txs),
+            ByteSize::mb(3),
             TxProvingCapability::ProofCollection,
             &genesis_block,
         );
 
-        let txs = make_plenty_mock_transaction_supported_by_primitive_witness(20);
+        let num_insertions = 7;
+        let txs = mock_transactions_with_sized_single_proof(num_insertions, ByteSize::mb(1));
         let mut all_events = vec![];
         for tx in txs {
             all_events.extend(mempool.insert(tx, UpgradePriority::Critical));
@@ -2208,10 +2169,14 @@ mod tests {
             .into_iter()
             .filter(|x| matches!(x, MempoolEvent::RemoveTx(_)))
             .collect_vec();
+        assert!(
+            !removal_events.is_empty(),
+            "Test assumption: Not all txs can fit into mempool"
+        );
         assert_eq!(
-            13,
-            removal_events.len(),
-            "13 txs must have been removed from mempool"
+            num_insertions,
+            removal_events.len() + mempool.len(),
+            "All insertions must be either in mempool or in the removal events"
         );
     }
 
@@ -2273,7 +2238,6 @@ mod tests {
             ] {
                 let mut mempool = Mempool::new(
                     ByteSize::gb(1),
-                    None,
                     TxProvingCapability::SingleProof,
                     &genesis_block,
                 );
@@ -2335,7 +2299,6 @@ mod tests {
             let genesis_block = Block::genesis(network);
             let mut mempool = Mempool::new(
                 ByteSize::gb(1),
-                None,
                 TxProvingCapability::SingleProof,
                 &genesis_block,
             );
@@ -2385,7 +2348,6 @@ mod tests {
 
             let mut mempool = Mempool::new(
                 ByteSize::gb(1),
-                None,
                 TxProvingCapability::SingleProof,
                 &Block::genesis(Network::Main),
             );
@@ -2604,7 +2566,6 @@ mod tests {
             let genesis_block = Block::genesis(Network::Main);
             let mut mempool = Mempool::new(
                 ByteSize::gb(1),
-                None,
                 TxProvingCapability::SingleProof,
                 &genesis_block,
             );

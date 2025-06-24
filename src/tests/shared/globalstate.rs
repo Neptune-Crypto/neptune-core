@@ -67,7 +67,6 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     ));
     let mempool = Mempool::new(
         cli.max_mempool_size,
-        cli.max_mempool_num_tx,
         cli.proving_capability(),
         &genesis_block,
     );
