@@ -46,7 +46,6 @@ use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -633,6 +632,7 @@ pub(crate) async fn create_block_transaction_from(
     .await?;
 
     // Get most valuable transactions from mempool.
+    let max_num_mergers = global_state_lock.cli().max_num_compose_mergers.get();
     let mut transactions_to_merge = match tx_merge_origin {
         TxMergeOrigin::Mempool => global_state_lock
             .lock_guard()
@@ -640,7 +640,7 @@ pub(crate) async fn create_block_transaction_from(
             .mempool
             .get_transactions_for_block_composition(
                 block_capacity_for_transactions,
-                Some(MAX_NUM_TXS_TO_MERGE),
+                Some(max_num_mergers),
             ),
         #[cfg(test)]
         TxMergeOrigin::ExplicitList(transactions) => transactions,

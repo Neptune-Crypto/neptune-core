@@ -5,7 +5,6 @@ use tasm_lib::prelude::Digest;
 use super::error::RegTestError;
 use crate::api::export::Timestamp;
 use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
-use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
@@ -139,7 +138,7 @@ impl RegTestPrivate {
         let txs_from_mempool = if include_mempool_txs {
             gs.mempool.get_transactions_for_block_composition(
                 SIZE_20MB_IN_BYTES,
-                Some(MAX_NUM_TXS_TO_MERGE),
+                Some(gsl.cli().max_num_compose_mergers.get()),
             )
         } else {
             vec![]
