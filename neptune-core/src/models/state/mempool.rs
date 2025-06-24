@@ -13,6 +13,7 @@
 pub mod mempool_event;
 pub(crate) mod mempool_update_job;
 pub(crate) mod mempool_update_job_result;
+pub(crate) mod merge_input_cache;
 pub(crate) mod primitive_witness_update;
 pub mod upgrade_priority;
 
@@ -64,6 +65,8 @@ use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::mempool_event::MempoolEvent;
 use crate::models::state::mempool::mempool_update_job::MempoolUpdateJob;
+use crate::models::state::mempool::merge_input_cache::MergeInputCache;
+use crate::models::state::mempool::merge_input_cache::MergeInputCacheElement;
 use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 
@@ -91,8 +94,7 @@ struct MempoolTransaction {
 /// Unpersisted view of valid transactions that have not been confirmed yet.
 ///
 /// Transactions can be inserted into the mempool, and a max size of the
-/// mempool can be declared, either in number of bytes, or in number of
-/// transactions allowed into the mempool.
+/// mempool can be declared.
 ///
 /// The mempool uses [`TransactionKernelId`] as its main key, meaning that two
 /// different transactions with the same [`TransactionKernelId`] can never be
@@ -121,17 +123,28 @@ struct MempoolTransaction {
 /// This means that two transactions that spend the same input will never be
 /// allowed into the mempool simultaneously.
 ///
+/// To prevent valid transactions from being needlessly forgotten the mempool
+/// maintains a cache of transactions that have been  deemed "merge inputs".
+/// In short, consider the merger of transaction a and b into c. If the mempool
+/// sees all three transactions, first a and b, then c, c will replace a and b
+/// in the mempool in accordance with the above stated policy of no conflicting
+/// transactions. However, a and b are kept around in a cache that's not
+/// considered a part of the mempool as they will not e.g. be returned for block
+/// construction. The cache is only used to avoid dropping transaction a if b is
+/// mined instead of c. See [`MergeInputCache`] for a more detailed explanation.
+///
 /// The mempool returns a list of events which should be handled by associated
 /// wallets to see unconfirmed balance updates. So all functions that can
 /// return events should be invoked from a context where listeners (like
 /// wallets) can be informed.
 #[derive(Debug, GetSize)]
+#[cfg_attr(test, derive(Clone))] // *never* use Clone outside of tests
 pub struct Mempool {
-    /// Maximum size this data structure may take up in memory.
+    /// Maximum size this data structure may take up in memory. In bytes.
     max_total_size: usize,
 
-    /// Contains transactions, with a mapping from transaction ID to transaction.
-    /// Maintain for constant lookup
+    /// Contains transactions, with a mapping from transaction ID to
+    /// transaction.
     tx_dictionary: HashMap<TransactionKernelId, MempoolTransaction>,
 
     /// Allows the mempool to report transactions sorted by [`FeeDensity`] in
@@ -158,6 +171,14 @@ pub struct Mempool {
     /// self-initiated single-proof backed transactions should be updated when
     /// a new block is processed.
     tx_proving_capability: TxProvingCapability,
+
+    /// A list of single-proof backed transactions that were removed from the
+    /// mempool because they were inputs to a merge. So they are not in the
+    /// mempool because they conflict with another transaction there. When a
+    /// new block comes in, however, some of these transactions may become
+    /// "unconflicted" again. This list can only grow when [`Self::insert`] is
+    /// called and can shrink when [`Self::update_with_block`] is called.
+    merge_input_cache: MergeInputCache,
 }
 
 /// note that all methods that modify state and result in a MempoolEvent
@@ -182,6 +203,7 @@ impl Mempool {
             .mutator_set_accumulator_after()
             .expect("Provided block must have mutator set after")
             .hash();
+        let merge_input_cache = MergeInputCache::default();
 
         Self {
             max_total_size,
@@ -191,6 +213,7 @@ impl Mempool {
             tip_digest,
             tip_mutator_set_hash,
             tx_proving_capability,
+            merge_input_cache,
         }
     }
 
@@ -458,6 +481,75 @@ impl Mempool {
         conflict_txs_in_mempool
     }
 
+    /// Returns `true` iff the new transaction is a merge of two transactions
+    /// with the existing mempool transaction as one of its inputs.
+    fn preserve_merge_input(
+        new_tx: &Transaction,
+        existing_tx: &Transaction,
+    ) -> Option<(TransactionKernel, NeptuneProof)> {
+        // early return for faster common case handling where new tx is not
+        // a merge of existing tx.
+        if !(new_tx.proof.is_single_proof() && existing_tx.proof.is_single_proof()) {
+            return None;
+        }
+
+        // Merge outputs are guaranteed to have merge bit set
+        if !new_tx.kernel.merge_bit {
+            return None;
+        }
+
+        // merge output cannot have fewer inputs/outputs/announcements than
+        // the two transaction it was merged from.
+        if new_tx.kernel.inputs.len() < existing_tx.kernel.inputs.len() {
+            return None;
+        }
+
+        if new_tx.kernel.outputs.len() < existing_tx.kernel.outputs.len() {
+            return None;
+        }
+
+        if new_tx.kernel.announcements.len() < existing_tx.kernel.announcements.len() {
+            return None;
+        }
+
+        // Merge result cannot have timestamp prior to its input transactions.
+        if new_tx.kernel.timestamp < existing_tx.kernel.timestamp {
+            return None;
+        }
+
+        // If the inputs to the existing tx is a true subset of the new tx, then
+        // the new tx is assumed to be the output of a merge with the existing
+        // tx as one of its inputs.
+        let new_txs_inputs: HashSet<_> = new_tx
+            .kernel
+            .inputs
+            .iter()
+            .map(|x| x.absolute_indices)
+            .collect();
+        for old_tx_input in existing_tx.kernel.inputs.iter() {
+            if !new_txs_inputs.contains(&old_tx_input.absolute_indices) {
+                return None;
+            }
+        }
+
+        // If a transaction has been merged with a nop transaction, it'll have
+        // exactly the same input, output, and announcement set. We don't care
+        // about preserving inputs to such mergers, so we require that at least
+        // one of those sets have increased in size.
+        if new_tx.kernel.inputs.len() == existing_tx.kernel.inputs.len()
+            && new_tx.kernel.outputs.len() == existing_tx.kernel.outputs.len()
+            && new_tx.kernel.announcements.len() == existing_tx.kernel.announcements.len()
+        {
+            return None;
+        }
+
+        let TransactionProof::SingleProof(proof_existing_tx) = &existing_tx.proof else {
+            panic!("Transaction proof must be of type single proof");
+        };
+
+        Some((existing_tx.kernel.clone(), proof_existing_tx.to_owned()))
+    }
+
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
     /// the transaction.
     ///
@@ -560,9 +652,28 @@ impl Mempool {
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
             let better_fee_density = min_fee_of_conflicting_tx < new_tx.transaction.fee_density();
-            if new_tx_has_higher_proof_quality || better_fee_density {
+            let should_replace_conflict = new_tx_has_higher_proof_quality || better_fee_density;
+            if should_replace_conflict {
                 for conflicting_txid in conflicts {
                     if let Some(e) = self.remove(conflicting_txid) {
+                        let MempoolEvent::RemoveTx(removed) = &e else {
+                            panic!("remove must return remove event");
+                        };
+
+                        // Conditionally store existing transaction in conflict
+                        // cache.
+                        if let Some((old_kernel, old_proof)) =
+                            Self::preserve_merge_input(&new_tx.transaction, removed)
+                        {
+                            let upgrade_priority = self
+                                .upgrade_priorities
+                                .get(&conflicting_txid)
+                                .map(|x| *x.1)
+                                .unwrap_or_default();
+                            self.merge_input_cache
+                                .insert(old_kernel, old_proof, upgrade_priority);
+                        }
+
                         events.push(e);
                     }
                 }
@@ -806,7 +917,7 @@ impl Mempool {
         new_block: &Block,
     ) -> anyhow::Result<(Vec<MempoolEvent>, Vec<MempoolUpdateJob>)> {
         // If the mempool is empty, there is nothing to do.
-        if self.is_empty() {
+        if self.is_empty() && self.merge_input_cache.is_empty() {
             self.set_sync_labels(new_block)?;
             return Ok((vec![], vec![]));
         }
@@ -827,7 +938,7 @@ impl Mempool {
         // contained by) SWBF indices coming from the block transaction. If they
         // are not disjoint, then remove the transaction from the mempool, as
         // it is now a double-spending transaction.
-        let swbf_index_set_union: HashSet<_> = new_block
+        let block_bf_set_union: HashSet<_> = new_block
             .kernel
             .body
             .transaction_kernel
@@ -835,7 +946,6 @@ impl Mempool {
             .iter()
             .flat_map(|rr| rr.absolute_indices.to_array())
             .collect();
-
         let still_valid = |(_transaction_id, tx): LookupItem| -> bool {
             let transaction_index_sets: HashSet<_> = tx
                 .kernel
@@ -847,7 +957,7 @@ impl Mempool {
             transaction_index_sets.iter().all(|index_set| {
                 index_set
                     .iter()
-                    .any(|index| !swbf_index_set_union.contains(index))
+                    .any(|index| !block_bf_set_union.contains(index))
             })
         };
 
@@ -855,6 +965,27 @@ impl Mempool {
         {
             let removed = self.retain(still_valid);
             events.extend(removed);
+        }
+
+        // Restore transactions from blocks. Do this prior to the collection of
+        // update jobs since we migth restore a transaction that we need to
+        // return as an update job, in case one of our own transactions got
+        // merged but the merged transaction was not picked up by the composer.
+        let restored_from_cache = self
+            .merge_input_cache
+            .update_with_block(&block_bf_set_union);
+        for elem in restored_from_cache {
+            let MergeInputCacheElement {
+                tx_kernel,
+                single_proof,
+                upgrade_priority,
+            } = elem;
+            let restored_tx = Transaction {
+                kernel: tx_kernel,
+                proof: TransactionProof::SingleProof(single_proof),
+            };
+            let inserted = self.insert(restored_tx, upgrade_priority);
+            events.extend(inserted);
         }
 
         // Build a list of jobs to update critical transactions to the mutator
@@ -934,10 +1065,10 @@ impl Mempool {
             events.extend(removed);
         }
 
-        // Maintaining the mutator set data could have increased the size of the
-        // transactions in the mempool. So we should shrink it to max size after
-        // applying the block.
-        self.shrink_to_max_size();
+        {
+            let removed = self.shrink_to_max_size();
+            events.extend(removed);
+        }
 
         // Update the sync-label to keep track of reorganizations
         self.set_sync_labels(new_block)?;
@@ -956,12 +1087,20 @@ impl Mempool {
         // You have to dereference before calling `get_size` here, otherwise
         // you get the size of the pointer.
         while (*self).get_size() > self.max_total_size {
-            let Some((removed, _)) = self.pop_min() else {
-                error!("Mempool is empty but exceeds max allowed size");
-                return removal_events;
-            };
+            let dominated_by_cache = self.merge_input_cache.get_size() * 2 > (*self).get_size();
+            if dominated_by_cache {
+                if self.merge_input_cache.pop_front().is_none() {
+                    // Panic here to avoid ending up in an infinite loop.
+                    panic!("Dominated by cache but cannot remove element");
+                }
+            } else {
+                let Some((removed, _)) = self.pop_min() else {
+                    error!("Mempool is empty but exceeds max allowed size");
+                    return removal_events;
+                };
 
-            removal_events.push(removed);
+                removal_events.push(removed);
+            }
         }
 
         self.shrink_to_fit();
@@ -1252,6 +1391,67 @@ mod tests {
                 .unwrap();
             mempool.insert(new_tx, upgrade_priority);
         }
+    }
+
+    /// Returns three transactions: Two transactions that are input to the
+    /// transaction-merge function, and the resulting merged transaction. Also
+    /// returns the mutator set these transactions are synced against.
+    async fn merge_tx_triplet(
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> (
+        ((Transaction, Transaction), Transaction),
+        MutatorSetAccumulator,
+    ) {
+        let mut test_runner = TestRunner::deterministic();
+        let [left, right] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(2, 2, 2), (2, 2, 2)])
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+
+        let mutator_set = left.mutator_set_accumulator.clone();
+        let left_single_proof = produce_single_proof(
+            &left,
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+        let right_single_proof = produce_single_proof(
+            &right,
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+
+        let left = Transaction {
+            kernel: left.kernel,
+            proof: TransactionProof::SingleProof(left_single_proof),
+        };
+        let right = Transaction {
+            kernel: right.kernel,
+            proof: TransactionProof::SingleProof(right_single_proof),
+        };
+
+        let shuffle_seed = arb::<[u8; 32]>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let merged = Transaction::merge_with(
+            left.clone(),
+            right.clone(),
+            shuffle_seed,
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+
+        (((left, right), merged), mutator_set)
     }
 
     #[traced_test]
@@ -1737,65 +1937,7 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn merged_tx_kicks_out_merge_inputs() {
-        /// Returns three transactions: Two transactions that are input to the
-        /// transaction-merge function, and the resulting merged transaction.
-        async fn merge_tx_triplet(
-            consensus_rule_set: ConsensusRuleSet,
-        ) -> ((Transaction, Transaction), Transaction) {
-            let mut test_runner = TestRunner::deterministic();
-            let [left, right] = PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
-                (2, 2, 2),
-                (2, 2, 2),
-            ])
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-
-            let left_single_proof = produce_single_proof(
-                &left,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
-            let right_single_proof = produce_single_proof(
-                &right,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
-
-            let left = Transaction {
-                kernel: left.kernel,
-                proof: TransactionProof::SingleProof(left_single_proof),
-            };
-            let right = Transaction {
-                kernel: right.kernel,
-                proof: TransactionProof::SingleProof(right_single_proof),
-            };
-
-            let shuffle_seed = arb::<[u8; 32]>()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            let merged = Transaction::merge_with(
-                left.clone(),
-                right.clone(),
-                shuffle_seed,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
-
-            ((left, right), merged)
-        }
-
+    async fn merged_tx_removes_merge_inputs_but_keeps_them_in_cache() {
         // Verify that a merged transaction replaces the two transactions that
         // are the input into the merge.
         let network = Network::Main;
@@ -1807,7 +1949,7 @@ mod tests {
             &genesis_block,
         );
 
-        let ((left, right), merged) = merge_tx_triplet(consensus_rule_set).await;
+        let (((left, right), merged), _) = merge_tx_triplet(consensus_rule_set).await;
         mempool.insert(left, UpgradePriority::Irrelevant);
         mempool.insert(right, UpgradePriority::Irrelevant);
         assert_eq!(2, mempool.len());
@@ -1833,6 +1975,13 @@ mod tests {
         assert_eq!(&merged, mempool.get(merged.kernel.txid()).unwrap());
 
         assert!(mempool.preferred_single_proof_pair().is_none());
+
+        assert_eq!(
+            2,
+            mempool.merge_input_cache.len(),
+            "Merge input cache must contain two entries after the merger of the\
+             two transactions in mempool was inserted."
+        );
     }
 
     #[traced_test]
@@ -2271,6 +2420,224 @@ mod tests {
         println!(
             "actual size of mempool with {tx_count_big} empty txs when serialized: {size_serialized_big}",
         );
+    }
+
+    mod merge_input_cache {
+        use crate::tests::shared::blocks::invalid_block_with_kernel_and_mutator_set;
+
+        use super::*;
+
+        #[apply(shared_tokio_runtime)]
+        async fn a_b_merged_b_mined() {
+            // merge: (a, b) -> c
+            // Scenario: a is mined => b is in mempool after block update
+            let consensus_rule_set = ConsensusRuleSet::Reboot;
+            let network = Network::Main;
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &Block::genesis(network),
+            );
+            let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
+            mempool.insert(a.clone(), UpgradePriority::Irrelevant);
+            mempool.insert(b.clone(), UpgradePriority::Irrelevant);
+            mempool.insert(c.clone(), UpgradePriority::Irrelevant);
+            assert!(!mempool.contains(a.txid()));
+            assert!(!mempool.contains(b.txid()));
+            assert!(mempool.contains(c.txid()));
+
+            let block1 = invalid_block_with_kernel_and_mutator_set(b.kernel.clone(), mutator_set);
+            let (events, _) = mempool.update_with_block(&block1).unwrap();
+            assert!(mempool.contains(a.txid()));
+            assert!(!mempool.contains(b.txid()));
+            assert!(!mempool.contains(c.txid()));
+            assert_eq!(1, mempool.len());
+
+            assert_eq!(2, events.len());
+            assert_eq!(1, MempoolEvent::num_removes(&events));
+            assert_eq!(1, MempoolEvent::num_adds(&events));
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn a_b_merged_c_mined() {
+            // merge: (a, b) -> c
+            // Scenario: c is mined => mempool is empty after block update
+            let consensus_rule_set = ConsensusRuleSet::Reboot;
+            let network = Network::Main;
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &Block::genesis(network),
+            );
+            let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
+            mempool.insert(a.clone(), UpgradePriority::Irrelevant);
+            mempool.insert(b.clone(), UpgradePriority::Irrelevant);
+            mempool.insert(c.clone(), UpgradePriority::Irrelevant);
+            assert!(!mempool.contains(a.txid()));
+            assert!(!mempool.contains(b.txid()));
+            assert!(mempool.contains(c.txid()));
+
+            let block1 = invalid_block_with_kernel_and_mutator_set(c.kernel.clone(), mutator_set);
+            let (events, _) = mempool.update_with_block(&block1).unwrap();
+            assert!(!mempool.contains(a.txid()));
+            assert!(!mempool.contains(b.txid()));
+            assert!(!mempool.contains(c.txid()));
+            assert!(mempool.is_empty());
+
+            assert_eq!(1, events.len());
+            assert_eq!(1, MempoolEvent::num_removes(&events));
+            assert_eq!(0, MempoolEvent::num_adds(&events));
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn nested_mergers_behave() {
+            let consensus_rule_set = ConsensusRuleSet::Reboot;
+            let network = Network::Main;
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &Block::genesis(network),
+            );
+            let (bottom, [left, right], final_tx, mutator_set) =
+                nested_mergers(consensus_rule_set).await;
+            for tx in &bottom {
+                mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+            }
+            assert_eq!(4, mempool.len());
+            assert_eq!(0, mempool.merge_input_cache.len());
+
+            for tx in [&left, &right] {
+                mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+            }
+            assert_eq!(2, mempool.len());
+            assert_eq!(4, mempool.merge_input_cache.len());
+
+            mempool.insert(final_tx.clone(), UpgradePriority::Irrelevant);
+            assert_eq!(1, mempool.len());
+            assert_eq!(6, mempool.merge_input_cache.len());
+
+            // Scenario: non-merged transaction mined (bottom layer)
+            let mut mempool1 = mempool.clone();
+            let block1 = invalid_block_with_kernel_and_mutator_set(
+                bottom[0].kernel.clone(),
+                mutator_set.clone(),
+            );
+            let _ = mempool1.update_with_block(&block1).unwrap();
+            assert!(!mempool1.contains(bottom[0].txid()));
+            assert!(mempool1.contains(bottom[1].txid()));
+            assert!(mempool1.contains(right.txid()));
+
+            // Scenario: one-time-merged transaction mined (middle layer)
+            let mut mempool2 = mempool.clone();
+            let block2 =
+                invalid_block_with_kernel_and_mutator_set(left.kernel.clone(), mutator_set.clone());
+            let _ = mempool2.update_with_block(&block2).unwrap();
+            assert!(!mempool2.contains(bottom[0].txid()));
+            assert!(!mempool2.contains(bottom[1].txid()));
+            assert!(mempool2.contains(right.txid()));
+
+            // Scenario: two-time-merged transaction mined (top layer)
+            let mut mempool3 = mempool.clone();
+            let block3 = invalid_block_with_kernel_and_mutator_set(
+                final_tx.kernel.clone(),
+                mutator_set.clone(),
+            );
+            let _ = mempool3.update_with_block(&block3).unwrap();
+            assert!(mempool3.is_empty());
+        }
+
+        /// Return a tree of transactions, where the parents are defined as the
+        /// merger of the children. All three layers are returned.
+        ///
+        ///       final_tx
+        ///      /      \
+        ///   left      right
+        ///   /  \      /  \
+        /// tx0  tx1  tx0  tx1
+        async fn nested_mergers(
+            consensus_rule_set: ConsensusRuleSet,
+        ) -> (
+            [Transaction; 4],
+            [Transaction; 2],
+            Transaction,
+            MutatorSetAccumulator,
+        ) {
+            let mut test_runner = TestRunner::deterministic();
+            let txs: [PrimitiveWitness; 4] =
+                PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                    (2, 2, 2),
+                    (3, 3, 3),
+                    (4, 4, 4),
+                    (5, 5, 5),
+                ])
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+
+            let mutator_set = txs[0].mutator_set_accumulator.clone();
+            let mut single_proofs = vec![];
+            for tx in &txs {
+                single_proofs.push(
+                    produce_single_proof(
+                        tx,
+                        TritonVmJobQueue::get_instance(),
+                        TritonVmJobPriority::default().into(),
+                        consensus_rule_set,
+                    )
+                    .await
+                    .unwrap(),
+                )
+            }
+
+            let txs: [Transaction; 4] = txs
+                .into_iter()
+                .zip_eq(single_proofs)
+                .map(|(pw, sp)| Transaction {
+                    kernel: pw.kernel,
+                    proof: TransactionProof::SingleProof(sp),
+                })
+                .collect_vec()
+                .try_into()
+                .unwrap();
+
+            let shuffle_seed = arb::<[u8; 32]>()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            let left = Transaction::merge_with(
+                txs[0].clone(),
+                txs[1].clone(),
+                shuffle_seed,
+                TritonVmJobQueue::get_instance(),
+                TritonVmJobPriority::default().into(),
+                consensus_rule_set,
+            )
+            .await
+            .unwrap();
+            let right = Transaction::merge_with(
+                txs[2].clone(),
+                txs[3].clone(),
+                shuffle_seed,
+                TritonVmJobQueue::get_instance(),
+                TritonVmJobPriority::default().into(),
+                consensus_rule_set,
+            )
+            .await
+            .unwrap();
+            let final_tx = Transaction::merge_with(
+                left.clone(),
+                right.clone(),
+                shuffle_seed,
+                TritonVmJobQueue::get_instance(),
+                TritonVmJobPriority::default().into(),
+                consensus_rule_set,
+            )
+            .await
+            .unwrap();
+
+            (txs, [left, right], final_tx, mutator_set)
+        }
     }
 
     mod mutator_set_updates {
