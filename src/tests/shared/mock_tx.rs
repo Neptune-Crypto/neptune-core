@@ -10,6 +10,8 @@ use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TxProvingCapability;
 use crate::config_models::cli_args;
+use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -111,6 +113,22 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
     )
 }
 
+pub(crate) fn make_mock_block_transaction_with_mutator_set_hash(
+    inputs: Vec<RemovalRecord>,
+    outputs: Vec<AdditionRecord>,
+    mutator_set_hash: Digest,
+) -> BlockTransaction {
+    let timestamp = Timestamp::now();
+
+    let transaction = make_mock_transaction_with_mutator_set_hash_and_timestamp(
+        inputs,
+        outputs,
+        mutator_set_hash,
+        timestamp,
+    );
+    BlockTransaction::upgrade(transaction)
+}
+
 /// Create a `Transaction` from `TransactionDetails` such that verification
 /// seems to pass but without the hassle of producing a proof for it. Behind the
 /// scenes, this method updates the true claims cache, such that the call to
@@ -130,14 +148,23 @@ pub(super) async fn fake_create_transaction_from_details_for_tests(
     }
 }
 
-/// Merge two transactions for tests, without the hassle of proving but such
-/// that the result seems valid.
+/// Merge two transactions for tests, into a regular transaction, without the
+/// hassle of proving but such that the result seems valid.
 pub(super) async fn fake_merge_transactions_for_tests(
     lhs: Transaction,
     rhs: Transaction,
     shuffle_seed: [u8; 32],
     consensus_rule_set: ConsensusRuleSet,
 ) -> anyhow::Result<Transaction> {
+    assert!(
+        lhs.proof.is_single_proof(),
+        "argument must be bogus singleproof transaction"
+    );
+    assert!(
+        rhs.proof.is_single_proof(),
+        "argument must be bogus singleproof transaction"
+    );
+
     let merge_witness =
         MergeWitness::from_transactions(lhs, rhs, shuffle_seed, consensus_rule_set.merge_version());
     let new_kernel = merge_witness.new_kernel.clone();
@@ -147,6 +174,36 @@ pub(super) async fn fake_merge_transactions_for_tests(
 
     Ok(Transaction {
         kernel: new_kernel,
+        proof: TransactionProof::SingleProof(Proof::invalid()),
+    })
+}
+
+/// Merge two transactions for tests, resulting in a [`BlockTrasnaction`],
+/// without the hassle of proving but such that the result seems valid.
+pub(super) async fn fake_merge_block_transactions_for_tests(
+    lhs: BlockOrRegularTransaction,
+    rhs: Transaction,
+    shuffle_seed: [u8; 32],
+    consensus_rule_set: ConsensusRuleSet,
+) -> anyhow::Result<BlockTransaction> {
+    assert!(
+        lhs.proof().is_single_proof(),
+        "Argument2 must be single-proof-backed transaction"
+    );
+    assert!(
+        rhs.proof.is_single_proof(),
+        "Argument2 must be single-proof-backed transaction"
+    );
+
+    let merge_version = consensus_rule_set.merge_version();
+    let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed, merge_version);
+    let new_kernel = merge_witness.new_kernel.clone();
+
+    let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
+    cache_true_claim(claim).await;
+
+    Ok(BlockTransaction {
+        kernel: new_kernel.try_into().unwrap(),
         proof: TransactionProof::SingleProof(Proof::invalid()),
     })
 }

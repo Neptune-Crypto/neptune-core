@@ -164,6 +164,7 @@ mod tests {
     use proptest_arbitrary_interop::arb;
 
     use crate::api::export::BlockHeight;
+    use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::Network;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
@@ -177,38 +178,43 @@ mod tests {
             block_height: BlockHeight,
             network: Network,
         ) -> BoxedStrategy<BlockBody> {
-            let transaction_kernel_strategy = arb::<TransactionKernel>();
-            let lock_free_mmr_accumulator_strategy = arb::<MmrAccumulator>();
-            let block_mmr_accumulator_strategy = arb::<MmrAccumulator>();
-            let consensus_rules = ConsensusRuleSet::infer_from(network, block_height);
-            (
-                transaction_kernel_strategy,
-                lock_free_mmr_accumulator_strategy,
-                block_mmr_accumulator_strategy,
-            )
-                .prop_map(
-                    move |(
-                        transaction_kernel,
-                        lock_free_mmr_accumulator,
-                        block_mmr_accumulator,
-                    )| {
-                        let inputs = if consensus_rules.merge_version().pack_removal_records() {
-                            RemovalRecordList::pack(transaction_kernel.inputs.clone())
-                        } else {
-                            transaction_kernel.inputs.clone()
-                        };
-                        let transaction_kernel = TransactionKernelModifier::default()
-                            .inputs(inputs)
-                            .modify(transaction_kernel);
-                        BlockBody {
-                            transaction_kernel,
-                            mutator_set_accumulator: mutator_set_accumulator.clone(),
-                            lock_free_mmr_accumulator,
-                            block_mmr_accumulator,
-                            merkle_tree: OnceLock::default(),
-                        }
-                    },
-                )
+            (NativeCurrencyAmount::arbitrary_non_negative())
+                .prop_flat_map(move |fee| {
+                    let transaction_kernel_strategy = TransactionKernel::strategy_with_fee(fee);
+                    let lock_free_mmr_accumulator_strategy = arb::<MmrAccumulator>();
+                    let block_mmr_accumulator_strategy = arb::<MmrAccumulator>();
+                    let consensus_rules = ConsensusRuleSet::infer_from(network, block_height);
+                    let mutator_set_accumulator = mutator_set_accumulator.clone();
+                    (
+                        transaction_kernel_strategy,
+                        lock_free_mmr_accumulator_strategy,
+                        block_mmr_accumulator_strategy,
+                    )
+                        .prop_map(
+                            move |(
+                                transaction_kernel,
+                                lock_free_mmr_accumulator,
+                                block_mmr_accumulator,
+                            )| {
+                                let inputs =
+                                    if consensus_rules.merge_version().pack_removal_records() {
+                                        RemovalRecordList::pack(transaction_kernel.inputs.clone())
+                                    } else {
+                                        transaction_kernel.inputs.clone()
+                                    };
+                                let transaction_kernel = TransactionKernelModifier::default()
+                                    .inputs(inputs)
+                                    .modify(transaction_kernel);
+                                BlockBody {
+                                    transaction_kernel,
+                                    mutator_set_accumulator: mutator_set_accumulator.clone(),
+                                    lock_free_mmr_accumulator,
+                                    block_mmr_accumulator,
+                                    merkle_tree: OnceLock::default(),
+                                }
+                            },
+                        )
+                })
                 .boxed()
         }
     }

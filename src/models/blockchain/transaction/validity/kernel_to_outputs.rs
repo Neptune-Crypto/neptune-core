@@ -354,13 +354,10 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
-    use proptest_arbitrary_interop::arb;
-    use strum::IntoEnumIterator;
     use tasm_lib::triton_vm;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;

@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use ::twenty_first::prelude::MerkleTree;
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::error::BFieldCodecError;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
@@ -620,6 +620,9 @@ impl BFieldCodec for RemovalRecordList {
 #[cfg(test)]
 mod tests {
 
+    use std::hash::BuildHasherDefault;
+    use std::hash::Hasher;
+
     use proptest::collection::vec;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
@@ -642,10 +645,27 @@ mod tests {
     use crate::util_types::mutator_set::NUM_TRIALS;
 
     impl RemovalRecord {
-        fn arbitrary_synchronized_set(
+        pub(crate) fn arbitrary_synchronized_set(
             num_leafs_aocl: u64,
             num_records: usize,
         ) -> BoxedStrategy<Vec<RemovalRecord>> {
+            #[derive(Default)]
+            struct SimpleHasher(u64);
+
+            impl Hasher for SimpleHasher {
+                fn write(&mut self, bytes: &[u8]) {
+                    for &b in bytes {
+                        self.0 = self.0.wrapping_mul(31).wrapping_add(b as u64);
+                    }
+                }
+
+                fn finish(&self) -> u64 {
+                    self.0
+                }
+            }
+
+            type HashMapWithHasher<K, V> = HashMap<K, V, BuildHasherDefault<SimpleHasher>>;
+
             const ROOT_INDEX: u64 = 1_u64;
 
             let num_leafs_swbfi = num_leafs_aocl / u64::from(BATCH_SIZE);
@@ -717,7 +737,12 @@ mod tests {
 
                             // populate sparse mmr with enough digests,
                             // overwriting if necessary
-                            let mut sparse_mmr = HashMap::new();
+                            // Use deterministic HashMap here for deterministic
+                            // key/value iterations.
+                            let deterministic_hash_map = || {
+                                HashMapWithHasher::default()
+                            };
+                            let mut sparse_mmr = deterministic_hash_map();
                             for (chunk_index, chunk) in &indexed_chunks {
                                 let (merkle_tree_node_index, peak_index) =
                                     leaf_index_to_mt_index_and_peak_index(

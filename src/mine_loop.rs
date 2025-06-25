@@ -37,6 +37,8 @@ use crate::job_queue::errors::JobHandleError;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
+use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
@@ -587,7 +589,7 @@ pub(crate) async fn create_block_transaction(
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
-) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+) -> Result<(BlockTransaction, Vec<ExpectedUtxo>)> {
     create_block_transaction_from(
         predecessor_block,
         global_state_lock,
@@ -606,7 +608,7 @@ pub(crate) async fn create_block_transaction_from(
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
-) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+) -> Result<(BlockTransaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     let predecessor_block_ms = predecessor_block
@@ -685,7 +687,7 @@ pub(crate) async fn create_block_transaction_from(
     }
 
     let num_merges = transactions_to_merge.len();
-    let mut block_transaction = coinbase_transaction;
+    let mut block_transaction = BlockOrRegularTransaction::from(coinbase_transaction);
     for (i, tx_to_include) in transactions_to_merge.into_iter().enumerate() {
         info!("Merging transaction {} / {}", i + 1, num_merges);
         info!(
@@ -694,7 +696,7 @@ pub(crate) async fn create_block_transaction_from(
             tx_to_include.kernel.outputs.len(),
             tx_to_include.kernel.fee
         );
-        block_transaction = Transaction::merge_with(
+        block_transaction = Transaction::merge_into_block_transaction(
             block_transaction,
             tx_to_include,
             rng.random(),
@@ -702,12 +704,18 @@ pub(crate) async fn create_block_transaction_from(
             job_options.clone(),
             consensus_rule_set,
         )
-        .await?; // fix #579.  propagate error up.
+        .await?
+        .into(); // fix #579.  propagate error up.
     }
 
     let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
 
-    Ok((block_transaction, own_expected_utxos))
+    Ok((
+        block_transaction
+            .try_into()
+            .expect("Must have merged at least once"),
+        own_expected_utxos,
+    ))
 }
 
 ///
@@ -1098,7 +1106,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -1112,6 +1119,7 @@ pub(crate) mod tests {
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
@@ -1190,7 +1198,7 @@ pub(crate) mod tests {
                 .map(|_| pseudorandom_addition_record(rng.random()))
                 .collect_vec();
             (
-                make_mock_transaction_with_mutator_set_hash(
+                make_mock_block_transaction_with_mutator_set_hash(
                     vec![],
                     outputs,
                     previous_block
@@ -1260,6 +1268,7 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
+        let transaction = BlockTransaction::upgrade(transaction);
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
         let block = Block::block_template_invalid_proof(
@@ -1552,6 +1561,7 @@ pub(crate) mod tests {
             .wallet_state
             .wallet_entropy
             .guesser_spending_key(tip_block_orig.hash());
+        let transaction = BlockTransaction::upgrade(transaction);
         let mut block = Block::block_template_invalid_proof(
             &tip_block_orig,
             transaction,
@@ -1632,6 +1642,7 @@ pub(crate) mod tests {
 
         let guesser_key = HashLockKey::from_preimage(Digest::default());
 
+        let transaction = BlockTransaction::upgrade(transaction);
         let template = Block::block_template_invalid_proof(
             &tip_block_orig,
             transaction,
@@ -1790,6 +1801,7 @@ pub(crate) mod tests {
 
             let guesser_key = HashLockKey::from_preimage(Digest::default());
 
+            let transaction = BlockTransaction::upgrade(transaction);
             let block = Block::block_template_invalid_proof(
                 &prev_block,
                 transaction,
@@ -2428,6 +2440,7 @@ pub(crate) mod tests {
             let guesser_key = HashLockKey::from_preimage(Digest::default());
 
             // generate a block template / proposal
+            let transaction = BlockTransaction::upgrade(transaction);
             let block_template = MockBlockGenerator::mock_block_from_tx_without_pow(
                 prev_block.clone(),
                 transaction,

@@ -26,10 +26,10 @@ use ratatui::widgets::List;
 use ratatui::widgets::ListItem;
 use ratatui::widgets::Widget;
 use tarpc::context;
+use tasm_lib::twenty_first::prelude::Digest;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time;
-use tasm_lib::twenty_first::prelude::Digest;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;

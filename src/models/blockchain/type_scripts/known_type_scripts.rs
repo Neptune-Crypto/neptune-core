@@ -33,3 +33,13 @@ pub(crate) fn match_type_script_and_generate_witness(
 pub(crate) fn is_known_type_script_with_valid_state(coin: &Coin) -> bool {
     NativeCurrency.matches_coin(coin) || TimeLock.matches_coin(coin)
 }
+
+pub(crate) fn typescript_name(type_script_hash: Digest) -> &'static str {
+    if type_script_hash == NativeCurrency.hash() {
+        "native currency"
+    } else if type_script_hash == TimeLock.hash() {
+        "time lock"
+    } else {
+        "unknown"
+    }
+}

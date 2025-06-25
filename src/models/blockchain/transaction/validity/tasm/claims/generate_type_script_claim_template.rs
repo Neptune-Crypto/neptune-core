@@ -103,7 +103,6 @@ mod tests {
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
-    use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;

@@ -1116,6 +1116,7 @@ pub(crate) mod tests {
             let network = Network::Main;
 
             for_each_version!({
+                println!("VERSION: {VERSION}");
                 let merge_witness =
                     deterministic_merge_witness_with_coinbase::<VERSION>(3, 3, 3, network).await;
                 let merge_witness = SingleProofWitness::<VERSION>::Merger(merge_witness.clone());

@@ -59,7 +59,6 @@ use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -3392,7 +3391,6 @@ pub(crate) mod tests {
         use super::*;
         use crate::config_models::cli_args;
         use crate::models::blockchain::block::block_height::BlockHeight;
-        use crate::models::blockchain::transaction::Transaction;
         use crate::models::state::mempool::upgrade_priority::UpgradePriority;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
@@ -4034,8 +4032,6 @@ pub(crate) mod tests {
     /// Test wallet state's handling of UTXOs abandoned due to reorganization.
     mod abandoned_mutxos {
         use super::*;
-        use crate::models::blockchain::transaction::Transaction;
-        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::tests::shared::blocks::invalid_empty_block;
 
         #[traced_test]
@@ -5059,16 +5055,16 @@ pub(crate) mod tests {
 
             let consensus_rule_set_one =
                 ConsensusRuleSet::infer_from(network, block_one.header().height);
-            let block_two_transaction = some_other_transaction
-                .merge_with(
-                    upgraded_transaction,
-                    rng.random(),
-                    dummy_queue.clone(),
-                    TritonVmProofJobOptions::default(),
-                    consensus_rule_set_one,
-                )
-                .await
-                .unwrap();
+            let block_two_transaction = Transaction::merge_into_block_transaction(
+                some_other_transaction.into(),
+                upgraded_transaction,
+                rng.random(),
+                dummy_queue.clone(),
+                TritonVmProofJobOptions::default(),
+                consensus_rule_set_one,
+            )
+            .await
+            .unwrap();
 
             // create block with that transaction
             let block_two = Block::compose(

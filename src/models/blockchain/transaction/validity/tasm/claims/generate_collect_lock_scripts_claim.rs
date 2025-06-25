@@ -156,7 +156,6 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;

@@ -66,7 +66,6 @@ use crate::models::state::mempool::mempool_event::MempoolEvent;
 use crate::models::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::models::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::models::state::mempool::upgrade_priority::UpgradePriority;
-use crate::prelude::twenty_first;
 
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
@@ -1039,9 +1038,7 @@ mod tests {
     use crate::main_loop::upgrade_incentive::UpgradeIncentive;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
-    use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
@@ -1625,16 +1622,16 @@ mod tests {
         )
         .await
         .unwrap();
-        let block_transaction = tx_by_bob
-            .merge_with(
-                coinbase_transaction,
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
+        let block_transaction = Transaction::merge_into_block_transaction(
+            coinbase_transaction.into(),
+            tx_by_bob,
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
         let block_2 = Block::block_template_invalid_proof(
             &block_1,
             block_transaction,
@@ -1695,16 +1692,16 @@ mod tests {
         )
         .await
         .unwrap();
-        let block_tx_5 = cbtx
-            .merge_with(
-                tx_by_alice_updated,
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
+        let block_tx_5 = Transaction::merge_into_block_transaction(
+            cbtx.into(),
+            tx_by_alice_updated,
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
         let block_5 = Block::block_template_invalid_proof(
             &previous_block,
             block_tx_5,

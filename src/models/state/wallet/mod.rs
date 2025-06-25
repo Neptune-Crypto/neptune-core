@@ -68,7 +68,7 @@ mod tests {
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-    use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
+    use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
@@ -462,7 +462,7 @@ mod tests {
             .map(|txi| txi.removal_record(&msa_tip_previous))
             .collect_vec();
         let addition_records = tx_outputs.addition_records();
-        let tx = make_mock_transaction_with_mutator_set_hash(
+        let tx = make_mock_block_transaction_with_mutator_set_hash(
             removal_records,
             addition_records,
             next_block.mutator_set_accumulator_after().unwrap().hash(),
@@ -881,16 +881,16 @@ mod tests {
         )
         .await
         .unwrap();
-        let merged_tx = coinbase_tx
-            .merge_with(
-                tx_from_bob,
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set_2_b,
-            )
-            .await
-            .unwrap();
+        let merged_tx = Transaction::merge_into_block_transaction(
+            coinbase_tx.into(),
+            tx_from_bob,
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set_2_b,
+        )
+        .await
+        .unwrap();
         let timestamp = merged_tx.kernel.timestamp;
         let block_3_b = Block::compose(
             &block_2_b,
@@ -1091,16 +1091,16 @@ mod tests {
             .unwrap()
             .transaction
             .into();
-        let tx_for_block = sender_tx
-            .merge_with(
-                cbtx,
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
+        let tx_for_block = Transaction::merge_into_block_transaction(
+            cbtx.into(),
+            sender_tx,
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
         let block_1 = Block::compose(
             &genesis_block,
             tx_for_block,

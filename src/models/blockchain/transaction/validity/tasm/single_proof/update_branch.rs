@@ -681,15 +681,11 @@ pub(crate) mod tests {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use strum::EnumCount;
-    use strum::IntoEnumIterator;
     use tasm_lib::triton_vm::prelude::*;
 
     use super::*;
-    use crate::api::export::BlockHeight;
-    use crate::api::export::Network;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
@@ -700,7 +696,6 @@ pub(crate) mod tests {
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
     // The main tests are actually in [`../../single_proof.rs`].
 

@@ -1250,11 +1250,13 @@ pub(super) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
@@ -1470,9 +1472,10 @@ pub(super) mod tests {
             .unwrap()
             .transaction;
 
+        let transaction = BlockTransaction::upgrade((*sender_tx).clone());
         let mock_block_2 = Block::block_template_invalid_proof(
             &block1,
-            (*sender_tx).clone(),
+            transaction,
             in_seven_months,
             None,
             network,
@@ -1970,16 +1973,16 @@ pub(super) mod tests {
         .await
         .unwrap();
 
-        let block_tx = cbtx
-            .merge_with(
-                tx_to_alice_and_bob.into(),
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set_0,
-            )
-            .await
-            .unwrap();
+        let block_tx = Transaction::merge_into_block_transaction(
+            cbtx.into(),
+            tx_to_alice_and_bob.into(),
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set_0,
+        )
+        .await
+        .unwrap();
         println!("Generated block transaction");
 
         let block_1 = Block::compose(
@@ -2226,25 +2229,26 @@ pub(super) mod tests {
         )
         .await
         .unwrap();
-        let block_tx2 = cbtx2
-            .merge_with(
-                tx_from_alice.into(),
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set_1,
-            )
-            .await
-            .unwrap()
-            .merge_with(
-                tx_from_bob.into(),
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set_1,
-            )
-            .await
-            .unwrap();
+        let block_tx2 = Transaction::merge_into_block_transaction(
+            cbtx2.into(),
+            tx_from_alice.into(),
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set_1,
+        )
+        .await
+        .unwrap();
+        let block_tx2 = Transaction::merge_into_block_transaction(
+            block_tx2.into(),
+            tx_from_bob.into(),
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set_1,
+        )
+        .await
+        .unwrap();
         let block_2 = Block::compose(
             &block_1,
             block_tx2,

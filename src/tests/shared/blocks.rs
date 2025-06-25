@@ -16,6 +16,7 @@ use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
@@ -169,8 +170,10 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
     let new_kernel = TransactionKernelModifier::default()
         .outputs(new_outputs)
         .inputs(new_inputs)
+        .merge_bit(true)
         .modify(transaction.kernel.clone());
     transaction.kernel = new_kernel;
+    let transaction = BlockTransaction::try_from(transaction).unwrap();
 
     let mut block = Block::block_template_invalid_proof(
         previous_block,
@@ -297,6 +300,7 @@ pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Bloc
         predecessor.mutator_set_accumulator_after().unwrap().hash(),
     );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    let tx = BlockTransaction::upgrade(tx);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
@@ -323,6 +327,7 @@ pub(crate) fn invalid_empty_block_with_timestamp(
         predecessor.mutator_set_accumulator_after().unwrap().hash(),
         timestamp,
     );
+    let tx = BlockTransaction::upgrade(tx);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
 }
 
@@ -330,7 +335,7 @@ pub(crate) fn invalid_empty_block_with_timestamp(
 /// be a valid block except for proof and PoW.
 pub(crate) async fn fake_valid_block_proposal_from_tx(
     predecessor: &Block,
-    tx: Transaction,
+    tx: BlockTransaction,
     network: Network,
 ) -> Block {
     let timestamp = tx.kernel.timestamp;
@@ -352,9 +357,9 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
 
 /// Create a block from a transaction without the hassle of proving but such
 /// that it appears valid.
-pub(crate) async fn fake_valid_block_from_tx_for_tests(
+pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
     predecessor: &Block,
-    tx: Transaction,
+    tx: BlockTransaction,
     seed: [u8; 32],
     network: Network,
 ) -> Block {
@@ -427,7 +432,7 @@ pub async fn fake_block_successor_with_merged_tx(
     .unwrap();
 
     if with_valid_pow {
-        fake_valid_block_from_tx_for_tests(
+        fake_valid_block_from_block_tx_for_tests(
             predecessor,
             block_tx,
             seed_bytes.pop().unwrap(),
