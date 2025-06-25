@@ -2073,9 +2073,11 @@ mod tests {
     use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::BlockProof;
     use crate::models::blockchain::transaction::lock_script::LockScript;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
@@ -3316,22 +3318,22 @@ mod tests {
             ))
             .await;
 
-        let block_transaction = tx_to_alice_and_bob
-            .merge_with(
-                coinbase_transaction,
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
+        let block_transaction = Transaction::merge_into_block_transaction(
+            coinbase_transaction.into(),
+            tx_to_alice_and_bob,
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
         assert!(
-            block_transaction
+            Transaction::from(block_transaction.clone())
                 .is_valid(network, consensus_rule_set)
                 .await
         );
-        assert!(block_transaction
+        assert!(Transaction::from(block_transaction.clone())
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap(),));
 
         let block_1 = Block::compose(
@@ -3565,31 +3567,33 @@ mod tests {
         assert!(coinbase_transaction2
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
-        let block_transaction2 = coinbase_transaction2
-            .merge_with(
-                tx_from_alice.into(),
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap()
-            .merge_with(
-                tx_from_bob.into(),
-                Default::default(),
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
+        let block_transaction2 = Transaction::merge_into_block_transaction(
+            coinbase_transaction2.into(),
+            tx_from_alice.into(),
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+        let block_transaction2 = Transaction::merge_into_block_transaction(
+            block_transaction2.into(),
+            tx_from_bob.into(),
+            Default::default(),
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+
         assert!(
-            block_transaction2
+            Transaction::from(block_transaction2.clone())
                 .is_valid(network, consensus_rule_set)
                 .await
         );
-        assert!(block_transaction2
+        assert!(Transaction::from(block_transaction2.clone())
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
         let block_2 = Block::compose(
@@ -3668,7 +3672,21 @@ mod tests {
             .await
             .unwrap();
 
-            Block::block_template_invalid_proof(&genesis_block, cb, timestamp, None, network)
+            let coinbase_kernel = TransactionKernelModifier::default()
+                .merge_bit(true)
+                .modify(cb.kernel);
+            let coinbase_transaction = Transaction {
+                kernel: coinbase_kernel,
+                proof: cb.proof,
+            };
+
+            Block::block_template_invalid_proof(
+                &genesis_block,
+                BlockTransaction::try_from(coinbase_transaction).unwrap(),
+                timestamp,
+                None,
+                network,
+            )
         }
 
         let mut global_state_lock_small = mock_genesis_global_state(

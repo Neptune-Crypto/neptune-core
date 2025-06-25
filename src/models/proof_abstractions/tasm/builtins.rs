@@ -1,6 +1,6 @@
-use tasm_lib::twenty_first::prelude::*;
 use itertools::Itertools;
 use tasm_lib::prelude::*;
+use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;

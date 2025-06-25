@@ -2,7 +2,6 @@ use std::slice::Iter;
 use std::slice::IterMut;
 use std::vec::IntoIter;
 
-use crate::prelude::twenty_first;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;

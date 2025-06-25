@@ -203,13 +203,10 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
-    use proptest_arbitrary_interop::arb;
-    use strum::IntoEnumIterator;
     use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;

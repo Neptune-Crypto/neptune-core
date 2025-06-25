@@ -14,14 +14,12 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::primitive_witness::PrimitiveWitness;
 use super::PublicAnnouncement;
 use crate::api::export::TransactionDetails;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -250,25 +248,60 @@ impl MastHash for TransactionKernel {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
     use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
     use itertools::Itertools;
+    use proptest::prelude::Strategy;
+    use proptest::prelude::*;
+    use proptest::strategy::BoxedStrategy;
 
     use super::*;
 
-    impl<'a> Arbitrary<'a> for TransactionKernel {
-        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+    impl TransactionKernel {
+        /// Lifts `Self::arbitrary_with_fee` into a `Strategy`.
+        pub(crate) fn strategy_with_fee(fee: NativeCurrencyAmount) -> BoxedStrategy<Self> {
+            // Choose an upper bound for how many bytes you want to feed into
+            // `Unstructured`.
+            const MAX_BYTES: usize = 262144;
+
+            proptest::collection::vec(any::<u8>(), 0..=MAX_BYTES)
+                .prop_filter_map("could not construct from bytes", move |bytes| {
+                    let mut u = Unstructured::new(&bytes);
+                    Self::arbitrary_with_fee(&mut u, fee).ok()
+                })
+                .boxed()
+        }
+
+        fn arbitrary_with_fee<'a>(
+            u: &mut ::arbitrary::Unstructured<'a>,
+            fee: NativeCurrencyAmount,
+        ) -> ::arbitrary::Result<Self> {
             let num_inputs = u.int_in_range(0..=4)?;
             let num_outputs = u.int_in_range(0..=4)?;
             let num_public_announcements = u.int_in_range(0..=2)?;
-            let inputs: Vec<RemovalRecord> = (0..num_inputs)
-                .map(|_| u.arbitrary().unwrap())
-                .collect_vec();
+            let num_aocl_leafs = u.int_in_range(0u64..=(1u64 << 63))?;
+
+            // Get some seed bytes from the unstructured input
+            let seed = u.bytes(32)?; // choose an appropriate length
+
+            // Create a proptest RNG from the seed
+            let rng = proptest::test_runner::TestRng::from_seed(
+                proptest::test_runner::RngAlgorithm::ChaCha,
+                &seed.try_into().unwrap_or([0u8; 32]), // handle length mismatch
+            );
+
+            let config = proptest::test_runner::Config::default();
+            let mut runner = proptest::test_runner::TestRunner::new_with_rng(config, rng);
+
+            let inputs = RemovalRecord::arbitrary_synchronized_set(num_aocl_leafs, num_inputs)
+                .new_tree(&mut runner)
+                .unwrap()
+                .current();
             let outputs: Vec<AdditionRecord> = (0..num_outputs)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
             let public_announcements: Vec<PublicAnnouncement> = (0..num_public_announcements)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
-            let fee: NativeCurrencyAmount = u.arbitrary()?;
             let coinbase: Option<NativeCurrencyAmount> = u.arbitrary()?;
             let timestamp: Timestamp = u.arbitrary()?;
             let mutator_set_hash: Digest = u.arbitrary()?;
@@ -287,6 +320,14 @@ pub mod neptune_arbitrary {
             .into_kernel();
 
             Ok(transaction_kernel)
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for TransactionKernel {
+        /// Produces unpacked inputs.
+        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+            let fee: NativeCurrencyAmount = u.arbitrary()?;
+            Self::arbitrary_with_fee(u, fee)
         }
     }
 }
@@ -485,6 +526,14 @@ pub mod tests {
             .unwrap()
             .current();
 
+        assert_eq!(a.outputs, b.outputs);
+        assert_eq!(a.fee, b.fee);
+        assert_eq!(a.coinbase, b.coinbase);
+        assert_eq!(a.mutator_set_hash, b.mutator_set_hash);
+        assert_eq!(a.merge_bit, b.merge_bit);
+        assert_eq!(a.public_announcements, b.public_announcements);
+        assert_eq!(a.timestamp, b.timestamp);
+        assert_eq!(a.inputs, b.inputs);
         assert_eq!(a, b);
     }
 

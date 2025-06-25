@@ -77,7 +77,6 @@ mod tests {
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
     use proptest::strategy::ValueTree;
-    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -94,7 +93,6 @@ mod tests {
     use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 
     use super::*;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 

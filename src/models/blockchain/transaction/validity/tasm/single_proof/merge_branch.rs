@@ -28,8 +28,12 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
+use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
+use crate::models::blockchain::block::block_transaction::BlockOrRegularTransactionKernel;
+use crate::models::blockchain::block::block_transaction::BlockTransactionKernel;
 use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::blockchain::transaction::validity::single_proof::DISCRIMINANT_FOR_MERGE;
@@ -59,8 +63,11 @@ const MERGE_WITNESS_ADDRESS: BFieldElement = BFieldElement::new(2);
 
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub struct MergeWitness {
+    /// This field, exceptionally, *CAN* contain packed [`RemovalRecord`]s.
     pub(crate) left_kernel: TransactionKernel,
     pub(crate) right_kernel: TransactionKernel,
+
+    /// This field, exceptionally, *CAN* contain packed [`RemovalRecord`]s.
     pub(crate) new_kernel: TransactionKernel,
     pub(crate) left_proof: Proof,
     pub(crate) right_proof: Proof,
@@ -71,6 +78,44 @@ pub struct MergeWitness {
 }
 
 impl MergeWitness {
+    pub(crate) fn for_composition(
+        left: BlockOrRegularTransaction,
+        right: Transaction,
+        shuffle_seed: [u8; 32],
+        merge_version: MergeVersion,
+    ) -> Self {
+        let left_kernel = left.kernel();
+        let right_kernel = right.kernel;
+
+        let TransactionProof::SingleProof(left_proof) = left.proof() else {
+            panic!("cannot merge transactions that are not supported by singleproof");
+        };
+        let TransactionProof::SingleProof(right_proof) = right.proof else {
+            panic!("cannot merge transactions that are not supported by singleproof");
+        };
+
+        assert!(
+            right_kernel.coinbase.is_none(),
+            "Coinbase transaction must be left hand side"
+        );
+
+        let new_kernel = Self::new_block_transaction_kernel(
+            &left_kernel,
+            &right_kernel,
+            shuffle_seed,
+            merge_version,
+        );
+
+        Self {
+            left_kernel: left_kernel.into(),
+            right_kernel,
+            new_kernel: new_kernel.into(),
+            left_proof,
+            right_proof,
+            merge_version,
+        }
+    }
+
     /// Generate a `MergeWitness` from two transactions (kernels plus proofs).
     /// Assumes the transactions can be merged. Takes randomness for shuffling
     /// the concatenations of inputs, outputs, and public announcements.
@@ -89,6 +134,11 @@ impl MergeWitness {
         let TransactionProof::SingleProof(right_proof) = right.proof else {
             panic!("cannot merge transactions that are not supported by singleproof");
         };
+
+        assert!(
+            left_kernel.coinbase.is_none() && right_kernel.coinbase.is_none(),
+            "Cannot use this function for coinbase transactions"
+        );
 
         let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed);
 
@@ -160,7 +210,43 @@ impl MergeWitness {
         }
     }
 
+    fn new_block_transaction_kernel(
+        left_kernel: &BlockOrRegularTransactionKernel,
+        right_kernel: &TransactionKernel,
+        shuffle_seed: [u8; 32],
+        merge_version: MergeVersion,
+    ) -> BlockTransactionKernel {
+        let lhs = match left_kernel {
+            BlockOrRegularTransactionKernel::Regular(regular) => regular.clone(),
+            BlockOrRegularTransactionKernel::Block(block_transaction_kernel) => {
+                let transaction_kernel: TransactionKernel = block_transaction_kernel.clone().into();
+                if merge_version.pack_removal_records() {
+                    let inputs = RemovalRecordList::try_unpack(transaction_kernel.inputs.clone())
+                        .expect("inputs must be packed for block transactions when required by merge version");
+                    TransactionKernelModifier::default()
+                        .inputs(inputs)
+                        .modify(transaction_kernel)
+                } else {
+                    transaction_kernel
+                }
+            }
+        };
+
+        let mut new_kernel = Self::new_kernel(&lhs, right_kernel, shuffle_seed);
+
+        if merge_version.pack_removal_records() {
+            let inputs = RemovalRecordList::pack(new_kernel.inputs.clone());
+            new_kernel = TransactionKernelModifier::default()
+                .inputs(inputs)
+                .modify(new_kernel);
+        }
+
+        BlockTransactionKernel::try_from(new_kernel).expect("merge bit should be set")
+    }
+
     /// Generate a new transaction kernel from two transactions.
+    ///
+    /// Assumes the [`RemovalRecord`]s in both arguments are not packed.
     pub(super) fn new_kernel(
         left_kernel: &TransactionKernel,
         right_kernel: &TransactionKernel,
@@ -174,7 +260,13 @@ impl MergeWitness {
             !right_kernel.fee.is_negative(),
             "attempting to merge with RHS transaction whose fee is negative; negative fees only allowed on LHS"
         );
+        assert!(
+            right_kernel.coinbase.is_none(),
+            "Coinbase only allowed in LHS transaction"
+        );
         let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed);
+
+        let old_coinbase = left_kernel.coinbase;
 
         let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
         inputs.shuffle(&mut rng);
@@ -186,8 +278,6 @@ impl MergeWitness {
         ]
         .concat();
         public_announcements.shuffle(&mut rng);
-
-        let old_coinbase = left_kernel.coinbase.or(right_kernel.coinbase);
 
         TransactionKernelProxy {
             inputs,
@@ -998,9 +1088,7 @@ pub(crate) mod tests {
     use strum::EnumCount;
 
     use super::*;
-    use crate::api::export::BlockHeight;
     use crate::api::export::Network;
-    use crate::models::blockchain::consensus_rule_set;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
@@ -1235,14 +1323,18 @@ pub(crate) mod tests {
 
         let mut test_runner = TestRunner::deterministic();
 
-        let (left, right) = PrimitiveWitness::arbitrary_pair_with_inputs_and_coinbase_respectively(
-            num_total_inputs,
-            num_total_outputs,
-            num_pub_announcements,
-        )
-        .new_tree(&mut test_runner)
-        .unwrap()
-        .current();
+        let (coinbase_transaction, tx_with_inputs) =
+            PrimitiveWitness::arbitrary_pair_with_coinbase_and_inputs_respectively(
+                num_total_inputs,
+                num_total_outputs,
+                num_pub_announcements,
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        assert!(coinbase_transaction.kernel.coinbase.is_some());
+        assert!(coinbase_transaction.kernel.inputs.is_empty());
 
         let shuffle_seed = arb::<[u8; 32]>()
             .new_tree(&mut test_runner)
@@ -1250,7 +1342,7 @@ pub(crate) mod tests {
             .current();
 
         let left_proof = produce_single_proof(
-            &left,
+            &coinbase_transaction,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
@@ -1258,7 +1350,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let right_proof = produce_single_proof(
-            &right,
+            &tx_with_inputs,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
             consensus_rule_set,
@@ -1266,10 +1358,10 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        let left = Transaction::new_single_proof(left.kernel, left_proof);
-        let right = Transaction::new_single_proof(right.kernel, right_proof);
+        let left = Transaction::new_single_proof(coinbase_transaction.kernel, left_proof);
+        let right = Transaction::new_single_proof(tx_with_inputs.kernel, right_proof);
 
         let merge_version = consensus_rule_set.merge_version();
-        MergeWitness::from_transactions(left, right, shuffle_seed, merge_version)
+        MergeWitness::for_composition(left.into(), right, shuffle_seed, merge_version)
     }
 }

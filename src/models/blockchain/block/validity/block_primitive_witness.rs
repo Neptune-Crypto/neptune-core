@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::sync::OnceLock;
 
 use tasm_lib::twenty_first::prelude::Mmr;
@@ -5,11 +6,10 @@ use tasm_lib::twenty_first::prelude::Mmr;
 use crate::api::export::Network;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-use crate::models::blockchain::transaction::Transaction;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
@@ -46,10 +46,8 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 pub(crate) struct BlockPrimitiveWitness {
     pub(super) predecessor_block: Block,
 
-    /// A transaction without packed inputs.
-    // Should not be public to avoid requiring the caller to know if inputs
-    // should be packed or not.
-    transaction: Transaction,
+    /// Inputs can be packed, depending on consensus rules.
+    transaction: BlockTransaction,
 
     maybe_body: OnceLock<BlockBody>,
 
@@ -60,7 +58,7 @@ impl BlockPrimitiveWitness {
     /// Takes transaction without packed inputs
     pub(crate) fn new(
         predecessor_block: Block,
-        transaction: Transaction,
+        transaction: BlockTransaction,
         network: Network,
     ) -> Self {
         Self {
@@ -71,7 +69,7 @@ impl BlockPrimitiveWitness {
         }
     }
 
-    pub fn transaction(&self) -> &Transaction {
+    pub fn transaction(&self) -> &BlockTransaction {
         &self.transaction
     }
 
@@ -104,7 +102,8 @@ impl BlockPrimitiveWitness {
                 .expect("Predecessor must have mutator set after");
             let predecessor_msa_digest = predecessor_msa
                 .hash();
-            let tx_msa_digest = self.transaction.kernel.mutator_set_hash;
+            let transaction_kernel = self.transaction.kernel.deref();
+            let tx_msa_digest = transaction_kernel.mutator_set_hash;
             assert_eq!(
                 predecessor_msa_digest,
                 tx_msa_digest,
@@ -112,12 +111,20 @@ impl BlockPrimitiveWitness {
                 \nPredecessor block had {predecessor_msa_digest};\ntransaction had {tx_msa_digest}\n\n"
             );
 
-            let mut mutator_set = predecessor_msa;
-            let mutator_set_update = MutatorSetUpdate::new(self.transaction.kernel.inputs.clone(), self.transaction.kernel.outputs.clone());
+            let block_height = self.predecessor_block.header().height.next();
+            let pack_removal_records = ConsensusRuleSet::infer_from(self.network, block_height).merge_version().pack_removal_records();
+            let inputs = if pack_removal_records {
+                RemovalRecordList::try_unpack(transaction_kernel.inputs.clone()).expect("Inputs must be packed")
+            } else {
+                transaction_kernel.inputs.clone()
+            };
+
+            let mutator_set_update = MutatorSetUpdate::new(inputs, self.transaction.kernel.outputs.clone());
 
             // Due to tests, we don't verify that the removal records can be applied. That is
             // the caller's responsibility to ensure by e.g. calling block.is_valid(network) after
             // constructing a block.
+            let mut mutator_set = predecessor_msa;
             mutator_set_update.apply_to_accumulator_unsafe(&mut mutator_set);
 
             let predecessor_body = self.predecessor_block.body();
@@ -125,18 +132,8 @@ impl BlockPrimitiveWitness {
             let mut block_mmr = predecessor_body.block_mmr_accumulator.clone();
             block_mmr.append(self.predecessor_block.hash());
 
-            let block_height = self.predecessor_block.header().height.next();
-            let pack_removal_records = ConsensusRuleSet::infer_from(self.network, block_height).merge_version().pack_removal_records();
-
-            let removal_records = if pack_removal_records {
-                RemovalRecordList::pack(self.transaction.kernel.inputs.clone())
-            } else {
-                self.transaction.kernel.inputs.clone()
-            };
-            let transaction_kernel = TransactionKernelModifier::default().inputs(removal_records).modify(self.transaction.kernel.clone());
-
             BlockBody::new(
-                transaction_kernel,
+                transaction_kernel.to_owned(),
                 mutator_set,
                 lock_free_mmr,
                 block_mmr,
@@ -171,6 +168,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::block_body::BlockBody;
     use crate::models::blockchain::block::block_header::BlockHeader;
     use crate::models::blockchain::block::block_kernel::BlockKernel;
+    use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::BlockProof;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
@@ -201,11 +199,11 @@ pub(crate) mod tests {
         coinbase_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
         block_height: BlockHeight,
-    ) -> BoxedStrategy<Transaction> {
+    ) -> BoxedStrategy<BlockTransaction> {
         let network = Network::Main; // explicit assumption
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         (
-            PrimitiveWitness::arbitrary_pair_with_inputs_and_coinbase_respectively_from_msa_and_records(
+            PrimitiveWitness::arbitrary_pair_with_coinbase_and_inputs_respectively_from_msa_and_records(
                 num_outputs,
                 num_announcements,
                 msa_and_records,
@@ -216,40 +214,41 @@ pub(crate) mod tests {
             ),
             arb::<[u8; 32]>(),
         )
-            .prop_map(move |((primwit_inputs, primwit_coinbase), shuffle_seed)| {
+            .prop_map(move |((primwit_coinbase, primwit_inputs), shuffle_seed)| {
                 let rt = crate::tests::tokio_runtime();
                 let _guard = rt.enter();
 
                 let proof_job_options = TritonVmProofJobOptions::from(TritonVmJobPriority::default());
 
-                let single_proof_inputs = rt
+                let single_proof_coinbase = rt
                     .block_on(produce_single_proof(
-                        &primwit_inputs,
+                        &primwit_coinbase,
                         TritonVmJobQueue::get_instance(),
                         proof_job_options.clone(),
                         consensus_rule_set,
                     ))
                     .unwrap();
 
-                let tx_inputs = Transaction {
-                    kernel: primwit_inputs.kernel,
-                    proof: TransactionProof::SingleProof(single_proof_inputs),
+                let tx_coinbase = Transaction {
+                    kernel: primwit_coinbase.kernel,
+                    proof: TransactionProof::SingleProof(single_proof_coinbase),
                 };
-                let single_proof_coinbase = rt
+                let single_proof_inputs = rt
                     .block_on(produce_single_proof(
-                        &primwit_coinbase,
+                        &primwit_inputs,
                         TritonVmJobQueue::get_instance(),
                         proof_job_options.clone(),
                         consensus_rule_set
                     ))
                     .unwrap();
-                let tx_coinbase = Transaction {
-                    kernel: primwit_coinbase.kernel,
-                    proof: TransactionProof::SingleProof(single_proof_coinbase),
+                let tx_inputs = Transaction {
+                    kernel: primwit_inputs.kernel,
+                    proof: TransactionProof::SingleProof(single_proof_inputs),
                 };
 
-                rt.block_on(tx_inputs.merge_with(
-                    tx_coinbase,
+                rt.block_on(Transaction::merge_into_block_transaction(
+                    tx_coinbase.into(),
+                    tx_inputs,
                     shuffle_seed,
                     TritonVmJobQueue::get_instance(),
                     proof_job_options.clone(),

@@ -23,15 +23,13 @@ use super::utxo::Utxo;
 use super::TransactionDetails;
 use crate::api::export::TxInputList;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-use crate::models::blockchain::transaction::merge_version::MergeVersion;
+use crate::models::blockchain::type_scripts::known_type_scripts;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 
@@ -382,7 +380,11 @@ impl PrimitiveWitness {
 
             if let Err(_e) = run_res {
                 // tbd: should we include the VMError in InvalidTypeScript error?
-                let error = WitnessValidationError::InvalidTypeScript(*type_script_hash);
+                let typescript_name = known_type_scripts::typescript_name(*type_script_hash);
+                let error = WitnessValidationError::InvalidTypeScript {
+                    type_script_hash: *type_script_hash,
+                    type_script_name: typescript_name.to_owned(),
+                };
                 warn!("{}", error);
                 return Err(error);
             }
@@ -509,8 +511,11 @@ pub enum WitnessValidationError {
     #[error("unknown typescript: {0}")]
     UnknownTypeScript(Digest),
 
-    #[error("invalid type script: {0}")]
-    InvalidTypeScript(Digest),
+    #[error("invalid type script: {type_script_hash}; ({type_script_name})")]
+    InvalidTypeScript {
+        type_script_hash: Digest,
+        type_script_name: String,
+    },
 
     #[error("removal records generated from witness do not match transaction kernel inputs")]
     RemovalRecordsMismatch {
@@ -547,7 +552,6 @@ pub mod neptune_arbitrary {
     use super::super::PublicAnnouncement;
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -558,7 +562,6 @@ pub mod neptune_arbitrary {
     use crate::models::state::wallet::address::generation_address;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
-    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
     impl PrimitiveWitness {
         /// Strategy for generating a `PrimitiveWitness` with the given number of
@@ -1069,13 +1072,11 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use strum::IntoEnumIterator;
     use test_strategy::proptest;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
@@ -1356,7 +1357,7 @@ mod tests {
                 .boxed()
         }
 
-        pub(crate) fn arbitrary_pair_with_inputs_and_coinbase_respectively(
+        pub(crate) fn arbitrary_pair_with_coinbase_and_inputs_respectively(
             num_inputs: usize,
             total_num_outputs: usize,
             total_num_announcements: usize,
@@ -1368,23 +1369,23 @@ mod tests {
             )
                 .prop_flat_map(move |(num_outputs, num_announcements, coinbase_amount)| {
                     let parameter_sets = [
-                        (num_inputs, num_outputs, num_announcements),
                         (
                             0,
                             total_num_outputs - num_outputs,
                             total_num_announcements - num_announcements,
                         ),
+                        (num_inputs, num_outputs, num_announcements),
                     ];
                     Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
                         parameter_sets,
-                        Some((coinbase_amount, 1)),
+                        Some((coinbase_amount, 0)),
                     )
                     .prop_map(|primwit| (primwit[0].clone(), primwit[1].clone()))
                 })
                 .boxed()
         }
 
-        pub(crate) fn arbitrary_pair_with_inputs_and_coinbase_respectively_from_msa_and_records(
+        pub(crate) fn arbitrary_pair_with_coinbase_and_inputs_respectively_from_msa_and_records(
             total_num_outputs: usize,
             total_num_announcements: usize,
             msa_and_records: MsaAndRecords,
@@ -1402,17 +1403,6 @@ mod tests {
                 .prop_flat_map(move |(num_outputs, num_announcements)| {
                     (
                         Self::arbitrary_given_mutator_set_accumulator_and_inputs(
-                            num_outputs,
-                            num_announcements,
-                            None,
-                            input_utxos.clone(),
-                            input_removal_records.clone(),
-                            input_membership_proofs.clone(),
-                            lock_scripts_and_witnesses.clone(),
-                            mutator_set_accumulator.clone(),
-                            timestamp,
-                        ),
-                        Self::arbitrary_given_mutator_set_accumulator_and_inputs(
                             total_num_outputs - num_outputs,
                             total_num_announcements - num_announcements,
                             Some(coinbase_amount),
@@ -1420,6 +1410,17 @@ mod tests {
                             vec![],
                             vec![],
                             vec![],
+                            mutator_set_accumulator.clone(),
+                            timestamp,
+                        ),
+                        Self::arbitrary_given_mutator_set_accumulator_and_inputs(
+                            num_outputs,
+                            num_announcements,
+                            None,
+                            input_utxos.clone(),
+                            input_removal_records.clone(),
+                            input_membership_proofs.clone(),
+                            lock_scripts_and_witnesses.clone(),
                             mutator_set_accumulator.clone(),
                             timestamp,
                         ),

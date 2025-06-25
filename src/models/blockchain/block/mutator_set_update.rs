@@ -1,4 +1,3 @@
-use anyhow::bail;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
@@ -53,7 +52,7 @@ impl MutatorSetUpdate {
         if valid_removal_records {
             Ok(())
         } else {
-            bail!("Cannot remove item from mutator set.");
+            Err(anyhow::anyhow!("Cannot remove item from mutator set."))
         }
     }
 
@@ -84,7 +83,7 @@ impl MutatorSetUpdate {
         if valid_removal_records {
             Ok(())
         } else {
-            bail!("Cannot remove item from mutator set.");
+            Err(anyhow::anyhow!("Cannot remove item from mutator set."))
         }
     }
 

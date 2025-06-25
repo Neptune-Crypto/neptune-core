@@ -5,6 +5,7 @@ pub mod block_height;
 pub mod block_info;
 pub mod block_kernel;
 pub mod block_selector;
+pub(crate) mod block_transaction;
 mod block_validation_error;
 pub mod difficulty_control;
 pub mod mock_block_generator;
@@ -44,11 +45,11 @@ use validity::block_proof_witness::BlockProofWitness;
 
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::transaction::utxo::Utxo;
-use super::transaction::Transaction;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::shared::Hash;
@@ -222,7 +223,7 @@ impl Block {
 
     async fn make_block_template_with_valid_proof(
         predecessor: &Block,
-        transaction: Transaction,
+        transaction: BlockTransaction,
         block_timestamp: Timestamp,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
@@ -264,7 +265,7 @@ impl Block {
     /// Create a block with valid block proof, but without proof-of-work.
     pub(crate) async fn compose(
         predecessor: &Block,
-        transaction: Transaction,
+        transaction: BlockTransaction,
         block_timestamp: Timestamp,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
@@ -1111,6 +1112,8 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::super::transaction::transaction_kernel::TransactionKernelModifier;
+    use super::super::transaction::Transaction;
+    use super::block_transaction::BlockOrRegularTransaction;
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -1147,13 +1150,13 @@ pub(crate) mod tests {
         /// To be used in tests where you don't care about block validity.
         pub(crate) fn block_template_invalid_proof(
             predecessor: &Block,
-            transaction: Transaction,
+            block_transaction: BlockTransaction,
             block_timestamp: Timestamp,
             override_target_block_interval: Option<Timestamp>,
             network: Network,
         ) -> Block {
             let primitive_witness =
-                BlockPrimitiveWitness::new(predecessor.to_owned(), transaction, network);
+                BlockPrimitiveWitness::new(predecessor.to_owned(), block_transaction, network);
             let target_block_interval =
                 override_target_block_interval.unwrap_or(network.target_block_interval());
             Self::block_template_invalid_proof_from_witness(
@@ -1278,16 +1281,21 @@ pub(crate) mod tests {
                 prepare_coinbase_transaction_stateless(&genesis, composer_parameters, now, network);
             let coinbase_kernel =
                 PrimitiveWitness::from_transaction_details(&transaction_details).kernel;
-            let coinbase = Transaction {
+            let coinbase_kernel = TransactionKernelModifier::default()
+                .merge_bit(true)
+                .modify(coinbase_kernel); // ok: proof is invalid anyway
+            let coinbase_transaction = Transaction {
                 kernel: coinbase_kernel,
                 proof: TransactionProof::invalid(),
             };
+            let coinbase_transaction =
+                BlockTransaction::try_from(coinbase_transaction).expect("merge bit was set");
             let total_composer_reward: NativeCurrencyAmount = composer_txos
                 .iter()
                 .map(|tx_output| tx_output.utxo().get_native_currency_amount())
                 .sum();
             let block_primitive_witness =
-                BlockPrimitiveWitness::new(genesis.clone(), coinbase, network);
+                BlockPrimitiveWitness::new(genesis.clone(), coinbase_transaction, network);
             let block_proof_witness = BlockProofWitness::produce(block_primitive_witness.clone());
             let block1 = Block::new(
                 block_primitive_witness.header(now, network.target_block_interval()),
@@ -1715,17 +1723,16 @@ pub(crate) mod tests {
                     .await
                     .unwrap()
                     .transaction;
-                let block2_tx = coinbase_for_block2
-                    .clone()
-                    .merge_with(
-                        (*tx2).clone(),
-                        rng.random(),
-                        TritonVmJobQueue::get_instance(),
-                        TritonVmProofJobOptions::default_with_network(network),
-                        consensus_rule_set_1,
-                    )
-                    .await
-                    .unwrap();
+                let block2_tx = Transaction::merge_into_block_transaction(
+                    coinbase_for_block2.clone().into(),
+                    (*tx2).clone(),
+                    rng.random(),
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmProofJobOptions::default_with_network(network),
+                    consensus_rule_set_1,
+                )
+                .await
+                .unwrap();
                 let block2_without_valid_pow = Block::compose(
                     &block1,
                     block2_tx,
@@ -1774,17 +1781,16 @@ pub(crate) mod tests {
                     .await
                     .unwrap()
                     .transaction;
-                let block3_tx = coinbase_for_block3
-                    .clone()
-                    .merge_with(
-                        (*tx3).clone(),
-                        rng.random(),
-                        TritonVmJobQueue::get_instance(),
-                        TritonVmProofJobOptions::default_with_network(network),
-                        consensus_rule_set_2,
-                    )
-                    .await
-                    .unwrap();
+                let block3_tx = Transaction::merge_into_block_transaction(
+                    coinbase_for_block3.clone().into(),
+                    (*tx3).clone(),
+                    rng.random(),
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmProofJobOptions::default_with_network(network),
+                    consensus_rule_set_2,
+                )
+                .await
+                .unwrap();
                 assert!(
                     !block3_tx.kernel.inputs.len().is_zero(),
                     "block transaction 3 must have inputs"
@@ -2068,9 +2074,10 @@ pub(crate) mod tests {
                 .unwrap()
                 .transaction;
 
+            let tx1 = BlockTransaction::upgrade((*tx1).clone());
             let block1 = Block::block_template_invalid_proof(
                 &genesis_block,
-                (*tx1).clone(),
+                tx1,
                 in_seven_months,
                 None,
                 network,
@@ -2096,13 +2103,9 @@ pub(crate) mod tests {
                 .unwrap()
                 .transaction;
 
-            let block2 = Block::block_template_invalid_proof(
-                &block1,
-                (*tx2).clone(),
-                in_eight_months,
-                None,
-                network,
-            );
+            let tx2 = BlockTransaction::upgrade((*tx2).clone());
+            let block2 =
+                Block::block_template_invalid_proof(&block1, tx2, in_eight_months, None, network);
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
@@ -2171,7 +2174,7 @@ pub(crate) mod tests {
             now += network.target_block_interval();
 
             // create coinbase transaction
-            let (mut transaction, _) = make_coinbase_transaction_from_state(
+            let (transaction, _) = make_coinbase_transaction_from_state(
                 &blocks[i - 1],
                 &alice,
                 launch_date,
@@ -2179,6 +2182,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+            let mut transaction = BlockOrRegularTransaction::from(transaction);
 
             let block_height = blocks.last().unwrap().header().height;
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
@@ -2226,28 +2230,31 @@ pub(crate) mod tests {
                 let self_spending_transaction = transaction_creation_artifacts.transaction;
 
                 // merge that transaction in
-                transaction = transaction
-                    .merge_with(
-                        (*self_spending_transaction).clone(),
-                        rng.random(),
-                        job_queue.clone(),
-                        TritonVmProofJobOptions::default_with_network(network),
-                        consensus_rule_set,
-                    )
-                    .await
-                    .unwrap();
+                transaction = Transaction::merge_into_block_transaction(
+                    transaction,
+                    (*self_spending_transaction).clone(),
+                    rng.random(),
+                    job_queue.clone(),
+                    TritonVmProofJobOptions::default_with_network(network),
+                    consensus_rule_set,
+                )
+                .await
+                .unwrap()
+                .into();
 
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(transaction.clone(), UpgradePriority::Critical)
+                    .mempool_insert(transaction.clone().into(), UpgradePriority::Critical)
                     .await;
             }
 
             // compose block
             let block = Block::compose(
                 blocks.last().unwrap(),
-                transaction,
+                transaction.try_into().expect(
+                    "went through at least one iteration of above loop, so merge bit must be set",
+                ),
                 now,
                 job_queue.clone(),
                 TritonVmProofJobOptions::default(),

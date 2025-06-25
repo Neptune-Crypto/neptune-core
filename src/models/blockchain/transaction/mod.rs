@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -202,6 +204,22 @@ impl Transaction {
             .await
     }
 
+    pub(crate) async fn merge_into_block_transaction(
+        coinbase: BlockOrRegularTransaction,
+        other: Transaction,
+        shuffle_seed: [u8; 32],
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Result<BlockTransaction> {
+        let merge_version = consensus_rule_set.merge_version();
+        let merge_witness =
+            MergeWitness::for_composition(coinbase, other, shuffle_seed, merge_version);
+        let tx = MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await?;
+
+        Ok(tx.try_into().expect("Must have merge bit set"))
+    }
+
     /// Merge two transactions. Both input transactions must have a valid
     /// Proof witness for this operation to work. The `self` argument can be
     /// a transaction with a negative fee.
@@ -226,8 +244,8 @@ impl Transaction {
         );
 
         assert!(
-            self.kernel.coinbase.is_none() || other.kernel.coinbase.is_none(),
-            "Cannot merge two coinbase transactions"
+            self.kernel.coinbase.is_none() && other.kernel.coinbase.is_none(),
+            "Don't use me for coinbase transactions, por favor"
         );
 
         let merge_version = consensus_rule_set.merge_version();
@@ -281,11 +299,9 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::tests::shared::blocks::block_mutator_set_update_from_transaction;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
@@ -295,6 +311,8 @@ pub(crate) mod tests {
 
     impl Transaction {
         /// Create a new transaction with primitive witness for a new mutator set.
+        ///
+        /// Takes unpacked removal records as input.
         pub(crate) fn new_with_primitive_witness_ms_data(
             old_primitive_witness: PrimitiveWitness,
             new_addition_records: Vec<AdditionRecord>,
@@ -386,10 +404,8 @@ pub(crate) mod tests {
             };
             assert!(original_tx.is_valid(network, consensus_rule_set).await);
 
-            let mutator_set_update = block_mutator_set_update_from_transaction(
-                &mined.kernel,
-                consensus_rule_set.merge_version(),
-            );
+            let mutator_set_update =
+                MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone());
             let updated_tx = Transaction::new_with_updated_mutator_set_records_given_proof(
                 original_tx.kernel,
                 &to_be_updated.mutator_set_accumulator,
@@ -437,20 +453,6 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn primitive_witness_update_properties() {
-        fn update_with_block(
-            to_be_updated: PrimitiveWitness,
-            mined: PrimitiveWitness,
-            merge_version: MergeVersion,
-        ) -> Transaction {
-            let mutator_set_update =
-                block_mutator_set_update_from_transaction(&mined.kernel, merge_version);
-            Transaction::new_with_primitive_witness_ms_data(
-                to_be_updated,
-                mutator_set_update.additions,
-                mutator_set_update.removals,
-            )
-        }
-
         async fn assert_valid_as_pw(transaction: &Transaction) {
             let TransactionProof::Witness(pw) = &transaction.proof else {
                 panic!("Expected primitive witness variant");
@@ -459,59 +461,57 @@ pub(crate) mod tests {
         }
 
         let mut test_runner = TestRunner::deterministic();
-        for merge_version in MergeVersion::iter() {
-            let [to_be_updated, mined] =
-                PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
-                    (4, 4, 4),
-                    (3, 3, 3),
-                ])
+        let [to_be_updated, mined] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(4, 4, 4), (3, 3, 3)])
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-            assert!(to_be_updated.validate().await.is_ok());
-            assert!(mined.validate().await.is_ok());
+        assert!(to_be_updated.validate().await.is_ok());
+        assert!(mined.validate().await.is_ok());
 
-            let updated_with_block =
-                update_with_block(to_be_updated.clone(), mined.clone(), merge_version);
-            assert_valid_as_pw(&updated_with_block).await;
+        let updated_with_block = Transaction::new_with_primitive_witness_ms_data(
+            to_be_updated.clone(),
+            mined.kernel.outputs.clone(),
+            mined.kernel.inputs.clone(),
+        );
+        assert_valid_as_pw(&updated_with_block).await;
 
-            // Asssert some properties of the updated transaction.
-            assert_eq!(
-                to_be_updated.kernel.coinbase,
-                updated_with_block.kernel.coinbase
-            );
-            assert_eq!(to_be_updated.kernel.fee, updated_with_block.kernel.fee);
-            assert_eq!(
-                to_be_updated.kernel.outputs,
-                updated_with_block.kernel.outputs
-            );
-            assert_eq!(
-                to_be_updated.kernel.public_announcements,
-                updated_with_block.kernel.public_announcements
-            );
-            assert_eq!(
-                to_be_updated.kernel.inputs.len(),
-                updated_with_block.kernel.inputs.len(),
-            );
-            assert_eq!(
-                to_be_updated
-                    .kernel
-                    .inputs
-                    .iter()
-                    .map(|x| x.absolute_indices)
-                    .collect_vec(),
-                updated_with_block
-                    .kernel
-                    .inputs
-                    .iter()
-                    .map(|x| x.absolute_indices)
-                    .collect_vec()
-            );
-            assert_ne!(
-                to_be_updated.kernel.mutator_set_hash,
-                updated_with_block.kernel.mutator_set_hash
-            );
-        }
+        // Asssert some properties of the updated transaction.
+        assert_eq!(
+            to_be_updated.kernel.coinbase,
+            updated_with_block.kernel.coinbase
+        );
+        assert_eq!(to_be_updated.kernel.fee, updated_with_block.kernel.fee);
+        assert_eq!(
+            to_be_updated.kernel.outputs,
+            updated_with_block.kernel.outputs
+        );
+        assert_eq!(
+            to_be_updated.kernel.public_announcements,
+            updated_with_block.kernel.public_announcements
+        );
+        assert_eq!(
+            to_be_updated.kernel.inputs.len(),
+            updated_with_block.kernel.inputs.len(),
+        );
+        assert_eq!(
+            to_be_updated
+                .kernel
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+                .collect_vec(),
+            updated_with_block
+                .kernel
+                .inputs
+                .iter()
+                .map(|x| x.absolute_indices)
+                .collect_vec()
+        );
+        assert_ne!(
+            to_be_updated.kernel.mutator_set_hash,
+            updated_with_block.kernel.mutator_set_hash
+        );
     }
 
     // #[traced_test]

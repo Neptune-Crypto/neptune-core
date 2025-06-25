@@ -74,7 +74,6 @@ mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::RngAlgorithm;
     use proptest::test_runner::TestRng;
-    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -94,7 +93,6 @@ mod tests {
     use tasm_lib::twenty_first::prelude::*;
 
     use super::*;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;

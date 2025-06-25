@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::bail;
 use anyhow::Result;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -9,6 +8,7 @@ use rand::SeedableRng;
 use crate::config_models::network::Network;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
@@ -27,6 +27,8 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 
+use super::block_transaction::BlockOrRegularTransaction;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MockBlockGenerator;
 
@@ -35,13 +37,13 @@ impl MockBlockGenerator {
     /// be a valid block except for proof and PoW.
     pub fn mock_block_from_tx_without_pow(
         predecessor: Block,
-        tx: Transaction,
+        block_tx: BlockTransaction,
         guesser_key: HashLockKey,
         network: Network,
     ) -> Block {
-        let timestamp = tx.kernel.timestamp;
+        let timestamp = block_tx.kernel.timestamp;
 
-        let primitive_witness = BlockPrimitiveWitness::new(predecessor, tx, network);
+        let primitive_witness = BlockPrimitiveWitness::new(predecessor, block_tx, network);
 
         let body = primitive_witness.body().to_owned();
         let mut header =
@@ -61,13 +63,17 @@ impl MockBlockGenerator {
     /// that it appears valid.
     fn mock_block_from_tx(
         predecessor: Arc<Block>,
-        tx: Transaction,
+        block_tx: BlockTransaction,
         guesser_key: HashLockKey,
         seed: [u8; 32],
         network: Network,
     ) -> Block {
-        let mut block =
-            Self::mock_block_from_tx_without_pow((*predecessor).clone(), tx, guesser_key, network);
+        let mut block = Self::mock_block_from_tx_without_pow(
+            (*predecessor).clone(),
+            block_tx,
+            guesser_key,
+            network,
+        );
 
         let mut rng = StdRng::from_seed(seed);
 
@@ -100,32 +106,28 @@ impl MockBlockGenerator {
 
     /// Merge two transactions for tests, without the hassle of proving but such
     /// that the result seems valid.
-    fn merge_mock_transactions(
-        lhs: Transaction,
+    fn fake_merge_block_transactions_for_tests(
+        lhs: BlockOrRegularTransaction,
         rhs: Transaction,
         shuffle_seed: [u8; 32],
         consensus_rule_set: ConsensusRuleSet,
-    ) -> Result<Transaction> {
-        let TransactionProof::SingleProof(lhs_proof) = lhs.proof else {
-            bail!("merge error: arguments must be singleproof transactions")
-        };
-        let TransactionProof::SingleProof(rhs_proof) = rhs.proof else {
-            bail!("merge error: arguments must be singleproof transactions")
-        };
-        let left_tx = Transaction::new_single_proof(lhs.kernel, lhs_proof);
-        let right_tx = Transaction::new_single_proof(rhs.kernel, rhs_proof);
-        let merge_witness = MergeWitness::from_transactions(
-            left_tx,
-            right_tx,
-            shuffle_seed,
-            consensus_rule_set.merge_version(),
+    ) -> Result<BlockTransaction> {
+        assert!(
+            lhs.proof().is_single_proof(),
+            "Argument2 must be single-proof-backed transaction"
         );
-        let new_kernel = merge_witness.new_kernel.clone();
-        let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
+        assert!(
+            rhs.proof.is_single_proof(),
+            "Argument2 must be single-proof-backed transaction"
+        );
 
-        Ok(Transaction {
-            kernel: new_kernel,
-            proof: TransactionProof::SingleProof(Proof::valid_mock(claim)),
+        let merge_version = consensus_rule_set.merge_version();
+        let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed, merge_version);
+        let new_kernel = merge_witness.new_kernel.clone();
+
+        Ok(BlockTransaction {
+            kernel: new_kernel.try_into().unwrap(),
+            proof: TransactionProof::SingleProof(Proof::invalid()),
         })
     }
 
@@ -138,7 +140,7 @@ impl MockBlockGenerator {
         timestamp: Timestamp,
         shuffle_seed: [u8; 32],
         mut selected_mempool_txs: Vec<Transaction>,
-    ) -> Result<(Transaction, TxOutputList)> {
+    ) -> Result<(BlockTransaction, TxOutputList)> {
         let consensus_rule_set =
             ConsensusRuleSet::infer_from(network, predecessor_block.header().height.next());
         let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
@@ -151,7 +153,6 @@ impl MockBlockGenerator {
         let coinbase_transaction =
             Self::mock_transaction_from_details(&transaction_details, consensus_rule_set);
 
-        let mut block_transaction = coinbase_transaction;
         if selected_mempool_txs.is_empty() {
             // create the nop-tx and merge into the coinbase transaction to set the
             // merge bit to allow the tx to be included in a block.
@@ -166,17 +167,24 @@ impl MockBlockGenerator {
             selected_mempool_txs = vec![nop_transaction];
         }
 
+        let mut block_transaction = coinbase_transaction.into();
         let mut rng = StdRng::from_seed(shuffle_seed);
         for tx_to_include in selected_mempool_txs {
-            block_transaction = Self::merge_mock_transactions(
+            block_transaction = Self::fake_merge_block_transactions_for_tests(
                 block_transaction,
                 tx_to_include,
                 rng.random(),
                 consensus_rule_set,
-            )?;
+            )?
+            .into();
         }
 
-        Ok((block_transaction, composer_txos))
+        Ok((
+            block_transaction
+                .try_into()
+                .expect("Merged should be done at least once"),
+            composer_txos,
+        ))
     }
 
     /// Create a mock block with coinbase going to self.
