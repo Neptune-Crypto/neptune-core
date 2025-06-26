@@ -13,6 +13,10 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 pub(crate) struct GenerateCollectTypeScriptsClaim;
 
+impl GenerateCollectTypeScriptsClaim {
+    const BAD_SIZE_INDICATOR_TYPE_SCRIPT_HASHES: i128 = 1_000_500;
+}
+
 impl BasicSnippet for GenerateCollectTypeScriptsClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "proof_collection_pointer".to_owned())]
@@ -45,7 +49,7 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
 
             dup 1
             eq
-            assert
+            assert error_id {Self::BAD_SIZE_INDICATOR_TYPE_SCRIPT_HASHES}
             // _ *type_script_hashes type_script_hashes_si
         );
 
@@ -184,14 +188,17 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
 
+    #[traced_test]
     #[test]
     fn unit_test() {
         ShadowedFunction::new(GenerateCollectTypeScriptsClaim).test();
@@ -238,7 +245,7 @@ mod tests {
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();
-                arbitrary_primitive_witness_with_active_timelocks(
+                arbitrary_primitive_witness_with_expired_timelocks(
                     num_inputs,
                     2,
                     2,
@@ -248,8 +255,17 @@ mod tests {
                 .unwrap()
                 .current()
             };
+
+            assert!(
+                !primitive_witness.kernel.merge_bit,
+                "No primitive witness should have its merge bit set."
+            );
             let rt = crate::tests::tokio_runtime();
             let _guard = rt.enter();
+            assert!(
+                rt.block_on(primitive_witness.validate()).is_ok(),
+                "Primitive witness must be valid"
+            );
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
