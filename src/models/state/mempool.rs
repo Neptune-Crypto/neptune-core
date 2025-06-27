@@ -1038,6 +1038,7 @@ mod tests {
     use crate::main_loop::upgrade_incentive::UpgradeIncentive;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
+    use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
@@ -1622,7 +1623,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let block_transaction = Transaction::merge_into_block_transaction(
+        let block_transaction = BlockTransaction::merge(
             coinbase_transaction.into(),
             tx_by_bob,
             Default::default(),
@@ -1692,7 +1693,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let block_tx_5 = Transaction::merge_into_block_transaction(
+        let block_tx_5 = BlockTransaction::merge(
             cbtx.into(),
             tx_by_alice_updated,
             Default::default(),

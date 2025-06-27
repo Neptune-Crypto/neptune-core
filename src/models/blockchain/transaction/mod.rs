@@ -204,22 +204,6 @@ impl Transaction {
             .await
     }
 
-    pub(crate) async fn merge_into_block_transaction(
-        coinbase: BlockOrRegularTransaction,
-        other: Transaction,
-        shuffle_seed: [u8; 32],
-        triton_vm_job_queue: Arc<TritonVmJobQueue>,
-        proof_job_options: TritonVmProofJobOptions,
-        consensus_rule_set: ConsensusRuleSet,
-    ) -> Result<BlockTransaction> {
-        let merge_version = consensus_rule_set.merge_version();
-        let merge_witness =
-            MergeWitness::for_composition(coinbase, other, shuffle_seed, merge_version);
-        let tx = MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await?;
-
-        Ok(tx.try_into().expect("Must have merge bit set"))
-    }
-
     /// Merge two transactions. Both input transactions must have a valid
     /// Proof witness for this operation to work. The `self` argument can be
     /// a transaction with a negative fee.

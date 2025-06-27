@@ -1973,7 +1973,7 @@ pub(super) mod tests {
         .await
         .unwrap();
 
-        let block_tx = Transaction::merge_into_block_transaction(
+        let block_tx = BlockTransaction::merge(
             cbtx.into(),
             tx_to_alice_and_bob.into(),
             Default::default(),
@@ -2229,7 +2229,7 @@ pub(super) mod tests {
         )
         .await
         .unwrap();
-        let block_tx2 = Transaction::merge_into_block_transaction(
+        let block_tx2 = BlockTransaction::merge(
             cbtx2.into(),
             tx_from_alice.into(),
             Default::default(),
@@ -2239,7 +2239,7 @@ pub(super) mod tests {
         )
         .await
         .unwrap();
-        let block_tx2 = Transaction::merge_into_block_transaction(
+        let block_tx2 = BlockTransaction::merge(
             block_tx2.into(),
             tx_from_bob.into(),
             Default::default(),

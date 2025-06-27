@@ -49,6 +49,7 @@ mod tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
+    use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::shared::Hash;
@@ -881,7 +882,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let merged_tx = Transaction::merge_into_block_transaction(
+        let merged_tx = BlockTransaction::merge(
             coinbase_tx.into(),
             tx_from_bob,
             Default::default(),
@@ -1091,7 +1092,7 @@ mod tests {
             .unwrap()
             .transaction
             .into();
-        let tx_for_block = Transaction::merge_into_block_transaction(
+        let tx_for_block = BlockTransaction::merge(
             cbtx.into(),
             sender_tx,
             Default::default(),

@@ -3318,7 +3318,7 @@ mod tests {
             ))
             .await;
 
-        let block_transaction = Transaction::merge_into_block_transaction(
+        let block_transaction = BlockTransaction::merge(
             coinbase_transaction.into(),
             tx_to_alice_and_bob,
             Default::default(),
@@ -3567,7 +3567,7 @@ mod tests {
         assert!(coinbase_transaction2
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
-        let block_transaction2 = Transaction::merge_into_block_transaction(
+        let block_transaction2 = BlockTransaction::merge(
             coinbase_transaction2.into(),
             tx_from_alice.into(),
             Default::default(),
@@ -3577,7 +3577,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let block_transaction2 = Transaction::merge_into_block_transaction(
+        let block_transaction2 = BlockTransaction::merge(
             block_transaction2.into(),
             tx_from_bob.into(),
             Default::default(),
