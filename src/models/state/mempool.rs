@@ -48,7 +48,7 @@ use priority_queue::PriorityQueue;
 use tracing::debug;
 use tracing::error;
 use tracing::warn;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;

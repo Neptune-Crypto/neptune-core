@@ -9,7 +9,7 @@ use strum::VariantArray;
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 
 use super::primitive_witness::PrimitiveWitness;
 use super::PublicAnnouncement;

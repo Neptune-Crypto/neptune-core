@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 
 use super::expected_utxo::ExpectedUtxo;
 use super::migrate_db;

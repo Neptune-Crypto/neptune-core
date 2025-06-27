@@ -16,7 +16,7 @@ use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 
 use super::lock_script::LockScript;
 use crate::models::blockchain::type_scripts::known_type_scripts::is_known_type_script_with_valid_state;

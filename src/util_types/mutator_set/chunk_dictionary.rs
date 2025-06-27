@@ -183,7 +183,7 @@ pub mod tests {
     use proptest::prelude::any;
     use proptest::prop_compose;
     use twenty_first::math::other::random_elements;
-    use twenty_first::math::tip5::Digest;
+    use twenty_first::prelude::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
