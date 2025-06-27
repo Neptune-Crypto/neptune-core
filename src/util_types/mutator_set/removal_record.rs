@@ -17,7 +17,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 #[cfg(test)]
 pub use tests::propcompose_absindset;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;

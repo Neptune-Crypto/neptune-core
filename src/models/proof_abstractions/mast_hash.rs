@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use strum::EnumCount;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tasm_lib::twenty_first::math::tip5::Digest;
+use tasm_lib::twenty_first::prelude::Digest;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 
 use crate::models::blockchain::shared::Hash;

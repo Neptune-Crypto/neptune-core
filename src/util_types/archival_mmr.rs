@@ -6,7 +6,7 @@ use tasm_lib::twenty_first::util_types::mmr::shared_advanced::leaf_index_to_node
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -363,7 +363,7 @@ pub(crate) mod tests {
     use test_strategy::proptest;
     use twenty_first::math::b_field_element::BFieldElement;
     use twenty_first::math::other::*;
-    use twenty_first::math::tip5::Tip5;
+    use twenty_first::prelude::Tip5;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
     use super::*;
