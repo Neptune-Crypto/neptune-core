@@ -18,6 +18,31 @@ impl MergeVersion {
     }
 }
 
+macro_rules! for_each {
+        ($var:ident in [$($const_val:ident),*] $body:block) => {
+            $(
+                {
+                    const $var: usize = $const_val;
+                    $body
+                }
+            )*
+        };
+    }
+pub(crate) use for_each;
+
+/// Repeats the given code while substituting all merge versions for the
+/// const `VERSION`.
+macro_rules! for_each_version {
+        ($body: block) => {
+            const GENESIS_VERSION: usize = MergeVersion::Genesis as usize;
+            const HARD_FORK_2_VERSION: usize = MergeVersion::HardFork2 as usize;
+            for_each!( VERSION in [GENESIS_VERSION, HARD_FORK_2_VERSION]  {
+                $body
+            });
+        }
+    }
+pub(crate) use for_each_version;
+
 #[cfg(test)]
 impl TryFrom<usize> for MergeVersion {
     fn try_from(value: usize) -> Result<Self, Self::Error> {

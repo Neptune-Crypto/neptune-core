@@ -450,11 +450,12 @@ impl<const VERSION: usize> BasicSnippet for MergeBranch<VERSION> {
         let right_txk_mast_hash_alloc = library.kmalloc(digest_len);
         let new_txk_mast_hash_alloc = library.kmalloc(digest_len);
 
-        let assert_coinbase_rules = library.import(Box::new(AuthenticateCoinbaseFields::new(
-            left_txk_mast_hash_alloc,
-            right_txk_mast_hash_alloc,
-            new_txk_mast_hash_alloc,
-        )));
+        let assert_coinbase_rules =
+            library.import(Box::new(AuthenticateCoinbaseFields::<VERSION>::new(
+                left_txk_mast_hash_alloc,
+                right_txk_mast_hash_alloc,
+                new_txk_mast_hash_alloc,
+            )));
 
         let neptune_coins_size = NativeCurrencyAmount::static_length().unwrap();
         let kernel_field_fee = field!(TransactionKernel::fee);
@@ -1097,7 +1098,11 @@ pub(crate) mod tests {
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MergeWitness {
-        pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {
+        pub fn branch_source<const VERSION: usize>(
+            &self,
+            single_proof_program_digest: Digest,
+            new_txk_digest: Digest,
+        ) {
             // divine the witness for this proof
             let mw = tasm::decode_from_memory::<MergeWitness>(MERGE_WITNESS_ADDRESS);
 
@@ -1117,6 +1122,7 @@ pub(crate) mod tests {
             let tree_height = TransactionKernelField::COUNT.next_power_of_two().ilog2();
 
             // new inputs are a permutation of the operands' inputs' concatenation
+            // up to chunk dictionaries.
             let left_inputs: &Vec<RemovalRecord> = &mw.left_kernel.inputs;
             let right_inputs: &Vec<RemovalRecord> = &mw.right_kernel.inputs;
             let new_inputs: &Vec<RemovalRecord> = &mw.new_kernel.inputs;
@@ -1133,10 +1139,16 @@ pub(crate) mod tests {
             let to_merge_inputs = left_inputs
                 .iter()
                 .chain(right_inputs)
-                .map(Tip5::hash)
+                .map(|rr| rr.absolute_indices.to_vec())
+                .map(|v| Tip5::hash(&v))
                 .sorted()
                 .collect_vec();
-            let merged_inputs = new_inputs.iter().map(Tip5::hash).sorted().collect_vec();
+            let merged_inputs = new_inputs
+                .iter()
+                .map(|rr| rr.absolute_indices.to_vec())
+                .map(|v| Tip5::hash(&v))
+                .sorted()
+                .collect_vec();
             assert_eq!(to_merge_inputs, merged_inputs);
 
             // new outputs are a permutation of the operands' outputs' concatenation
@@ -1209,11 +1221,18 @@ pub(crate) mod tests {
             assert_fee_integrity(right_txk_digest, &right_fee);
             assert_fee_integrity(new_txk_digest, &new_fee);
 
-            // at most one coinbase is set
             let left_coinbase = mw.left_kernel.coinbase;
             let right_coinbase = mw.right_kernel.coinbase;
             let new_coinbase = left_coinbase.or(right_coinbase);
-            assert!(left_coinbase.is_none() || right_coinbase.is_none());
+            if VERSION == MergeVersion::Genesis as usize {
+                // at most one coinbase is set
+                assert!(left_coinbase.is_none() || right_coinbase.is_none());
+            } else if VERSION == MergeVersion::HardFork2 as usize {
+                // if a coinbase is set, it must be the left one
+                assert!(right_coinbase.is_none());
+            } else {
+                panic!("Unrecognized version");
+            }
 
             let assert_coinbase_integrity = |merkle_root, coinbase| {
                 let leaf_index = TransactionKernelField::Coinbase as u32;
