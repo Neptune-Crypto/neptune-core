@@ -1123,7 +1123,7 @@ mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*pwtx).clone(), UpgradePriority::Irrelevant)
+                .mempool_insert((*pwtx).clone(), UpgradePriority::Critical)
                 .await;
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
