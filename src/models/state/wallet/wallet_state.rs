@@ -4717,6 +4717,7 @@ pub(crate) mod tests {
         use crate::mine_loop::create_block_transaction;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
+        use crate::models::blockchain::block::block_transaction::BlockTransaction;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::MainToPeerTask;
         use crate::PEER_CHANNEL_CAPACITY;
@@ -5055,7 +5056,7 @@ pub(crate) mod tests {
 
             let consensus_rule_set_one =
                 ConsensusRuleSet::infer_from(network, block_one.header().height);
-            let block_two_transaction = Transaction::merge_into_block_transaction(
+            let block_two_transaction = BlockTransaction::merge(
                 some_other_transaction.into(),
                 upgraded_transaction,
                 rng.random(),

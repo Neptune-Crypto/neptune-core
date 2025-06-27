@@ -246,7 +246,7 @@ pub(crate) mod tests {
                     proof: TransactionProof::SingleProof(single_proof_inputs),
                 };
 
-                rt.block_on(Transaction::merge_into_block_transaction(
+                rt.block_on(BlockTransaction::merge(
                     tx_coinbase.into(),
                     tx_inputs,
                     shuffle_seed,

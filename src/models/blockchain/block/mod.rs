@@ -1723,7 +1723,7 @@ pub(crate) mod tests {
                     .await
                     .unwrap()
                     .transaction;
-                let block2_tx = Transaction::merge_into_block_transaction(
+                let block2_tx = BlockTransaction::merge(
                     coinbase_for_block2.clone().into(),
                     (*tx2).clone(),
                     rng.random(),
@@ -1781,7 +1781,7 @@ pub(crate) mod tests {
                     .await
                     .unwrap()
                     .transaction;
-                let block3_tx = Transaction::merge_into_block_transaction(
+                let block3_tx = BlockTransaction::merge(
                     coinbase_for_block3.clone().into(),
                     (*tx3).clone(),
                     rng.random(),
@@ -2230,7 +2230,7 @@ pub(crate) mod tests {
                 let self_spending_transaction = transaction_creation_artifacts.transaction;
 
                 // merge that transaction in
-                transaction = Transaction::merge_into_block_transaction(
+                transaction = BlockTransaction::merge(
                     transaction,
                     (*self_spending_transaction).clone(),
                     rng.random(),

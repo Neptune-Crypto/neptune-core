@@ -696,7 +696,7 @@ pub(crate) async fn create_block_transaction_from(
             tx_to_include.kernel.outputs.len(),
             tx_to_include.kernel.fee
         );
-        block_transaction = Transaction::merge_into_block_transaction(
+        block_transaction = BlockTransaction::merge(
             block_transaction,
             tx_to_include,
             rng.random(),

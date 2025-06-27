@@ -1,9 +1,19 @@
 use std::ops::Deref;
+use std::sync::Arc;
 
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 
+/// Newtype for [`TransactionKernel`] for use in the context of
+/// [`BlockTransaction`]s. See [`BlockTransaction`] for more documentation.
+/// The difference betwen regular [`Transaction`]s and [`BlockTransaction`]s is
+/// contained in the kernel, which is why [`BlockTransaction`] has a custom
+/// kernel type but not a custom proof type.
 #[derive(Debug, Clone)]
 pub(crate) struct BlockTransactionKernel(TransactionKernel);
 
@@ -49,6 +59,17 @@ impl From<BlockOrRegularTransactionKernel> for TransactionKernel {
     }
 }
 
+/// Essentially a newtype for [`Transaction`], specifically for use in the
+/// context of *the* transaction in a given block.
+///
+/// The main difference relative to [`Transaction`] is the `inputs`, which are
+/// a [`Vec`] of [`RemovalRecord`]s. Before hard fork 2, these removal records
+/// are not packed; and [`BlockTransaction`] is identical to [`Transaction`].
+/// After hard fork 2, the removal records *are* packed -- and unpacked,
+/// whenever appropriate. The point about packing is that it does not change
+/// type: this operation maps a `Vec<RemovalRecord>` to a `Vec<RemovalRecord>`
+/// purely by removing redundant information that can later be added back
+/// cheaply.
 #[derive(Debug, Clone)]
 pub(crate) struct BlockTransaction {
     pub(crate) kernel: BlockTransactionKernel,
@@ -75,6 +96,8 @@ impl From<BlockTransaction> for Transaction {
     }
 }
 
+/// A transaction, but when it is undefined or unknown whether it is a
+/// regular [`Transaction`] or a [`BlockTransaction`].
 #[derive(Debug, Clone)]
 pub(crate) enum BlockOrRegularTransaction {
     Block(BlockTransaction),
@@ -133,6 +156,30 @@ impl From<BlockOrRegularTransaction> for Transaction {
             },
             BlockOrRegularTransaction::Regular(transaction) => transaction,
         }
+    }
+}
+
+impl BlockTransaction {
+    /// Merge a [`BlockTransaction`] or a regular [`Transaction`] with a
+    /// regular [`Transaction`], resulting in a [`BlockTransaction`].
+    ///
+    /// See also: [`Transaction::merge_with`], which should be used if
+    ///  - a) the arguments are two regular [`Transaction`]s; and
+    ///  - b) the result must be a regular [`Transaction`] as well.
+    pub(crate) async fn merge(
+        coinbase: BlockOrRegularTransaction,
+        other: Transaction,
+        shuffle_seed: [u8; 32],
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> anyhow::Result<BlockTransaction> {
+        let merge_version = consensus_rule_set.merge_version();
+        let merge_witness =
+            MergeWitness::for_composition(coinbase, other, shuffle_seed, merge_version);
+        let tx = MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await?;
+
+        Ok(tx.try_into().expect("Must have merge bit set"))
     }
 }
 
