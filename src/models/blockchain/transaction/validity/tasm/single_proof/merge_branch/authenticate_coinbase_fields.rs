@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 
+use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
@@ -15,19 +16,20 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 
 const UNEQUAL_DISCRIMINANT_ERROR: i128 = 1_000_020;
 const UNEQUAL_VALUE_ERROR: i128 = 1_000_021;
-const BOTH_INPUT_COINBASES_ERROR: i128 = 1_000_022;
+const BOTH_INPUT_COINBASES_ERROR: i128 = 1_000_022; // genesis
+const RIGHT_INPUT_COINBASE_ERROR: i128 = 1_000_022; // hard fork 2
 
 /// Authenticate coinbase fields of left, right, and new kernels. Verify that
 /// at most one from (left, right) is set. Verify that the one that is set (if
 /// any) matches new.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct AuthenticateCoinbaseFields {
+pub(crate) struct AuthenticateCoinbaseFields<const VERSION: usize> {
     left_txk_mast_hash_alloc: StaticAllocation,
     right_txk_mast_hash_alloc: StaticAllocation,
     new_txk_mast_hash_alloc: StaticAllocation,
 }
 
-impl AuthenticateCoinbaseFields {
+impl<const VERSION: usize> AuthenticateCoinbaseFields<VERSION> {
     pub(crate) fn new(
         left_txk_mast_hash_alloc: StaticAllocation,
         right_txk_mast_hash_alloc: StaticAllocation,
@@ -44,7 +46,7 @@ impl AuthenticateCoinbaseFields {
     }
 }
 
-impl BasicSnippet for AuthenticateCoinbaseFields {
+impl<const VERSION: usize> BasicSnippet for AuthenticateCoinbaseFields<VERSION> {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::VoidPointer, "left_tx_kernel".to_owned()),
@@ -131,12 +133,71 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
                 return
         );
 
+        // Coinbase rules for "Genesis" merge version: at most one is set.
+        let assert_coinbases_not_both_set = triton_asm! {
+                // _ *new_txk *left_coinbase *right_coinbase
+
+                dup 1
+                read_mem 1
+                pop 1
+                // _ *new_txk *left_coinbase *right_coinbase left_coinbase_discriminant
+
+                dup 1
+                read_mem 1
+                pop 1
+                // _ *new_txk *left_coinbase *right_coinbase left_coinbase_discriminant right_coinbase_discriminant
+
+                push 1
+                eq
+                swap 1
+                push 1
+                eq
+                // _ *new_txk *left_coinbase *right_coinbase (right_coinbase_discriminant == 1) (left_coinbase_discriminant == 1)
+                // _ *new_txk *left_coinbase *right_coinbase (right_coinbase.is_some()) (left_coinbase.is_some())
+
+                mul
+                push 0
+                eq
+                // _ *new_txk *left_coinbase *right_coinbase !(right_coinbase.is_some() && left_coinbase.is_some())
+
+                assert error_id {BOTH_INPUT_COINBASES_ERROR}
+                // _ *new_txk *left_coinbase *right_coinbase
+        };
+
+        // Coinbase rules for "HardFork2" merge version: right coinbase is not
+        // set.
+        let assert_coinbases_right_not_set = triton_asm! {
+                // _ *new_txk *left_coinbase *right_coinbase
+                dup 0
+                read_mem 1
+                pop 1
+                // _ *new_txk *left_coinbase *right_coinbase right_coinbase_discriminant
+
+                push 0
+                eq
+                // _ *new_txk *left_coinbase *right_coinbase right_coinbase.is_none()
+
+                assert error_id {RIGHT_INPUT_COINBASE_ERROR}
+                // _ *new_txk *left_coinbase *right_coinbase
+        };
+
+        // Pick the right version for the coinbase rules, depending on the
+        // merge version.
+        let assert_coinbase_rules = if VERSION == MergeVersion::Genesis as usize {
+            assert_coinbases_not_both_set
+        } else if VERSION == MergeVersion::HardFork2 as usize {
+            assert_coinbases_right_not_set
+        } else {
+            panic!("unrecognized merge version")
+        };
+
         triton_asm!(
             {entrypoint}:
                 /*
                     1. Get left coinbase field and authenticate
                     2. Get right coinbase field and authenticate
-                    3. Assert that not both coinbase fields are set
+                    3. Assert that not both coinbase fields are set (Genesis)
+                    3. Assert that right coinbase is not set (HardFork2)
                     4. Verify that the one set (if set) matches new
                     5. Authenticate calculated new against new_txkmh
                  */
@@ -183,31 +244,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
 
 
                 /* 3. */
-                dup 1
-                read_mem 1
-                pop 1
-                // _ *new_txk *left_coinbase *right_coinbase left_coinbase_discriminant
-
-                dup 1
-                read_mem 1
-                pop 1
-                // _ *new_txk *left_coinbase *right_coinbase left_coinbase_discriminant right_coinbase_discriminant
-
-                push 1
-                eq
-                swap 1
-                push 1
-                eq
-                // _ *new_txk *left_coinbase *right_coinbase (right_coinbase_discriminant == 1) (left_coinbase_discriminant == 1)
-                // _ *new_txk *left_coinbase *right_coinbase (right_coinbase.is_some()) (left_coinbase.is_some())
-
-                mul
-                push 0
-                eq
-                // _ *new_txk *left_coinbase *right_coinbase !(right_coinbase.is_some() && left_coinbase.is_some())
-
-                assert error_id {BOTH_INPUT_COINBASES_ERROR}
-                // _ *new_txk *left_coinbase *right_coinbase
+                {&assert_coinbase_rules}
 
 
                 /*  Goal: Put the `maybe` coinbase on top */
@@ -295,17 +332,19 @@ mod tests {
     use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 
     use super::*;
+    use crate::models::blockchain::transaction::merge_version::for_each;
+    use crate::models::blockchain::transaction::merge_version::for_each_version;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::TransactionKernelProxy;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
-    fn dummy_snippet_for_test() -> AuthenticateCoinbaseFields {
+    fn dummy_snippet_for_test<const VERSION: usize>() -> AuthenticateCoinbaseFields<VERSION> {
         let mut mock_library = Library::default();
         let left_txk_mast_hash_alloc = mock_library.kmalloc(Digest::LEN as u32);
         let right_txk_mast_hash_alloc = mock_library.kmalloc(Digest::LEN as u32);
         let new_txk_mast_hash_alloc = mock_library.kmalloc(Digest::LEN as u32);
-        AuthenticateCoinbaseFields {
+        AuthenticateCoinbaseFields::<VERSION> {
             left_txk_mast_hash_alloc,
             right_txk_mast_hash_alloc,
             new_txk_mast_hash_alloc,
@@ -328,30 +367,44 @@ mod tests {
 
     #[test]
     fn authenticate_coinbase_fields_for_merge_test() {
-        let snippet = dummy_snippet_for_test();
-        let init_state = snippet.pseudorandom_initial_state(random(), None);
-        test_rust_equivalence_given_execution_state(
-            &ShadowedReadOnlyAlgorithm::new(snippet),
-            init_state.into(),
-        );
+        for_each_version!({
+            let snippet = dummy_snippet_for_test::<VERSION>();
+            let init_state = snippet.pseudorandom_initial_state(random(), None);
+            test_rust_equivalence_given_execution_state(
+                &ShadowedReadOnlyAlgorithm::new(snippet),
+                init_state.into(),
+            );
+        });
     }
 
-    fn prop(
+    fn prop<const VERSION: usize>(
         left_cb: Option<NativeCurrencyAmount>,
         right_cb: Option<NativeCurrencyAmount>,
         new_cb: Option<NativeCurrencyAmount>,
     ) {
-        let new_cb_is_legal = match (left_cb, right_cb, new_cb) {
-            (None, None, None) => Ok(()),
-            (Some(o), None, Some(n)) | (None, Some(o), Some(n)) if o == n => Ok(()),
-            (Some(_), None, Some(_)) | (None, Some(_), Some(_)) => Err(UNEQUAL_VALUE_ERROR),
-            (Some(_), Some(_), _) => Err(BOTH_INPUT_COINBASES_ERROR),
-            (Some(_), None, None) | (None, Some(_), None) | (None, None, Some(_)) => {
-                Err(UNEQUAL_DISCRIMINANT_ERROR)
+        let new_cb_is_legal = if VERSION == MergeVersion::Genesis as usize {
+            match (left_cb, right_cb, new_cb) {
+                (None, None, None) => Ok(()),
+                (Some(o), None, Some(n)) | (None, Some(o), Some(n)) if o == n => Ok(()),
+                (Some(_), None, Some(_)) | (None, Some(_), Some(_)) => Err(UNEQUAL_VALUE_ERROR),
+                (Some(_), Some(_), _) => Err(BOTH_INPUT_COINBASES_ERROR),
+                (Some(_), None, None) | (None, Some(_), None) | (None, None, Some(_)) => {
+                    Err(UNEQUAL_DISCRIMINANT_ERROR)
+                }
             }
+        } else if VERSION == MergeVersion::HardFork2 as usize {
+            match (left_cb, right_cb, new_cb) {
+                (None, None, None) => Ok(()),
+                (Some(o), None, Some(n)) if o == n => Ok(()),
+                (_, Some(_), _) => Err(RIGHT_INPUT_COINBASE_ERROR),
+                (Some(_), None, Some(_)) => Err(UNEQUAL_VALUE_ERROR),
+                (Some(_), None, None) | (None, None, Some(_)) => Err(UNEQUAL_DISCRIMINANT_ERROR),
+            }
+        } else {
+            panic!("unrecognized version");
         };
 
-        let snippet = dummy_snippet_for_test();
+        let snippet = dummy_snippet_for_test::<VERSION>();
         let left = dummy_tx_kernel(left_cb);
         let right = dummy_tx_kernel(right_cb);
         let new = dummy_tx_kernel(new_cb);
@@ -367,83 +420,89 @@ mod tests {
 
     #[test]
     fn cannot_change_cb_amount() {
-        prop(
-            Some(NativeCurrencyAmount::coins(2)),
-            None,
-            Some(NativeCurrencyAmount::coins(3)),
-        );
-        prop(
-            Some(NativeCurrencyAmount::coins(3)),
-            None,
-            Some(NativeCurrencyAmount::coins(2)),
-        );
-        prop(
-            None,
-            Some(NativeCurrencyAmount::coins(2)),
-            Some(NativeCurrencyAmount::coins(3)),
-        );
-        prop(
-            None,
-            Some(NativeCurrencyAmount::coins(3)),
-            Some(NativeCurrencyAmount::coins(2)),
-        );
-        prop(
-            Some(NativeCurrencyAmount::coins(3)),
-            Some(NativeCurrencyAmount::coins(3)),
-            Some(NativeCurrencyAmount::coins(6)),
-        );
+        for_each_version!({
+            prop::<VERSION>(
+                Some(NativeCurrencyAmount::coins(2)),
+                None,
+                Some(NativeCurrencyAmount::coins(3)),
+            );
+            prop::<VERSION>(
+                Some(NativeCurrencyAmount::coins(3)),
+                None,
+                Some(NativeCurrencyAmount::coins(2)),
+            );
+            prop::<VERSION>(
+                None,
+                Some(NativeCurrencyAmount::coins(2)),
+                Some(NativeCurrencyAmount::coins(3)),
+            );
+            prop::<VERSION>(
+                None,
+                Some(NativeCurrencyAmount::coins(3)),
+                Some(NativeCurrencyAmount::coins(2)),
+            );
+            prop::<VERSION>(
+                Some(NativeCurrencyAmount::coins(3)),
+                Some(NativeCurrencyAmount::coins(3)),
+                Some(NativeCurrencyAmount::coins(6)),
+            );
 
-        // Verify that the entire u128 is checked, not just a top-limb
-        prop(
-            Some(NativeCurrencyAmount::from_nau(3.into())),
-            None,
-            Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 32))),
-        );
-        prop(
-            Some(NativeCurrencyAmount::from_nau((3).into())),
-            None,
-            Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 64))),
-        );
-        prop(
-            Some(NativeCurrencyAmount::from_nau((3).into())),
-            None,
-            Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 96))),
-        );
+            // Verify that the entire u128 is checked, not just a top-limb
+            prop::<VERSION>(
+                Some(NativeCurrencyAmount::from_nau(3.into())),
+                None,
+                Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 32))),
+            );
+            prop::<VERSION>(
+                Some(NativeCurrencyAmount::from_nau((3).into())),
+                None,
+                Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 64))),
+            );
+            prop::<VERSION>(
+                Some(NativeCurrencyAmount::from_nau((3).into())),
+                None,
+                Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 96))),
+            );
+        });
     }
 
     #[test]
     fn test_all_cb_combinations() {
-        let options = [None, Some(NativeCurrencyAmount::coins(1))];
-        for left_cb in options {
-            for right_cb in options {
-                for new_cb in options {
-                    prop(left_cb, right_cb, new_cb);
+        for_each_version!({
+            let options = [None, Some(NativeCurrencyAmount::coins(1))];
+            for left_cb in options {
+                for right_cb in options {
+                    for new_cb in options {
+                        prop::<VERSION>(left_cb, right_cb, new_cb);
+                    }
                 }
             }
-        }
+        });
     }
 
     #[test]
     fn negative_test_bad_ap() {
-        let left = dummy_tx_kernel(None);
-        let right = dummy_tx_kernel(None);
-        let new = dummy_tx_kernel(None);
+        for_each_version!({
+            let left = dummy_tx_kernel(None);
+            let right = dummy_tx_kernel(None);
+            let new = dummy_tx_kernel(None);
 
-        let snippet = dummy_snippet_for_test();
-        let mut init_state = snippet.init_state(&left, &right, &new);
-        let nd_digests_len = init_state.nondeterminism.digests.len();
+            let snippet = dummy_snippet_for_test::<VERSION>();
+            let mut init_state = snippet.init_state(&left, &right, &new);
+            let nd_digests_len = init_state.nondeterminism.digests.len();
 
-        for mutated_index in 0..nd_digests_len {
-            init_state.nondeterminism.digests[mutated_index] = random();
-            test_assertion_failure(
-                &ShadowedReadOnlyAlgorithm::new(snippet),
-                init_state.clone().into(),
-                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-            );
-        }
+            for mutated_index in 0..nd_digests_len {
+                init_state.nondeterminism.digests[mutated_index] = random();
+                test_assertion_failure(
+                    &ShadowedReadOnlyAlgorithm::new(snippet),
+                    init_state.clone().into(),
+                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+                );
+            }
+        });
     }
 
-    impl AuthenticateCoinbaseFields {
+    impl<const VERSION: usize> AuthenticateCoinbaseFields<VERSION> {
         fn init_state(
             &self,
             left_kernel: &TransactionKernel,
@@ -498,7 +557,7 @@ mod tests {
         }
     }
 
-    impl ReadOnlyAlgorithm for AuthenticateCoinbaseFields {
+    impl<const VERSION: usize> ReadOnlyAlgorithm for AuthenticateCoinbaseFields<VERSION> {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
@@ -549,8 +608,15 @@ mod tests {
             assert_coinbase_integrity(right_txk_mast_hash, &right_txk.coinbase);
             assert_coinbase_integrity(new_txk_mast_hash, &new_txk.coinbase);
 
-            // Assert that either left or right is not set
-            assert!(left_txk.coinbase.is_none() || right_txk.coinbase.is_none());
+            if VERSION == MergeVersion::Genesis as usize {
+                // Assert that either left or right is not set
+                assert!(left_txk.coinbase.is_none() || right_txk.coinbase.is_none());
+            } else if VERSION == MergeVersion::HardFork2 as usize {
+                // Assert that right is not set
+                assert!(right_txk.coinbase.is_none());
+            } else {
+                panic!("unrecognized version");
+            }
 
             let maybe_coinbase = if left_txk.coinbase.is_some() {
                 &left_txk.coinbase

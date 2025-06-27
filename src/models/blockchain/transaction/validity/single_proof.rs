@@ -787,31 +787,8 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
-
-    macro_rules! for_each {
-        ($var:ident in [$($const_val:ident),*] $body:block) => {
-            $(
-                {
-                    const $var: usize = $const_val;
-                    $body
-                }
-            )*
-        };
-    }
-
-    /// Repeats the given code while substituting all merge versions for the
-    /// const `VERSION`.
-    macro_rules! for_each_version {
-        ($body: block) => {
-            const GENESIS_VERSION: usize = MergeVersion::Genesis as usize;
-            const HARD_FORK_2_VERSION: usize = MergeVersion::HardFork2 as usize;
-            for_each!( VERSION in [GENESIS_VERSION, HARD_FORK_2_VERSION]  {
-                $body
-            });
-        }
-    }
-
-    pub(crate) use for_each_version;
+    use crate::models::blockchain::transaction::merge_version::for_each_version;
+    use crate::models::blockchain::transaction::merge_version::for_each;
 
     impl<const VERSION: usize> ConsensusProgramSpecification for SingleProof<VERSION> {
         fn source(&self) {
@@ -884,7 +861,7 @@ pub(crate) mod tests {
                     witness.branch_source(own_program_digest, txk_digest);
                 }
                 SingleProofWitness::Merger(witness) => {
-                    witness.branch_source(own_program_digest, txk_digest)
+                    witness.branch_source::<VERSION>(own_program_digest, txk_digest)
                 }
             }
         }
@@ -1146,7 +1123,7 @@ pub(crate) mod tests {
         use super::*;
 
         fn positive_prop(witness: UpdateWitness, consensus_rule_set: ConsensusRuleSet) {
-            let (claim, input, nondeterminism) = if consensus_rule_set.merge_version()
+            let (_claim, input, nondeterminism) = if consensus_rule_set.merge_version()
                 == MergeVersion::Genesis
             {
                 let witness =
