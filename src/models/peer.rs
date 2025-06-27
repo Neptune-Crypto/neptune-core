@@ -29,7 +29,7 @@ use tracing::trace;
 use tracing::warn;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;

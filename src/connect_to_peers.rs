@@ -564,7 +564,7 @@ mod tests {
     use macro_rules_attr::apply;
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
-    use twenty_first::math::digest::Digest;
+    use twenty_first::prelude::Digest;
 
     use super::*;
     use crate::config_models::cli_args;

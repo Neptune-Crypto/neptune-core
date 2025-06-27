@@ -16,7 +16,7 @@ use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use tracing::warn;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;

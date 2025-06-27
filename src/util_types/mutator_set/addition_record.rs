@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 
 use crate::prelude::twenty_first;
 

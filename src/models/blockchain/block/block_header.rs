@@ -12,7 +12,7 @@ use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use super::block_height::BlockHeight;
 use super::difficulty_control::difficulty_control;
