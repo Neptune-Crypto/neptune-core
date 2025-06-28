@@ -20,7 +20,7 @@ use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::models::state::wallet::wallet_state::WalletState;
-use crate::prelude::twenty_first::math::digest::Digest;
+use crate::prelude::twenty_first::prelude::Digest;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 

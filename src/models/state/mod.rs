@@ -48,7 +48,7 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use transaction_kernel_id::TransactionKernelId;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
 use tx_creation_artifacts::TxCreationArtifactsError;
 use tx_proving_capability::TxProvingCapability;

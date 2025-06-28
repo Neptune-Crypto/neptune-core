@@ -1009,7 +1009,7 @@ mod tests {
     use proptest::strategy::Just;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::twenty_first::math::tip5::Tip5;
+    use tasm_lib::twenty_first::prelude::Tip5;
     use test_strategy::proptest;
 
     use super::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;

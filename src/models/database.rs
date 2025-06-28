@@ -3,7 +3,7 @@ use std::net::IpAddr;
 
 use serde::Deserialize;
 use serde::Serialize;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_header::HeaderToBlockHashWitness;

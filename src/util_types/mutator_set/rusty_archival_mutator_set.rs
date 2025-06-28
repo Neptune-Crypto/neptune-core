@@ -1,4 +1,4 @@
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 
 use super::active_window::ActiveWindow;
 use super::archival_mutator_set::ArchivalMutatorSet;

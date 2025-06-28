@@ -23,7 +23,7 @@ use thiserror::Error;
 use super::block_height::BlockHeight;
 use crate::models::state::GlobalState;
 use crate::twenty_first::error::TryFromHexDigestError;
-use crate::twenty_first::math::digest::Digest;
+use crate::twenty_first::prelude::Digest;
 
 /// Provides alternatives for looking up a block.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

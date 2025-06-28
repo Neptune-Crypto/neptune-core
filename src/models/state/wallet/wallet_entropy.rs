@@ -6,8 +6,8 @@ use tasm_lib::twenty_first::bfe_vec;
 use tasm_lib::twenty_first::xfe;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
+use twenty_first::prelude::Digest;
 use zeroize::ZeroizeOnDrop;
 
 use super::address::ReceivingAddress;

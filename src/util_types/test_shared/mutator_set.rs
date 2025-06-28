@@ -5,7 +5,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;

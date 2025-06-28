@@ -11,7 +11,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::debug;
 use tracing::warn;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 pub(crate) mod bootstrap_from_block_files;
 

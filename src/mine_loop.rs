@@ -25,7 +25,7 @@ use tokio::task::JoinHandle;
 use tokio::time;
 use tokio::time::sleep;
 use tracing::*;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use crate::api::export::TxInputList;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;

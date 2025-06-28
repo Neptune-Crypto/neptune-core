@@ -163,7 +163,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::twenty_first::math::tip5::Digest;
+    use crate::twenty_first::prelude::Digest;
 
     fn indices_and_leafs_strategy(max: u64, num: usize) -> BoxedStrategy<Vec<(u64, Digest)>> {
         vec((0u64..max, arb::<Digest>()), num)

@@ -4,7 +4,7 @@
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;

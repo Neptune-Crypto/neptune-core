@@ -62,7 +62,7 @@ use tasm_lib::twenty_first::prelude::Mmr;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
-use twenty_first::math::digest::Digest;
+use twenty_first::prelude::Digest;
 
 use crate::api;
 use crate::api::tx_initiation;

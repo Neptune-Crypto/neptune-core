@@ -10,7 +10,7 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
+use twenty_first::prelude::Digest;
 
 use super::utxo::Utxo;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
