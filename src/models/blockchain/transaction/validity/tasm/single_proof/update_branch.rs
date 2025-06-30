@@ -894,6 +894,9 @@ pub(crate) mod tests {
 
     /// Return an update witness where the mutator set has had both elements
     /// added and removed.
+    ///
+    /// The provided number of inputs/outputs/public announcements refer to the
+    /// transaction being updated.
     pub(crate) async fn deterministic_update_witness_additions_and_removals(
         num_inputs: usize,
         num_outputs: usize,
