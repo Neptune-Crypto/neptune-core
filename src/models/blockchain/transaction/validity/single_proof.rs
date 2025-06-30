@@ -70,6 +70,12 @@ impl<const VERSION: usize> SingleProofWitness<VERSION> {
     }
 
     pub(crate) fn from_merge(merge_witness: MergeWitness) -> Self {
+        // Ensure consistency of merge version field
+        assert_eq!(
+            merge_witness.merge_version as usize, VERSION,
+            "Merge version in merge witness must match that in SingleProof"
+        );
+
         Self::Merger(merge_witness)
     }
 }
@@ -741,29 +747,33 @@ impl<const VERSION: usize> ConsensusProgram for SingleProof<VERSION> {
     }
 
     fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
+        static PROGRAM_DIGESTS: [OnceLock<Digest>; 2] = [OnceLock::new(), OnceLock::new()];
 
-        *HASH.get_or_init(|| self.program().hash())
+        let digest = PROGRAM_DIGESTS[VERSION].get_or_init(|| self.program().hash());
+
+        *digest
     }
 
     fn program(&self) -> Program {
         // Overwrite trait-implementation since this leads to much faster code.
-        // Throughout the lifetime of a client, the `SingleProof` program never
-        // changes, so this is OK.
-        static PROGRAM: OnceLock<Program> = OnceLock::new();
+        // Throughout the lifetime of a client, the `SingleProof` program for a
+        // given version never changes, so this is OK.
+        static PROGRAMS: [OnceLock<Program>; 2] = [OnceLock::new(), OnceLock::new()];
 
-        PROGRAM
-            .get_or_init(|| {
-                let (_, code) = self.library_and_code();
-                Program::new(&code)
-            })
-            .clone()
+        let program = PROGRAMS[VERSION].get_or_init(|| {
+            let (_, code) = self.library_and_code();
+            Program::new(&code)
+        });
+
+        program.clone()
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use std::collections::HashSet;
+
     use assert2::let_assert;
     use macro_rules_attr::apply;
     use proptest::prelude::Strategy;
@@ -902,6 +912,30 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn single_proof_program_digests_are_unique_for_different_versions() {
+        let mut program_digests: HashSet<Digest> = HashSet::default();
+        for_each_version!({
+            let digest = SingleProof::<VERSION>.hash();
+            assert!(
+                program_digests.insert(digest),
+                "Version {VERSION} must have unique program digest"
+            );
+        });
+    }
+
+    #[test]
+    fn single_proof_programs_are_unique_for_different_versions() {
+        let mut programs: HashSet<Digest> = HashSet::default();
+        for_each_version!({
+            let program = SingleProof::<VERSION>.program();
+            assert!(
+                programs.insert(program.hash()),
+                "Version {VERSION} must have unique program"
+            );
+        });
+    }
+
     fn positive_prop<const VERSION: usize>(witness: SingleProofWitness<VERSION>) {
         let claim = witness.claim();
         let public_input = PublicInput::new(claim.input);
@@ -966,7 +1000,7 @@ pub(crate) mod tests {
                 let bad_witness =
                     SingleProofWitness::<VERSION>::from_collection(bad_proof_collection);
 
-                // This witness fails with a Merkle auth path error since the never
+                // This witness fails with a Merkle auth path error since it never
                 // reads the actual bit but rather just verifies that it is set to
                 // false in this execution path.
                 SingleProof::<VERSION>
@@ -1061,52 +1095,68 @@ pub(crate) mod tests {
 
     mod merge_tests {
         use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase;
-        use crate::api::export::BlockHeight;
 
         use super::*;
+
+        fn positive_prop(witness: MergeWitness) {
+            let merge_version = witness.merge_version;
+            let (input, nondeterminism) = if merge_version == MergeVersion::Genesis {
+                let witness =
+                    SingleProofWitness::<{ MergeVersion::Genesis as usize }>::from_merge(witness);
+                let claim = witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = witness.nondeterminism();
+                (input, nondeterminism)
+            } else {
+                let witness =
+                    SingleProofWitness::<{ MergeVersion::HardFork2 as usize }>::from_merge(witness);
+                let claim = witness.claim();
+                let input = PublicInput::new(claim.input.clone());
+                let nondeterminism = witness.nondeterminism();
+                (input, nondeterminism)
+            };
+
+            let (rust_result, tasm_result) = if merge_version == MergeVersion::Genesis {
+                let rust_result = SingleProof::<{ MergeVersion::Genesis as usize }>
+                    .run_rust(&input, nondeterminism.clone());
+
+                let tasm_result = SingleProof::<{ MergeVersion::Genesis as usize }>
+                    .run_tasm(&input, nondeterminism);
+                (rust_result, tasm_result)
+            } else {
+                let rust_result = SingleProof::<{ MergeVersion::HardFork2 as usize }>
+                    .run_rust(&input, nondeterminism.clone());
+
+                let tasm_result = SingleProof::<{ MergeVersion::HardFork2 as usize }>
+                    .run_tasm(&input, nondeterminism);
+                (rust_result, tasm_result)
+            };
+
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        }
 
         #[apply(shared_tokio_runtime)]
         async fn can_verify_transaction_merger_without_coinbase() {
             let network = Network::Main;
-            let block_height = BlockHeight::new(bfe!(100000));
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-            let merge_witness =
-                deterministic_merge_witness((2, 2, 2), (2, 2, 2), consensus_rule_set, network)
-                    .await;
 
-            for_each_version!({
-                let merge_witness = SingleProofWitness::<VERSION>::Merger(merge_witness.clone());
-
-                let claim = merge_witness.claim();
-                let public_input = PublicInput::new(claim.input);
-                let rust_result =
-                    SingleProof::<VERSION>.run_rust(&public_input, merge_witness.nondeterminism());
-                let tasm_result =
-                    SingleProof::<VERSION>.run_tasm(&public_input, merge_witness.nondeterminism());
-
-                assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
-            });
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
+                let merge_witness =
+                    deterministic_merge_witness((2, 2, 2), (2, 2, 2), consensus_rule_set, network)
+                        .await;
+                positive_prop(merge_witness);
+            }
         }
 
         #[apply(shared_tokio_runtime)]
         async fn can_verify_transaction_merger_with_coinbase() {
             let network = Network::Main;
 
-            for_each_version!({
-                println!("VERSION: {VERSION}");
+            for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
                 let merge_witness =
-                    deterministic_merge_witness_with_coinbase::<VERSION>(3, 3, 3, network).await;
-                let merge_witness = SingleProofWitness::<VERSION>::Merger(merge_witness.clone());
-
-                let claim = merge_witness.claim();
-                let public_input = PublicInput::new(claim.input);
-                let rust_result =
-                    SingleProof::<VERSION>.run_rust(&public_input, merge_witness.nondeterminism());
-                let tasm_result =
-                    SingleProof::<VERSION>.run_tasm(&public_input, merge_witness.nondeterminism());
-
-                assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
-            });
+                    deterministic_merge_witness_with_coinbase(3, 3, 3, network, consensus_rule_set)
+                        .await;
+                positive_prop(merge_witness);
+            }
         }
     }
 
@@ -1123,7 +1173,7 @@ pub(crate) mod tests {
         use super::*;
 
         fn positive_prop(witness: UpdateWitness, consensus_rule_set: ConsensusRuleSet) {
-            let (_claim, input, nondeterminism) = if consensus_rule_set.merge_version()
+            let (input, nondeterminism) = if consensus_rule_set.merge_version()
                 == MergeVersion::Genesis
             {
                 let witness =
@@ -1131,7 +1181,7 @@ pub(crate) mod tests {
                 let claim = witness.claim();
                 let input = PublicInput::new(claim.input.clone());
                 let nondeterminism = witness.nondeterminism();
-                (claim, input, nondeterminism)
+                (input, nondeterminism)
             } else {
                 let witness =
                     SingleProofWitness::<{ MergeVersion::HardFork2 as usize }>::from_update(
@@ -1140,7 +1190,7 @@ pub(crate) mod tests {
                 let claim = witness.claim();
                 let input = PublicInput::new(claim.input.clone());
                 let nondeterminism = witness.nondeterminism();
-                (claim, input, nondeterminism)
+                (input, nondeterminism)
             };
 
             let (rust_result, tasm_result) =
@@ -1161,6 +1211,43 @@ pub(crate) mod tests {
                 };
 
             assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        }
+
+        fn negative_prop(
+            witness: UpdateWitness,
+            consensus_rule_set: ConsensusRuleSet,
+            allowed_error_codes: &[i128],
+        ) {
+            let merge_version = consensus_rule_set.merge_version();
+            match merge_version {
+                MergeVersion::Genesis => {
+                    const VERSION: usize = MergeVersion::Genesis as usize;
+                    let witness = SingleProofWitness::<VERSION>::from_update(witness.clone());
+                    let claim = witness.claim();
+                    let input = PublicInput::new(claim.input.clone());
+                    let nondeterminism = witness.nondeterminism();
+                    let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                        input,
+                        nondeterminism,
+                        allowed_error_codes,
+                    );
+                    test_result.unwrap();
+                }
+
+                MergeVersion::HardFork2 => {
+                    const VERSION: usize = MergeVersion::HardFork2 as usize;
+                    let witness = SingleProofWitness::<VERSION>::from_update(witness.clone());
+                    let claim = witness.claim();
+                    let input = PublicInput::new(claim.input.clone());
+                    let nondeterminism = witness.nondeterminism();
+                    let test_result = SingleProof::<VERSION>.test_assertion_failure(
+                        input,
+                        nondeterminism,
+                        allowed_error_codes,
+                    );
+                    test_result.unwrap();
+                }
+            }
         }
 
         #[apply(shared_tokio_runtime)]
@@ -1259,7 +1346,10 @@ pub(crate) mod tests {
             }
         }
 
-        fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
+        fn new_timestamp_older_than_old_prop(
+            good_witness: &UpdateWitness,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
             let mut bad_witness = good_witness.to_owned();
 
             bad_witness.new_kernel = TransactionKernelModifier::default()
@@ -1267,83 +1357,39 @@ pub(crate) mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            for_each_version!({
-                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
-                let claim = bad_witness.claim();
-                let input = PublicInput::new(claim.input.clone());
-                let nondeterminism = bad_witness.nondeterminism();
-                let test_result = SingleProof::<VERSION>.test_assertion_failure(
-                    input,
-                    nondeterminism,
-                    &[UpdateBranch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
-                );
-                test_result.unwrap();
-            });
+            negative_prop(
+                bad_witness,
+                consensus_rule_set,
+                &[UpdateBranch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
+            )
         }
 
-        fn bad_new_aocl(good_witness: &UpdateWitness) {
-            for_each_version!({
-                let good_witness =
-                    SingleProofWitness::<VERSION>::from_update(good_witness.to_owned());
-                let claim = good_witness.claim();
-                let input = PublicInput::new(claim.input.clone());
-                let mut nondeterminism = good_witness.nondeterminism();
+        fn bad_new_aocl_prop(good_witness: &UpdateWitness, consensus_rule_set: ConsensusRuleSet) {
+            let mut bad_witness = good_witness.to_owned();
+            bad_witness.new_aocl.append(random());
 
-                let witness_again: SingleProofWitness<VERSION> =
-                    *SingleProofWitness::<VERSION>::decode_from_memory(
-                        &nondeterminism.ram,
-                        FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                    )
-                    .unwrap();
-                let mut witness_again = witness_again.into_update();
-                witness_again.new_aocl.append(random());
-                let witness_again = SingleProofWitness::<VERSION>::from_update(witness_again);
-                encode_to_memory(
-                    &mut nondeterminism.ram,
-                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                    &witness_again,
-                );
-                let test_result = SingleProof::<VERSION>.test_assertion_failure(
-                    input,
-                    nondeterminism,
-                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-                );
-                test_result.unwrap();
-            });
+            negative_prop(
+                bad_witness,
+                consensus_rule_set,
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            )
         }
 
-        fn bad_old_aocl(good_witness: &UpdateWitness) {
-            for_each_version!({
-                let good_witness =
-                    SingleProofWitness::<VERSION>::from_update(good_witness.to_owned());
-                let claim = good_witness.claim();
-                let input = PublicInput::new(claim.input.clone());
-                let mut nondeterminism = good_witness.nondeterminism();
+        fn bad_old_aocl_prop(good_witness: &UpdateWitness, consensus_rule_set: ConsensusRuleSet) {
+            let mut bad_witness = good_witness.to_owned();
+            bad_witness.old_aocl.append(random());
 
-                let witness_again: SingleProofWitness<VERSION> =
-                    *SingleProofWitness::<VERSION>::decode_from_memory(
-                        &nondeterminism.ram,
-                        FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                    )
-                    .unwrap();
-                let mut witness_again = witness_again.into_update();
-                witness_again.old_aocl.append(random());
-                let witness_again = SingleProofWitness::<VERSION>::from_update(witness_again);
-                encode_to_memory(
-                    &mut nondeterminism.ram,
-                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                    &witness_again,
-                );
-                let test_result = SingleProof::<VERSION>.test_assertion_failure(
-                    input,
-                    nondeterminism,
-                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-                );
-                test_result.unwrap();
-            });
+            negative_prop(
+                bad_witness,
+                consensus_rule_set,
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            )
         }
 
-        fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
+        fn bad_absolute_index_set_value_prop(
+            good_witness: &UpdateWitness,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
             let mut bad_witness = good_witness.clone();
 
             let mut new_inputs = bad_witness.new_kernel.inputs.clone();
@@ -1356,21 +1402,17 @@ pub(crate) mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            for_each_version!({
-                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
-                let claim = bad_witness.claim();
-                let input = PublicInput::new(claim.input.clone());
-                let nondeterminism = bad_witness.nondeterminism();
-                let test_result = SingleProof::<VERSION>.test_assertion_failure(
-                    input,
-                    nondeterminism,
-                    &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
-                );
-                test_result.unwrap();
-            });
+            negative_prop(
+                bad_witness,
+                consensus_rule_set,
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
+            )
         }
 
-        fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
+        fn bad_absolute_index_set_length_too_short_prop(
+            good_witness: &UpdateWitness,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
             let mut bad_witness = good_witness.clone();
 
             let mut new_inputs = bad_witness.new_kernel.inputs.clone();
@@ -1380,21 +1422,18 @@ pub(crate) mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            for_each_version!({
-                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
-                let claim = bad_witness.claim();
-                let input = PublicInput::new(claim.input.clone());
-                let nondeterminism = bad_witness.nondeterminism();
-                let test_result = SingleProof::<VERSION>.test_assertion_failure(
-                    input,
-                    nondeterminism,
-                    &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
-                );
-                test_result.unwrap();
-            });
+            negative_prop(
+                bad_witness,
+                consensus_rule_set,
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
+            )
         }
 
-        fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness, rr: RemovalRecord) {
+        fn bad_absolute_index_set_length_too_long_prop(
+            good_witness: &UpdateWitness,
+            rr: RemovalRecord,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
             let mut bad_witness = good_witness.clone();
 
             let mut new_inputs = bad_witness.new_kernel.inputs.clone();
@@ -1405,18 +1444,41 @@ pub(crate) mod tests {
                 .modify(bad_witness.new_kernel);
             bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
 
-            for_each_version!({
-                let bad_witness = SingleProofWitness::<VERSION>::from_update(bad_witness.clone());
-                let claim = bad_witness.claim();
-                let input = PublicInput::new(claim.input.clone());
-                let nondeterminism = bad_witness.nondeterminism();
-                let test_result = SingleProof::<VERSION>.test_assertion_failure(
-                    input,
-                    nondeterminism,
-                    &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
-                );
-                test_result.unwrap();
-            });
+            negative_prop(
+                bad_witness,
+                consensus_rule_set,
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
+            )
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn update_witness_with_different_sp_versions_are_incompatible() {
+            // Indicates a failure in STARK proof verification.
+            const EXPECTED_TVM_ERROR_CODE: i128 = 230;
+            const WRONG_RULE_SET: usize = ConsensusRuleSet::HardFork2.merge_version() as usize;
+
+            let matching_consensus_rule_set = ConsensusRuleSet::Genesis;
+            let witness = deterministic_update_witness_only_additions_to_mutator_set(
+                2,
+                2,
+                2,
+                matching_consensus_rule_set,
+            )
+            .await;
+            positive_prop(witness.clone(), matching_consensus_rule_set);
+
+            let witness = SingleProofWitness::<WRONG_RULE_SET>::Update(witness);
+            let claim = witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let nondeterminism = witness.nondeterminism();
+
+            // This will attempt to validate the single proof witness with the
+            // wrong version of the single proof program, so must fail during
+            // verification of the supplied single proof, which has the wrong
+            // version.
+            SingleProof::<WRONG_RULE_SET>
+                .test_assertion_failure(input, nondeterminism, &[EXPECTED_TVM_ERROR_CODE])
+                .unwrap();
         }
 
         #[apply(shared_tokio_runtime)]
@@ -1432,15 +1494,15 @@ pub(crate) mod tests {
                 )
                 .await;
                 positive_prop(good_witness.clone(), consensus_rule_set);
-                new_timestamp_older_than_old(&good_witness);
-                bad_new_aocl(&good_witness);
-                bad_old_aocl(&good_witness);
-                bad_absolute_index_set_value(&good_witness);
-                bad_absolute_index_set_length_too_short(&good_witness);
+                new_timestamp_older_than_old_prop(&good_witness, consensus_rule_set);
+                bad_new_aocl_prop(&good_witness, consensus_rule_set);
+                bad_old_aocl_prop(&good_witness, consensus_rule_set);
+                bad_absolute_index_set_value_prop(&good_witness, consensus_rule_set);
+                bad_absolute_index_set_length_too_short_prop(&good_witness, consensus_rule_set);
                 proptest::proptest! {
                     ProptestConfig { cases: 3, .. ProptestConfig::default() },
                     |(rr in arb::<RemovalRecord>())| {
-                        bad_absolute_index_set_length_too_long(&good_witness, rr);
+                        bad_absolute_index_set_length_too_long_prop(&good_witness, rr, consensus_rule_set);
                     }
                 }
             }
@@ -1514,9 +1576,22 @@ pub(crate) mod tests {
         }
     }
 
-    test_program_snapshot!(
-        SingleProof::<{ MergeVersion::Genesis as usize }>,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "c0f8cbc73a844ab6c3586d8891e29b677a3aa08f25f9aec0f854a72bf2e2f84c2a48c9dd1bbe0a66"
-    );
+    mod genesis {
+        use super::*;
+
+        test_program_snapshot!(
+            SingleProof::<{ MergeVersion::Genesis as usize }>,
+            // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
+            "c0f8cbc73a844ab6c3586d8891e29b677a3aa08f25f9aec0f854a72bf2e2f84c2a48c9dd1bbe0a66"
+        );
+    }
+
+    mod hard_fork2 {
+        use super::*;
+
+        test_program_snapshot!(
+            SingleProof::<{ MergeVersion::HardFork2 as usize }>,
+            "4dfa22497212493419d0e846e6d61666a5aba112ae63ea270af6cfaa70e2c026138d70829a781f81"
+        );
+    }
 }

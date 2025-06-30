@@ -1328,18 +1328,13 @@ pub(crate) mod tests {
         MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed, merge_version)
     }
 
-    pub(crate) async fn deterministic_merge_witness_with_coinbase<const VERSION: usize>(
+    pub(crate) async fn deterministic_merge_witness_with_coinbase(
         num_total_inputs: usize,
         num_total_outputs: usize,
         num_pub_announcements: usize,
         network: Network,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> MergeWitness {
-        let consensus_rule_set = if VERSION == MergeVersion::Genesis as usize {
-            ConsensusRuleSet::HardFork1
-        } else {
-            ConsensusRuleSet::HardFork2
-        };
-
         let mut test_runner = TestRunner::deterministic();
 
         let (coinbase_transaction, tx_with_inputs) =
@@ -1352,8 +1347,14 @@ pub(crate) mod tests {
             .unwrap()
             .current();
 
-        assert!(coinbase_transaction.kernel.coinbase.is_some());
-        assert!(coinbase_transaction.kernel.inputs.is_empty());
+        assert!(
+            coinbase_transaction.kernel.coinbase.is_some(),
+            "Expected coinbase field must be set."
+        );
+        assert!(
+            coinbase_transaction.kernel.inputs.is_empty(),
+            "coinbase transaction cannot have inputs."
+        );
 
         let shuffle_seed = arb::<[u8; 32]>()
             .new_tree(&mut test_runner)
