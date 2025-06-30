@@ -30,6 +30,7 @@ use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 // from genesis block anyway.
 //
 // see: https://github.com/Neptune-Crypto/neptune-core/issues/539
+#[cfg(test)]
 static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::HashSet<Claim>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
@@ -52,6 +53,7 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
     }
 
     // presently this is used by certain unit tests.
+    #[cfg(test)]
     if CLAIMS_CACHE.lock().await.contains(&claim) {
         return true;
     }
