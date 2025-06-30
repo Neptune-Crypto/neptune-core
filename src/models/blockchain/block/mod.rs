@@ -1501,15 +1501,109 @@ pub(crate) mod tests {
     }
 
     mod block_is_valid {
+        use rand::rng;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
         use super::*;
+        use crate::mine_loop::create_block_transaction_from;
         use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+        use crate::mine_loop::TxMergeOrigin;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+        use crate::triton_vm_job_queue::vm_job_queue;
         use crate::triton_vm_job_queue::TritonVmJobPriority;
+
+        async fn deterministic_empty_block1_proposal() -> (Block, Timestamp, Network, Block) {
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let plus_one_hour = genesis.kernel.header.timestamp + Timestamp::hours(1);
+
+            // wallet must be deterministic for block 1 to be deterministic, for
+            // block proof to be reusable over test runs.
+            let alice_wallet = WalletEntropy::devnet_wallet();
+            let alice = mock_genesis_global_state(
+                3,
+                alice_wallet.clone(),
+                cli_args::Args {
+                    guesser_fraction: 0.5,
+                    network,
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let job_options = TritonVmProofJobOptions::default();
+            let (transaction, _) = create_block_transaction_from(
+                &genesis,
+                &alice,
+                plus_one_hour,
+                job_options.clone(),
+                TxMergeOrigin::ExplicitList(vec![]),
+            )
+            .await
+            .unwrap();
+            let block1_proposal = Block::compose(
+                &genesis,
+                transaction,
+                plus_one_hour,
+                vm_job_queue(),
+                job_options,
+            )
+            .await
+            .unwrap();
+            (genesis, plus_one_hour, network, block1_proposal)
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_with_valid_proof_passes() {
+            let (predecesor, time, network, block) = deterministic_empty_block1_proposal().await;
+            assert!(block.validate(&predecesor, time, network).await.is_ok());
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_with_invalid_proof_fails() {
+            let (predecesor, time, network, mut block) =
+                deterministic_empty_block1_proposal().await;
+
+            // Block validation fails on manipulated proof
+            let BlockProof::SingleProof(block_proof) = &mut block.proof else {
+                panic!("Single proof expected");
+            };
+            let proof_length = block_proof.0.len();
+
+            let mut rng = rng();
+            let index = rng.random_range(0..proof_length);
+            block_proof.0.get_mut(index).unwrap().increment();
+
+            assert_eq!(
+                BlockValidationError::ProofValidity,
+                block
+                    .validate(&predecesor, time, network)
+                    .await
+                    .unwrap_err()
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_with_empty_proof_fails() {
+            let (predecesor, time, network, mut block) =
+                deterministic_empty_block1_proposal().await;
+
+            // Block validation fails on empty proof
+            block.set_proof(BlockProof::SingleProof(Proof(vec![]).into()));
+            assert_eq!(
+                BlockValidationError::ProofValidity,
+                block
+                    .validate(&predecesor, time, network)
+                    .await
+                    .unwrap_err()
+            );
+        }
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
