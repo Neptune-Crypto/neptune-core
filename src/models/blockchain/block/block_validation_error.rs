@@ -2,7 +2,7 @@
 /// invalid.
 ///
 /// Conversely, defines what it means for a block to be "valid".
-#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
 pub enum BlockValidationError {
     // 0. `previous_block` is consistent with current block
     ///   0.a) Block height is previous plus one
