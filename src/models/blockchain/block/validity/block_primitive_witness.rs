@@ -112,7 +112,9 @@ impl BlockPrimitiveWitness {
             );
 
             let block_height = self.predecessor_block.header().height.next();
-            let pack_removal_records = ConsensusRuleSet::infer_from(self.network, block_height).merge_version().pack_removal_records();
+            let pack_removal_records = ConsensusRuleSet::infer_from(self.network, block_height)
+                .merge_version()
+                .pack_removal_records();
             let inputs = if pack_removal_records {
                 RemovalRecordList::try_unpack(transaction_kernel.inputs.clone()).expect("Inputs must be packed")
             } else {
@@ -282,6 +284,15 @@ pub(crate) mod tests {
                 .boxed()
         }
 
+        pub(crate) fn deterministic_with_block_height(block_height: BlockHeight) -> Self {
+            let mut test_runner = TestRunner::deterministic();
+
+            Self::arbitrary_with_block_height(block_height)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current()
+        }
+
         pub(crate) fn arbitrary_with_block_height(
             block_height: BlockHeight,
         ) -> BoxedStrategy<BlockPrimitiveWitness> {
@@ -350,11 +361,13 @@ pub(crate) mod tests {
                                 let own_items = own_items.clone();
                                 let lock_scripts_and_witnesses = lock_scripts_and_witnesses.clone();
 
-                                let parent_header = arb::<BlockHeader>();
+                                let parent_height = block_height.previous().unwrap();
+                                let parent_header =
+                                    BlockHeader::arbitrary_with_height(parent_height);
                                 let parent_appendix = arb::<BlockAppendix>();
                                 let parent_body = BlockBody::arbitrary_with_mutator_set_accumulator(
                                     intermediate_mutator_set_accumulator.clone(),
-                                    block_height,
+                                    parent_height,
                                     network,
                                 );
                                 (parent_header, parent_body, parent_appendix).prop_flat_map(

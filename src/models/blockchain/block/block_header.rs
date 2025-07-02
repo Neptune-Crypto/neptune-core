@@ -250,6 +250,57 @@ impl BlockHeaderWithBlockHashWitness {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl BlockHeader {
+    pub(crate) fn arbitrary_with_height(
+        block_height: BlockHeight,
+    ) -> proptest::prelude::BoxedStrategy<Self> {
+        use proptest::prelude::Strategy;
+        use proptest_arbitrary_interop::arb;
+
+        let version = arb::<BFieldElement>();
+        let prev_block_digest = arb::<Digest>();
+        let timestamp = arb::<Timestamp>();
+        let nonce = arb::<Digest>();
+        let cumulative_proof_of_work = arb::<ProofOfWork>();
+        let difficulty = arb::<Difficulty>();
+        let guesser_digest = arb::<Digest>();
+
+        (
+            version,
+            prev_block_digest,
+            timestamp,
+            nonce,
+            cumulative_proof_of_work,
+            difficulty,
+            guesser_digest,
+        )
+            .prop_map(
+                move |(
+                    version,
+                    prev_block_digest,
+                    timestamp,
+                    nonce,
+                    cumulative_proof_of_work,
+                    difficulty,
+                    guesser_digest,
+                )| {
+                    BlockHeader {
+                        version,
+                        height: block_height,
+                        prev_block_digest,
+                        timestamp,
+                        nonce,
+                        cumulative_proof_of_work,
+                        difficulty,
+                        guesser_digest,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {

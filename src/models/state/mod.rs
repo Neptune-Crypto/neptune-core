@@ -1010,7 +1010,8 @@ impl GlobalState {
     ///   + that are unspendable (no spending key)
     ///   + that are already spent in the mempool
     ///
-    /// note: ordering of the returned `TxInput` is undefined.
+    /// note: ordering of the returned `TxInput` is insertion order into the
+    /// wallet.
     pub async fn wallet_spendable_inputs(
         &self,
         timestamp: Timestamp,
