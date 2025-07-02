@@ -506,6 +506,16 @@ impl ArchivalState {
     /// All predecessors of this block must be known and stored in the block
     /// index database for this update to work.
     pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
+        #[cfg(test)]
+        {
+            // In tests you're allowed to set a genesis block with a height
+            // different than zero. In such cases, this part of the archival state
+            // update cannot work. So we skip it.
+            if !self.genesis_block.header().height.is_genesis() {
+                return;
+            }
+        }
+
         // Roll back to length of parent (accounting for genesis block),
         // then add new digest.
         let num_leafs_prior_to_this_block = new_block.header().height.into();
@@ -1086,6 +1096,16 @@ impl ArchivalState {
     /// This function will return an error if the new block does not have a
     /// mutator set update.
     pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+        #[cfg(test)]
+        {
+            // In tests you're allowed to set a genesis block with a height
+            // different than zero. In such cases, this part of the archival state
+            // update cannot work. So we skip it.
+            if !self.genesis_block.header().height.is_genesis() {
+                return Ok(());
+            }
+        }
+
         // cannot get the mutator set update from new block, so abort early
         if new_block.mutator_set_update(self.network).is_err() {
             bail!("invalid block: could not get mutator set update");
