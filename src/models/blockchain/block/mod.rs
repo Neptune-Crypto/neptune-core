@@ -1139,6 +1139,7 @@ pub(crate) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::vm_job_queue;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::archival_mmr::ArchivalMmr;
 
@@ -1179,6 +1180,25 @@ pub(crate) mod tests {
             let appendix = BlockAppendix::default();
 
             Block::new(header, body, appendix, proof)
+        }
+
+        /// Produce two fake blocks, parent and child.
+        pub(crate) async fn fake_block_pair_genesis_and_child_from_witness(
+            primitive_witness: BlockPrimitiveWitness,
+        ) -> (Block, Block) {
+            let mut fake_genesis = primitive_witness.predecessor_block().to_owned();
+            fake_genesis.proof = BlockProof::Genesis;
+            let block_timestamp = primitive_witness.transaction().kernel.timestamp;
+            let fake_child = Self::block_template_from_block_primitive_witness(
+                primitive_witness,
+                block_timestamp,
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            (fake_genesis, fake_child)
         }
     }
 
