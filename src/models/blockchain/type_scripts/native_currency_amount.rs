@@ -105,7 +105,7 @@ impl NativeCurrencyAmount {
 
     /// Return the element that corresponds to 1 nau. Use in tests only.
     #[cfg(test)]
-    pub fn one() -> NativeCurrencyAmount {
+    pub fn one_nau() -> NativeCurrencyAmount {
         NativeCurrencyAmount(1i128)
     }
 

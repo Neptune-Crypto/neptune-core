@@ -724,7 +724,7 @@ mod tests {
         let seed: Digest = rng.random();
         let address = GenerationReceivingAddress::derive_from_seed(seed);
 
-        let amount = NativeCurrencyAmount::one();
+        let amount = NativeCurrencyAmount::one_nau();
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
 
         let sender_randomness = state
@@ -786,7 +786,7 @@ mod tests {
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
 
-        let amount = NativeCurrencyAmount::one();
+        let amount = NativeCurrencyAmount::one_nau();
 
         for (owned_utxo_notification_medium, address) in [
             (UtxoNotificationMedium::OffChain, address_gen.clone()),
