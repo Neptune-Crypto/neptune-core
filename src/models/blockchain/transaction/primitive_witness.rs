@@ -1082,6 +1082,7 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -1462,25 +1463,47 @@ mod tests {
                         output_salt,
                         public_announcements,
                     )| {
-                        let total_input_amount = input_utxos
+                        let input_amount = input_utxos
                             .iter()
                             .map(|utxo| utxo.get_native_currency_amount())
-                            .sum::<NativeCurrencyAmount>()
-                            + coinbase.unwrap_or(NativeCurrencyAmount::zero());
+                            .sum::<NativeCurrencyAmount>();
                         PrimitiveWitness::find_balanced_output_amounts_and_fee(
-                            total_input_amount,
+                            input_amount,
                             coinbase,
                             &mut output_amounts,
                             &mut fee,
                         );
 
-                        let output_utxos = output_amounts
+                        assert_eq!(
+                            input_amount + coinbase.unwrap_or(NativeCurrencyAmount::from_nau(0)),
+                            output_amounts.iter().copied().sum::<NativeCurrencyAmount>() + fee
+                        );
+                        assert!(!fee.is_negative());
+
+                        let mut output_utxos: Vec<_> = output_amounts
                             .into_iter()
                             .zip(lock_script_hashes)
                             .map(|(amount, lock_script_hash)| {
-                                (lock_script_hash, amount.to_native_coins()).into()
+                                Utxo::from((lock_script_hash, amount.to_native_coins()))
                             })
                             .collect_vec();
+
+                        // If coinbase is set, add timelock type script, with
+                        // sufficiently long timelock to output UTXOs for at
+                        // least half the value.
+                        if let Some(coinbase) = coinbase {
+                            let release_date = timestamp + MINING_REWARD_TIME_LOCK_PERIOD;
+                            let mut timelocked = NativeCurrencyAmount::zero();
+                            let mut required_timelocked = coinbase;
+                            required_timelocked.div_two();
+                            let mut i = 0;
+                            while timelocked < required_timelocked {
+                                output_utxos[i] =
+                                    output_utxos[i].clone().with_time_lock(release_date);
+                                timelocked += output_utxos[i].get_native_currency_amount();
+                                i += 1;
+                            }
+                        };
 
                         let salted_input_utxos = SaltedUtxos {
                             utxos: input_utxos.clone(),
@@ -1511,12 +1534,22 @@ mod tests {
                         }
                         .into_kernel();
 
-                        let type_scripts_and_witnesses = vec![NativeCurrencyWitness {
+                        let mut type_scripts_and_witnesses = vec![NativeCurrencyWitness {
                             salted_input_utxos: salted_input_utxos.clone(),
                             salted_output_utxos: salted_output_utxos.clone(),
                             kernel: kernel.clone(),
                         }
                         .type_script_and_witness()];
+                        if coinbase.is_some() {
+                            type_scripts_and_witnesses.push(
+                                TimeLockWitness::new(
+                                    kernel.clone(),
+                                    salted_input_utxos.clone(),
+                                    salted_output_utxos.clone(),
+                                )
+                                .type_script_and_witness(),
+                            );
+                        }
 
                         Self {
                             input_utxos: salted_input_utxos,
