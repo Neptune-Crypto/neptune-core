@@ -69,6 +69,35 @@ pub(crate) struct GuessingConfiguration {
     pub(crate) num_guesser_threads: Option<usize>,
 }
 
+/// Creates a block transaction and composes a block from it. Returns the block
+/// and the composer UTXOs. Block will reward caller according to block
+/// proposal parameters.
+pub(crate) async fn compose_block_helper(
+    latest_block: Block,
+    global_state_lock: GlobalStateLock,
+    block_timestamp: Timestamp,
+    job_options: TritonVmProofJobOptions,
+) -> Result<(Block, Vec<ExpectedUtxo>)> {
+    let (transaction, composer_utxos) = create_block_transaction(
+        &latest_block,
+        &global_state_lock,
+        block_timestamp,
+        job_options.clone(),
+    )
+    .await?;
+
+    let compose_result = Block::compose(
+        &latest_block,
+        transaction,
+        block_timestamp,
+        vm_job_queue(),
+        job_options,
+    )
+    .await?;
+
+    Ok((compose_result, composer_utxos))
+}
+
 async fn compose_block(
     latest_block: Block,
     global_state_lock: GlobalStateLock,
@@ -86,27 +115,8 @@ async fn compose_block(
         .proof_job_options(TritonVmJobPriority::High);
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
-    let (transaction, composer_utxos) = create_block_transaction(
-        &latest_block,
-        &global_state_lock,
-        timestamp,
-        job_options.clone(),
-    )
-    .await?;
-
-    let compose_result = Block::compose(
-        &latest_block,
-        transaction,
-        timestamp,
-        vm_job_queue(),
-        job_options,
-    )
-    .await;
-
-    let proposal = match compose_result {
-        Ok(template) => template,
-        Err(e) => bail!("Miner failed to generate block template. {}", e.to_string()),
-    };
+    let (proposal, composer_utxos) =
+        compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?;
 
     // Please clap.
     match sender.send((proposal, composer_utxos)) {
