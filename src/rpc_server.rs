@@ -3936,8 +3936,11 @@ mod tests {
             .clone()
             .clear_standing_by_ip(ctx, token, "127.0.0.1".parse().unwrap())
             .await;
-        let output: OutputFormat =
-            (own_receiving_address.clone(), NativeCurrencyAmount::one()).into();
+        let output: OutputFormat = (
+            own_receiving_address.clone(),
+            NativeCurrencyAmount::one_nau(),
+        )
+            .into();
         let _ = rpc_server
             .clone()
             .send(
@@ -3945,13 +3948,14 @@ mod tests {
                 token,
                 vec![output],
                 ChangePolicy::ExactChange,
-                NativeCurrencyAmount::one(),
+                NativeCurrencyAmount::one_nau(),
             )
             .await;
 
         // let transaction_timestamp = network.launch_date();
         // let proving_capability = rpc_server.state.cli().proving_capability();
-        let my_output: OutputFormat = (own_receiving_address, NativeCurrencyAmount::one()).into();
+        let my_output: OutputFormat =
+            (own_receiving_address, NativeCurrencyAmount::one_nau()).into();
         let _ = rpc_server
             .clone()
             .send(
@@ -3959,7 +3963,7 @@ mod tests {
                 token,
                 vec![my_output],
                 ChangePolicy::ExactChange,
-                NativeCurrencyAmount::one(),
+                NativeCurrencyAmount::one_nau(),
             )
             .await;
 

@@ -631,7 +631,7 @@ pub mod tests {
                     canonical_commitment
                 }],
                 public_announcements: Default::default(),
-                fee: NativeCurrencyAmount::one(),
+                fee: NativeCurrencyAmount::one_nau(),
                 coinbase: None,
                 timestamp: Default::default(),
                 mutator_set_hash,

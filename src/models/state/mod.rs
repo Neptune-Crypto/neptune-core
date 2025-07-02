@@ -3260,7 +3260,7 @@ mod tests {
             ),
         ];
 
-        let fee = NativeCurrencyAmount::one();
+        let fee = NativeCurrencyAmount::one_nau();
         let genesis_key = premine_receiver
             .lock_guard_mut()
             .await
