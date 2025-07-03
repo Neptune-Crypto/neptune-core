@@ -1,7 +1,9 @@
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::prelude::Mmr;
 
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
@@ -44,20 +46,22 @@ impl MsaAndRecords {
             .removal_records
             .iter()
             .all(|rr| self.mutator_set_accumulator.can_remove(rr));
-        assert!(
-            all_removal_records_can_remove,
-            "Some removal records cannot be removed!"
-        );
         let all_membership_proofs_are_valid = self
             .membership_proofs
             .iter()
             .zip_eq(items.iter())
             .all(|(mp, item)| self.mutator_set_accumulator.verify(*item, mp));
-        assert!(
-            all_membership_proofs_are_valid,
-            "some membership proofs are not valid!"
-        );
-        all_removal_records_can_remove && all_membership_proofs_are_valid
+
+        // Verify that mutator set has expected number of elements in Bloom
+        // filter MMR.
+        let expected_num_swbf_leafs =
+            self.mutator_set_accumulator.aocl.num_leafs() / u64::from(BATCH_SIZE);
+        let has_right_num_swbf_leafs =
+            expected_num_swbf_leafs == self.mutator_set_accumulator.swbf_inactive.num_leafs();
+
+        all_removal_records_can_remove
+            && all_membership_proofs_are_valid
+            && has_right_num_swbf_leafs
     }
 }
 
@@ -158,11 +162,11 @@ pub mod neptune_arbitrary {
                     all_chunk_indices.dedup();
 
                     // filter by swbf mmr size
-                    let swbf_mmr_size = aocl_mmra.num_leafs() / u64::from(BATCH_SIZE);
+                    let swbf_mmr_num_leafs = aocl_mmra.num_leafs() / u64::from(BATCH_SIZE);
                     let mmr_chunk_indices = all_chunk_indices
                         .iter()
                         .copied()
-                        .filter(|ci| *ci < swbf_mmr_size)
+                        .filter(|ci| *ci < swbf_mmr_num_leafs)
                         .collect_vec();
 
                     // prepare to unwrap
@@ -187,12 +191,11 @@ pub mod neptune_arbitrary {
                             let all_index_sets = all_index_sets.clone();
                             let aocl_membership_proofs = aocl_membership_proofs.clone();
                             let removables = removables.clone();
-                            let swbf_mmr_leaf_count = (aocl_mmra.num_leafs() / u64::from(BATCH_SIZE)).saturating_sub(1);
                             let aocl_leaf_indices = aocl_leaf_indices.clone();
 
                             // unwrap random swbf mmra and membership proofs
                             MmraAndMembershipProofs::arbitrary_with((
-                                swbf_indices_and_leafs, swbf_mmr_leaf_count
+                                swbf_indices_and_leafs, swbf_mmr_num_leafs
                             )).prop_flat_map(move |swbf_mmr_and_paths| {
                                     let swbf_mmra = swbf_mmr_and_paths.mmra;
                                     let swbf_membership_proofs = swbf_mmr_and_paths.membership_proofs;
@@ -223,7 +226,7 @@ pub mod neptune_arbitrary {
                                             ChunkDictionary::new(
                                                 chunk_indices
                                                 .iter()
-                                                .filter(|chunk_index| **chunk_index < swbf_mmr_size)
+                                                .filter(|chunk_index| **chunk_index < swbf_mmr_num_leafs)
                                                 .map(|chunk_index| {
                                                     (
                                                         chunk_index,
@@ -317,6 +320,7 @@ mod tests {
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::MsaAndRecords;
     use crate::util_types::mutator_set::ms_membership_proof::tests::propcompose_msmembershipproof;
@@ -358,9 +362,9 @@ mod tests {
         }
     }
 
-    #[test_strategy::proptest(cases = 1)]
+    #[test_strategy::proptest(cases = 20)]
     fn msa_and_records_is_valid(
-        #[strategy(0usize..10)] _num_removals: usize,
+        #[strategy(0usize..100)] _num_removals: usize,
         #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         removables: Vec<(Digest, Digest, Digest)>,
