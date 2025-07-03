@@ -3,6 +3,7 @@
 ///
 /// Conversely, defines what it means for a block to be "valid".
 #[derive(Debug, Clone, Copy, thiserror::Error)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum BlockValidationError {
     // 0. `previous_block` is consistent with current block
     ///   0.a) Block height is previous plus one
@@ -49,18 +50,18 @@ pub enum BlockValidationError {
     ///   2.a) Verify that MS removal records are valid, done against previous
     ///      `mutator_set_accumulator`,
     #[error("all removal records must be valid relative to predecessor block's mutator set")]
-    RemovalRecordsValid,
+    RemovalRecordsValidity,
     ///   2.b) Verify that all removal records have unique index sets
     #[error("all removal records must be unique")]
-    RemovalRecordsUnique,
+    RemovalRecordsUniqueness,
     ///   2.c) Verify that the mutator set update induced by the block
     ///        is possible
     #[error("mutator set update must be possible")]
-    MutatorSetUpdatePossible,
+    MutatorSetUpdateImpossible,
     ///   2.d) Verify that the mutator set update induced by the block sends
     ///      the old mutator set accumulator to the new one.
     #[error("mutator set must evolve in accordance with transaction")]
-    MutatorSetUpdateIntegral,
+    MutatorSetUpdateIntegrity,
     ///   2.e) transaction timestamp <= block timestamp
     #[error("transaction timestamp must not exceed block timestamp")]
     TransactionTimestamp,
@@ -69,7 +70,7 @@ pub enum BlockValidationError {
     CoinbaseTooBig,
     ///   2.g) transaction coinbase <= block subsidy, and not negative.
     #[error("coinbase cannot be negative")]
-    CoinbaseTooSmall,
+    NegativeCoinbase,
     ///   2.h) 0 <= transaction fee (also checked in block program).
     #[error("fee must be non-negative")]
     NegativeFee,

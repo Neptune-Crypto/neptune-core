@@ -104,6 +104,7 @@ pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmo
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub enum BlockProof {
     Genesis,
     #[default]
@@ -803,16 +804,6 @@ impl Block {
             return Err(BlockValidationError::AppendixTooLarge);
         }
 
-        // 1.c)
-        let BlockProof::SingleProof(block_proof) = &self.proof else {
-            return Err(BlockValidationError::ProofQuality);
-        };
-
-        // 1.d)
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
-            return Err(BlockValidationError::ProofValidity);
-        }
-
         // 1.e)
         if self.header().height < BLOCK_HEIGHT_HF_1 && self.size() > MAX_BLOCK_SIZE_BEFORE_HF_1 {
             return Err(BlockValidationError::MaxSize);
@@ -822,13 +813,10 @@ impl Block {
             return Err(BlockValidationError::MaxSize);
         }
 
-        // 2.a)
-        let msa_before = previous_block.mutator_set_accumulator_after()?;
-        for removal_record in &self.kernel.body.transaction_kernel.inputs {
-            if !msa_before.can_remove(removal_record) {
-                return Err(BlockValidationError::RemovalRecordsValid);
-            }
-        }
+        // 1.c)
+        let BlockProof::SingleProof(block_proof) = &self.proof else {
+            return Err(BlockValidationError::ProofQuality);
+        };
 
         // 2.b)
         let mut absolute_index_sets = self
@@ -842,25 +830,31 @@ impl Block {
         absolute_index_sets.sort();
         absolute_index_sets.dedup();
         if absolute_index_sets.len() != self.kernel.body.transaction_kernel.inputs.len() {
-            return Err(BlockValidationError::RemovalRecordsUnique);
+            return Err(BlockValidationError::RemovalRecordsUniqueness);
         }
 
+        // 2.h)
+        if self.kernel.body.transaction_kernel.fee.is_negative() {
+            return Err(BlockValidationError::NegativeFee);
+        }
+
+        // 2.a)
+        let msa_before = previous_block.mutator_set_accumulator_after()?;
+        for removal_record in &self.kernel.body.transaction_kernel.inputs {
+            if !msa_before.can_remove(removal_record) {
+                return Err(BlockValidationError::RemovalRecordsValidity);
+            }
+        }
+
+        // 2.c)
         let mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
         let mut msa = msa_before;
-        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
-
-        // 2.c)
-        if ms_update_result.is_err() {
-            return Err(BlockValidationError::MutatorSetUpdatePossible);
+        if mutator_set_update.apply_to_accumulator(&mut msa).is_err() {
+            return Err(BlockValidationError::MutatorSetUpdateImpossible);
         };
-
-        // 2.d)
-        if msa.hash() != self.body().mutator_set_accumulator.hash() {
-            return Err(BlockValidationError::MutatorSetUpdateIntegral);
-        }
 
         // 2.e)
         if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
@@ -877,14 +871,8 @@ impl Block {
 
             // 2.g)
             if coinbase.is_negative() {
-                return Err(BlockValidationError::CoinbaseTooSmall);
+                return Err(BlockValidationError::NegativeCoinbase);
             }
-        }
-
-        // 2.h)
-        let fee = self.kernel.body.transaction_kernel.fee;
-        if fee.is_negative() {
-            return Err(BlockValidationError::NegativeFee);
         }
 
         if self.header().height >= BLOCK_HEIGHT_HF_1 {
@@ -908,6 +896,16 @@ impl Block {
             {
                 return Err(BlockValidationError::TooManyPublicAnnouncements);
             }
+        }
+
+        // 2.d)
+        if msa.hash() != self.body().mutator_set_accumulator.hash() {
+            return Err(BlockValidationError::MutatorSetUpdateIntegrity);
+        }
+
+        // 1.d)
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
+            return Err(BlockValidationError::ProofValidity);
         }
 
         Ok(())
@@ -1031,6 +1029,7 @@ impl Block {
         &self,
     ) -> Result<NativeCurrencyAmount, BlockValidationError> {
         if self.body().transaction_kernel.fee.is_negative() {
+            // if dbg!(self.body().transaction_kernel.fee).is_negative() {
             return Err(BlockValidationError::NegativeFee);
         }
 
@@ -1154,6 +1153,39 @@ pub(crate) mod tests {
     use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
+
+    /// Relies on the private fields hence is here for re-export via `tests::shared::strategies`.
+    pub mod strategies {
+        use super::*;
+        use proptest::prop_compose;
+
+        prop_compose! {
+            pub fn arbitrary_mostly() (
+                header in arb::<BlockHeader>(),
+                transaction_kernel in crate::tests::shared::strategies::txkernel::txkernel(),
+                lock_free_mmr_accumulator in arb::<MmrAccumulator>(),
+                block_mmr_accumulator in arb::<MmrAccumulator>(),
+                appendix in arb::<BlockAppendix>(),
+            ) -> Block {
+                Block{ kernel: BlockKernel{ header, body: BlockBody::new(
+                    transaction_kernel, Default::default(), lock_free_mmr_accumulator, block_mmr_accumulator
+                ), appendix }, proof: Default::default(), digest: Default::default() }
+            }
+        }
+        prop_compose! {
+            pub fn previous() (
+                header in arb::<BlockHeader>(),
+                transaction_kernel in crate::tests::shared::strategies::txkernel::txkernel(),
+                lock_free_mmr_accumulator in arb::<MmrAccumulator>(),
+                block_mmr_accumulator in arb::<MmrAccumulator>(),
+                appendix in arb::<BlockAppendix>(),
+            ) -> Block {
+                Block{ kernel: BlockKernel{ header, body: BlockBody::new(
+                    transaction_kernel, Default::default(), lock_free_mmr_accumulator, block_mmr_accumulator
+                ), appendix }, proof: Default::default(), digest: Default::default() }
+            }
+        }
+    }
 
     #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {
@@ -1501,6 +1533,9 @@ pub(crate) mod tests {
     }
 
     mod block_is_valid {
+        // use proptest::prelude::Strategy;
+        // use proptest::strategy::ValueTree;
+        // use proptest::test_runner::TestRunner;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
@@ -1510,6 +1545,9 @@ pub(crate) mod tests {
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
         use crate::triton_vm_job_queue::TritonVmJobPriority;
+        use crate::{
+            api::export::NeptuneProof, tests::shared::strategies::block::arbitrary_mostly,
+        };
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -1714,6 +1752,339 @@ pub(crate) mod tests {
             let future_time5 = now + Timestamp::seconds(86400 * 2);
             block1.kernel.header.timestamp = future_time5;
             assert!(!block1.is_valid(&genesis_block, now, network).await);
+        }
+
+        use proptest::{prop_assert_eq, prop_assume};
+        // #[traced_test]
+        #[test_strategy::proptest(async = "tokio")]
+        async fn proptest_negs(
+            #[strategy(arbitrary_mostly())] mut b_previous: Block,
+            #[strategy(arbitrary_mostly())] mut b_now: Block,
+            #[strategy(arb::<Timestamp>())] ts_previous: Timestamp,
+            #[strategy((#ts_previous.0.value() + 6000)..=(BFieldElement::MAX - 1288490188500000))]
+            ts_now: u64,
+            // #[strategy((#ts_now + 6000)..(#ts_now + 1288490188500000))] ts_next: u64,
+            #[strategy((#ts_now + 1288490188500000)..=BFieldElement::MAX)] ts_future: u64,
+            #[strategy(#ts_now..=BFieldElement::MAX)] ts_kernel: u64,
+            #[strategy(arb())] proof_an: NeptuneProof,
+            #[strategy(arb())] msa_an: MutatorSetAccumulator,
+            // #[strategy(arb())] rr_an: crate::util_types::mutator_set::removal_record::RemovalRecord,
+            // #[strategy(arb())] record_addition_an: crate::util_types::mutator_set::addition_record::AdditionRecord,
+        ) {
+            // dbg!(BFieldElement::montyred(dbg!(ts_previous.0.into())), BFieldElement::MAX, ts_previous.0.value());
+            // dbg!(BFieldElement::canonical_representation(ts_previous.0.into()));
+            let (
+                now,
+                // ts_next,
+                ts_future,
+                ts_kernel,
+            ) = (
+                Timestamp(bfe![ts_now]),
+                // Timestamp(bfe![ts_next]),
+                Timestamp(bfe![ts_future]),
+                Timestamp(bfe![ts_kernel]),
+            );
+            // println!("`ts_previous`: {ts_previous}, `ts_now`: {ts_now}, `ts_future`: {ts_future}");
+
+            proptest::prop_assume!(
+                b_now.kernel.header.height != b_previous.kernel.header.height + 1
+            );
+            assert_eq![
+                BlockValidationError::BlockHeight,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            b_now.kernel.header.height = b_previous.kernel.header.height + 1;
+            proptest::prop_assume!(b_now.kernel.header.prev_block_digest != b_previous.hash());
+            assert_eq![
+                BlockValidationError::PrevBlockDigest,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            b_now.kernel.header.prev_block_digest = b_previous.hash();
+            assert_eq![
+                BlockValidationError::BlockMmrUpdate,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            let mut mmra = b_previous.kernel.body.block_mmr_accumulator.clone();
+            mmra.append(b_previous.hash());
+            b_now.kernel.body.block_mmr_accumulator = mmra;
+            prop_assume!(
+                b_now.kernel.header.timestamp
+                    < (Network::Main.minimum_block_time() + b_previous.kernel.header.timestamp)
+            );
+            assert_eq![
+                BlockValidationError::MinimumBlockTime,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            b_previous.kernel.header.timestamp = ts_previous;
+            b_now.kernel.header.timestamp = ts_future;
+            let expected_difficulty = if Block::should_reset_difficulty(
+                Network::Main,
+                b_now.header().timestamp,
+                b_previous.header().timestamp,
+            ) {
+                Network::Main.genesis_difficulty()
+            } else {
+                difficulty_control(
+                    b_now.header().timestamp,
+                    b_previous.header().timestamp,
+                    b_previous.header().difficulty,
+                    Network::Main.target_block_interval(),
+                    b_previous.header().height,
+                )
+            };
+            if expected_difficulty != b_now.kernel.header.difficulty {
+                assert_eq![
+                    BlockValidationError::Difficulty,
+                    b_now
+                        .validate(&b_previous, now, Network::Main)
+                        .await
+                        .err()
+                        .unwrap()
+                ]
+            }
+
+            b_now.kernel.header.difficulty = expected_difficulty;
+            let expected_cumulative =
+                b_previous.header().cumulative_proof_of_work + b_previous.header().difficulty;
+            prop_assume!(b_now.header().cumulative_proof_of_work != expected_cumulative);
+            assert_eq![
+                BlockValidationError::CumulativeProofOfWork,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            b_now.kernel.header.cumulative_proof_of_work = expected_cumulative;
+            assert_eq![
+                BlockValidationError::FutureDating,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            b_now.kernel.header.timestamp = now;
+            b_now.kernel.header.difficulty = if Block::should_reset_difficulty(
+                Network::Main,
+                b_now.header().timestamp,
+                b_previous.header().timestamp,
+            ) {
+                Network::Main.genesis_difficulty()
+            } else {
+                difficulty_control(
+                    b_now.header().timestamp,
+                    b_previous.header().timestamp,
+                    b_previous.header().difficulty,
+                    Network::Main.target_block_interval(),
+                    b_previous.header().height,
+                )
+            };
+
+            assert_eq![
+                BlockValidationError::AppendixMissingClaim,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            // TODO separate this one as clearly independent for a chance to parallelize in another thread #thread2
+            b_now.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_now.body()));
+            let mut b_now_huge = b_now.clone();
+            b_now_huge.proof = BlockProof::SingleProof(NeptuneProof::from(vec![
+                Default::default();
+                MAX_BLOCK_SIZE_AFTER_HF_1
+                    + 1
+            ]));
+            prop_assert_eq![
+                BlockValidationError::MaxSize,
+                b_now_huge
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            prop_assert_eq![
+                BlockValidationError::ProofQuality,
+                b_now
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            b_now.proof = BlockProof::SingleProof(proof_an);
+            let mut b_now_dup = b_now.clone();
+            let mut tx_kernel_dup =
+                TransactionKernelProxy::from(b_now.kernel.body.transaction_kernel.clone());
+            tx_kernel_dup.inputs.push(tx_kernel_dup.inputs[0].clone());
+            b_now_dup.kernel.body.transaction_kernel = tx_kernel_dup.into_kernel();
+            // let mut appendix_dup = b_now_dup.kernel.appendix._claims().clone();
+            // appendix_dup.push(appendix_dup[0].clone());
+            // let appendix_dup = BlockAppendix::new(appendix_dup);
+            // b_now_dup.kernel.appendix = appendix_dup;
+            b_now_dup.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_now_dup.body()));
+            prop_assert_eq![
+                BlockValidationError::RemovalRecordsUniqueness,
+                b_now_dup
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            let mut b_now_fee_neg = b_now.clone();
+            // prop_assume!(!b_now.kernel.body.transaction_kernel.fee.is_zero());
+            let mut tx_kernel_fee_neg =
+                TransactionKernelProxy::from(b_now_fee_neg.kernel.body.transaction_kernel.clone());
+            if b_now.kernel.body.transaction_kernel.fee.is_negative() {
+                tx_kernel_fee_neg.fee = -b_now.kernel.body.transaction_kernel.fee;
+                b_now.kernel.body.transaction_kernel = tx_kernel_fee_neg.into_kernel();
+            } else {
+                // if b_now_fee_neg.kernel.body.transaction_kernel.fee.is_zero() {
+                tx_kernel_fee_neg.fee = -NativeCurrencyAmount::one();
+                b_now_fee_neg.kernel.body.transaction_kernel = tx_kernel_fee_neg.into_kernel();
+                b_now_fee_neg.kernel.appendix =
+                    BlockAppendix::new(BlockAppendix::consensus_claims(b_now_fee_neg.body()));
+                // }
+                // else {b_now_fee_neg.kernel.body.transaction_kernel.fee = -b_now.kernel.body.transaction_kernel.fee}
+            }
+            prop_assert_eq![
+                BlockValidationError::NegativeFee,
+                b_now_fee_neg
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            if b_previous.kernel.body.transaction_kernel.fee.is_negative() {
+                let mut tx_kernel_prev =
+                    TransactionKernelProxy::from(b_previous.kernel.body.transaction_kernel.clone());
+                tx_kernel_prev.fee = -b_previous.kernel.body.transaction_kernel.fee;
+                b_previous.kernel.body.transaction_kernel = tx_kernel_prev.into_kernel();
+            }
+            // prop_assume!(b_now.body().cumulative_proof_of_work != expected_cumulative);
+            let mut b_now_bad_spending = b_now.clone();
+            b_now_bad_spending.kernel.body.mutator_set_accumulator = msa_an;
+            b_now_bad_spending.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_now_bad_spending.body()));
+            assert_eq![
+                BlockValidationError::RemovalRecordsValidity,
+                b_now_bad_spending
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            /* > S:
+            Is that ok two identical addition records in a tx kernel proxy doesn't trigger a validation error (at least up to the digests  comparison for integrity)? I mean I can imagine some deduplication under the hood hence asking. I thought it's the simplest way to hit BlockValidationError::MutatorSetUpdateImpossible (renamed a bit); but maybe there's a better path to it?
+
+            > Thorkil Schmidiger -- will never ask for money:
+            There might be an error wrt. mutator set update that cannot be reached.
+
+            > Thorkil Schmidiger -- will never ask for money:
+            I'm not sure it's possible to hit the `BlockValidationError::MutatorSetUpdatePossible` error.
+            */
+            // let mut b_now_bad_update = b_now.clone();
+            // let mut tx_kernel_bad_update = TransactionKernelProxy::from(b_now_bad_update.kernel.body.transaction_kernel.clone());
+            // tx_kernel_bad_update.inputs = Vec::new();
+            // tx_kernel_bad_update.outputs = [record_addition_an; 2].to_vec();
+            // b_now_bad_update.kernel.body.transaction_kernel = tx_kernel_bad_update.into_kernel();
+            // // MutatorSetUpdate{additions: [record_addition_an; 2].to_vec(), removals: Vec::new()}.apply_to_accumulator(&mut b_now_bad_update.kernel.body.mutator_set_accumulator);
+            // b_now_bad_update.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_now_bad_update.body()));
+            // // dbg!(&b_now_bad_update.kernel.body.transaction_kernel.inputs);
+            // assert_eq![
+            //     // BlockValidationError::MutatorSetUpdateImpossible,
+            //     BlockValidationError::MutatorSetUpdateIntegrity,
+            //     b_now_bad_update.validate(&b_previous, now, Network::Main).await.err().unwrap()
+            // ];
+
+            let mut b_now_kernel_ts = b_now.clone();
+            let mut tx_kernel_ts = TransactionKernelProxy::from(
+                b_now_kernel_ts.kernel.body.transaction_kernel.clone(),
+            );
+            tx_kernel_ts.timestamp = ts_kernel;
+            tx_kernel_ts.inputs = Vec::new();
+            b_now_kernel_ts.kernel.body.transaction_kernel = tx_kernel_ts.into_kernel();
+            b_now_kernel_ts.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_now_kernel_ts.body()));
+            // dbg!(&b_now_kernel_ts.kernel.body.transaction_kernel.inputs);
+            assert_eq![
+                BlockValidationError::TransactionTimestamp,
+                b_now_kernel_ts
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
+
+            // // prop_assume!(proof_an != expected_cumulative);
+            // prop_assert_eq![BlockValidationError::ProofValidity, b_now.validate(
+            //     &b_previous, now, Network::Main
+            // ).await.err().unwrap()];
+
+            /* proof requiring error will be reached with `TestRunner::deterministic()`
+            // #[traced_test]
+            #[apply(shared_tokio_runtime)]
+            async fn test_negs() {
+                todo!("BlockValidationError::TransactionTimestamp");
+
+                let mut test_runner = TestRunner::deterministic();
+                let (b_prev, ts_next) = strategies::previous().prop_flat_map(|b_prev| {
+                    let ts_prev = b_prev.kernel.header.timestamp.0.value();
+                    (proptest::prelude::Just(b_prev), (ts_prev + 6000)..(ts_prev + 1288490188500000))
+                }).new_tree(&mut test_runner).unwrap().current();
+                // struct Test {
+                //     b_prev: Block,
+                //     b_next: Block,
+                //     now: u64,
+                //     network: Network,
+                // };
+                let ts_next = Timestamp(bfe![ts_next]);
+
+                let mut rng_seeded = StdRng::seed_from_u64(2225550001);
+                let b_next =
+                    loop {
+                        let b_n = fake_valid_successor_for_tests(
+                            &b_prev, ts_next, rng_seeded.random(), Network::Main
+                        ).await;
+                        if !dbg!(b_n.kernel.body.transaction_kernel.fee).is_negative() {break b_n;}
+                    };
+                // prop_assume![!dbg!(b_next.kernel.body.transaction_kernel.fee).is_negative()];
+
+                // see `shared::fake_create_block_transaction_for_tests` for using `nop`
+
+                // dbg![b_next.validate(&b_now, ts_next, Network::Main).await];
+            } */
         }
     }
 

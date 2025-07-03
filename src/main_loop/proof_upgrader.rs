@@ -523,8 +523,8 @@ impl UpgradeJob {
     ///
     /// Upgrades transactions to a proof of higher quality that is more likely
     /// to be picked up by a miner. Returns the upgraded proof, or an error if
-    /// the prover is already in use and the proof_job_options is set to not wait if
-    /// prover is busy.
+    /// the prover is already in use and the `proof_job_options` is set to not wait if
+    /// the prover is busy.
     pub(crate) async fn upgrade(
         self,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,

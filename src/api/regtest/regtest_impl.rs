@@ -1,5 +1,3 @@
-// private module.  no need for module docs.
-
 use tasm_lib::prelude::Digest;
 
 use super::error::RegTestError;

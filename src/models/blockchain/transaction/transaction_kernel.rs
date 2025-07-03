@@ -518,7 +518,8 @@ pub mod tests {
 
     #[proptest]
     fn test_decode_transaction_kernel(
-        #[strategy(crate::tests::shared::strategies::txkernel())] kernel: TransactionKernel,
+        #[strategy(crate::tests::shared::strategies::txkernel::txkernel())]
+        kernel: TransactionKernel,
     ) {
         let encoded = kernel.encode();
         let decoded = *TransactionKernel::decode(&encoded).unwrap();

@@ -38,6 +38,7 @@ enum MockProofBehavior {
 /// 2. valid-mock.    a mock proof that passes validation (if mock proofs are allowed)
 /// 3. invalid-mock.  a mock proof that fails validation (if mock proofs are allowed, or not)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct NeptuneProof {
     proof: VmProof,
 }
