@@ -2047,44 +2047,198 @@ pub(crate) mod tests {
                     .unwrap()
             ];
 
-            // // prop_assume!(proof_an != expected_cumulative);
-            // prop_assert_eq![BlockValidationError::ProofValidity, b_now.validate(
-            //     &b_previous, now, Network::Main
-            // ).await.err().unwrap()];
+            // Test AppendixTooLarge
+            let mut b_now_large_appendix = b_now.clone();
+            let large_claims = vec![Claim::default(); MAX_NUM_CLAIMS + 1];
+            b_now_large_appendix.kernel.appendix = BlockAppendix::new(large_claims);
+            prop_assert_eq![
+                BlockValidationError::AppendixTooLarge,
+                b_now_large_appendix
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
 
-            /* proof requiring error will be reached with `TestRunner::deterministic()`
-            // #[traced_test]
-            #[apply(shared_tokio_runtime)]
-            async fn test_negs() {
-                todo!("BlockValidationError::TransactionTimestamp");
+            // Test CoinbaseTooBig
+            let mut b_now_big_coinbase = b_now.clone();
+            let mut tx_kernel_big_coinbase = TransactionKernelProxy::from(
+                b_now_big_coinbase.kernel.body.transaction_kernel.clone(),
+            );
+            let block_subsidy = Block::block_subsidy(b_now.header().height);
+            tx_kernel_big_coinbase.coinbase = Some(block_subsidy + NativeCurrencyAmount::one());
+            tx_kernel_big_coinbase.inputs = Vec::new();
+            b_now_big_coinbase.kernel.body.transaction_kernel = tx_kernel_big_coinbase.into_kernel();
+            b_now_big_coinbase.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_now_big_coinbase.body()));
+            prop_assert_eq![
+                BlockValidationError::CoinbaseTooBig,
+                b_now_big_coinbase
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
 
-                let mut test_runner = TestRunner::deterministic();
-                let (b_prev, ts_next) = strategies::previous().prop_flat_map(|b_prev| {
-                    let ts_prev = b_prev.kernel.header.timestamp.0.value();
-                    (proptest::prelude::Just(b_prev), (ts_prev + 6000)..(ts_prev + 1288490188500000))
-                }).new_tree(&mut test_runner).unwrap().current();
-                // struct Test {
-                //     b_prev: Block,
-                //     b_next: Block,
-                //     now: u64,
-                //     network: Network,
-                // };
-                let ts_next = Timestamp(bfe![ts_next]);
+            // Test NegativeCoinbase
+            let mut b_now_neg_coinbase = b_now.clone();
+            let mut tx_kernel_neg_coinbase = TransactionKernelProxy::from(
+                b_now_neg_coinbase.kernel.body.transaction_kernel.clone(),
+            );
+            tx_kernel_neg_coinbase.coinbase = Some(-NativeCurrencyAmount::one());
+            tx_kernel_neg_coinbase.inputs = Vec::new();
+            b_now_neg_coinbase.kernel.body.transaction_kernel = tx_kernel_neg_coinbase.into_kernel();
+            b_now_neg_coinbase.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_now_neg_coinbase.body()));
+            prop_assert_eq![
+                BlockValidationError::NegativeCoinbase,
+                b_now_neg_coinbase
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
 
-                let mut rng_seeded = StdRng::seed_from_u64(2225550001);
-                let b_next =
-                    loop {
-                        let b_n = fake_valid_successor_for_tests(
-                            &b_prev, ts_next, rng_seeded.random(), Network::Main
-                        ).await;
-                        if !dbg!(b_n.kernel.body.transaction_kernel.fee).is_negative() {break b_n;}
-                    };
-                // prop_assume![!dbg!(b_next.kernel.body.transaction_kernel.fee).is_negative()];
+            // Test MutatorSetUpdateIntegrity
+            let mut b_now_bad_integrity = b_now.clone();
+            let mut tx_kernel_bad_integrity = TransactionKernelProxy::from(
+                b_now_bad_integrity.kernel.body.transaction_kernel.clone(),
+            );
+            tx_kernel_bad_integrity.inputs = Vec::new();
+            tx_kernel_bad_integrity.outputs = Vec::new();
+            b_now_bad_integrity.kernel.body.transaction_kernel = tx_kernel_bad_integrity.into_kernel();
+            // Keep the old mutator set accumulator to trigger integrity error
+            b_now_bad_integrity.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_now_bad_integrity.body()));
+            prop_assert_eq![
+                BlockValidationError::MutatorSetUpdateIntegrity,
+                b_now_bad_integrity
+                    .validate(&b_previous, now, Network::Main)
+                    .await
+                    .err()
+                    .unwrap()
+            ];
 
-                // see `shared::fake_create_block_transaction_for_tests` for using `nop`
+            // Test TooManyInputs (only for blocks after HF_1)
+            if b_now.header().height >= BLOCK_HEIGHT_HF_1 {
+                let mut b_now_many_inputs = b_now.clone();
+                let mut tx_kernel_many_inputs = TransactionKernelProxy::from(
+                    b_now_many_inputs.kernel.body.transaction_kernel.clone(),
+                );
+                tx_kernel_many_inputs.inputs = vec![
+                    crate::util_types::mutator_set::removal_record::RemovalRecord::default();
+                    MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1 + 1
+                ];
+                b_now_many_inputs.kernel.body.transaction_kernel = tx_kernel_many_inputs.into_kernel();
+                b_now_many_inputs.kernel.appendix =
+                    BlockAppendix::new(BlockAppendix::consensus_claims(b_now_many_inputs.body()));
+                prop_assert_eq![
+                    BlockValidationError::TooManyInputs,
+                    b_now_many_inputs
+                        .validate(&b_previous, now, Network::Main)
+                        .await
+                        .err()
+                        .unwrap()
+                ];
 
-                // dbg![b_next.validate(&b_now, ts_next, Network::Main).await];
-            } */
+                // Test TooManyOutputs
+                let mut b_now_many_outputs = b_now.clone();
+                let mut tx_kernel_many_outputs = TransactionKernelProxy::from(
+                    b_now_many_outputs.kernel.body.transaction_kernel.clone(),
+                );
+                tx_kernel_many_outputs.inputs = Vec::new();
+                tx_kernel_many_outputs.outputs = vec![
+                    crate::util_types::mutator_set::addition_record::AdditionRecord::default();
+                    MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1 + 1
+                ];
+                b_now_many_outputs.kernel.body.transaction_kernel = tx_kernel_many_outputs.into_kernel();
+                b_now_many_outputs.kernel.appendix =
+                    BlockAppendix::new(BlockAppendix::consensus_claims(b_now_many_outputs.body()));
+                prop_assert_eq![
+                    BlockValidationError::TooManyOutputs,
+                    b_now_many_outputs
+                        .validate(&b_previous, now, Network::Main)
+                        .await
+                        .err()
+                        .unwrap()
+                ];
+
+                // Test TooManyPublicAnnouncements
+                let mut b_now_many_announcements = b_now.clone();
+                let mut tx_kernel_many_announcements = TransactionKernelProxy::from(
+                    b_now_many_announcements.kernel.body.transaction_kernel.clone(),
+                );
+                tx_kernel_many_announcements.inputs = Vec::new();
+                tx_kernel_many_announcements.public_announcements = vec![
+                    crate::models::blockchain::transaction::PublicAnnouncement::default();
+                    MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1 + 1
+                ];
+                b_now_many_announcements.kernel.body.transaction_kernel = tx_kernel_many_announcements.into_kernel();
+                b_now_many_announcements.kernel.appendix =
+                    BlockAppendix::new(BlockAppendix::consensus_claims(b_now_many_announcements.body()));
+                prop_assert_eq![
+                    BlockValidationError::TooManyPublicAnnouncements,
+                    b_now_many_announcements
+                        .validate(&b_previous, now, Network::Main)
+                        .await
+                        .err()
+                        .unwrap()
+                ];
+            }
+
+            // Note: ProofValidity and MutatorSetUpdateImpossible are not tested here
+            // as they require more complex setup or may not be reachable through property testing
+        }
+
+        /// Test error kinds that require proof-based testing or complex setup
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn test_proof_requiring_errors() {
+            let network = Network::Main;
+            let now = Timestamp::now();
+            
+            // Create a simple genesis block as previous
+            let genesis_block = Block::genesis(network);
+            
+            // Create a block with invalid proof to test ProofValidity
+            let mut invalid_proof_block = genesis_block.clone();
+            invalid_proof_block.kernel.header.height = genesis_block.header().height + 1;
+            invalid_proof_block.kernel.header.prev_block_digest = genesis_block.hash();
+            
+            // Update MMR
+            let mut mmra = genesis_block.kernel.body.block_mmr_accumulator.clone();
+            mmra.append(genesis_block.hash());
+            invalid_proof_block.kernel.body.block_mmr_accumulator = mmra;
+            
+            // Set proper timestamp and difficulty
+            invalid_proof_block.kernel.header.timestamp = now;
+            invalid_proof_block.kernel.header.difficulty = network.genesis_difficulty();
+            invalid_proof_block.kernel.header.cumulative_proof_of_work = 
+                genesis_block.header().cumulative_proof_of_work + genesis_block.header().difficulty;
+            
+            // Create empty transaction kernel to avoid other validation errors
+            let mut tx_kernel = TransactionKernelProxy::from(
+                invalid_proof_block.kernel.body.transaction_kernel.clone()
+            );
+            tx_kernel.inputs = Vec::new();
+            tx_kernel.outputs = Vec::new();
+            tx_kernel.public_announcements = Vec::new();
+            tx_kernel.fee = NativeCurrencyAmount::zero();
+            tx_kernel.coinbase = None;
+            tx_kernel.timestamp = now;
+            invalid_proof_block.kernel.body.transaction_kernel = tx_kernel.into_kernel();
+            
+            // Set proper appendix
+            invalid_proof_block.kernel.appendix = 
+                BlockAppendix::new(BlockAppendix::consensus_claims(invalid_proof_block.body()));
+            
+            // Set an invalid proof (mock proof that should fail verification)
+            invalid_proof_block.proof = BlockProof::SingleProof(NeptuneProof::from(vec![0u8; 100]));
+            
+            // This should trigger ProofValidity error
+            let result = invalid_proof_block.validate(&genesis_block, now, network).await;
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err(), BlockValidationError::ProofValidity);
         }
     }
 
