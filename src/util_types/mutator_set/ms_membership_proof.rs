@@ -571,6 +571,7 @@ pub mod tests {
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
+    use rand::seq::IndexedRandom;
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
@@ -1409,6 +1410,66 @@ pub mod tests {
             let encoded = msmp.encode();
             let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
             assert_eq!(msmp, decoded);
+        }
+    }
+
+    #[test]
+    fn batch_updates_on_small_mmr() {
+        let mut rng = rand::rng();
+
+        for remove_share in [0.01, 0.1, 0.4, 0.7, 0.99, 1.0] {
+            let mut msa = MutatorSetAccumulator::default();
+            let mut msmps = vec![];
+            let mut items = vec![];
+            let mut removed = vec![];
+            for j in 0usize..usize::try_from(25 * BATCH_SIZE).unwrap() {
+                println!("{j}");
+                let item: Digest = rng.random();
+                let sender_randomness: Digest = rng.random();
+                let receiver_preimage: Digest = rng.random();
+                let msmp = msa.prove(item, sender_randomness, receiver_preimage);
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+                MsMembershipProof::batch_update_from_addition(
+                    &mut msmps.iter_mut().collect_vec(),
+                    &items,
+                    &msa,
+                    &addition_record,
+                )
+                .unwrap();
+                msa.add(&addition_record);
+                msmps.push(msmp);
+                items.push(item);
+
+                if rng.random_bool(remove_share) {
+                    let not_removed = (0..=j).filter(|i| !removed.contains(i)).collect_vec();
+                    let remove = *not_removed.choose(&mut rng).unwrap();
+                    let remove_item = items[remove];
+                    let remove_msmp = &msmps[remove];
+                    let removal_record = msa.drop(remove_item, remove_msmp);
+                    MsMembershipProof::batch_update_from_remove(
+                        &mut msmps.iter_mut().collect_vec(),
+                        &removal_record,
+                    )
+                    .unwrap();
+                    assert!(msa.can_remove(&removal_record));
+                    msa.remove(&removal_record);
+                    removed.push(remove);
+                }
+            }
+
+            for ((j, msmp), item) in msmps.into_iter().enumerate().zip(items) {
+                if removed.contains(&j) {
+                    assert!(
+                        !msa.verify(item, &msmp),
+                        "index {j} must fail to verify since it was removed."
+                    );
+                } else {
+                    assert!(
+                        msa.verify(item, &msmp),
+                        "index {j} must verify since it was never removed."
+                    );
+                }
+            }
         }
     }
 
