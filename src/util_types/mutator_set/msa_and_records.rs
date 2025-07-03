@@ -68,6 +68,7 @@ impl MsaAndRecords {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
     use std::collections::HashMap;
+    use std::collections::HashSet;
 
     use proptest::arbitrary::Arbitrary;
     use proptest::collection::vec;
@@ -104,6 +105,10 @@ pub mod neptune_arbitrary {
         // Returns unpacked removal records. Caller must handle packing.
         fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
             let (removables, aocl_size) = parameters;
+            assert!(
+                removables.len() <= usize::try_from(aocl_size).unwrap(),
+                "Cannot remove more elements than are present"
+            );
 
             // compute the canonical commitments that were added to the aocl at some prior,
             // as this is information needed to produce membership proofs for the items that
@@ -121,11 +126,23 @@ pub mod neptune_arbitrary {
             vec(0u64..aocl_size, removables.len())
                 .prop_flat_map(move |removed_aocl_indices| {
 
+                // Ensure AOCL indices are unique. Just add indices
+                // deterministically if they are not, since all Hell would
+                // break loose if we spun up an RNG in this context.
+                let mut removed_aocl_indices: HashSet<_> = removed_aocl_indices.into_iter().collect();
+                let mut j = 1u64;
+                let a_big_prime = (1u64 << 63) - 165;
+                let a_small_prime = 961749043;
+                while removed_aocl_indices.len() < removables.len() {
+                    removed_aocl_indices.insert((j.wrapping_mul(a_big_prime).wrapping_add(a_small_prime)) % aocl_size);
+                    j += 1;
+                }
+
                 // prepare unwrap
                 let removables = removables.clone();
 
                 // bundle all indices and leafs for pseudorandom aocl
-                let all_aocl_indices_and_leafs = removed_aocl_indices.into_iter().zip(removable_commitments.iter().map(|ar|ar.canonical_commitment)).collect_vec();
+                let all_aocl_indices_and_leafs = removed_aocl_indices.into_iter().zip_eq(removable_commitments.iter().map(|ar|ar.canonical_commitment)).collect_vec();
 
                 // unwrap random aocl mmr with membership proofs
                 MmraAndMembershipProofs::arbitrary_with((all_aocl_indices_and_leafs, aocl_size))
@@ -372,6 +389,33 @@ mod tests {
         msa_and_records: MsaAndRecords,
     ) {
         prop_assert!(msa_and_records.verify(
+            &removables
+                .iter()
+                .map(|(item, _sr, _rp)| *item)
+                .collect_vec()
+        ));
+    }
+
+    #[test_strategy::proptest(cases = 6)]
+    fn msa_and_records_invalid_on_failing_swbf_leaf(
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 30usize))]
+        removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#removables, 100u64)))]
+        msa_and_records: MsaAndRecords,
+        #[strategy(arb())] new_leaf: Digest,
+    ) {
+        let mut msa_and_records = msa_and_records;
+        prop_assert!(msa_and_records.verify(
+            &removables
+                .iter()
+                .map(|(item, _sr, _rp)| *item)
+                .collect_vec()
+        ));
+        msa_and_records
+            .mutator_set_accumulator
+            .swbf_inactive
+            .append(new_leaf);
+        prop_assert!(!msa_and_records.verify(
             &removables
                 .iter()
                 .map(|(item, _sr, _rp)| *item)
