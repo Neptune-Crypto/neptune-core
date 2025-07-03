@@ -132,8 +132,13 @@ impl MsMembershipProof {
         let new_item_index2 = mutator_set.aocl.num_leafs();
 
         // window does slide
-        let batch_index = new_item_index2 / u64::from(BATCH_SIZE);
-        let old_window_start_batch_index = batch_index - 1;
+        let next_batch_index = new_item_index2 / u64::from(BATCH_SIZE);
+        let current_batch_index = next_batch_index - 1;
+        assert_eq!(
+            current_batch_index,
+            mutator_set.swbf_inactive.num_leafs(),
+            "Number of SWBF MMR leafs must match current batch index"
+        );
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
@@ -177,7 +182,7 @@ impl MsMembershipProof {
         // Find the indices of the mutator set membership proofs whose
         // `target_chunks` field needs a new dictionary entry for the slid chunk.
         let indices_for_mps_with_new_chunk_dictionary_entry: Vec<usize> =
-            match chunk_index_to_mp_index.get(&old_window_start_batch_index) {
+            match chunk_index_to_mp_index.get(&current_batch_index) {
                 Some(vals) => vals.clone(),
                 None => vec![],
             };
@@ -186,7 +191,7 @@ impl MsMembershipProof {
         // to be updated because of the window sliding. We just
         let mut mps_for_batch_append: HashSet<usize> = HashSet::new();
         for (chunk_index, mp_indices) in chunk_index_to_mp_index {
-            if chunk_index < old_window_start_batch_index {
+            if chunk_index < current_batch_index {
                 for mp_index in mp_indices {
                     mps_for_batch_append.insert(mp_index);
                 }
@@ -199,7 +204,7 @@ impl MsMembershipProof {
         // proofs that need it.
         for i in &indices_for_mps_with_new_chunk_dictionary_entry {
             membership_proofs.index_mut(*i).target_chunks.insert(
-                old_window_start_batch_index,
+                current_batch_index,
                 (new_chunk_auth_path.clone(), new_chunk.clone()),
             );
         }
@@ -227,7 +232,7 @@ impl MsMembershipProof {
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
                 for (chunk_index, (mmr_mp, _chunk)) in mp.target_chunks.iter_mut() {
-                    if *chunk_index != old_window_start_batch_index {
+                    if *chunk_index != current_batch_index {
                         mmr_membership_proofs_for_append.push(mmr_mp);
                         mmr_membership_indices.push(*chunk_index);
                         mmr_mp_index_to_ms_mp_index.push(i as u64);
