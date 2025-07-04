@@ -271,24 +271,40 @@ impl Transaction {
 pub(crate) mod tests {
     use lock_script::LockScript;
     use macro_rules_attr::apply;
+    use num_traits::Zero;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
-    use rand::random;
+    use rand::rngs::StdRng;
+    use rand::{random, Rng, SeedableRng};
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::prelude::Tip5;
     use tests::primitive_witness::SaltedUtxos;
     use tests::utxo::Utxo;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::{TxInputList, TxOutputList};
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
+    use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::transaction::validity::single_proof::{
+        produce_single_proof, SingleProof,
+    };
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::wallet::address::AddressableKeyType;
+    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::utxo_notification::{
+        UtxoNotificationMedium, UtxoNotifyMethod,
+    };
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -432,6 +448,140 @@ pub(crate) mod tests {
                 prop(to_be_updated.clone(), mined.clone(), consensus_rule_set).await;
             }
         }
+    }
+
+    // #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn danger_danger() {
+        let network = Network::Main;
+        let consensus_rule_set = ConsensusRuleSet::Genesis;
+        let genesis = Block::genesis(network);
+
+        let msa = genesis.mutator_set_accumulator_after().unwrap();
+        let now = network.launch_date() + Timestamp::hours(12);
+        let cheated_fee = NativeCurrencyAmount::coins(100);
+        let fee_tx = TransactionDetails::new_without_coinbase(
+            TxInputList::default(),
+            TxOutputList::default(),
+            cheated_fee,
+            now,
+            msa.clone(),
+            network,
+        );
+        let fee_tx = fee_tx.primitive_witness();
+        let fee_sp = produce_single_proof(
+            &fee_tx,
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+            ConsensusRuleSet::Genesis,
+        )
+        .await
+        .unwrap();
+        let fee_tx = Transaction {
+            kernel: fee_tx.kernel,
+            proof: TransactionProof::SingleProof(fee_sp),
+        };
+        assert!(fee_tx.is_valid(network, consensus_rule_set).await);
+        assert_eq!(cheated_fee, fee_tx.kernel.fee);
+
+        let coinbase_amt = NativeCurrencyAmount::coins(128);
+        let mut rng = StdRng::seed_from_u64(479);
+        let mut alice = mock_genesis_global_state(
+            0,
+            WalletEntropy::new_pseudorandom(rng.random()),
+            cli_args::Args::default(),
+        )
+        .await;
+        let a_key = alice
+            .api_mut()
+            .wallet_mut()
+            .next_unused_spending_key(AddressableKeyType::Symmetric)
+            .await
+            .unwrap();
+
+        let mut half_coinbase = coinbase_amt;
+        half_coinbase.div_two();
+        let self_reward_0 = TxOutput::native_currency(
+            half_coinbase,
+            Digest::default(),
+            a_key.to_address(),
+            UtxoNotificationMedium::OnChain,
+            true,
+        );
+        let self_reward_1 = TxOutput::native_currency(
+            half_coinbase,
+            Digest::default(),
+            a_key.to_address(),
+            UtxoNotificationMedium::OnChain,
+            true,
+        )
+        .with_time_lock(now + Timestamp::years(3) + Timestamp::hours(1));
+
+        let guesser_reward = NativeCurrencyAmount::zero();
+        let coinbase_outputs = TxOutputList::from(vec![self_reward_0, self_reward_1]);
+        let coinbase = TransactionDetails::new_with_coinbase(
+            TxInputList::default(),
+            coinbase_outputs.clone(),
+            coinbase_amt,
+            guesser_reward,
+            now,
+            msa.clone(),
+            network,
+        );
+        let coinbase = coinbase.primitive_witness();
+        let coinbase_sp = produce_single_proof(
+            &coinbase,
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+            ConsensusRuleSet::Genesis,
+        )
+        .await
+        .unwrap();
+        let coinbase = Transaction {
+            kernel: coinbase.kernel,
+            proof: TransactionProof::SingleProof(coinbase_sp),
+        };
+        assert!(coinbase.is_valid(network, consensus_rule_set).await);
+
+        let block_tx = BlockTransaction::merge(
+            coinbase.into(),
+            fee_tx,
+            Default::default(),
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+        let block1 = Block::compose(
+            &genesis,
+            block_tx,
+            now,
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert!(block1.is_valid(&genesis, now, network).await);
+
+        assert_eq!(cheated_fee, block1.body().transaction_kernel.fee);
+        alice
+            .set_new_self_composed_tip(
+                block1,
+                coinbase_outputs
+                    .expected_utxos(UtxoNotifier::OwnMinerComposeBlock, a_key.privacy_preimage()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            coinbase_amt,
+            alice
+                .api()
+                .wallet()
+                .balances(now + Timestamp::years(4))
+                .await
+                .confirmed_available
+        );
     }
 
     #[traced_test]
