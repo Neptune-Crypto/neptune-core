@@ -10,7 +10,7 @@ use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
 
 /// A [`MutatorSetAccumulator`] with matching [`RemovalRecord`]s.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MsaAndRecords {
     pub mutator_set_accumulator: MutatorSetAccumulator,
 
@@ -142,7 +142,7 @@ pub mod neptune_arbitrary {
                 let removables = removables.clone();
 
                 // bundle all indices and leafs for pseudorandom aocl
-                let all_aocl_indices_and_leafs = removed_aocl_indices.into_iter().zip_eq(removable_commitments.iter().map(|ar|ar.canonical_commitment)).collect_vec();
+                let all_aocl_indices_and_leafs = removed_aocl_indices.into_iter().sorted().zip_eq(removable_commitments.iter().map(|ar|ar.canonical_commitment)).collect_vec();
 
                 // unwrap random aocl mmr with membership proofs
                 MmraAndMembershipProofs::arbitrary_with((all_aocl_indices_and_leafs, aocl_size))
@@ -334,7 +334,10 @@ pub mod neptune_arbitrary {
 mod tests {
     use itertools::Itertools;
     use proptest::collection::vec;
+    use proptest::prelude::{Arbitrary, Strategy};
     use proptest::prop_assert;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::Mmr;
@@ -466,5 +469,30 @@ mod tests {
         }
 
         assert_eq!(running_sum, total);
+    }
+
+    #[test]
+    fn arbitrary_msa_and_records_is_deterministic() {
+        let deterministic_msa = |num_removals, num_items| {
+            let mut test_runner = TestRunner::deterministic();
+            let removables = vec(
+                (arb::<Digest>(), arb::<Digest>(), arb::<Digest>()),
+                num_removals,
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+            MsaAndRecords::arbitrary_with((removables, num_items))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current()
+        };
+
+        let num_removals = 50;
+        let num_items = 100;
+        assert_eq!(
+            deterministic_msa(num_removals, num_items),
+            deterministic_msa(num_removals, num_items)
+        );
     }
 }
