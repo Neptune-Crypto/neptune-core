@@ -53,15 +53,10 @@ impl MsaAndRecords {
             .all(|(mp, item)| self.mutator_set_accumulator.verify(*item, mp));
 
         // Verify that mutator set has expected number of elements in Bloom
-        // filter MMR.
-        let expected_num_swbf_leafs =
-            self.mutator_set_accumulator.aocl.num_leafs() / u64::from(BATCH_SIZE);
-        let has_right_num_swbf_leafs =
-            expected_num_swbf_leafs == self.mutator_set_accumulator.swbf_inactive.num_leafs();
+        // filter MMR, and other qualities of the mutator set.
+        let ms_is_consistent = self.mutator_set_accumulator.is_consistent();
 
-        all_removal_records_can_remove
-            && all_membership_proofs_are_valid
-            && has_right_num_swbf_leafs
+        all_removal_records_can_remove && all_membership_proofs_are_valid && ms_is_consistent
     }
 }
 
@@ -179,7 +174,7 @@ pub mod neptune_arbitrary {
                     all_chunk_indices.dedup();
 
                     // filter by swbf mmr size
-                    let swbf_mmr_num_leafs = aocl_mmra.num_leafs() / u64::from(BATCH_SIZE);
+                    let swbf_mmr_num_leafs = aocl_mmra.num_leafs().saturating_sub(1) / u64::from(BATCH_SIZE);
                     let mmr_chunk_indices = all_chunk_indices
                         .iter()
                         .copied()
@@ -400,7 +395,7 @@ mod tests {
     }
 
     #[test_strategy::proptest(cases = 6)]
-    fn msa_and_records_invalid_on_failing_swbf_leaf(
+    fn msa_and_records_invalid_on_one_too_many_swbf_leaf(
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 30usize))]
         removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#removables, 100u64)))]

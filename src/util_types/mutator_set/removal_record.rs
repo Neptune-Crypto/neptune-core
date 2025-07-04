@@ -64,6 +64,14 @@ impl RemovalRecord {
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
+        let next_batch_index = new_item_index / u64::from(BATCH_SIZE);
+        let current_batch_index = next_batch_index - 1;
+        assert_eq!(
+            current_batch_index,
+            mutator_set.swbf_inactive.num_leafs(),
+            "Number of SWBF MMR leafs must match current batch index"
+        );
+
         // Insert the new chunk digest into the accumulator-version of the
         // SWBF MMR to get its authentication path. It's important to convert the MMR
         // to an MMR Accumulator here, since we don't want to drag around or clone

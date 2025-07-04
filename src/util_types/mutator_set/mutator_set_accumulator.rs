@@ -48,6 +48,24 @@ impl Default for MutatorSetAccumulator {
 }
 
 impl MutatorSetAccumulator {
+    /// Return true if the mutator set is internally consistent, e.g. has the
+    /// right number of elements in the Bloom filter MMR given the number of
+    /// leafs in the AOCL.
+    pub(crate) fn is_consistent(&self) -> bool {
+        let expected_num_leafs_bfmmr =
+            self.aocl.num_leafs().saturating_sub(1) / u64::from(BATCH_SIZE);
+        let correct_bfmmr_num_leafs = expected_num_leafs_bfmmr == self.swbf_inactive.num_leafs();
+
+        // These unwraps can't fail as that would require some pretty long numbers, even on a 16 bit
+        // architecture.
+        let consistent_aocl =
+            usize::try_from(self.aocl.num_leafs().count_ones()).unwrap() == self.aocl.peaks().len();
+        let consistent_swbf = usize::try_from(self.swbf_inactive.num_leafs().count_ones()).unwrap()
+            == self.swbf_inactive.peaks().len();
+
+        correct_bfmmr_num_leafs && consistent_aocl && consistent_swbf
+    }
+
     pub fn new(
         aocl: &[Digest],
         aocl_leaf_count: u64,
