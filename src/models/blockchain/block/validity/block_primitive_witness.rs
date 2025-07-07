@@ -111,15 +111,7 @@ impl BlockPrimitiveWitness {
                 \nPredecessor block had {predecessor_msa_digest};\ntransaction had {tx_msa_digest}\n\n"
             );
 
-            let block_height = self.predecessor_block.header().height.next();
-            let pack_removal_records = ConsensusRuleSet::infer_from(self.network, block_height)
-                .merge_version()
-                .pack_removal_records();
-            let inputs = if pack_removal_records {
-                RemovalRecordList::try_unpack(transaction_kernel.inputs.clone()).expect("Inputs must be packed")
-            } else {
-                transaction_kernel.inputs.clone()
-            };
+            let inputs = RemovalRecordList::try_unpack(transaction_kernel.inputs.clone()).expect("Inputs must be packed in block transaction");
 
             let mutator_set_update = MutatorSetUpdate::new(inputs, self.transaction.kernel.outputs.clone());
 

@@ -197,11 +197,7 @@ mod tests {
                                 block_mmr_accumulator,
                             )| {
                                 let inputs =
-                                    if consensus_rules.merge_version().pack_removal_records() {
-                                        RemovalRecordList::pack(transaction_kernel.inputs.clone())
-                                    } else {
-                                        transaction_kernel.inputs.clone()
-                                    };
+                                    RemovalRecordList::pack(transaction_kernel.inputs.clone());
                                 let transaction_kernel = TransactionKernelModifier::default()
                                     .inputs(inputs)
                                     .modify(transaction_kernel);

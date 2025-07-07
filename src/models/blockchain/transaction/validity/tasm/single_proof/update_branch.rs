@@ -687,6 +687,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
+    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionKernelModifier;
@@ -1027,35 +1028,26 @@ pub(crate) mod tests {
     /// untouched, or at most permuted.
     #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_only_additions() {
-        for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
-            let update_witness = deterministic_update_witness_only_additions_to_mutator_set(
-                4,
-                4,
-                4,
-                consensus_rule_set,
-            )
-            .await;
-            assert_eq!(
-                update_witness.old_kernel.txid(),
-                update_witness.new_kernel.txid(),
-                "Txid function must agree before and after transaction update"
-            );
-        }
+        let consensus_rule_set = ConsensusRuleSet::Reboot;
+        let update_witness =
+            deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4, consensus_rule_set)
+                .await;
+        assert_eq!(
+            update_witness.old_kernel.txid(),
+            update_witness.new_kernel.txid(),
+            "Txid function must agree before and after transaction update"
+        );
     }
 
-    /// A test of the simple test generator, that it leaves the expected fields
-    /// untouched, or at most permuted.
     #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_additions_and_removals() {
-        for consensus_rule_set in ConsensusRuleSet::iter_merge_versions() {
-            let update_witness =
-                deterministic_update_witness_additions_and_removals(4, 4, 4, consensus_rule_set)
-                    .await;
-            assert_eq!(
-                update_witness.old_kernel.txid(),
-                update_witness.new_kernel.txid(),
-                "Txid function must agree before and after transaction update"
-            );
-        }
+        let consensus_rule_set = ConsensusRuleSet::Reboot;
+        let update_witness =
+            deterministic_update_witness_additions_and_removals(4, 4, 4, consensus_rule_set).await;
+        assert_eq!(
+            update_witness.old_kernel.txid(),
+            update_witness.new_kernel.txid(),
+            "Txid function must agree before and after transaction update"
+        );
     }
 }

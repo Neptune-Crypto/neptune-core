@@ -31,7 +31,6 @@ use crate::api::export::NeptuneProof;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::api::tx_initiation::error::ProofRequirement;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -277,58 +276,24 @@ impl<'a> TransactionProofBuilder<'a> {
         if proof_job_options.job_settings.proof_type.is_single_proof() {
             let consensus_rule_set =
                 consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
-            let merge_version = consensus_rule_set.merge_version();
-            type GenesisSingleProofWitness = SingleProofWitness<{ MergeVersion::Genesis as usize }>;
-            type HardFork2SingleProofWitness =
-                SingleProofWitness<{ MergeVersion::HardFork2 as usize }>;
 
             // claim, nondeterminism --> single proof
             if let Some((c, nd)) = claim_and_nondeterminism {
-                return match merge_version {
-                    MergeVersion::Genesis => {
-                        gen_single_genesis(c, || nd, job_queue, proof_job_options, valid_mock).await
-                    }
-                    MergeVersion::HardFork2 => {
-                        gen_single_hard_fork_2(c, || nd, job_queue, proof_job_options, valid_mock)
-                            .await
-                    }
-                };
+                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
             }
             // update-witness --> single proof
             else if let Some(w) = update_witness {
-                return match merge_version {
-                    MergeVersion::Genesis => {
-                        let spw = GenesisSingleProofWitness::from_update(w.clone());
-                        let c = spw.claim();
-                        let nd = spw.nondeterminism();
-                        gen_single_genesis(c, || nd, job_queue, proof_job_options, valid_mock).await
-                    }
-                    MergeVersion::HardFork2 => {
-                        let spw = HardFork2SingleProofWitness::from_update(w.clone());
-                        let c = spw.claim();
-                        let nd = spw.nondeterminism();
-                        gen_single_hard_fork_2(c, || nd, job_queue, proof_job_options, valid_mock)
-                            .await
-                    }
-                };
+                let spw = SingleProofWitness::from_update(w.clone());
+                let c = spw.claim();
+                let nd = spw.nondeterminism();
+                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
             }
             // proof-collection --> single proof
             else if let Some(pc) = proof_collection {
-                return match merge_version {
-                    MergeVersion::Genesis => {
-                        let spw = GenesisSingleProofWitness::from_collection(pc);
-                        let c = spw.claim();
-                        let nd = spw.nondeterminism();
-                        gen_single_genesis(c, || nd, job_queue, proof_job_options, valid_mock).await
-                    }
-                    MergeVersion::HardFork2 => {
-                        let spw = HardFork2SingleProofWitness::from_collection(pc);
-                        let c = spw.claim();
-                        let nd = spw.nondeterminism();
-                        gen_single_hard_fork_2(c, || nd, job_queue, proof_job_options, valid_mock)
-                            .await
-                    }
-                };
+                let spw = SingleProofWitness::from_collection(pc);
+                let c = spw.claim();
+                let nd = spw.nondeterminism();
+                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
             }
         }
 
@@ -382,7 +347,7 @@ impl<'a> TransactionProofBuilder<'a> {
 // builds TransactionProof::SingleProof from Claim, NonDeterminism
 //
 // will generate a mock proof if Network::use_mock_proof() is true.
-async fn gen_single<'a, F, const VERSION: usize>(
+async fn gen_single<'a, F>(
     claim: Claim,
     nondeterminism: F,
     job_queue: Arc<TritonVmJobQueue>,
@@ -394,7 +359,7 @@ where
 {
     Ok(TransactionProof::SingleProof(
         ProofBuilder::new()
-            .program(SingleProof::<VERSION>.program())
+            .program(SingleProof.program())
             .claim(claim)
             .nondeterminism(nondeterminism)
             .job_queue(job_queue)
@@ -403,46 +368,6 @@ where
             .build()
             .await?,
     ))
-}
-
-async fn gen_single_genesis<'a, F>(
-    claim: Claim,
-    nondeterminism: F,
-    job_queue: Arc<TritonVmJobQueue>,
-    proof_job_options: TritonVmProofJobOptions,
-    valid_mock: bool,
-) -> Result<TransactionProof, CreateProofError>
-where
-    F: FnOnce() -> NonDeterminism + Send + Sync + 'a,
-{
-    gen_single::<'a, F, { MergeVersion::Genesis as usize }>(
-        claim,
-        nondeterminism,
-        job_queue,
-        proof_job_options,
-        valid_mock,
-    )
-    .await
-}
-
-async fn gen_single_hard_fork_2<'a, F>(
-    claim: Claim,
-    nondeterminism: F,
-    job_queue: Arc<TritonVmJobQueue>,
-    proof_job_options: TritonVmProofJobOptions,
-    valid_mock: bool,
-) -> Result<TransactionProof, CreateProofError>
-where
-    F: FnOnce() -> NonDeterminism + Send + Sync + 'a,
-{
-    gen_single::<'a, F, { MergeVersion::HardFork2 as usize }>(
-        claim,
-        nondeterminism,
-        job_queue,
-        proof_job_options,
-        valid_mock,
-    )
-    .await
 }
 
 /// Builds a [`TransactionProof::ProofCollection`] from Cow<PrimitiveWitness>

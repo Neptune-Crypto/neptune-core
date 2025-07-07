@@ -794,13 +794,8 @@ impl Block {
         }
 
         // 2.a)
-        let merge_version = consensus_rule_set.merge_version();
-        let inputs = if merge_version.pack_removal_records() {
-            RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
-                .map_err(BlockValidationError::from)?
-        } else {
-            self.body().transaction_kernel.inputs.clone()
-        };
+        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
+            .map_err(BlockValidationError::from)?;
 
         // 2.b)
         let msa_before = previous_block.mutator_set_accumulator_after()?;
@@ -1077,12 +1072,9 @@ impl Block {
         network: Network,
     ) -> Result<MutatorSetUpdate, BlockValidationError> {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
-        let inputs = if consensus_rule_set.merge_version().pack_removal_records() {
-            RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
-                .map_err(BlockValidationError::from)?
-        } else {
-            self.body().transaction_kernel.inputs.clone()
-        };
+        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
+            .map_err(BlockValidationError::from)?;
+
         let mut mutator_set_update =
             MutatorSetUpdate::new(inputs, self.body().transaction_kernel.outputs.clone());
 

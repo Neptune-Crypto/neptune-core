@@ -10,7 +10,6 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::models::blockchain::transaction::merge_version::MergeVersion;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
     #[test]
@@ -42,34 +41,28 @@ mod tests {
             format!("{} {name}", sign_offs.len())
         }
 
-        let all_consensus_critical_imports =
-            name_and_lib![
-                block::validity::block_program::BlockProgram,
-                transaction::validity::collect_lock_scripts::CollectLockScripts,
-                transaction::validity::collect_type_scripts::CollectTypeScripts,
-                transaction::validity::kernel_to_outputs::KernelToOutputs,
-                type_scripts::native_currency::NativeCurrency,
-                transaction::validity::removal_records_integrity::RemovalRecordsIntegrity,
-                transaction::validity::single_proof::SingleProof::<
-                    { MergeVersion::Genesis as usize },
-                >,
-                transaction::validity::single_proof::SingleProof::<
-                    { MergeVersion::HardFork2 as usize },
-                >,
-                type_scripts::time_lock::TimeLock,
-                // todo: what about those?
-                // block_validity::coinbase_is_valid::CoinbaseIsValid,
-                // block_validity::correct_control_parameter_update::CorrectControlParameterUpdate,
-                // block_validity::correct_mmr_update::CorrectMmrUpdate,
-                // block_validity::correct_mutator_set_update::CorrectMutatorSetUpdate,
-                // block_validity::mmr_membership::MmrMembership,
-                // block_validity::predecessor_is_valid::PredecessorIsValid,
-                // block_validity::PrincipalBlockValidationLogic,
-            ]
-            .into_iter()
-            .flat_map(|(name, snippet_names)| [vec![format!("\n{name}")], snippet_names].concat())
-            .unique()
-            .join("\n");
+        let all_consensus_critical_imports = name_and_lib![
+            block::validity::block_program::BlockProgram,
+            transaction::validity::collect_lock_scripts::CollectLockScripts,
+            transaction::validity::collect_type_scripts::CollectTypeScripts,
+            transaction::validity::kernel_to_outputs::KernelToOutputs,
+            type_scripts::native_currency::NativeCurrency,
+            transaction::validity::removal_records_integrity::RemovalRecordsIntegrity,
+            transaction::validity::single_proof::SingleProof,
+            type_scripts::time_lock::TimeLock,
+            // todo: what about those?
+            // block_validity::coinbase_is_valid::CoinbaseIsValid,
+            // block_validity::correct_control_parameter_update::CorrectControlParameterUpdate,
+            // block_validity::correct_mmr_update::CorrectMmrUpdate,
+            // block_validity::correct_mutator_set_update::CorrectMutatorSetUpdate,
+            // block_validity::mmr_membership::MmrMembership,
+            // block_validity::predecessor_is_valid::PredecessorIsValid,
+            // block_validity::PrincipalBlockValidationLogic,
+        ]
+        .into_iter()
+        .flat_map(|(name, snippet_names)| [vec![format!("\n{name}")], snippet_names].concat())
+        .unique()
+        .join("\n");
 
         println!("{all_consensus_critical_imports}");
     }
