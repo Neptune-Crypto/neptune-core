@@ -121,8 +121,7 @@ impl MockBlockGenerator {
             "Argument2 must be single-proof-backed transaction"
         );
 
-        let merge_version = consensus_rule_set.merge_version();
-        let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed, merge_version);
+        let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed);
         let new_kernel = merge_witness.new_kernel.clone();
 
         Ok(BlockTransaction {

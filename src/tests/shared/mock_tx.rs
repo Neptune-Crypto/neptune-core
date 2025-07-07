@@ -165,8 +165,7 @@ pub(super) async fn fake_merge_transactions_for_tests(
         "argument must be bogus singleproof transaction"
     );
 
-    let merge_witness =
-        MergeWitness::from_transactions(lhs, rhs, shuffle_seed, consensus_rule_set.merge_version());
+    let merge_witness = MergeWitness::from_transactions(lhs, rhs, shuffle_seed);
     let new_kernel = merge_witness.new_kernel.clone();
 
     let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
@@ -195,8 +194,7 @@ pub(super) async fn fake_merge_block_transactions_for_tests(
         "Argument2 must be single-proof-backed transaction"
     );
 
-    let merge_version = consensus_rule_set.merge_version();
-    let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed, merge_version);
+    let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed);
     let new_kernel = merge_witness.new_kernel.clone();
 
     let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);

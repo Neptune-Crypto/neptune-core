@@ -174,9 +174,7 @@ impl BlockTransaction {
         proof_job_options: TritonVmProofJobOptions,
         consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<BlockTransaction> {
-        let merge_version = consensus_rule_set.merge_version();
-        let merge_witness =
-            MergeWitness::for_composition(coinbase, other, shuffle_seed, merge_version);
+        let merge_witness = MergeWitness::for_composition(coinbase, other, shuffle_seed);
         let tx = MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await?;
 
         Ok(tx.try_into().expect("Must have merge bit set"))

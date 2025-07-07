@@ -13,7 +13,6 @@ use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 pub mod lock_script;
-pub mod merge_version;
 pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod transaction_proof;
@@ -232,9 +231,7 @@ impl Transaction {
             "Don't use me for coinbase transactions, por favor"
         );
 
-        let merge_version = consensus_rule_set.merge_version();
-        let merge_witness =
-            MergeWitness::from_transactions(self, other, shuffle_seed, merge_version);
+        let merge_witness = MergeWitness::from_transactions(self, other, shuffle_seed);
         MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await
     }
 
@@ -297,9 +294,8 @@ pub(crate) mod tests {
     use crate::models::state::wallet::address::AddressableKeyType;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::{
-        UtxoNotificationMedium, UtxoNotifyMethod,
-    };
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
@@ -453,8 +449,8 @@ pub(crate) mod tests {
     // #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn danger_danger() {
+        // This test should **not** pass.
         let network = Network::Main;
-        let consensus_rule_set = ConsensusRuleSet::Genesis;
         let genesis = Block::genesis(network);
 
         let msa = genesis.mutator_set_accumulator_after().unwrap();
@@ -468,12 +464,14 @@ pub(crate) mod tests {
             msa.clone(),
             network,
         );
+
         let fee_tx = fee_tx.primitive_witness();
+        let consensus_rule_set = ConsensusRuleSet::Reboot;
         let fee_sp = produce_single_proof(
             &fee_tx,
             vm_job_queue(),
             TritonVmProofJobOptions::default(),
-            ConsensusRuleSet::Genesis,
+            consensus_rule_set,
         )
         .await
         .unwrap();
@@ -533,7 +531,7 @@ pub(crate) mod tests {
             &coinbase,
             vm_job_queue(),
             TritonVmProofJobOptions::default(),
-            ConsensusRuleSet::Genesis,
+            consensus_rule_set,
         )
         .await
         .unwrap();

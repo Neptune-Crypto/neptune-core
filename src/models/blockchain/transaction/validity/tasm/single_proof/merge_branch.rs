@@ -31,7 +31,6 @@ use tracing::info;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransactionKernel;
 use crate::models::blockchain::block::block_transaction::BlockTransactionKernel;
-use crate::models::blockchain::transaction::merge_version::MergeVersion;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -71,10 +70,6 @@ pub struct MergeWitness {
     pub(crate) new_kernel: TransactionKernel,
     pub(crate) left_proof: Proof,
     pub(crate) right_proof: Proof,
-
-    #[bfield_codec(ignore)]
-    #[tasm_object(ignore)]
-    pub(crate) merge_version: MergeVersion,
 }
 
 impl MergeWitness {
@@ -82,7 +77,6 @@ impl MergeWitness {
         left: BlockOrRegularTransaction,
         right: Transaction,
         shuffle_seed: [u8; 32],
-        merge_version: MergeVersion,
     ) -> Self {
         let left_kernel = left.kernel();
         let right_kernel = right.kernel;
@@ -99,12 +93,8 @@ impl MergeWitness {
             "Coinbase transaction must be left hand side"
         );
 
-        let new_kernel = Self::new_block_transaction_kernel(
-            &left_kernel,
-            &right_kernel,
-            shuffle_seed,
-            merge_version,
-        );
+        let new_kernel =
+            Self::new_block_transaction_kernel(&left_kernel, &right_kernel, shuffle_seed);
 
         Self {
             left_kernel: left_kernel.into(),
@@ -112,7 +102,6 @@ impl MergeWitness {
             new_kernel: new_kernel.into(),
             left_proof,
             right_proof,
-            merge_version,
         }
     }
 
@@ -123,7 +112,6 @@ impl MergeWitness {
         left: Transaction,
         right: Transaction,
         shuffle_seed: [u8; 32],
-        merge_version: MergeVersion,
     ) -> Self {
         let left_kernel = left.kernel;
         let right_kernel = right.kernel;
@@ -148,7 +136,6 @@ impl MergeWitness {
             new_kernel,
             left_proof,
             right_proof,
-            merge_version,
         }
     }
 
@@ -160,86 +147,52 @@ impl MergeWitness {
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
         let new_kernel = self.new_kernel.clone();
-        match self.merge_version {
-            MergeVersion::Genesis => {
-                type GenesisSingleProofWitness =
-                    SingleProofWitness<{ MergeVersion::Genesis as usize }>;
-                let genesis_single_proof = SingleProof::<{ MergeVersion::Genesis as usize }>;
-                let new_single_proof_witness = GenesisSingleProofWitness::from_merge(self);
-                let new_single_proof_claim = new_single_proof_witness.claim();
-                info!("Start: creating new single proof through merge");
-                let new_single_proof = genesis_single_proof
-                    .prove(
-                        new_single_proof_claim,
-                        new_single_proof_witness.nondeterminism(),
-                        triton_vm_job_queue,
-                        proof_job_options,
-                    )
-                    .await?;
 
-                info!("Done: creating new single proof through merge");
+        let new_single_proof_witness = SingleProofWitness::from_merge(self);
+        let new_single_proof_claim = new_single_proof_witness.claim();
+        info!("Start: creating new single proof through merge");
+        let new_single_proof = SingleProof
+            .prove(
+                new_single_proof_claim,
+                new_single_proof_witness.nondeterminism(),
+                triton_vm_job_queue,
+                proof_job_options,
+            )
+            .await?;
 
-                Ok(Transaction {
-                    kernel: new_kernel,
-                    proof: TransactionProof::SingleProof(new_single_proof),
-                })
-            }
-            MergeVersion::HardFork2 => {
-                type HardFork2SingleProofWitness =
-                    SingleProofWitness<{ MergeVersion::HardFork2 as usize }>;
-                let hard_fork_2_single_proof = SingleProof::<{ MergeVersion::HardFork2 as usize }>;
-                let new_single_proof_witness = HardFork2SingleProofWitness::from_merge(self);
-                let new_single_proof_claim = new_single_proof_witness.claim();
-                info!("Start: creating new single proof through merge");
-                let new_single_proof = hard_fork_2_single_proof
-                    .prove(
-                        new_single_proof_claim,
-                        new_single_proof_witness.nondeterminism(),
-                        triton_vm_job_queue,
-                        proof_job_options,
-                    )
-                    .await?;
+        info!("Done: creating new single proof through merge");
 
-                info!("Done: creating new single proof through merge");
-
-                Ok(Transaction {
-                    kernel: new_kernel,
-                    proof: TransactionProof::SingleProof(new_single_proof),
-                })
-            }
-        }
+        Ok(Transaction {
+            kernel: new_kernel,
+            proof: TransactionProof::SingleProof(new_single_proof),
+        })
     }
 
     fn new_block_transaction_kernel(
         left_kernel: &BlockOrRegularTransactionKernel,
         right_kernel: &TransactionKernel,
         shuffle_seed: [u8; 32],
-        merge_version: MergeVersion,
     ) -> BlockTransactionKernel {
         let lhs = match left_kernel {
             BlockOrRegularTransactionKernel::Regular(regular) => regular.clone(),
             BlockOrRegularTransactionKernel::Block(block_transaction_kernel) => {
                 let transaction_kernel: TransactionKernel = block_transaction_kernel.clone().into();
-                if merge_version.pack_removal_records() {
-                    let inputs = RemovalRecordList::try_unpack(transaction_kernel.inputs.clone())
-                        .expect("inputs must be packed for block transactions when required by merge version");
-                    TransactionKernelModifier::default()
-                        .inputs(inputs)
-                        .modify(transaction_kernel)
-                } else {
-                    transaction_kernel
-                }
+                let inputs = RemovalRecordList::try_unpack(transaction_kernel.inputs.clone())
+                    .expect(
+                    "inputs must be packed for block transactions when required by merge version",
+                );
+                TransactionKernelModifier::default()
+                    .inputs(inputs)
+                    .modify(transaction_kernel)
             }
         };
 
         let mut new_kernel = Self::new_kernel(&lhs, right_kernel, shuffle_seed);
 
-        if merge_version.pack_removal_records() {
-            let inputs = RemovalRecordList::pack(new_kernel.inputs.clone());
-            new_kernel = TransactionKernelModifier::default()
-                .inputs(inputs)
-                .modify(new_kernel);
-        }
+        let inputs = RemovalRecordList::pack(new_kernel.inputs.clone());
+        new_kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(new_kernel);
 
         BlockTransactionKernel::try_from(new_kernel).expect("merge bit should be set")
     }
@@ -361,14 +314,14 @@ impl MergeWitness {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MergeBranch<const VERSION: usize>;
+pub(crate) struct MergeBranch;
 
-impl<const VERSION: usize> MergeBranch<VERSION> {
+impl MergeBranch {
     const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_070;
     const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_071;
 }
 
-impl<const VERSION: usize> BasicSnippet for MergeBranch<VERSION> {
+impl BasicSnippet for MergeBranch {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "single_proof_program_digest".to_owned()),
@@ -450,12 +403,11 @@ impl<const VERSION: usize> BasicSnippet for MergeBranch<VERSION> {
         let right_txk_mast_hash_alloc = library.kmalloc(digest_len);
         let new_txk_mast_hash_alloc = library.kmalloc(digest_len);
 
-        let assert_coinbase_rules =
-            library.import(Box::new(AuthenticateCoinbaseFields::<VERSION>::new(
-                left_txk_mast_hash_alloc,
-                right_txk_mast_hash_alloc,
-                new_txk_mast_hash_alloc,
-            )));
+        let assert_coinbase_rules = library.import(Box::new(AuthenticateCoinbaseFields::new(
+            left_txk_mast_hash_alloc,
+            right_txk_mast_hash_alloc,
+            new_txk_mast_hash_alloc,
+        )));
 
         let neptune_coins_size = NativeCurrencyAmount::static_length().unwrap();
         let kernel_field_fee = field!(TransactionKernel::fee);
@@ -1098,11 +1050,7 @@ pub(crate) mod tests {
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MergeWitness {
-        pub fn branch_source<const VERSION: usize>(
-            &self,
-            single_proof_program_digest: Digest,
-            new_txk_digest: Digest,
-        ) {
+        pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {
             // divine the witness for this proof
             let mw = tasm::decode_from_memory::<MergeWitness>(MERGE_WITNESS_ADDRESS);
 
@@ -1224,15 +1172,9 @@ pub(crate) mod tests {
             let left_coinbase = mw.left_kernel.coinbase;
             let right_coinbase = mw.right_kernel.coinbase;
             let new_coinbase = left_coinbase.or(right_coinbase);
-            if VERSION == MergeVersion::Genesis as usize {
-                // at most one coinbase is set
-                assert!(left_coinbase.is_none() || right_coinbase.is_none());
-            } else if VERSION == MergeVersion::HardFork2 as usize {
-                // if a coinbase is set, it must be the left one
-                assert!(right_coinbase.is_none());
-            } else {
-                panic!("Unrecognized version");
-            }
+
+            // if a coinbase is set, it must be the left one
+            assert!(right_coinbase.is_none());
 
             let assert_coinbase_integrity = |merkle_root, coinbase| {
                 let leaf_index = TransactionKernelField::Coinbase as u32;
@@ -1324,8 +1266,7 @@ pub(crate) mod tests {
         let left_tx = Transaction::new_single_proof(primitive_witness_1.kernel, left_proof);
         let right_tx = Transaction::new_single_proof(primitive_witness_2.kernel, right_proof);
 
-        let merge_version = consensus_rule_set.merge_version();
-        MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed, merge_version)
+        MergeWitness::from_transactions(left_tx, right_tx, shuffle_seed)
     }
 
     pub(crate) async fn deterministic_merge_witness_with_coinbase(
@@ -1381,7 +1322,6 @@ pub(crate) mod tests {
         let left = Transaction::new_single_proof(coinbase_transaction.kernel, left_proof);
         let right = Transaction::new_single_proof(tx_with_inputs.kernel, right_proof);
 
-        let merge_version = consensus_rule_set.merge_version();
-        MergeWitness::for_composition(left.into(), right, shuffle_seed, merge_version)
+        MergeWitness::for_composition(left.into(), right, shuffle_seed)
     }
 }
