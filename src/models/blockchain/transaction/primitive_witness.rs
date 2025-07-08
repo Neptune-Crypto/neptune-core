@@ -349,6 +349,16 @@ impl PrimitiveWitness {
             .map(|tsaw| (tsaw.program.hash(), tsaw.program.to_owned()))
             .collect::<HashMap<_, _>>();
 
+        // Verify we don't have too many type script witnesses.
+        if type_script_dictionary.len() > required_type_script_hashes.len() {
+            let error = WitnessValidationError::TooManyTypeScriptWitnesses {
+                expected: required_type_script_hashes.len(),
+                got: type_script_dictionary.len(),
+            };
+            warn!("{}", error);
+            return Err(error);
+        }
+
         // all must be in dictionary.  so if we find first that is not then it
         // is already an error.  note that the error only informs caller of the
         // first unknown, not all.
@@ -521,6 +531,9 @@ pub enum WitnessValidationError {
 
     #[error("unknown typescript: {0}")]
     UnknownTypeScript(Digest),
+
+    #[error("Too many typescript witnesses. Expected {expected}, got {got}")]
+    TooManyTypeScriptWitnesses { expected: usize, got: usize },
 
     #[error("invalid type script: {type_script_hash}; ({type_script_name})")]
     InvalidTypeScript {
@@ -1087,6 +1100,8 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -1812,6 +1827,27 @@ mod tests {
         transaction_primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(transaction_primitive_witness.validate().await.is_ok());
+    }
+
+    #[proptest(cases = 3, async = "tokio")]
+    async fn timelock_witness_present_with_timelock_typescript_in_inputs(
+        #[strategy(3usize..10)] _num_inputs: usize,
+        #[strategy(3usize..10)] _num_outputs: usize,
+        #[strategy(3usize..10)] _num_public_announcements: usize,
+        #[strategy(arb())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_expired_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now
+        ))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        prop_assert!(primitive_witness.validate().await.is_ok());
+        prop_assert!(
+            primitive_witness
+                .type_scripts_and_witnesses
+                .iter()
+                .map(|ts_and_witness| ts_and_witness.program.hash())
+                .any(|ts_digest| ts_digest == TimeLock.hash()),
+            "Type scripts witness must contain timelock"
+        );
     }
 
     #[proptest]
