@@ -157,6 +157,9 @@ struct MutableMainLoopState {
     /// A channel that the task updating mempool transactions can use to
     /// communicate its result.
     update_mempool_receiver: mpsc::Receiver<Vec<MempoolUpdateJobResult>>,
+
+    /// When set, new blocks are ignored.
+    frozen: bool,
 }
 
 impl MutableMainLoopState {
@@ -170,7 +173,29 @@ impl MutableMainLoopState {
             proof_upgrader_task: None,
             update_mempool_txs_handle: None,
             update_mempool_receiver: dummy_receiver,
+            frozen: false,
         }
+    }
+
+    /// Freeze updates to the blockchain state.
+    fn freeze(&mut self) {
+        if self.is_frozen() {
+            warn!("blockchain state already frozen");
+        }
+        self.frozen = true;
+    }
+
+    /// Unfreeze the blockchain state; allow updates.
+    fn unfreeze(&mut self) {
+        if !self.is_frozen() {
+            warn!("blockchain state is not frozen (never frozen or already unfrozen)");
+        }
+        self.frozen = false;
+    }
+
+    /// Whether to ignore new blocks.
+    fn is_frozen(&self) -> bool {
+        self.frozen
     }
 }
 
@@ -699,6 +724,17 @@ impl MainLoopHandler {
             MinerToMain::NewBlockFound(new_block_info) => {
                 log_slow_scope!(fn_name!() + "::MinerToMain::NewBlockFound");
 
+                if main_loop_state.is_frozen() {
+                    info!("Own miner found new block; but ignoring because state is frozen.");
+
+                    // The mine loop sets boolean `wait_for_continue` prior to
+                    // sending this message. Reply to the mine loop with an
+                    // instruction to unset this variable.
+                    self.main_to_miner_tx.send(MainToMiner::Continue);
+
+                    return Ok(None);
+                }
+
                 let new_block = new_block_info.block;
 
                 info!("Miner found new block: {}", new_block.kernel.header.height);
@@ -768,8 +804,12 @@ impl MainLoopHandler {
         Ok(None)
     }
 
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
+    /// Handle a message sent by a peer task.
+    ///
+    /// Return `Ok(())` if the main loop should continue; `None` otherwise.
+    ///
+    /// # Locking
+    ///  * acquires `global_state_lock` for write
     async fn handle_peer_task_message(
         &mut self,
         msg: PeerTaskToMain,
@@ -780,6 +820,11 @@ impl MainLoopHandler {
         match msg {
             PeerTaskToMain::NewBlocks(blocks) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
+
+                if main_loop_state.is_frozen() {
+                    info!("Received new block from peer , but ignoring because state is frozen.");
+                    return Ok(());
+                }
 
                 let last_block = blocks.last().unwrap().to_owned();
                 let update_jobs = {
@@ -1916,6 +1961,16 @@ impl MainLoopHandler {
                 self.main_to_miner_tx.send(MainToMiner::StartMining);
                 Ok(false)
             }
+            RPCServerToMain::Freeze => {
+                info!("Freezing state updates.");
+                main_loop_state.freeze();
+                Ok(false)
+            }
+            RPCServerToMain::Unfreeze => {
+                info!("Unfreezing state updates.");
+                main_loop_state.unfreeze();
+                Ok(false)
+            }
             RPCServerToMain::Shutdown => {
                 info!("Received RPC shutdown request.");
 
@@ -1997,6 +2052,7 @@ mod tests {
     struct TestSetup {
         main_loop_handler: MainLoopHandler,
         main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
+        main_to_miner_rx: mpsc::Receiver<MainToMiner>,
     }
 
     async fn setup(
@@ -2040,7 +2096,7 @@ mod tests {
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
 
-        let (main_to_miner_tx, _main_to_miner_rx) =
+        let (main_to_miner_tx, main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
         let (_miner_to_main_tx, miner_to_main_rx) =
             mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
@@ -2063,6 +2119,7 @@ mod tests {
         TestSetup {
             main_loop_handler,
             main_to_peer_rx,
+            main_to_miner_rx,
         }
     }
 
@@ -2853,6 +2910,173 @@ mod tests {
 
             // don't forget to terminate the peer task, which is still running
             incoming_peer_task_handle.abort();
+        }
+    }
+
+    mod freezing {
+        use rand::rngs::StdRng;
+        use rand::Rng;
+        use rand::SeedableRng;
+
+        use crate::api::export::GenerationSpendingKey;
+        use crate::models::channel::NewBlockFound;
+        use crate::tests::shared::blocks::make_mock_block;
+
+        use super::*;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn state_updates_halt_when_frozen_and_resume_afterwards() {
+            let network = Network::Main;
+            let cli_args = cli_args::Args {
+                guess: true,
+                ..Default::default()
+            };
+            let TestSetup {
+                mut main_loop_handler,
+                main_to_peer_rx: _,
+                mut main_to_miner_rx,
+            } = setup(0, 0, cli_args.clone()).await;
+
+            main_loop_handler.global_state_lock.set_cli(cli_args).await;
+
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
+
+            // by default, state is not frozen
+            assert!(!mutable_main_loop_state.is_frozen());
+
+            // state is updated with new block from peer
+            let genesis_block = Block::genesis(network);
+            let mut rng = StdRng::seed_from_u64(0x3b00b5);
+            let rando = GenerationSpendingKey::derive_from_seed(rng.random());
+            let (block_1, _) =
+                make_mock_block(network, &genesis_block, None, rando, rng.random()).await;
+            let peer_block_handler_result_1 = main_loop_handler
+                .handle_peer_task_message(
+                    PeerTaskToMain::NewBlocks(vec![block_1.clone()]),
+                    &mut mutable_main_loop_state,
+                )
+                .await;
+            let channel_remains_open_1 = peer_block_handler_result_1.is_ok();
+            assert!(channel_remains_open_1);
+            assert_eq!(
+                block_1.hash(),
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .hash()
+            );
+
+            // main loop tells the miner to wait while it is processing the
+            // block, before it tells it that it found a new block
+            let message_sent_to_miner_1 = main_to_miner_rx.recv().await.unwrap();
+            assert_eq!(MainToMiner::WaitForContinue, message_sent_to_miner_1);
+            let message_sent_to_miner_2 = main_to_miner_rx.recv().await.unwrap();
+            assert_eq!(MainToMiner::NewBlock, message_sent_to_miner_2);
+
+            // freeze
+            mutable_main_loop_state.freeze();
+            assert!(mutable_main_loop_state.is_frozen());
+
+            // state is not updated with new block from peer
+            let (block_2, _) =
+                make_mock_block(network, &genesis_block, None, rando, rng.random()).await;
+            let peer_block_handler_result_2 = main_loop_handler
+                .handle_peer_task_message(
+                    PeerTaskToMain::NewBlocks(vec![block_2.clone()]),
+                    &mut mutable_main_loop_state,
+                )
+                .await;
+            let channel_remains_open_2 = peer_block_handler_result_2.is_ok();
+            assert!(channel_remains_open_2);
+            let current_tip_hash_2 = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .hash();
+            assert_eq!(block_1.hash(), current_tip_hash_2);
+            assert_ne!(block_2.hash(), current_tip_hash_2);
+
+            // if mine loop sends new block while frozen, it receives
+            // continue message back right away
+            let (block_3, _) =
+                make_mock_block(network, &genesis_block, None, rando, rng.random()).await;
+            let new_block_found_3 = NewBlockFound {
+                block: Box::new(block_3.clone()),
+            };
+            let miner_block_handler_result_3 = main_loop_handler
+                .handle_miner_task_message(
+                    MinerToMain::NewBlockFound(new_block_found_3),
+                    &mut mutable_main_loop_state,
+                )
+                .await;
+            let channel_remains_open_3 = miner_block_handler_result_3.is_ok_and(|x| x == None);
+            assert!(channel_remains_open_3);
+            let message_sent_to_miner_3 = main_to_miner_rx.recv().await.unwrap();
+            assert_eq!(MainToMiner::Continue, message_sent_to_miner_3,);
+
+            // state is not updated with new block
+            let current_tip_hash_3 = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .hash();
+            assert_eq!(block_1.hash(), current_tip_hash_3);
+            assert_ne!(block_3.hash(), current_tip_hash_3);
+
+            // unfreeze
+            mutable_main_loop_state.unfreeze();
+            assert!(!mutable_main_loop_state.is_frozen());
+
+            // if a peer sends a new block, it is processed
+            let (block_4, _) =
+                make_mock_block(network, &genesis_block, None, rando, rng.random()).await;
+            let peer_block_handler_result_4 = main_loop_handler
+                .handle_peer_task_message(
+                    PeerTaskToMain::NewBlocks(vec![block_4.clone()]),
+                    &mut mutable_main_loop_state,
+                )
+                .await;
+            let channel_remains_open_4 = peer_block_handler_result_4.is_ok();
+            assert!(channel_remains_open_4);
+            let current_tip_hash_4 = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .hash();
+            assert_eq!(block_4.hash(), current_tip_hash_4);
+
+            // if mine loop sends new block, it is processed
+            let (block_5, _) =
+                make_mock_block(network, &genesis_block, None, rando, rng.random()).await;
+            let new_block_found_5 = NewBlockFound {
+                block: Box::new(block_5.clone()),
+            };
+            let miner_block_handler_result_5 = main_loop_handler
+                .handle_miner_task_message(
+                    MinerToMain::NewBlockFound(new_block_found_5),
+                    &mut mutable_main_loop_state,
+                )
+                .await;
+            let channel_remains_open_5 = miner_block_handler_result_5.is_ok();
+            assert!(channel_remains_open_5);
+            let current_tip_hash_5 = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .hash();
+            assert_eq!(block_5.hash(), current_tip_hash_5);
         }
     }
 }

@@ -115,6 +115,7 @@ use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
+use crate::rpc_server::error::RpcError;
 use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::DataDirectory;
@@ -1936,6 +1937,13 @@ pub trait RPC {
     /// ```
     async fn prune_abandoned_monitored_utxos(token: rpc_auth::Token) -> RpcResult<usize>;
 
+    /// Freeze the blockchain state, so that new updates are not applied. To
+    /// unfreeze, use [`RPC::unfreeze`].
+    async fn freeze(token: rpc_auth::Token) -> RpcResult<()>;
+
+    /// Unfreeze the blockchain state, so that new updates can be applied again.
+    async fn unfreeze(token: rpc_auth::Token) -> RpcResult<()>;
+
     /// Gracious shutdown.
     ///
     /// ```no_run
@@ -3354,6 +3362,36 @@ impl RPC for NeptuneRPCServer {
                 Ok(0)
             }
         }
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn freeze(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::Freeze)
+            .await
+            .map_err(|e| RpcError::Failed(format!("Could not send message to main thread: {e}")))
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn unfreeze(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::Unfreeze)
+            .await
+            .map_err(|e| RpcError::Failed(format!("Could not send message to main thread: {e}")))
     }
 
     // documented in trait. do not add doc-comment.

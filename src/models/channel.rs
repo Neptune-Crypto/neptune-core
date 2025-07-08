@@ -16,7 +16,7 @@ use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 use super::state::wallet::monitored_utxo::MonitoredUtxo;
 
-#[derive(Clone, Debug, strum::Display)]
+#[derive(Clone, Debug, PartialEq, Eq, strum::Display)]
 pub(crate) enum MainToMiner {
     /// Communicates that a new block is now considered canonical
     NewBlock,
@@ -205,6 +205,7 @@ pub(crate) struct ClaimUtxoData {
 
 /// represents messages that can be sent from RPC server to main loop.
 #[derive(Clone, Debug, strum::Display)]
+#[non_exhaustive]
 pub enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),
     BroadcastMempoolTransactions,
@@ -213,4 +214,6 @@ pub enum RPCServerToMain {
     Shutdown,
     PauseMiner,
     RestartMiner,
+    Freeze,
+    Unfreeze,
 }

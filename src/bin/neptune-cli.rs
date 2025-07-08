@@ -332,6 +332,14 @@ enum Command {
     /// resume mining
     RestartMiner,
 
+    /// Freeze the state update mechanism. Do not change state when a new block
+    /// arrives, whether from peers or from the miner.
+    Freeze,
+
+    /// Unfreeze the state update mechanism. Resume state changes when new
+    /// blocks arrive.
+    Unfreeze,
+
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
@@ -1175,6 +1183,18 @@ async fn main() -> Result<()> {
             println!("Sending command to restart miner.");
             client.restart_miner(ctx, token).await??;
             println!("Command completed successfully");
+        }
+
+        Command::Freeze => {
+            println!("Freezing state update mechanism ...");
+            client.freeze(ctx, token).await??;
+            println!("success.");
+        }
+
+        Command::Unfreeze => {
+            println!("Freezing state update mechanism ...");
+            client.unfreeze(ctx, token).await??;
+            println!("success.");
         }
 
         Command::PruneAbandonedMonitoredUtxos => {
