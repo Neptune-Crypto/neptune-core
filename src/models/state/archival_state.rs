@@ -170,10 +170,15 @@ impl ArchivalState {
         Ok(archival_bmmr)
     }
 
-    /// Find the path connecting two blocks. Every path involves
-    /// going down some number of steps and then going up some number
-    /// of steps. So this function returns two lists: the list of
-    /// down steps and the list of up steps.
+    /// Find the path connecting two blocks. Every path involves going down some
+    /// number of steps and then going up some number of steps. So this function
+    /// returns two lists: the list of down steps and the list of up steps. It
+    /// also returns their latest common ancestor.
+    ///
+    /// # Panics
+    ///
+    ///  - If there is no path. (Meaning: different genesis blocks.)
+    ///  - If the blocks on the path are not stored.
     pub(crate) async fn find_path(
         &self,
         start: Digest,
@@ -233,6 +238,20 @@ impl ArchivalState {
         (leaving, luca, arriving)
     }
 
+    /// Apply all [AdditionRecord]s in the genesis block to the archival mutator
+    /// set. Set the sync label to the genesis block hash. Persist.
+    async fn populate_archival_mutator_set_with_genesis_block(
+        archival_mutator_set: &mut RustyArchivalMutatorSet,
+        genesis_block: Block,
+    ) {
+        for addition_record in &genesis_block.kernel.body.transaction_kernel.outputs {
+            archival_mutator_set.ams_mut().add(addition_record).await;
+        }
+        let genesis_hash = genesis_block.hash();
+        archival_mutator_set.set_sync_label(genesis_hash).await;
+        archival_mutator_set.persist().await;
+    }
+
     pub(crate) async fn new(data_dir: DataDirectory, genesis_block: Block) -> Self {
         let mut archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)
             .await
@@ -245,12 +264,11 @@ impl ArchivalState {
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
         if archival_mutator_set.ams().aocl.is_empty().await {
-            for addition_record in &genesis_block.kernel.body.transaction_kernel.outputs {
-                archival_mutator_set.ams_mut().add(addition_record).await;
-            }
-            let genesis_hash = genesis_block.hash();
-            archival_mutator_set.set_sync_label(genesis_hash).await;
-            archival_mutator_set.persist().await;
+            Self::populate_archival_mutator_set_with_genesis_block(
+                &mut archival_mutator_set,
+                genesis_block.clone(),
+            )
+            .await;
         }
 
         let mut archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir)
@@ -492,13 +510,31 @@ impl ArchivalState {
         self.write_block_internal(new_block, true).await
     }
 
-    /// Add a new block as tip for the archival block MMR.
+    /// Sets a block as tip for the archival block MMR.
     ///
-    /// All predecessors of this block must be known and stored in the block
-    /// index database for this update to work.
+    /// This method handles reorganizations, but all predecessors of this block
+    /// must be known and stored in the block index database for it to work.
     pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
-        // Roll back to length of parent (accounting for genesis block),
-        // then add new digest.
+        // If the new block is the genesis block, special case and exit early
+        if new_block.header().height.is_genesis() {
+            let genesis_block_hash = self.genesis_block().hash();
+            assert_eq!(genesis_block_hash, new_block.hash(), "Wrong genesis block.");
+            if let Some(leaf) = self.archival_block_mmr.ammr().try_get_leaf(0).await {
+                assert_eq!(leaf, new_block.hash(), "Corrupt block MMR.");
+            } else {
+                self.archival_block_mmr
+                    .ammr_mut()
+                    .append(new_block.hash())
+                    .await;
+            }
+            self.archival_block_mmr
+                .ammr_mut()
+                .prune_to_num_leafs(1)
+                .await;
+            return;
+        }
+
+        // Roll back to length of parent then add new digest.
         let num_leafs_prior_to_this_block = new_block.header().height.into();
         self.archival_block_mmr
             .ammr_mut()
@@ -796,6 +832,10 @@ impl ArchivalState {
         Some(parent.expect("Indicated block must exist"))
     }
 
+    /// Get the header of the block identified by digest, assuming it is stored.
+    ///
+    /// Returns `None` if the block digest is different from that of the genesis
+    /// block and no such block is stored.
     pub(crate) async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
         let mut ret = self
             .block_index_db
@@ -1069,14 +1109,35 @@ impl ArchivalState {
         .map(|(_, msa)| msa)
     }
 
-    /// Update the mutator set with a block after this block has been stored to
-    /// the database. Handles rollback of the mutator set if needed but requires
-    /// that all blocks that are rolled back are present in the DB. The input
-    /// block is considered chain tip. All blocks stored in the database are
-    /// assumed to be valid. The given `new_block` is also assumed to be valid.
-    /// This function will return an error if the new block does not have a
-    /// mutator set update.
+    /// Update the archival mutator set with a new block.
+    ///
+    /// Assumes the block in question has already been stored to the database
+    /// (or else it is the genesis block). This function handles rollback of the
+    /// mutator set if needed but requires that all blocks that are rolled back
+    /// are present in the DB. The input block is considered chain tip. All
+    /// blocks stored in the database are assumed to be valid. The given
+    /// `new_block` is also assumed to be valid. This function will return an
+    /// error if the new block does not have a mutator set update.
+    ///
+    /// # Panics
+    ///
+    ///  - If the database does not contain rolled back blocks.
+    ///  - If there is no path to the new block.
     pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+        // If new block is genesis block, special case and exit early.
+        if new_block.header().height.is_genesis() {
+            let genesis_hash = self.genesis_block().hash();
+            assert_eq!(genesis_hash, new_block.hash(), "Wrong genesis block.");
+
+            self.archival_mutator_set.ams_mut().clear().await;
+            Self::populate_archival_mutator_set_with_genesis_block(
+                &mut self.archival_mutator_set,
+                new_block.clone(),
+            )
+            .await;
+
+            return Ok(());
+        }
         // cannot get the mutator set update from new block, so abort early
         if new_block.mutator_set_update().is_err() {
             bail!("invalid block: could not get mutator set update");

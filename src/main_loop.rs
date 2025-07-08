@@ -2924,8 +2924,7 @@ mod tests {
 
         use super::*;
 
-        #[traced_test]
-        #[tokio::test]
+        #[apply(shared_tokio_runtime)]
         async fn state_updates_halt_when_frozen_and_resume_afterwards() {
             let network = Network::Main;
             let cli_args = cli_args::Args {

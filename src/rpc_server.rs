@@ -1937,6 +1937,11 @@ pub trait RPC {
     /// ```
     async fn prune_abandoned_monitored_utxos(token: rpc_auth::Token) -> RpcResult<usize>;
 
+    /// Set the tip of the blockchain state to a given block, identified by its
+    /// hash. The block must be stored, but it does not need to live on the
+    /// canonical chain.
+    async fn set_tip(token: rpc_auth::Token, indicated_tip: Digest) -> RpcResult<()>;
+
     /// Freeze the blockchain state, so that new updates are not applied. To
     /// unfreeze, use [`RPC::unfreeze`].
     async fn freeze(token: rpc_auth::Token) -> RpcResult<()>;
@@ -3362,6 +3367,32 @@ impl RPC for NeptuneRPCServer {
                 Ok(0)
             }
         }
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn set_tip(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        indicated_tip: Digest,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Freeze. Do not process blocks in the course of this RPC endpoint
+        // handler or afterwards. The user needs to unfreeze manually.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::Freeze)
+            .await
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        // Set tip.
+        self.state
+            .lock_guard_mut()
+            .await
+            .set_tip_to_stored_block(indicated_tip)
+            .await
+            .map_err(|e| RpcError::Failed(format!("failed to set tip to stored block: {e}")))
     }
 
     // Documented in trait. Do not add doc-comment.

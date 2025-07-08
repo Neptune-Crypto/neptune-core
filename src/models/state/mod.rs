@@ -1209,14 +1209,21 @@ impl GlobalState {
     /// Restore mutator set membership proofs of all monitored UTXOs from an
     /// archival mutator set.
     ///
+    /// # Panics
     ///
+    ///  - If the archival mutator set is not synced to the current state tip.
     pub(crate) async fn restore_monitored_utxos_from_archival_mutator_set(&mut self) {
         let tip_hash = self.chain.light_state().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
+        // Assert that archival mutator set is synced to current tip.
+        // Otherwise, the function will proceed successfully but the resulting
+        // membership proofs will be synced to some wrong block which is not
+        // the tip.
         let asm_sync_label = ams_ref.get_sync_label();
         assert_eq!(
-            tip_hash, asm_sync_label,
+            tip_hash,
+            asm_sync_label,
             "Error: sync label in archival mutator set database disagrees with \
             block tip. Archival mutator set must be synced to tip for successful \
             MUTXO recovery.\n\
@@ -1224,7 +1231,9 @@ impl GlobalState {
             Possible solution: try deleting the database at `DATA_DIR/databases/`. \
             Get the value of `DATA_DIR` from the first message in the log, and \
             *do not* delete the wallet file or directory.\n\n\
-            Tip:\n{tip_hash};\nsync label:\n{asm_sync_label}"
+            Tip:\n{};\nsync label:\n{}",
+            tip_hash.to_hex(),
+            asm_sync_label.to_hex()
         );
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
@@ -1606,6 +1615,63 @@ impl GlobalState {
         self.net.peer_databases.peer_standings.flush().await;
 
         debug!("Flushed all databases");
+
+        Ok(())
+    }
+
+    /// Set the current tip to a stored block, identified by block hash.
+    ///
+    /// Assumes the block was stored, and if it is not canonical that there is
+    /// a connecting path. Assumes furthermore that the node is archival. If any
+    /// of these assumptions are not met then this function returns an error.
+    pub(crate) async fn set_tip_to_stored_block(&mut self, block_digest: Digest) -> Result<()> {
+        // If the node not archival, it cannot sync the wallet. So in this case,
+        // abort early.
+        if !self.chain.is_archival_node() {
+            bail!("node must be archival in order to set tip to stored block");
+        }
+
+        // Read the block.
+        let block = self
+            .chain
+            .archival_state()
+            .get_block(block_digest)
+            .await?
+            .ok_or(anyhow::Error::msg(format!("unknown block {block_digest}")))?;
+
+        // Abort early if the block does not have a mutator set update.
+        if block.mutator_set_update().is_err() {
+            bail!("block does not have a mutator set update".to_string(),);
+        }
+
+        // Set light state to this block.
+        *self.chain.light_state_mut() = Arc::new(block.clone());
+
+        // No need to mark the block as tip in the block index database. If the
+        // node is unfrozen and blocks are found, the tip in the block index
+        // database will be set by the new block handler.
+
+        // Update archival block MMR.
+        self.chain
+            .archival_state_mut()
+            .append_to_archival_block_mmr(&block)
+            .await;
+
+        // Update archival Mutator Set.
+        self.chain
+            .archival_state_mut()
+            .update_mutator_set(&block)
+            .await
+            .expect("mutator set update was already verified");
+
+        // Update wallet state.
+        // We can't use `update_wallet_state_with_new_block` because it doesn't
+        // handle forks or even rollbacks without fast-forwards. Instead, we
+        // need to dig into the archival mutator set to find the membership
+        // proofs. The reason why that's okay is because the node is already
+        // verified to be archival.
+        self.restore_monitored_utxos_from_archival_mutator_set()
+            .await;
 
         Ok(())
     }
@@ -2054,6 +2120,7 @@ impl GlobalState {
 mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::random;
     use rand::rngs::StdRng;
@@ -2066,8 +2133,10 @@ mod tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
+    use crate::api::export::ChangePolicy;
+    use crate::api::export::InputSelectionPolicy;
     use crate::api::export::NeptuneProof;
-    use crate::api::export::TxOutputList;
+    use crate::api::export::OutputFormat;
     use crate::config_models::network::Network;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
@@ -2075,11 +2144,15 @@ mod tests {
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::state::tx_creation_config::TxCreationConfig;
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::models::state::wallet::address::BaseSpendingKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::wallet::wallet_status::WalletStatusExportFormat;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+    use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_blocks;
     use crate::tests::shared::blocks::make_mock_block;
@@ -2092,6 +2165,291 @@ mod tests {
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+    mod helper {
+
+        use futures::future;
+
+        use crate::api::export::TransactionProof;
+        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
+        use crate::models::state::wallet::address::AddressableKeyType;
+
+        use super::*;
+
+        /// Create 3 branches and return them in an array.
+        ///
+        /// First two branches share common ancestor `first_for_0_1`, last
+        /// branch starts from `first_for_2`. All branches have the same length.
+        /// All branches are populated with non-trivial inputs and outputs.
+        pub(crate) async fn make_3_branches(
+            network: Network,
+            first_for_0_1: &Block,
+            first_for_2: &Block,
+            num_blocks_per_branch: usize,
+            coinbase_recipient: &GenerationSpendingKey,
+        ) -> [Vec<Block>; 3] {
+            make_branches(
+                network,
+                [first_for_0_1, first_for_0_1, first_for_2],
+                [num_blocks_per_branch; 3],
+                coinbase_recipient,
+            )
+            .await
+        }
+
+        pub(crate) async fn make_one_branch(
+            network: Network,
+            first_block: &Block,
+            branch_length: usize,
+            coinbase_recipient: &GenerationSpendingKey,
+            seed: [u8; 32],
+        ) -> Vec<Block> {
+            let mut rng = StdRng::from_seed(seed);
+            let mut branch = Vec::with_capacity(branch_length);
+
+            let mut block: Block = first_block.clone();
+            let mut spendable_utxos: Vec<(Utxo, MsMembershipProof, AdditionRecord)> = vec![];
+            for _ in 0..branch_length {
+                let mut mutator_set_accumulator = block.mutator_set_accumulator_after().unwrap();
+
+                // produce removal records
+                let num_removal_records = rng.random_range(0..=spendable_utxos.len());
+                let mut inputs = vec![];
+                for _ in 0..num_removal_records {
+                    let index = rng.random_range(0..spendable_utxos.len());
+                    let (utxo, ms_membership_proof, _addition_record) =
+                        spendable_utxos.swap_remove(index);
+                    let item = Tip5::hash(&utxo);
+                    assert!(mutator_set_accumulator.verify(item, &ms_membership_proof));
+
+                    let removal_record = mutator_set_accumulator.drop(item, &ms_membership_proof);
+
+                    assert!(mutator_set_accumulator.can_remove(&removal_record));
+                    inputs.push(removal_record);
+                }
+
+                // produce addition records
+                let mut outputs = vec![];
+                let mut new_spendable_utxos = vec![];
+                let num_outputs = rng.random_range(0..10);
+                for _ in 0..num_outputs {
+                    let utxo = Utxo::new_native_currency(
+                        LockScript::anyone_can_spend(),
+                        NativeCurrencyAmount::coins(rng.random_range(0..100)),
+                    );
+                    let sender_randomness: Digest = rng.random();
+                    let receiver_preimage: Digest = rng.random();
+
+                    let utxo_triple = UtxoTriple {
+                        utxo: utxo.clone(),
+                        sender_randomness,
+                        receiver_digest: receiver_preimage.hash(),
+                    };
+                    let addition_record = utxo_triple.addition_record();
+                    outputs.push(addition_record);
+
+                    new_spendable_utxos.push((utxo, sender_randomness, receiver_preimage));
+                }
+
+                // produce block
+                let (next_block, _) = make_mock_block_with_inputs_and_outputs(
+                    network,
+                    &block,
+                    inputs.clone(),
+                    outputs.clone(),
+                    None,
+                    coinbase_recipient.to_owned(),
+                    rng.random(),
+                )
+                .await;
+                branch.push(next_block.clone());
+                let mut test_msa = block.mutator_set_accumulator_after().unwrap();
+                block = next_block;
+
+                // update membership proofs
+                let mutator_set_update = block.mutator_set_update().unwrap();
+                let MutatorSetUpdate {
+                    additions,
+                    mut removals,
+                } = mutator_set_update;
+
+                assert_eq!(mutator_set_accumulator, test_msa);
+
+                // ... with addition records
+                for addition_record in additions {
+                    for (utxo, ms_membership_proof, _addition_record) in &mut spendable_utxos {
+                        ms_membership_proof
+                            .update_from_addition(
+                                Tip5::hash(utxo),
+                                &mutator_set_accumulator,
+                                &addition_record,
+                            )
+                            .unwrap();
+                    }
+
+                    // if the addition record is our own, collect a membership proof for it
+                    if let Some((utxo, sender_randomness, receiver_preimage)) = new_spendable_utxos
+                        .iter()
+                        .find(|(utxo, sender_randomness, receiver_preimage)| {
+                            let utxo_triple = UtxoTriple {
+                                utxo: utxo.clone(),
+                                sender_randomness: *sender_randomness,
+                                receiver_digest: receiver_preimage.hash(),
+                            };
+                            utxo_triple.addition_record() == addition_record
+                        })
+                    {
+                        let ms_membership_proof = mutator_set_accumulator.prove(
+                            Tip5::hash(utxo),
+                            *sender_randomness,
+                            *receiver_preimage,
+                        );
+
+                        let mut new_test_msa = mutator_set_accumulator.clone();
+                        new_test_msa.add(&addition_record);
+                        assert!(new_test_msa.verify(Tip5::hash(utxo), &ms_membership_proof));
+
+                        spendable_utxos.push((utxo.clone(), ms_membership_proof, addition_record));
+                    }
+
+                    RemovalRecord::batch_update_from_addition(
+                        &mut removals.iter_mut().collect_vec(),
+                        &mutator_set_accumulator,
+                    );
+
+                    mutator_set_accumulator.add(&addition_record);
+                }
+
+                // ... and with removal records
+                removals.reverse();
+                while let Some(removal_record) = removals.pop() {
+                    for (_utxo, ms_membership_proof, _addition_record) in &mut spendable_utxos {
+                        ms_membership_proof.update_from_remove(&removal_record);
+                    }
+
+                    RemovalRecord::batch_update_from_remove(
+                        &mut removals.iter_mut().collect_vec(),
+                        &removal_record,
+                    );
+
+                    mutator_set_accumulator.remove(&removal_record);
+                }
+
+                block
+                    .mutator_set_update()
+                    .unwrap()
+                    .apply_to_accumulator(&mut test_msa)
+                    .unwrap();
+                assert_eq!(mutator_set_accumulator, test_msa);
+            }
+            branch
+        }
+
+        /// Create an arbitrary number of branches with given starting blocks.
+        ///
+        /// This function produces the branches in parallel, using tokio.
+        pub(crate) async fn make_branches<const N: usize>(
+            network: Network,
+            first_blocks: [&Block; N],
+            branch_lengths: [usize; N],
+            coinbase_recipient: &GenerationSpendingKey,
+        ) -> [Vec<Block>; N] {
+            let mut rng = rand::rng();
+            let all_branches = Arc::new(tokio::sync::Mutex::new([const { None }; N]));
+            let mut handles = vec![];
+
+            // for every branch, spawn a new task to produce it
+            for (i, (first_block, branch_length)) in first_blocks
+                .into_iter()
+                .zip(branch_lengths.into_iter())
+                .enumerate()
+            {
+                let seed: [u8; 32] = rng.random();
+                let first_block = first_block.clone();
+                let coinbase_recipient = coinbase_recipient.clone();
+                let all_branches = all_branches.clone();
+                handles.push(tokio::spawn(async move {
+                    let branch = make_one_branch(
+                        network,
+                        &first_block,
+                        branch_length,
+                        &coinbase_recipient,
+                        seed,
+                    )
+                    .await;
+
+                    all_branches.lock().await[i] = Some(branch);
+                }));
+            }
+
+            // do not continue unless all tasks spawned above are finished
+            let _results = future::join_all(handles).await;
+
+            let all_branches = all_branches.lock().await.clone();
+            all_branches.map(std::option::Option::unwrap)
+        }
+
+        /// Send coins to somewhere.
+        ///
+        /// Make the transaction. Update state accordingly. Return the
+        /// transaction.
+        pub(crate) async fn send_coins(
+            alice: &mut GlobalStateLock,
+            amount: NativeCurrencyAmount,
+            destination: GenerationReceivingAddress,
+        ) -> Transaction {
+            let inputs = alice
+                .api()
+                .tx_initiator()
+                .select_spendable_inputs(
+                    InputSelectionPolicy::ByProvidedOrder,
+                    NativeCurrencyAmount::coins(10),
+                )
+                .await
+                .into_iter()
+                .collect_vec();
+            let outputs = alice
+                .api()
+                .tx_initiator()
+                .generate_tx_outputs(vec![OutputFormat::AddressAndAmount(
+                    destination.into(),
+                    amount,
+                )])
+                .await;
+            let fee = NativeCurrencyAmount::coins(0);
+            let transaction_details = alice
+                .api()
+                .tx_initiator()
+                .generate_tx_details(
+                    inputs.into(),
+                    outputs,
+                    ChangePolicy::RecoverToNextUnusedKey {
+                        key_type: AddressableKeyType::Symmetric,
+                        medium: UtxoNotificationMedium::OnChain,
+                    },
+                    fee,
+                )
+                .await
+                .unwrap();
+            let primitive_witness_proof = alice
+                .api()
+                .tx_initiator()
+                .generate_witness_proof(transaction_details.into());
+            let primitive_witness = primitive_witness_proof.into_primitive_witness();
+
+            println!(
+                "primitive witness has public announcements? (global state) {}",
+                !primitive_witness.kernel.public_announcements.is_empty()
+            );
+            let kernel = primitive_witness.kernel;
+
+            let transaction = Transaction {
+                kernel,
+                proof: TransactionProof::invalid(),
+            };
+            transaction
+        }
+    }
 
     mod handshake {
 
@@ -2154,31 +2512,221 @@ mod tests {
         }
     }
 
+    mod set_tip {
+        use super::*;
+
+        #[apply(shared_tokio_runtime)]
+        async fn set_new_tip_clears_block_proposal_related_data() {
+            let network = Network::Main;
+            let mut bob = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
+            let mut bob = bob.global_state_lock.lock_guard_mut().await;
+            let block1 = invalid_empty_block(network, &Block::genesis(network));
+
+            bob.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone());
+            bob.mining_state
+                .exported_block_proposals
+                .insert(random(), block1.clone());
+
+            bob.set_new_tip(block1).await.unwrap();
+            assert!(
+                bob.mining_state.block_proposal.is_none(),
+                "block proposal must be reset after setting new tip."
+            );
+            assert!(
+                bob.mining_state.exported_block_proposals.is_empty(),
+                "Set of exported block proposals must be empty after registering new block"
+            );
+        }
+    }
+
+    #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn set_new_tip_clears_block_proposal_related_data() {
+    async fn test_set_tip_to_stored_block() {
         let network = Network::Main;
-        let mut bob = mock_genesis_global_state(
+        let mut rng = StdRng::seed_from_u64(43579293874);
+        let mut alice = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
             cli_args::Args::default_with_network(network),
         )
         .await;
-        let mut bob = bob.global_state_lock.lock_guard_mut().await;
-        let block1 = invalid_empty_block(network, &Block::genesis(network));
+        let mut alice_gsl = alice.lock_guard_mut().await;
+        let alice_key = alice_gsl
+            .wallet_state
+            .wallet_entropy
+            .nth_generation_spending_key(0);
+        let bob_secret = WalletEntropy::new_random();
+        let bob_key = bob_secret.nth_generation_spending_key(0);
 
-        bob.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone());
-        bob.mining_state
-            .exported_block_proposals
-            .insert(random(), block1.clone());
-
-        bob.set_new_tip(block1).await.unwrap();
-        assert!(
-            bob.mining_state.block_proposal.is_none(),
-            "block proposal must be reset after setting new tip."
+        // alice mines 3 blocks
+        let genesis_block = alice_gsl.chain.archival_state().get_tip().await;
+        let mut current_block = genesis_block.clone();
+        for _ in 0..3 {
+            let (block, alice_composer_expected_utxos) =
+                make_mock_block(network, &current_block, None, alice_key, rng.random()).await;
+            alice_gsl
+                .wallet_state
+                .add_expected_utxos(alice_composer_expected_utxos)
+                .await;
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+            current_block = block;
+        }
+        const LIQUID_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(64);
+        let wallet_status_1 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_1 = current_block.header().timestamp;
+        assert_eq!(
+            alice_gsl
+                .wallet_state
+                .confirmed_available_balance(&wallet_status_1, timestamp_1),
+            LIQUID_BLOCK_SUBSIDY * 3
         );
-        assert!(
-            bob.mining_state.exported_block_proposals.is_empty(),
-            "Set of exported block proposals must be empty after registering new block"
+
+        // prepare two branches with 3*|a| = |b|
+        let branch_length = 60;
+        let [mut a_blocks, b_blocks] = helper::make_branches(
+            network,
+            [&current_block, &current_block],
+            [branch_length / 3, branch_length],
+            &bob_key,
+        )
+        .await;
+        a_blocks = a_blocks[0..(branch_length / 3)].to_vec();
+
+        // apply branch a
+        for block in &a_blocks {
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+        }
+        current_block = a_blocks.last().unwrap().clone();
+        let wallet_status_2 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_2 = current_block.header().timestamp;
+        assert_eq!(
+            alice_gsl
+                .wallet_state
+                .confirmed_available_balance(&wallet_status_2, timestamp_2),
+            LIQUID_BLOCK_SUBSIDY * 3
+        );
+
+        // initiate transaction
+        let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
+        drop(alice_gsl); // drop lock to free up api
+        let tx_a = helper::send_coins(&mut alice, NativeCurrencyAmount::coins(10), rando).await;
+        alice_gsl = alice.lock_guard_mut().await; //re-acquire lock
+        let block_middle_of_a = invalid_block_with_transaction(&current_block, tx_a);
+        a_blocks.push(block_middle_of_a.clone());
+        current_block = block_middle_of_a;
+        alice_gsl.set_new_tip(current_block.clone()).await.unwrap();
+
+        let wallet_status_3 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_3 = current_block.header().timestamp;
+        let wallet_balance_3 = alice_gsl
+            .wallet_state
+            .confirmed_available_balance(&wallet_status_3, timestamp_3);
+        assert_eq!(
+            wallet_balance_3,
+            (LIQUID_BLOCK_SUBSIDY * 3)
+                .checked_sub(&NativeCurrencyAmount::coins(10))
+                .unwrap(),
+            "wallet balance: {wallet_balance_3}"
+        );
+
+        // continue for a while
+        let more_a_blocks = helper::make_one_branch(
+            network,
+            &current_block,
+            2 * branch_length / 3,
+            &bob_key,
+            rng.random(),
+        )
+        .await;
+        for block in more_a_blocks {
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+            a_blocks.push(block);
+        }
+        current_block = a_blocks.last().unwrap().clone();
+
+        let wallet_status_4 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_4 = current_block.header().timestamp;
+        assert_eq!(
+            alice_gsl
+                .wallet_state
+                .confirmed_available_balance(&wallet_status_4, timestamp_4),
+            (LIQUID_BLOCK_SUBSIDY * 3)
+                .checked_sub(&NativeCurrencyAmount::coins(10))
+                .unwrap()
+        );
+
+        // resolve fork: apply all of branch b
+        for block in &b_blocks {
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+        }
+        current_block = b_blocks.last().unwrap().clone();
+
+        // option 1
+        let _ = alice_gsl.resync_membership_proofs().await;
+
+        // option 2
+        // let _ = alice_gsl
+        //     .resync_membership_proofs_from_stored_blocks(current_block.hash())
+        //     .await;
+
+        let wallet_status_5 = alice_gsl.get_wallet_status_for_tip().await;
+        println!(
+            "wallet_status_5: {}",
+            WalletStatusExportFormat::Table.export(&wallet_status_5)
+        );
+        let timestamp_5 = current_block.header().timestamp;
+        let wallet_balance_5 = alice_gsl
+            .wallet_state
+            .confirmed_available_balance(&wallet_status_5, timestamp_5);
+        assert_eq!(
+            wallet_balance_5,
+            LIQUID_BLOCK_SUBSIDY * 3,
+            "wallet balance: {wallet_balance_5}"
+        );
+
+        // make transaction
+        drop(alice_gsl); // drop lock to free up api
+        let tx_b = helper::send_coins(&mut alice, NativeCurrencyAmount::coins(5), rando).await;
+        alice_gsl = alice.lock_guard_mut().await; //re-acquire lock
+        let block_end_of_b = invalid_block_with_transaction(&current_block, tx_b);
+        a_blocks.push(block_end_of_b.clone());
+        current_block = block_end_of_b;
+        alice_gsl.set_new_tip(current_block.clone()).await.unwrap();
+
+        let wallet_status_6 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_6 = current_block.header().timestamp;
+        assert_eq!(
+            alice_gsl
+                .wallet_state
+                .confirmed_available_balance(&wallet_status_6, timestamp_6),
+            (LIQUID_BLOCK_SUBSIDY * 3)
+                .checked_sub(&NativeCurrencyAmount::coins(5))
+                .unwrap()
+        );
+
+        // set tip to half-way in branch a
+        let target_block = a_blocks[branch_length / 2].clone();
+        alice_gsl
+            .set_tip_to_stored_block(target_block.hash())
+            .await
+            .unwrap();
+
+        assert_eq!(alice_gsl.chain.light_state().hash(), target_block.hash());
+
+        let wallet_status_7 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_7 = current_block.header().timestamp;
+        assert_eq!(
+            alice_gsl
+                .wallet_state
+                .confirmed_available_balance(&wallet_status_7, timestamp_7),
+            (LIQUID_BLOCK_SUBSIDY * 3)
+                .checked_sub(&NativeCurrencyAmount::coins(10))
+                .unwrap()
         );
     }
 
@@ -2308,7 +2856,6 @@ mod tests {
     }
 
     mod restore_monitored_utxo_data {
-        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 
         use super::*;
 
@@ -2759,183 +3306,6 @@ mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn resync_ms_membership_proofs_across_stale_fork() {
-            /// Create 3 branches and return them in an array.
-            ///
-            /// First two branches share common ancestor `first_for_0_1`, last
-            /// branch starts from `first_for_2`. All branches have the same length.
-            /// All branches are populated with non-trivial inputs and outputs.
-            ///
-            /// Factored out to parallel function to make this test run faster.
-            async fn make_3_branches(
-                network: Network,
-                first_for_0_1: &Block,
-                first_for_2: &Block,
-                num_blocks_per_branch: usize,
-                coinbase_recipient: &GenerationSpendingKey,
-            ) -> [Vec<Block>; 3] {
-                let mut final_ret = Vec::with_capacity(3);
-                for i in 0..3 {
-                    let mut rng = rand::rng();
-                    let mut ret = Vec::with_capacity(num_blocks_per_branch);
-
-                    let mut block = if i < 2 {
-                        first_for_0_1.to_owned()
-                    } else {
-                        first_for_2.to_owned()
-                    };
-                    let mut spendable_utxos: Vec<(Utxo, MsMembershipProof, AdditionRecord)> =
-                        vec![];
-                    for _ in 0..num_blocks_per_branch {
-                        let mut mutator_set_accumulator =
-                            block.mutator_set_accumulator_after().unwrap();
-
-                        // produce removal records
-                        let num_removal_records = rng.random_range(0..=spendable_utxos.len());
-                        let mut inputs = vec![];
-                        for _ in 0..num_removal_records {
-                            let index = rng.random_range(0..spendable_utxos.len());
-                            let (utxo, ms_membership_proof, _addition_record) =
-                                spendable_utxos.swap_remove(index);
-                            let item = Tip5::hash(&utxo);
-                            assert!(mutator_set_accumulator.verify(item, &ms_membership_proof));
-
-                            let removal_record =
-                                mutator_set_accumulator.drop(item, &ms_membership_proof);
-
-                            assert!(mutator_set_accumulator.can_remove(&removal_record));
-                            inputs.push(removal_record);
-                        }
-
-                        // produce addition records
-                        let mut outputs = vec![];
-                        let mut new_spendable_utxos = vec![];
-                        let num_outputs = rng.random_range(0..10);
-                        for _ in 0..num_outputs {
-                            let utxo = Utxo::new_native_currency(
-                                LockScript::anyone_can_spend(),
-                                NativeCurrencyAmount::coins(rng.random_range(0..100)),
-                            );
-                            let sender_randomness: Digest = rng.random();
-                            let receiver_preimage: Digest = rng.random();
-
-                            let utxo_triple = UtxoTriple {
-                                utxo: utxo.clone(),
-                                sender_randomness,
-                                receiver_digest: receiver_preimage.hash(),
-                            };
-                            let addition_record = utxo_triple.addition_record();
-                            outputs.push(addition_record);
-
-                            new_spendable_utxos.push((utxo, sender_randomness, receiver_preimage));
-                        }
-
-                        // produce block
-                        let (next_block, _) = make_mock_block_with_inputs_and_outputs(
-                            network,
-                            &block,
-                            inputs.clone(),
-                            outputs.clone(),
-                            None,
-                            coinbase_recipient.to_owned(),
-                            rng.random(),
-                        )
-                        .await;
-                        ret.push(next_block.clone());
-                        let mut test_msa = block.mutator_set_accumulator_after().unwrap();
-                        block = next_block;
-
-                        // update membership proofs
-                        let mutator_set_update = block.mutator_set_update().unwrap();
-                        let MutatorSetUpdate {
-                            additions,
-                            mut removals,
-                        } = mutator_set_update;
-
-                        assert_eq!(mutator_set_accumulator, test_msa);
-
-                        // ... with addition records
-                        for addition_record in additions {
-                            for (utxo, ms_membership_proof, _addition_record) in
-                                &mut spendable_utxos
-                            {
-                                ms_membership_proof
-                                    .update_from_addition(
-                                        Tip5::hash(utxo),
-                                        &mutator_set_accumulator,
-                                        &addition_record,
-                                    )
-                                    .unwrap();
-                            }
-
-                            // if the addition record is our own, collect a membership proof for it
-                            if let Some((utxo, sender_randomness, receiver_preimage)) =
-                                new_spendable_utxos.iter().find(
-                                    |(utxo, sender_randomness, receiver_preimage)| {
-                                        let utxo_triple = UtxoTriple {
-                                            utxo: utxo.clone(),
-                                            sender_randomness: *sender_randomness,
-                                            receiver_digest: receiver_preimage.hash(),
-                                        };
-                                        utxo_triple.addition_record() == addition_record
-                                    },
-                                )
-                            {
-                                let ms_membership_proof = mutator_set_accumulator.prove(
-                                    Tip5::hash(utxo),
-                                    *sender_randomness,
-                                    *receiver_preimage,
-                                );
-
-                                let mut new_test_msa = mutator_set_accumulator.clone();
-                                new_test_msa.add(&addition_record);
-                                assert!(new_test_msa.verify(Tip5::hash(utxo), &ms_membership_proof));
-
-                                spendable_utxos.push((
-                                    utxo.clone(),
-                                    ms_membership_proof,
-                                    addition_record,
-                                ));
-                            }
-
-                            RemovalRecord::batch_update_from_addition(
-                                &mut removals.iter_mut().collect_vec(),
-                                &mutator_set_accumulator,
-                            );
-
-                            mutator_set_accumulator.add(&addition_record);
-                        }
-
-                        // ... and with removal records
-                        removals.reverse();
-                        while let Some(removal_record) = removals.pop() {
-                            for (_utxo, ms_membership_proof, _addition_record) in
-                                &mut spendable_utxos
-                            {
-                                ms_membership_proof.update_from_remove(&removal_record);
-                            }
-
-                            RemovalRecord::batch_update_from_remove(
-                                &mut removals.iter_mut().collect_vec(),
-                                &removal_record,
-                            );
-
-                            mutator_set_accumulator.remove(&removal_record);
-                        }
-
-                        block
-                            .mutator_set_update()
-                            .unwrap()
-                            .apply_to_accumulator(&mut test_msa)
-                            .unwrap();
-                        assert_eq!(mutator_set_accumulator, test_msa);
-                    }
-
-                    final_ret.push(ret);
-                }
-
-                final_ret.try_into().unwrap()
-            }
-
             let network = Network::Main;
             let mut rng = rand::rng();
 
@@ -2984,7 +3354,7 @@ mod tests {
                 }
 
                 let [a_blocks, b_blocks, c_blocks] =
-                    make_3_branches(network, &block_1, &genesis_block, 60, &bob_key).await;
+                    helper::make_3_branches(network, &block_1, &genesis_block, 60, &bob_key).await;
 
                 println!(
                     "a_blocks put counts: {}",
