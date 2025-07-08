@@ -161,7 +161,10 @@ impl ConsensusProgram for CollectTypeScripts {
             // _ *ctsw *type_script_hashes N 0 *utxos[0]_si
 
             call {collect_type_script_hashes_from_utxos}
-            // _ *ctsw *type_script_hashes N N *
+            // _ *ctsw *type_script_hashes N N *utxos[N]_si
+
+            /* Ensure pointer is inside allowed ND-memory region */
+            pop_count
 
             pop 3
             // _ *ctsw *type_script_hashes
@@ -269,6 +272,11 @@ impl ConsensusProgram for CollectTypeScripts {
 
                 call {collect_type_script_hashes_from_coins}
                 // _ *type_script_hashes N i *utxos[i]_si len len *coin[len]_si
+
+
+                /* Ensure pointer is inside allowed ND-memory region */
+                pop_count
+
 
                 pop 3
                 // _ *type_script_hashes N i *utxos[i]_si
@@ -641,6 +649,6 @@ mod tests {
 
     test_program_snapshot!(
         CollectTypeScripts,
-        "dfb4e2a91b9ecfabf071298814f2d772f1ec4e6b8f42cb43f04a2f83bfa5c72498326d6195284424"
+        "c413d68007e84f124fb9b044a0d019edc5ab715909ab7987eae5363cccd8214df47e5e113f29b3a4"
     );
 }
