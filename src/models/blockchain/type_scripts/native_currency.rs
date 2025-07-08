@@ -95,6 +95,9 @@ impl ConsensusProgram for NativeCurrency {
         ));
         let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
         let i128_lt = library.import(Box::new(tasm_lib::arithmetic::i128::lt::Lt));
+        let shift_right_one_u128 = library.import(Box::new(
+            tasm_lib::arithmetic::u128::shift_right_static::ShiftRightStatic::<1>,
+        ));
         let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
         let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
             NativeCurrencyWitnessMemory,
@@ -170,6 +173,40 @@ impl ConsensusProgram for NativeCurrency {
             // _ *salted_utxos
         };
 
+        let assert_half_output_amount_timelocked_label =
+            "neptune_core_native_currency_assert_half_output_amount_timelocked";
+        let assert_half_output_amount_timelocked = triton_asm! {
+            {assert_half_output_amount_timelocked_label}:
+            // _ [total_output] [timelocked_amount]
+
+            dup 7
+            dup 7
+            dup 7
+            dup 7
+            // _ [total_output] [timelocked_amount] [total_output]
+
+            call {shift_right_one_u128}
+            // _ [total_output] [timelocked_amount] [total_output / 2]
+
+            dup 7
+            dup 7
+            dup 7
+            dup 7
+            // _ [total_output] [timelocked_amount] [total_output / 2] [timelocked_amount]
+
+            call {u128_lt}
+            // _ [total_output] [timelocked_amount] (total_output / 2 > timelocked_amount)
+
+            push 0
+            eq
+            // _ [total_output] [timelocked_amount] (total_output / 2 <= timelocked_amount)
+
+            assert error_id {COINBASE_TIMELOCK_INSUFFICIENT}
+            // _ [total_output] [timelocked_amount]
+
+            return
+        };
+
         let main_code = triton_asm! {
             // _
 
@@ -223,7 +260,6 @@ impl ConsensusProgram for NativeCurrency {
 
 
             /* Divine and authenticate fee field */
-
             dup 1
             // _ [txkmh] *ncw *coinbase *ncw
 
@@ -339,8 +375,8 @@ impl ConsensusProgram for NativeCurrency {
             // _ [txkmh] *ncw *coinbase *fee
             hint fee_ptr = stack[0]
 
-            /* Divine and authenticate salted input and output UTXOs */
 
+            /* Divine and authenticate salted input and output UTXOs */
             dup 2 {&field_with_size_salted_input_utxos}
             // _ [txkmh] *ncw *coinbase *fee *salted_input_utxos size
 
@@ -355,7 +391,6 @@ impl ConsensusProgram for NativeCurrency {
 
 
             /* Compute left-hand side: sum inputs + (optional coinbase) */
-
             swap 1 {&field_utxos}
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos *input_utxos
 
@@ -393,7 +428,6 @@ impl ConsensusProgram for NativeCurrency {
 
 
             /* Compute right-hand side: fee + sum outputs */
-
             dup 11 dup 11
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee *salted_output_utxos
 
@@ -426,6 +460,8 @@ impl ConsensusProgram for NativeCurrency {
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 [total_output] [timelocked_amount]
 
             call {loop_utxos_add_amounts_label}
+            hint timelocked_amount = stack[0..4]
+            hint total_output = stack[4..8]
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount]
 
             // sanity check total output
@@ -465,22 +501,10 @@ impl ConsensusProgram for NativeCurrency {
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] (total_output >= 0)
 
             assert error_id {SUM_OF_OUTPUTS_IS_NEGATIVE}
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount]
 
-            // add half of fee to timelocked amount
-            dup 14
-            push {coin_size-1} add
-            read_mem {coin_size}
-            pop 1
-            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] [fee]
 
-            push 1
-            call {i128_shr}
-            call {u128_overflowing_add}
-            pop 1
-            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [total_timelocked]
-
-            hint total_timelocked : u128 = stack[0..4]
-
+            /* Verify that coinbase transactions timelock half their output amount */
             pick 8 pop 1
             pick 8 pop 1
             pick 8 pop 1
@@ -488,7 +512,7 @@ impl ConsensusProgram for NativeCurrency {
             pick 8 pop 1
             pick 8 pop 1
             pick 8 pop 1
-            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] [total_output] [total_timelocked]
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] [total_output] [timelocked_amount]
 
             pick 12 pop 1
             pick 12 pop 1
@@ -497,28 +521,26 @@ impl ConsensusProgram for NativeCurrency {
             pick 12 pop 1
             pick 12 pop 1
             pick 12 pop 1
-            // _ [txkmh] *ncw *coinbase *fee [total_input] [total_output] [total_timelocked]
+            // _ [txkmh] *ncw *coinbase *fee [total_input] [total_output] [timelocked_amount]
 
             pick 13
             call {coinbase_pointer_to_amount}
-            // _ [txkmh] *ncw *fee [total_input] [total_output] [total_timelocked] [coinbase]
             hint coinbase = stack[0..4]
+            // _ [txkmh] *ncw *fee [total_input] [total_output] [timelocked_amount] [coinbase]
 
-            push 1
-            call {i128_shr}
-            // _ [txkmh] *ncw *fee [total_input] [total_output] [total_timelocked] [coinbase/2]
-
-            pick 7
-            pick 7
-            pick 7
-            pick 7
+            /* If coinbase is non-zero assert that at least half output is timelocked */
+            push 0
+            push 0
+            push 0
+            push 0
             call {u128_lt}
-            // _ [txkmh] *ncw *fee [total_input] [total_output] (total_timelocked < coinbase/2)
+            // _ [txkmh] *ncw *fee [total_input] [total_output] [timelocked_amount] (coinbase > 0)
 
-            push 0 eq
-            // _ [txkmh] *ncw *fee [total_input] [total_output] (total_timelocked >= coinbase/2)
+            skiz
+                call {assert_half_output_amount_timelocked_label}
+            // _ [txkmh] *ncw *fee [total_input] [total_output] [timelocked_amount]
 
-            assert error_id {COINBASE_TIMELOCK_INSUFFICIENT}
+            pop {coin_size}
             // _ [txkmh] *ncw *fee [total_input] [total_output]
 
             pick 8 addi {coin_size-1}
@@ -587,6 +609,7 @@ impl ConsensusProgram for NativeCurrency {
         let code = triton_asm!(
             {&main_code}
             {&subroutines}
+            {&assert_half_output_amount_timelocked}
             {&imports}
         );
 
@@ -851,7 +874,7 @@ pub mod tests {
 
             // get total output amount from outputs
             let mut total_output = NativeCurrencyAmount::coins(0);
-            let mut total_timelocked_output = NativeCurrencyAmount::coins(0);
+            let mut timelocked_output = NativeCurrencyAmount::coins(0);
 
             i = 0;
             let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
@@ -884,7 +907,7 @@ pub mod tests {
                 }
                 total_output = total_output.checked_add(&total_amount_for_utxo).unwrap();
                 if time_locked {
-                    total_timelocked_output = total_timelocked_output
+                    timelocked_output = timelocked_output
                         .checked_add(&total_amount_for_utxo)
                         .unwrap();
                 }
@@ -901,15 +924,11 @@ pub mod tests {
             );
 
             // if coinbase is set, verify that half of it is time-locked
-            let mut half_of_coinbase = some_coinbase;
-            half_of_coinbase.div_two();
-            let mut half_of_fee = fee;
-            half_of_fee.div_two();
-            assert!(some_coinbase.is_zero() || half_of_coinbase <= total_timelocked_output + half_of_fee,
-                    "not enough funds timelocked -- half of coinbase == {} > total_timelocked_output + half_of_fee == {} whereas total output == {}",
-                    half_of_coinbase,
-                    total_timelocked_output + half_of_fee,
-                    total_output,);
+            if some_coinbase.is_positive() {
+                let mut required_timelocked = total_output;
+                required_timelocked.div_two();
+                assert!(timelocked_output >= required_timelocked);
+            }
 
             // test no-inflation equation
             let total_input_plus_coinbase: NativeCurrencyAmount =
@@ -1257,7 +1276,7 @@ pub mod tests {
     }
 
     #[proptest]
-    fn transaction_with_timelocked_coinbase_is_valid(
+    fn transaction_with_timelocked_coinbase_is_valid_prop(
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
         #[filter(!#primitive_witness.kernel.fee.is_negative())]
         primitive_witness: PrimitiveWitness,
@@ -1267,7 +1286,27 @@ pub mod tests {
     }
 
     #[test]
-    fn transaction_with_timelocked_coinbase_is_valid_deterministic() {
+    fn transaction_with_timelocked_coinbase_is_valid_deterministic_small() {
+        let mut test_runner = TestRunner::deterministic();
+        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 1, 0)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        while primitive_witness.kernel.fee.is_negative() {
+            primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 1, 0)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        }
+        println!("primitive_witness:\n{primitive_witness}\n\n");
+
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+
+        assert!(assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).is_ok());
+    }
+
+    #[test]
+    fn transaction_with_timelocked_coinbase_is_valid_deterministic_medium() {
         let mut test_runner = TestRunner::deterministic();
         let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
             .new_tree(&mut test_runner)
@@ -1279,6 +1318,8 @@ pub mod tests {
                 .unwrap()
                 .current();
         }
+        println!("primitive_witness:\n{primitive_witness}\n\n");
+
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         let mut fee = native_currency_witness.kernel.fee;
         fee.div_two();
