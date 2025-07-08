@@ -25,8 +25,10 @@ use crate::api::export::TxInputList;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::type_scripts::known_type_scripts;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -323,12 +325,21 @@ impl PrimitiveWitness {
             witnessed_removal_records.push(removal_record);
         }
 
-        // verify that all type script hashes are represented by the witness's type script list
-        let type_script_hashes = self
-            .output_utxos
-            .utxos
-            .iter()
-            .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash))
+        // verify that all type required scripts are present.
+        let required_type_script_hashes = vec![NativeCurrency.hash()]
+            .into_iter()
+            .chain(
+                self.output_utxos
+                    .utxos
+                    .iter()
+                    .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash)),
+            )
+            .chain(
+                self.input_utxos
+                    .utxos
+                    .iter()
+                    .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash)),
+            )
             .unique()
             .collect_vec();
 
@@ -341,17 +352,17 @@ impl PrimitiveWitness {
         // all must be in dictionary.  so if we find first that is not then it
         // is already an error.  note that the error only informs caller of the
         // first unknown, not all.
-        if let Some(first) = type_script_hashes
+        if let Some(first_missing_type_script_hash) = required_type_script_hashes
             .iter()
             .find(|tsh| !type_script_dictionary.contains_key(tsh))
         {
-            let error = WitnessValidationError::UnknownTypeScript(*first);
+            let error = WitnessValidationError::UnknownTypeScript(*first_missing_type_script_hash);
             warn!("{}", error);
             return Err(error);
         }
 
         // verify type scripts
-        for (j, type_script_hash) in type_script_hashes.iter().enumerate() {
+        for (j, type_script_hash) in required_type_script_hashes.iter().enumerate() {
             let type_script = type_script_dictionary[type_script_hash].clone();
             let nondeterminism = self.type_scripts_and_witnesses[j].nondeterminism();
             let public_input = [
@@ -884,32 +895,26 @@ pub mod neptune_arbitrary {
                 salt: outputs_salt,
             };
 
-            let num_inputs = input_utxos.len();
-            let num_outputs = output_utxos.len();
-            let mut type_scripts_and_witnesses = vec![];
-            if num_inputs + num_outputs > 0 {
-                let all_utxos = salted_input_utxos
-                    .utxos
-                    .iter()
-                    .chain(salted_output_utxos.utxos.iter());
-                if all_utxos.clone().any(|utxo| utxo.has_native_currency()) {
-                    let native_currency_type_script_witness = NativeCurrencyWitness {
-                        salted_input_utxos: salted_input_utxos.clone(),
-                        salted_output_utxos: salted_output_utxos.clone(),
-                        kernel: kernel.clone(),
-                    };
-                    type_scripts_and_witnesses
-                        .push(native_currency_type_script_witness.type_script_and_witness());
-                }
+            let native_currency_type_script_witness = NativeCurrencyWitness {
+                salted_input_utxos: salted_input_utxos.clone(),
+                salted_output_utxos: salted_output_utxos.clone(),
+                kernel: kernel.clone(),
+            };
+            let mut type_scripts_and_witnesses =
+                vec![native_currency_type_script_witness.type_script_and_witness()];
 
-                if all_utxos.clone().any(|utxo| utxo.release_date().is_some()) {
-                    let time_lock_witness = TimeLockWitness::new(
-                        kernel.clone(),
-                        salted_input_utxos.clone(),
-                        salted_output_utxos.clone(),
-                    );
-                    type_scripts_and_witnesses.push(time_lock_witness.type_script_and_witness());
-                }
+            let all_utxos = salted_input_utxos
+                .utxos
+                .iter()
+                .chain(salted_output_utxos.utxos.iter());
+
+            if all_utxos.clone().any(|utxo| utxo.release_date().is_some()) {
+                let time_lock_witness = TimeLockWitness::new(
+                    kernel.clone(),
+                    salted_input_utxos.clone(),
+                    salted_output_utxos.clone(),
+                );
+                type_scripts_and_witnesses.push(time_lock_witness.type_script_and_witness());
             }
 
             PrimitiveWitness {
