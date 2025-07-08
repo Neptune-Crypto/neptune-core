@@ -89,6 +89,19 @@ impl SecretWitness for CollectTypeScriptsWitness {
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectTypeScripts;
 
+impl CollectTypeScripts {
+    // cannot be triggered
+    const EMPTY_TYPE_SCRIPT_HASH_LIST: i128 = 1_000_510;
+
+    // cannot be triggered
+    const FIRST_TYPE_SCRIPT_HASH_NOT_NATIVE_CURRENCY: i128 = 1_000_511;
+
+    // cannot be triggered
+    const SALTED_UTXOS_TOO_SMALL: i128 = 1_000_512;
+
+    const NON_INTEGRAL_SALTED_UTXOS: i128 = 1_000_513;
+}
+
 impl ConsensusProgram for CollectTypeScripts {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
@@ -119,13 +132,23 @@ impl ConsensusProgram for CollectTypeScripts {
             dup 1 swap 1
             // _ *ctsw *type_script_hashes *salted_utxos *salted_utxos size
 
+
+            /* Sanity check: Ensure salted utxos struct not too small */
+            dup 0
+            push 2
+            lt
+            assert error_id {Self::SALTED_UTXOS_TOO_SMALL}
+            // _ *ctsw *type_script_hashes *salted_utxos *salted_utxos size
+
+
             call {hash_varlen}
             // _ *ctsw *type_script_hashes *salted_utxos [salted_utxos_hash]
 
             read_io 5
             // _ *ctsw *type_script_hashes *salted_utxos [salted_utxos_hash] [sud]
 
-            {&eq_digest} assert
+            {&eq_digest}
+            assert error_id {Self::NON_INTEGRAL_SALTED_UTXOS}
             // _ *ctsw *type_script_hashes *salted_utxos
 
             {&field_utxos}
@@ -191,6 +214,28 @@ impl ConsensusProgram for CollectTypeScripts {
             read_mem 1 push 2 add swap 1
             // _ *ctsw *type_script_hashes[0] len
 
+
+            /* Sanity checks of generated list of type script hashes */
+            dup 0
+            push 0
+            lt
+            assert error_id {Self::EMPTY_TYPE_SCRIPT_HASH_LIST}
+            // _ *ctsw *type_script_hashes[0] len
+
+            dup 1
+            push {Digest::LEN-1} add
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *ctsw *type_script_hashes[0] len [hashes[0]]
+
+            {&push_native_currency_hash_to_stack}
+            // _ *ctsw *type_script_hashes[0] len [hashes[0]] [native_currency_hash]
+
+            {&DataType::Digest.compare()}
+            assert error_id {Self::FIRST_TYPE_SCRIPT_HASH_NOT_NATIVE_CURRENCY}
+
+
+            /* Write all hashes to std-out */
             push {Digest::LEN} mul
             // _ *ctsw *type_script_hashes[0] size
 
@@ -585,7 +630,6 @@ mod tests {
 
     test_program_snapshot!(
         CollectTypeScripts,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "bd0d05812596ed09f0f8d55cff43545f2f97adb378314b2ed3eeb74586d41329ea51ea6fb25f06df"
+        "599c91df555f0d0b884380f5a8892407f6435de653b9663298edaf980c744ed7ce04efe3fb65fc3e"
     );
 }

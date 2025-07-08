@@ -30,4 +30,5 @@ often.
 |  270..280 | [`KernelToOutputs`](models/blockchain/transaction/validity/kernel_to_outputs.rs)                                               |
 |  300..400 | [`LockScript`](models/blockchain/transaction/lock_script.rs)                                                                   |
 |  400..500 | [`amount`](models/blockchain/type_scripts/amount/mod.rs)                                                                       |
-|  500..510 | [`GenerateCollectTypeScriptsClaim`](models/blockchain/transaction/validity/tasm/claims/generate_collect_type_scripts_claim.rs) | 
+|  500..510 | [`GenerateCollectTypeScriptsClaim`](models/blockchain/transaction/validity/tasm/claims/generate_collect_type_scripts_claim.rs) |
+|  510..520 | [`CollectTypeScripts`](models/blockchain/transaction/validity/collect_type_scripts.rs)                                         |
