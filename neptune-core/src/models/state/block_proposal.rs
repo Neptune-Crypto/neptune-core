@@ -120,3 +120,14 @@ impl fmt::Display for BlockProposalRejectError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::models::state::block_proposal::BlockProposal;
+
+    impl BlockProposal {
+        pub(crate) fn is_none(&self) -> bool {
+            matches!(self, BlockProposal::None)
+        }
+    }
+}

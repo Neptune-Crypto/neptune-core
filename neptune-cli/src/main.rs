@@ -49,6 +49,7 @@ use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
 
 use crate::parser::beneficiary::Beneficiary;
+use crate::parser::hex_digest::HexDigest;
 
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
@@ -329,6 +330,13 @@ enum Command {
 
     /// resume mining
     RestartMiner,
+
+    /// Set the tip of the blockchain state to a stored block, identified by its
+    /// hash.
+    SetTip {
+        #[arg(value_parser = HexDigest::from_str)]
+        digest: HexDigest,
+    },
 
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
@@ -842,12 +850,12 @@ async fn main() -> Result<()> {
                 .block_digest(ctx, token, BlockSelector::Tip)
                 .await??
                 .unwrap_or_default();
-            println!("{head_hash}");
+            println!("{} / {:x}", head_hash, head_hash);
         }
         Command::LatestTipDigests { n } => {
             let head_hashes = client.latest_tip_digests(ctx, token, n).await??;
             for hash in head_hashes {
-                println!("{hash}");
+                println!("{hash} / {hash:x}");
             }
         }
         Command::TipHeader => {
@@ -1274,6 +1282,18 @@ async fn main() -> Result<()> {
             println!("Sending command to restart miner.");
             client.restart_miner(ctx, token).await??;
             println!("Command completed successfully");
+        }
+
+        Command::SetTip { digest } => {
+            println!("Setting tip ...");
+            match client.set_tip(ctx, token, digest.0).await? {
+                Ok(_) => {
+                    println!("success.");
+                }
+                Err(server_error) => {
+                    println!("failed to set tip: {server_error}");
+                }
+            };
         }
 
         Command::PruneAbandonedMonitoredUtxos => {

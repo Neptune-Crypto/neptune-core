@@ -115,6 +115,7 @@ use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_auth;
+use crate::rpc_server::error::RpcError;
 use crate::rpc_server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -1930,6 +1931,11 @@ pub trait RPC {
     /// ```
     async fn prune_abandoned_monitored_utxos(token: rpc_auth::Token) -> RpcResult<usize>;
 
+    /// Set the tip of the blockchain state to a given block, identified by its
+    /// hash. The block must be stored, but it does not need to live on the
+    /// canonical chain.
+    async fn set_tip(token: rpc_auth::Token, indicated_tip: Digest) -> RpcResult<()>;
+
     /// Gracious shutdown.
     ///
     /// ```no_run
@@ -3539,6 +3545,25 @@ impl RPC for NeptuneRPCServer {
                 Ok(0)
             }
         }
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn set_tip(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        indicated_tip: Digest,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Set tip.
+        self.state
+            .lock_guard_mut()
+            .await
+            .set_tip_to_stored_block(indicated_tip)
+            .await
+            .map_err(|e| RpcError::Failed(format!("failed to set tip to stored block: {e}")))
     }
 
     // documented in trait. do not add doc-comment.
