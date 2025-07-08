@@ -44,6 +44,8 @@ use serde::Serialize;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
+use tasm_lib::prelude::Digest;
+use thiserror::Error;
 
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
@@ -339,6 +341,18 @@ enum Command {
     /// Unfreeze the state update mechanism. Resume state changes when new
     /// blocks arrive.
     Unfreeze,
+
+    /// Set the tip of the blockchain state to a stored block, identified by its
+    /// hash.
+    ///
+    /// This command has an important side-effect: it freezes the state. If it
+    /// did not, then the state would automatically synchronize to a new
+    /// canonical block when it appears on the network. To unfreeze, use the
+    /// `unfreeze` command.
+    SetTip {
+        #[arg(value_parser = HexDigest::from_str)]
+        digest: HexDigest,
+    },
 
     /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
@@ -848,12 +862,12 @@ async fn main() -> Result<()> {
                 .block_digest(ctx, token, BlockSelector::Tip)
                 .await??
                 .unwrap_or_default();
-            println!("{}", head_hash);
+            println!("{} / {:x}", head_hash, head_hash);
         }
         Command::LatestTipDigests { n } => {
             let head_hashes = client.latest_tip_digests(ctx, token, n).await??;
             for hash in head_hashes {
-                println!("{hash}");
+                println!("{hash} / {hash:x}");
             }
         }
         Command::TipHeader => {
@@ -1192,9 +1206,21 @@ async fn main() -> Result<()> {
         }
 
         Command::Unfreeze => {
-            println!("Freezing state update mechanism ...");
+            println!("Unfreezing state update mechanism ...");
             client.unfreeze(ctx, token).await??;
             println!("success.");
+        }
+
+        Command::SetTip { digest } => {
+            println!("Setting tip ...");
+            match client.set_tip(ctx, token, digest.0).await? {
+                Ok(_) => {
+                    println!("success.");
+                }
+                Err(server_error) => {
+                    println!("failed to set tip: {server_error}");
+                }
+            };
         }
 
         Command::PruneAbandonedMonitoredUtxos => {
@@ -1417,5 +1443,40 @@ fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
 fn print_seed_phrase_dialog(wallet_secret: SecretKeyMaterial) {
     for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
         println!("{}. {word}", i + 1);
+    }
+}
+
+/// Newtype for [`Digest`] so that clap can parse.
+#[derive(Debug, Clone, Copy)]
+struct HexDigest(Digest);
+
+#[derive(Debug, Clone, Error)]
+enum DigestParseError {
+    #[error("invalid hex string: '{0}'")]
+    InvalidHexString(String),
+    #[error("wrong input length")]
+    InputLengthMismatch,
+    #[error("non-canonical representation")]
+    NonCanonicalRepresentation,
+}
+
+impl FromStr for HexDigest {
+    type Err = DigestParseError;
+    fn from_str(unparsed: &str) -> Result<HexDigest, DigestParseError> {
+        if unparsed.len() != 80 {
+            return Err(DigestParseError::InputLengthMismatch);
+        }
+        let mut arr = [0u8; 40];
+        for i in 0..40 {
+            let byte_str = &unparsed[2 * i..2 * i + 2];
+            arr[i] = u8::from_str_radix(byte_str, 16)
+                .map_err(|_| DigestParseError::InvalidHexString(byte_str.to_owned()))?;
+        }
+
+        let digest = HexDigest(
+            Digest::try_from(arr).map_err(|_| DigestParseError::NonCanonicalRepresentation)?,
+        );
+
+        Ok(digest)
     }
 }

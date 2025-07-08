@@ -124,6 +124,15 @@ where
 
         self.chunks.set_many(chunk_index_to_chunk_new_state).await
     }
+
+    /// Clear the mutator set: revert all operations so as to bring it into a
+    /// brand new state.
+    pub(crate) async fn clear(&mut self) {
+        self.aocl.prune_to_num_leafs(0).await;
+        self.swbf_inactive.prune_to_num_leafs(0).await;
+        self.swbf_active.sbf.clear();
+        self.chunks.clear().await;
+    }
 }
 
 impl<MmrStorage, ChunkStorage> ArchivalMutatorSet<MmrStorage, ChunkStorage>
