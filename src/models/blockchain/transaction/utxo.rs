@@ -300,6 +300,24 @@ mod tests {
             self.coins[coin_index].state.push(new_element);
             self
         }
+
+        pub(crate) fn empty_dummy() -> Self {
+            Self {
+                lock_script_hash: Digest::default(),
+                coins: vec![],
+            }
+        }
+
+        pub(crate) fn dummy_with_num_coins(num_coins: usize) -> Self {
+            let dummy_coin = Coin {
+                type_script_hash: Digest::default(),
+                state: vec![],
+            };
+            Self {
+                lock_script_hash: Digest::default(),
+                coins: vec![dummy_coin.clone(); num_coins],
+            }
+        }
     }
 
     proptest::proptest! {

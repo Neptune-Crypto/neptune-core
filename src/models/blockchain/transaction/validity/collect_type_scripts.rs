@@ -32,6 +32,14 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm;
 
+/// Maximum number of inputs/outputs allowed. Number of UTXOs must be strictly
+/// less than this number.
+const MAX_NUM_INPUTS_AND_OUTPUTS: usize = 100_000;
+
+/// Maximum number of coins per UTXO allowed. Number of coins must be strictly
+/// less than this number.
+const MAX_NUM_COINS_PER_UTXOS: usize = 100_000;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct CollectTypeScriptsWitness {
     salted_input_utxos: SaltedUtxos,
@@ -100,6 +108,10 @@ impl CollectTypeScripts {
     const SALTED_UTXOS_TOO_SMALL: i128 = 1_000_512;
 
     const NON_INTEGRAL_SALTED_UTXOS: i128 = 1_000_513;
+
+    const TOO_MANY_INPUTS_OR_OUTPUTS: i128 = 1_000_514;
+
+    const TOO_MANY_COINS: i128 = 1_000_515;
 }
 
 impl ConsensusProgram for CollectTypeScripts {
@@ -151,10 +163,19 @@ impl ConsensusProgram for CollectTypeScripts {
             assert error_id {Self::NON_INTEGRAL_SALTED_UTXOS}
             // _ *ctsw *type_script_hashes *salted_utxos
 
+            /* Verify not too many UTXOs */
             {&field_utxos}
             // _ *ctsw *type_script_hashes *utxos_li
 
             read_mem 1 addi 2
+            // _ *ctsw *type_script_hashes N *utxos[0]_si
+
+            push {MAX_NUM_INPUTS_AND_OUTPUTS}
+            dup 2
+            lt
+            // _ *ctsw *type_script_hashes N *utxos[0]_si (max_num_puts > N)
+
+            assert error_id {Self::TOO_MANY_INPUTS_OR_OUTPUTS}
             // _ *ctsw *type_script_hashes N *utxos[0]_si
 
             push 0 swap 1
@@ -265,6 +286,15 @@ impl ConsensusProgram for CollectTypeScripts {
                 // _ *type_script_hashes N i *utxos[i]_si *coin
 
                 read_mem 1 addi 2
+                // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si
+
+                /* Verify not too many coins */
+                push {MAX_NUM_COINS_PER_UTXOS}
+                dup 2
+                lt
+                // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si (max_num_coins > len)
+
+                assert error_id {Self::TOO_MANY_COINS}
                 // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si
 
                 push 0 swap 1
@@ -437,6 +467,8 @@ mod tests {
             let salted_input_utxos: &SaltedUtxos = &ctsw.salted_input_utxos;
             let input_utxos: &Vec<Utxo> = &salted_input_utxos.utxos;
 
+            assert!(input_utxos.len() < MAX_NUM_INPUTS_AND_OUTPUTS);
+
             // verify that the divined data matches with the explicit input digest
             let salted_input_utxos_hash: Digest = Tip5::hash(salted_input_utxos);
             assert_eq!(siu_digest, salted_input_utxos_hash);
@@ -444,6 +476,8 @@ mod tests {
             // divine in the salted output UTXOs with hash
             let salted_output_utxos: &SaltedUtxos = &ctsw.salted_output_utxos;
             let output_utxos: &Vec<Utxo> = &salted_output_utxos.utxos;
+
+            assert!(output_utxos.len() < MAX_NUM_INPUTS_AND_OUTPUTS);
 
             // verify that the divined data matches with the explicit input digest
             let salted_output_utxos_hash: Digest = Tip5::hash(salted_output_utxos);
@@ -457,8 +491,11 @@ mod tests {
             while i < input_utxos.len() {
                 let utxo: &Utxo = &input_utxos[i];
 
+                let num_coins = utxo.coins().len();
+                assert!(num_coins < MAX_NUM_COINS_PER_UTXOS);
+
                 let mut j = 0;
-                while j < utxo.coins().len() {
+                while j < num_coins {
                     let coin: &Coin = &utxo.coins()[j];
                     if !type_script_hashes.contains(&coin.type_script_hash) {
                         type_script_hashes.push(coin.type_script_hash);
@@ -474,8 +511,11 @@ mod tests {
             while i < output_utxos.len() {
                 let utxo: &Utxo = &output_utxos[i];
 
+                let num_coins = utxo.coins().len();
+                assert!(num_coins < MAX_NUM_COINS_PER_UTXOS);
+
                 let mut j = 0;
-                while j < utxo.coins().len() {
+                while j < num_coins {
                     let coin: &Coin = &utxo.coins()[j];
                     if !type_script_hashes.contains(&coin.type_script_hash) {
                         type_script_hashes.push(coin.type_script_hash);
@@ -613,6 +653,62 @@ mod tests {
     }
 
     #[test]
+    fn disallow_too_many_coins() {
+        let too_many_coins = Utxo::dummy_with_num_coins(MAX_NUM_COINS_PER_UTXOS);
+        let too_many_coins = SaltedUtxos {
+            utxos: vec![too_many_coins],
+            salt: [bfe!(0); 3],
+        };
+
+        let too_many_coins_in_input = CollectTypeScriptsWitness {
+            salted_input_utxos: too_many_coins.clone(),
+            salted_output_utxos: SaltedUtxos::empty(),
+        };
+        let too_many_coins_in_output = CollectTypeScriptsWitness {
+            salted_input_utxos: SaltedUtxos::empty(),
+            salted_output_utxos: too_many_coins,
+        };
+
+        for witness in [too_many_coins_in_input, too_many_coins_in_output] {
+            CollectTypeScripts
+                .test_assertion_failure(
+                    witness.standard_input(),
+                    witness.nondeterminism(),
+                    &[CollectTypeScripts::TOO_MANY_COINS],
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn disallow_too_many_inputs_and_too_many_outputs() {
+        let an_input_utxo = Utxo::empty_dummy();
+        let too_many_utxos = SaltedUtxos {
+            utxos: vec![an_input_utxo; MAX_NUM_INPUTS_AND_OUTPUTS],
+            salt: [bfe!(0); 3],
+        };
+
+        let too_many_inputs = CollectTypeScriptsWitness {
+            salted_input_utxos: too_many_utxos.clone(),
+            salted_output_utxos: SaltedUtxos::empty(),
+        };
+        let too_many_outputs = CollectTypeScriptsWitness {
+            salted_input_utxos: SaltedUtxos::empty(),
+            salted_output_utxos: too_many_utxos,
+        };
+
+        for witness in [too_many_inputs, too_many_outputs] {
+            CollectTypeScripts
+                .test_assertion_failure(
+                    witness.standard_input(),
+                    witness.nondeterminism(),
+                    &[CollectTypeScripts::TOO_MANY_INPUTS_OR_OUTPUTS],
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn collect_type_scripts_proof_generation() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
@@ -649,6 +745,6 @@ mod tests {
 
     test_program_snapshot!(
         CollectTypeScripts,
-        "c413d68007e84f124fb9b044a0d019edc5ab715909ab7987eae5363cccd8214df47e5e113f29b3a4"
+        "a2129bd3f4c2c5e4ba2d3f6a04db204411ce180c5b8453af70303a83661a903a146fed5fc2666568"
     );
 }
