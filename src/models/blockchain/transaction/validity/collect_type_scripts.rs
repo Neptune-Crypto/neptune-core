@@ -27,6 +27,7 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm;
@@ -46,17 +47,24 @@ impl SecretWitness for CollectTypeScriptsWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        self.salted_input_utxos
+        let mut type_script_hashes = vec![NativeCurrency.hash()];
+
+        for utxos in self
+            .salted_input_utxos
             .utxos
             .iter()
             .chain(self.salted_output_utxos.utxos.iter())
-            .flat_map(|utxo| {
-                utxo.coins()
-                    .iter()
-                    .map(|c| c.type_script_hash)
-                    .collect_vec()
-            })
-            .unique()
+        {
+            for coin in utxos.coins() {
+                let type_script_hash = &coin.type_script_hash;
+                if !type_script_hashes.contains(type_script_hash) {
+                    type_script_hashes.push(*type_script_hash);
+                }
+            }
+        }
+
+        type_script_hashes
+            .into_iter()
             .flat_map(|d| d.values())
             .collect_vec()
     }
@@ -101,7 +109,8 @@ impl ConsensusProgram for CollectTypeScripts {
             "neptune_consensus_transaction_collect_type_script_hashes_from_utxo".to_string();
         let collect_type_script_hashes_from_coins =
             "neptune_consensus_transaction_collect_type_script_hashes_from_coin".to_string();
-        let push_digest_to_list = "neptune_consensus_transaction_push_digest_to_list".to_string();
+        let push_digest_from_coin_to_list =
+            "neptune_consensus_transaction_push_digest_to_list".to_string();
         let write_all_digests = "netpune_consensus_transaction_write_all_digests".to_string();
         let authenticate_salted_utxos_and_collect_hashes = triton_asm! {
             // BEFORE:
@@ -135,6 +144,14 @@ impl ConsensusProgram for CollectTypeScripts {
             // _ *ctsw *type_script_hashes
         };
 
+        let push_native_currency_hash_to_stack = NativeCurrency
+            .hash()
+            .values()
+            .iter()
+            .rev()
+            .map(|elem| triton_instr!(push elem.value()))
+            .collect_vec();
+
         let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
             CollectTypeScriptsWitness,
         >::default()));
@@ -151,6 +168,12 @@ impl ConsensusProgram for CollectTypeScripts {
             // _ *ctsw
 
             call {new_list}
+            // _ *ctsw *type_script_hashes
+
+            /* Push native currency hash which must always be present */
+            dup 0
+            {&push_native_currency_hash_to_stack}
+            call {push_digest}
             // _ *ctsw *type_script_hashes
 
             dup 1 {&field_with_size_salted_input_utxos}
@@ -239,8 +262,8 @@ impl ConsensusProgram for CollectTypeScripts {
                 push 0 eq
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes ([digest] not in type_script_hashes)
 
-                skiz call {push_digest_to_list}
-                // _ *type_script_hashes * * * len j size *coin[j] *
+                skiz call {push_digest_from_coin_to_list}
+                // _ *type_script_hashes * * * len j size *coin[j]
 
                 pop 1 add
                 // _ *type_script_hashes * * * len j *coin[j+1]_si
@@ -252,7 +275,7 @@ impl ConsensusProgram for CollectTypeScripts {
 
             // BEFORE: _ *coin[j] *type_script_hashes
             // AFTER:  _ *coin[j] *
-            {push_digest_to_list}:
+            {push_digest_from_coin_to_list}:
                 dup 1
                 // _ *coin[j] *type_script_hashes *coin[j]
 
@@ -331,6 +354,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::program::tests::test_program_snapshot;
@@ -362,7 +386,9 @@ mod tests {
             assert_eq!(sou_digest, salted_output_utxos_hash);
 
             // iterate over all input UTXOs and collect the type script hashes
-            let mut type_script_hashes: Vec<Digest> = Vec::with_capacity(input_utxos.len());
+            // Because of fees, the native currency type script must *always*
+            // be present.
+            let mut type_script_hashes: Vec<Digest> = vec![NativeCurrency.hash()];
             let mut i = 0;
             while i < input_utxos.len() {
                 let utxo: &Utxo = &input_utxos[i];
@@ -427,6 +453,49 @@ mod tests {
         prop_assert_eq!(rust_result, tasm_result);
 
         Ok(())
+    }
+
+    #[proptest(cases = 8)]
+    fn native_currency_type_script_is_present_when_num_puts_are_zero(
+        #[strategy(0usize..5)] _num_pub_announcements: usize,
+        #[strategy(
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, #_num_pub_announcements)
+        )]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let collect_type_scripts = CollectTypeScriptsWitness::from(&primitive_witness);
+        let tasm_result = CollectTypeScripts
+            .run_tasm(
+                &collect_type_scripts.standard_input(),
+                collect_type_scripts.nondeterminism(),
+            )
+            .unwrap();
+        assert_eq!(NativeCurrency.hash().values().to_vec(), tasm_result);
+    }
+
+    #[proptest(cases = 8)]
+    fn native_currency_type_script_is_always_present(
+        #[strategy(0usize..5)] _num_outputs: usize,
+        #[strategy(0usize..5)] _num_inputs: usize,
+        #[strategy(
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, 2)
+        )]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let collect_type_scripts = CollectTypeScriptsWitness::from(&primitive_witness);
+        let tasm_result = CollectTypeScripts
+            .run_tasm(
+                &collect_type_scripts.standard_input(),
+                collect_type_scripts.nondeterminism(),
+            )
+            .unwrap();
+
+        // additionally (besides presence) verify the native currency hash comes
+        // first
+        assert_eq!(
+            NativeCurrency.hash().values().to_vec(),
+            tasm_result.into_iter().take(5).collect_vec()
+        );
     }
 
     #[proptest(cases = 8)]
