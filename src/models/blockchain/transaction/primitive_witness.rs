@@ -1087,6 +1087,7 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::BoxedStrategy;
     use proptest::prop_assert;
+    use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
@@ -1100,6 +1101,7 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
@@ -1827,6 +1829,34 @@ mod tests {
         transaction_primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(transaction_primitive_witness.validate().await.is_ok());
+    }
+
+    #[proptest(cases = 3, async = "tokio")]
+    async fn not_valid_with_active_timelocks(
+        #[strategy(1usize..10)] _num_inputs: usize,
+        #[strategy(1usize..10)] _num_outputs: usize,
+        #[strategy(1usize..10)] _num_public_announcements: usize,
+        #[strategy(arb())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_active_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now
+        ))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let Err(err) = primitive_witness.validate().await else {
+            panic!("Must fail when timelocks are active");
+        };
+
+        let WitnessValidationError::InvalidTypeScript {
+            type_script_hash, ..
+        } = err
+        else {
+            panic!("Must fail during type script validation");
+        };
+
+        prop_assert_eq!(
+            TimeLock.hash(),
+            type_script_hash,
+            "Must fail in time lock type script"
+        );
     }
 
     #[proptest(cases = 3, async = "tokio")]
