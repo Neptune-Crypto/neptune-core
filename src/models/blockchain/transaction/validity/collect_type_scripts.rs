@@ -154,7 +154,7 @@ impl ConsensusProgram for CollectTypeScripts {
             {&field_utxos}
             // _ *ctsw *type_script_hashes *utxos_li
 
-            read_mem 1 push 2 add
+            read_mem 1 addi 2
             // _ *ctsw *type_script_hashes N *utxos[0]_si
 
             push 0 swap 1
@@ -211,7 +211,7 @@ impl ConsensusProgram for CollectTypeScripts {
             {&authenticate_salted_utxos_and_collect_hashes}
             // _ *ctsw *type_script_hashes
 
-            read_mem 1 push 2 add swap 1
+            read_mem 1 addi 2 swap 1
             // _ *ctsw *type_script_hashes[0] len
 
 
@@ -223,7 +223,7 @@ impl ConsensusProgram for CollectTypeScripts {
             // _ *ctsw *type_script_hashes[0] len
 
             dup 1
-            push {Digest::LEN-1} add
+            addi {Digest::LEN-1}
             read_mem {Digest::LEN}
             pop 1
             // _ *ctsw *type_script_hashes[0] len [hashes[0]]
@@ -258,10 +258,10 @@ impl ConsensusProgram for CollectTypeScripts {
                 skiz return
                 // _ *type_script_hashes N i *utxos[i]_si
 
-                dup 0 push 1 add {&field_coin}
+                dup 0 addi 1 {&field_coin}
                 // _ *type_script_hashes N i *utxos[i]_si *coin
 
-                read_mem 1 push 2 add
+                read_mem 1 addi 2
                 // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si
 
                 push 0 swap 1
@@ -273,7 +273,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 pop 3
                 // _ *type_script_hashes N i *utxos[i]_si
 
-                read_mem 1 push 2 add
+                read_mem 1 addi 2
                 // _ *type_script_hashes N i size *utxos[i]
 
                 /* Ensure forward jump, by ensuring size is u32 */
@@ -297,13 +297,13 @@ impl ConsensusProgram for CollectTypeScripts {
                 skiz return
                 // _ *type_script_hashes * * * len j *coin[j]_si
 
-                read_mem 1 push 2 add
+                read_mem 1 addi 2
                 // _ *type_script_hashes * * * len j size *coin[j]
 
                 dup 7 dup 0 dup 2 {&field_type_script_hash}
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes *digest
 
-                push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
+                addi {Digest::LEN-1} read_mem {Digest::LEN} pop 1
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes [digest]
 
                 call {contains}
@@ -324,7 +324,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 add
                 // _ *type_script_hashes * * * len j *coin[j+1]_si
 
-                swap 1 push 1 add swap 1
+                swap 1 addi 1 swap 1
                 // _ *type_script_hashes * * * len (j+1) *coin[j+1]_si
 
                 recurse
@@ -338,7 +338,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 {&field_type_script_hash}
                 // _ *coin[j] *type_script_hashes *digest
 
-                push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
+                addi {Digest::LEN-1} read_mem {Digest::LEN} pop 1
                 // _ *coin[j] *type_script_hashes [digest]
 
                 call {push_digest}
@@ -357,10 +357,10 @@ impl ConsensusProgram for CollectTypeScripts {
                 skiz return
                 // _ *type_script_hashes[i] *type_script_hashes[N+1]
 
-                dup 1 push {Digest::LEN-1} add read_mem {Digest::LEN}
+                dup 1 addi {Digest::LEN-1} read_mem {Digest::LEN}
                 // _ *type_script_hashes[i] *type_script_hashes[N+1] [type_script_hashes[i]] (*type_script_hashes[i]-1)
 
-                push {Digest::LEN+1} add swap 7 pop 1
+                addi {Digest::LEN+1} swap 7 pop 1
                 // _ *type_script_hashes[i+1] *type_script_hashes[N+1] [type_script_hashes[i]]
 
                 write_io 5
@@ -641,6 +641,6 @@ mod tests {
 
     test_program_snapshot!(
         CollectTypeScripts,
-        "8475b172ac6c36db2265bb11008c9c5b0bd2aaf9e9f32c05c8d7ffc72d2e603bd19719c1a280c36d"
+        "dfb4e2a91b9ecfabf071298814f2d772f1ec4e6b8f42cb43f04a2f83bfa5c72498326d6195284424"
     );
 }
