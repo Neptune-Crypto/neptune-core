@@ -614,9 +614,7 @@ pub mod neptune_arbitrary {
             merge_bit: bool,
         ) -> BoxedStrategy<Self> {
             // Primitive witnesses may not simultaneously have inputs and set a
-            // coinbase. In combination with a rule in `Block::is_valid` that
-            // requires that block transactions have at least one input, this
-            // limitation forces miners to pick up at least one transaction.
+            // coinbase.
             let (num_inputs, set_coinbase) = match num_inputs {
                 Some(number) => (number, false),
                 None => (0, true),
@@ -1054,10 +1052,12 @@ pub mod neptune_arbitrary {
                     );
                     let mut utxos = vec![liquid_utxo];
                     if let Some(release_date) = timelock_until {
-                        let timelocked_utxo = Utxo::new(
+                        let lock_script =
                             generation_address::GenerationSpendingKey::derive_from_seed(*seed)
                                 .to_address()
-                                .lock_script(),
+                                .lock_script();
+                        let timelocked_utxo = Utxo::new(
+                            lock_script,
                             [
                                 amount.to_native_coins(),
                                 vec![TimeLock::until(release_date)],

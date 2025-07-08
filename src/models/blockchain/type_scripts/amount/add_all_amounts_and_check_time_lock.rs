@@ -141,10 +141,10 @@ impl AddAllAmountsAndCheckTimeLock {
 
 
                 // prepare for next iteration
-                dup 14 push 1 add swap 15 pop 1
+                dup 14 addi 1 swap 15 pop 1
                 // _ M (j+1) *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked
 
-                dup 13 read_mem 1 push 2 add
+                dup 13 read_mem 1 addi 2
                 // _ M (j+1) *coins[j]_si [amount] [timelocked_amount]  [utxo_amount] utxo_is_timelocked size(coins[j]) *coins[j]
 
                 /* Range-check on size */

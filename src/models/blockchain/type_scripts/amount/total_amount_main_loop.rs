@@ -101,13 +101,13 @@ impl TotalAmountMainLoop {
                 skiz return
                 // _ N i *utxos[i]_si * * * [amount] [timelocked_amount]
 
-                dup 11 push 1 add
+                dup 11 addi 1
                 // _ N i *utxos[i]_si * * * [amount] [timelocked_amount] *utxos[i]
 
                 {&field_coins}
                 // _ N i *utxos[i]_si * * * [amount] [timelocked_amount] *coins
 
-                read_mem 1 push 2 add
+                read_mem 1 addi 2
                 // _ N i *utxos[i]_si * * * [amount] [timelocked_amount] M *coins[0]_si
 
                 swap 10 pop 1
@@ -146,7 +146,7 @@ impl TotalAmountMainLoop {
                 swap 13 pop 1
                 // _ N (i+1) *utxos[i]_si M M *coins[M]_si [amount'] [timelocked_amount']
 
-                dup 11 read_mem 1 push 2 add
+                dup 11 read_mem 1 addi 2
                 // _ N (i+1) *utxos[i]_si M M *coins[M]_si [amount'] [timelocked_amount'] size(utxos[i]) *utxos[i]
 
                 push  {DEFAULT_MAX_DYN_FIELD_SIZE}
