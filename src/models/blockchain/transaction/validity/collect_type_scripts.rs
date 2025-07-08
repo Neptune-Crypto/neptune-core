@@ -276,10 +276,15 @@ impl ConsensusProgram for CollectTypeScripts {
                 read_mem 1 push 2 add
                 // _ *type_script_hashes N i size *utxos[i]
 
+                /* Ensure forward jump, by ensuring size is u32 */
+                dup 1
+                pop_count
+                pop 1
+
                 add
                 // _ *type_script_hashes N i *utxos[i+1]_si
 
-                swap 1 push 1 add swap 1
+                swap 1 addi 1 swap 1
                 // _ *type_script_hashes N (i+1) *utxos[i+1]_si
 
                 recurse
@@ -308,9 +313,15 @@ impl ConsensusProgram for CollectTypeScripts {
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes ([digest] not in type_script_hashes)
 
                 skiz call {push_digest_from_coin_to_list}
+                // _ *type_script_hashes * * * len j size *coin[j] garbage
+
+                /* Ensure forward jump, by ensuring size is u32 */
+                dup 2
+                pop_count
+                pop 2
                 // _ *type_script_hashes * * * len j size *coin[j]
 
-                pop 1 add
+                add
                 // _ *type_script_hashes * * * len j *coin[j+1]_si
 
                 swap 1 push 1 add swap 1
@@ -630,6 +641,6 @@ mod tests {
 
     test_program_snapshot!(
         CollectTypeScripts,
-        "599c91df555f0d0b884380f5a8892407f6435de653b9663298edaf980c744ed7ce04efe3fb65fc3e"
+        "8475b172ac6c36db2265bb11008c9c5b0bd2aaf9e9f32c05c8d7ffc72d2e603bd19719c1a280c36d"
     );
 }
