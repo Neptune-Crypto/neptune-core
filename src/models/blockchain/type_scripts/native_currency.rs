@@ -779,9 +779,9 @@ pub mod tests {
             let timestamp = native_currency_witness_mem.timestamp;
 
             // authenticate coinbase against kernel mast hash
-            let coinbase_leaf_index: u32 = 4;
+            let coinbase_leaf_index: u32 = TransactionKernelField::Coinbase as u32;
             let coinbase_leaf: Digest = Hash::hash(&coinbase);
-            let kernel_tree_height: u32 = 3;
+            let kernel_tree_height: u32 = u32::try_from(TransactionKernel::MAST_HEIGHT).unwrap();
             tasm::tasmlib_hashing_merkle_verify(
                 tx_kernel_digest,
                 coinbase_leaf_index,
@@ -797,7 +797,7 @@ pub mod tests {
             assert!(!some_coinbase.is_negative());
 
             // authenticate fee against kernel mast hash
-            let fee_leaf_index: u32 = 3;
+            let fee_leaf_index: u32 = TransactionKernelField::Fee as u32;
             let fee_leaf: Digest = Hash::hash(&fee);
             tasm::tasmlib_hashing_merkle_verify(
                 tx_kernel_digest,
@@ -1109,6 +1109,68 @@ pub mod tests {
     }
 
     #[test]
+    fn tx_with_negative_coinbase_is_invalid_deterministic() {
+        let mut test_runner = TestRunner::deterministic();
+        let fee = NativeCurrencyAmount::zero();
+        let witness = PrimitiveWitness::arbitrary_primitive_witness_with(
+            &vec![],
+            &vec![],
+            &vec![],
+            &vec![],
+            fee,
+            Some(-NativeCurrencyAmount::coins(1)),
+        )
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
+        let witness = NativeCurrencyWitness::from(witness);
+        NativeCurrency
+            .test_assertion_failure(
+                witness.standard_input(),
+                witness.nondeterminism(),
+                &[CoinbaseAmount::ILLEGAL_COINBASE_AMOUNT_ERROR],
+            )
+            .unwrap();
+    }
+
+    #[proptest(cases = 50)]
+    fn tx_with_negative_coinbase_is_invalid(
+        #[strategy(1usize..=3)] _num_inputs: usize,
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())]
+        _minus_coinbase: NativeCurrencyAmount,
+        #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
+        #[strategy(vec(arb::<LockScriptAndWitness>(), #_num_inputs))]
+        _input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
+        #[strategy(vec(arb::<Utxo>(), #_num_outputs))] _output_utxos: Vec<Utxo>,
+        #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
+            PublicAnnouncement,
+        >,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
+        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
+            &#_input_utxos,
+            &#_input_lock_scripts_and_witnesses,
+            &#_output_utxos,
+            &#_public_announcements,
+            #_fee,
+            Some(-#_minus_coinbase),
+        ))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        // with high probability the amounts (which are random) do not add up
+        // and since the coinbase is set, the coinbase-timelock test might fail
+        // before the no-inflation test.
+        let witness = NativeCurrencyWitness::from(primitive_witness);
+        assert!(witness.kernel.coinbase.is_some(), "coinbase is none");
+        NativeCurrency.test_assertion_failure(
+            witness.standard_input(),
+            witness.nondeterminism(),
+            &[CoinbaseAmount::ILLEGAL_COINBASE_AMOUNT_ERROR],
+        )?;
+    }
+
+    #[test]
     fn tx_with_negative_fee_with_coinbase_deterministic() {
         let mut test_runner = TestRunner::deterministic();
         let mut primitive_witness =
@@ -1375,6 +1437,22 @@ pub mod tests {
         primitive_witness: PrimitiveWitness,
     ) {
         assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
+    }
+
+    #[test]
+    fn fee_can_be_negative_deterministic() {
+        let mut test_runner = TestRunner::deterministic();
+        for _ in 0..10 {
+            let fee = NativeCurrencyAmount::arbitrary_non_negative()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            let pw = PrimitiveWitness::arbitrary_with_fee(-fee)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(pw)).unwrap();
+        }
     }
 
     #[proptest]
