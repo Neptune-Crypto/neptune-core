@@ -3379,33 +3379,6 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        // Take write lock. Hold for entire duration of this call handler.
-        let mut gsm = self.state.lock_guard_mut().await;
-
-        // Endpoint assumes the block was already stored. Read it.
-        let block = gsm
-            .chain
-            .archival_state()
-            .get_block(indicated_tip)
-            .await
-            .map_err(|e| {
-                RpcError::Failed(format!(
-                    "could not read block {indicated_tip} from storage: {e}"
-                ))
-            })?
-            .ok_or(RpcError::Failed(format!("unknown block {indicated_tip}")))?;
-
-        // Abort early if the block does not have a mutator set update.
-        if block.mutator_set_update().is_err() {
-            return Err(RpcError::Failed(
-                "block does not have a mutator set update".to_string(),
-            ));
-        }
-
-        // No need to mark it as tip in the block index database. If the node
-        // is unfrozen and blocks are found, the tip in the block index database
-        // will be set by the new block handler.
-
         // Freeze. Do not process blocks in the course of this RPC endpoint
         // handler or afterwards. The user needs to unfreeze manually.
         self.rpc_server_to_main_tx
@@ -3413,28 +3386,13 @@ impl RPC for NeptuneRPCServer {
             .await
             .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
 
-        // Update archival block MMR.
-        gsm.chain
-            .archival_state_mut()
-            .append_to_archival_block_mmr(&block)
-            .await;
-
-        // Update archival Mutator Set.
-        gsm.chain
-            .archival_state_mut()
-            .update_mutator_set(&block)
+        // Set tip.
+        self.state
+            .lock_guard_mut()
             .await
-            .expect("mutator set update was already verified");
-
-        // Update wallet state.
-        // We can't use `update_wallet_state_with_new_block` because it doesn't
-        // handle forks or even rollbacks without fast-forwards. Instead, we
-        // need to dig into the archival mutator set to find the membership
-        // proofs.
-        gsm.restore_monitored_utxos_from_archival_mutator_set()
-            .await;
-
-        Ok(())
+            .set_tip_to_stored_block(indicated_tip)
+            .await
+            .map_err(|e| RpcError::Failed(format!("failed to set tip to stored block: {e}")))
     }
 
     // Documented in trait. Do not add doc-comment.
