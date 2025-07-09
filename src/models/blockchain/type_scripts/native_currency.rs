@@ -62,6 +62,10 @@ const INVALID_COINBASE_DISCRIMINANT: i128 = 1_000_040;
 ///
 /// Lastly, if the coinbase is set then at least half of this amount must be
 /// time-locked for 3 years.
+///
+/// This consensus program assumes that coinbase transactions can never be
+/// merged with negative-fee paying transactions, as the timelock of the
+/// coinbase reward could otherwise be circumvented.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct NativeCurrency;
 
@@ -982,14 +986,14 @@ pub mod tests {
 
     #[test]
     fn native_currency_derived_witness_generates_accepting_tasm_program_empty_tx() {
-        // Generate a tx with coinbase input, no outputs, fee-size is the same
-        // as the coinbase, so tx is valid.
+        // Generate a tx with no inputs, no outputs and zero fee, commonly
+        // referred to as a "nop" transaction. This must pass.
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, 0)
+        let nop = PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, 0)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness::from(nop);
         assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
@@ -1004,10 +1008,10 @@ pub mod tests {
         assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
-    #[proptest(cases = 50)]
+    #[proptest(cases = 30)]
     fn balanced_transaction_is_valid(
-        #[strategy(0usize..=3)] _num_inputs: usize,
-        #[strategy(0usize..=3)] _num_outputs: usize,
+        #[strategy(0usize..=10)] _num_inputs: usize,
+        #[strategy(0usize..=10)] _num_outputs: usize,
         #[strategy(0usize..=1)] _num_public_announcements: usize,
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements))]
         primitive_witness: PrimitiveWitness,
@@ -1100,7 +1104,7 @@ pub mod tests {
         #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
             PublicAnnouncement,
         >,
-        #[strategy(arb())] _fee: NativeCurrencyAmount,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
             &#_input_utxos,
             &#_input_lock_scripts_and_witnesses,
@@ -1119,11 +1123,7 @@ pub mod tests {
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
             witness.nondeterminism(),
-            &[
-                NO_INFLATION_VIOLATION,
-                COINBASE_TIMELOCK_INSUFFICIENT,
-                COINBASE_IS_SET_AND_FEE_IS_NEGATIVE,
-            ],
+            &[NO_INFLATION_VIOLATION, COINBASE_TIMELOCK_INSUFFICIENT],
         )?;
     }
 
@@ -1189,51 +1189,6 @@ pub mod tests {
         )?;
     }
 
-    #[test]
-    fn tx_with_negative_fee_with_coinbase_deterministic() {
-        let mut test_runner = TestRunner::deterministic();
-        let mut primitive_witness =
-            PrimitiveWitness::arbitrary_with_fee(-NativeCurrencyAmount::coins(1))
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-        let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
-        assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
-
-        let kernel_modifier =
-            TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1)));
-        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
-        let bad_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
-        NativeCurrency
-            .test_assertion_failure(
-                bad_native_currency_witness.standard_input(),
-                bad_native_currency_witness.nondeterminism(),
-                &[COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
-            )
-            .unwrap();
-    }
-
-    #[proptest]
-    fn tx_with_negative_fee_with_coinbase(
-        #[strategy(PrimitiveWitness::arbitrary_with_fee(-NativeCurrencyAmount::coins(1)))]
-        mut primitive_witness: PrimitiveWitness,
-    ) {
-        let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
-        assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
-
-        let kernel_modifier =
-            TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1)));
-        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
-        let bad_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
-        NativeCurrency
-            .test_assertion_failure(
-                bad_native_currency_witness.standard_input(),
-                bad_native_currency_witness.nondeterminism(),
-                &[COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
-            )
-            .unwrap();
-    }
-
     #[apply(shared_tokio_runtime)]
     async fn native_currency_proof_happy_path() {
         let network = Network::Main;
@@ -1275,9 +1230,58 @@ pub mod tests {
         assert!(verify(claim, proof, network).await, "proof fails");
     }
 
+    #[test]
+    fn tx_with_negative_fee_with_coinbase_is_invalid_deterministic() {
+        let mut test_runner = TestRunner::deterministic();
+        let mut primitive_witness =
+            PrimitiveWitness::arbitrary_with_fee(-NativeCurrencyAmount::coins(1))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
+
+        let kernel_modifier =
+            TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1)));
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let bad_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        NativeCurrency
+            .test_assertion_failure(
+                bad_native_currency_witness.standard_input(),
+                bad_native_currency_witness.nondeterminism(),
+                &[COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
+            )
+            .unwrap();
+    }
+
+    #[proptest]
+    fn tx_with_negative_fee_with_coinbase_is_invalid_prop(
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
+        #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
+        mut primitive_witness: PrimitiveWitness,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())]
+        coinbase_amount: NativeCurrencyAmount,
+    ) {
+        let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
+
+        let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(coinbase_amount));
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let bad_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        NativeCurrency
+            .test_assertion_failure(
+                bad_native_currency_witness.standard_input(),
+                bad_native_currency_witness.nondeterminism(),
+                &[COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
+            )
+            .unwrap();
+    }
+
     #[proptest]
     fn transaction_with_timelocked_coinbase_is_valid_prop(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+        #[strategy(1usize..=10)] _num_outputs: usize,
+        #[strategy(0usize..=10)] _num_public_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, #_num_outputs, #_num_public_announcements))]
         #[filter(!#primitive_witness.kernel.fee.is_negative())]
         primitive_witness: PrimitiveWitness,
     ) {
@@ -1318,8 +1322,6 @@ pub mod tests {
                 .unwrap()
                 .current();
         }
-        println!("primitive_witness:\n{primitive_witness}\n\n");
-
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         let mut fee = native_currency_witness.kernel.fee;
         fee.div_two();
@@ -1357,6 +1359,7 @@ pub mod tests {
             .unwrap()
             .current()
             .clone();
+
             // with high probability the amounts (which are random) do not add up
             let witness = NativeCurrencyWitness::from(primitive_witness);
             let result = NativeCurrency.test_assertion_failure(
@@ -1369,28 +1372,76 @@ pub mod tests {
     }
 
     #[proptest]
-    fn coinbase_transaction_with_not_enough_funds_timelocked_is_invalid(
-        #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+    fn unbalanced_coinbase_transaction_is_invalid_changed_coinbase_prop(
+        #[strategy(1usize..=5)] _num_outputs: usize,
+        #[strategy(1usize..=5)] _num_public_announcements: usize,
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
             #_num_public_announcements,
         ))]
         mut primitive_witness: PrimitiveWitness,
-        #[strategy(arb())]
-        #[filter(NativeCurrencyAmount::zero() < #delta)]
-        delta: NativeCurrencyAmount,
+        #[strategy(arb())] delta: NativeCurrencyAmount,
     ) {
         // Modify the kernel so as to increase the coinbase but not the fee. The
-        // resulting transaction is imbalanced but since the timelocked coinbase
-        // amount is checked prior to the input/output balancing check, we know
-        // which assert will be hit.
+        // resulting transaction is imbalanced. The amount timelocked is
+        // correct, so this run must fail on the no inflation violation. The
+        // no inflation check disallows *any* imbalance, so total output amount
+        // can neither be too big, nor too small.
+
+        // Another test handles negative coinbase amounts.
         let coinbase = primitive_witness.kernel.coinbase.unwrap();
-        let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(coinbase + delta));
+        let new_coinbase = coinbase + delta;
+        prop_assume!(!new_coinbase.is_negative());
+
+        let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(new_coinbase));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        assert_both_rust_and_tasm_fail(native_currency_witness, &[COINBASE_TIMELOCK_INSUFFICIENT]);
+        assert_both_rust_and_tasm_fail(native_currency_witness, &[NO_INFLATION_VIOLATION]);
+    }
+
+    #[proptest]
+    fn unbalanced_coinbase_transaction_is_invalid_changed_fee_prop(
+        #[strategy(1usize..=5)] _num_outputs: usize,
+        #[strategy(1usize..=5)] _num_public_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
+            None,
+            #_num_outputs,
+            #_num_public_announcements,
+        ))]
+        mut primitive_witness: PrimitiveWitness,
+        #[strategy(arb())] delta: NativeCurrencyAmount,
+    ) {
+        // Another test handles negative fee amounts when coinbase is set.
+        let fee = primitive_witness.kernel.fee;
+        let new_fee = fee + delta;
+        prop_assume!(!new_fee.is_negative());
+
+        let kernel_modifier = TransactionKernelModifier::default().fee(new_fee);
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+
+        assert_both_rust_and_tasm_fail(native_currency_witness, &[NO_INFLATION_VIOLATION]);
+    }
+
+    #[proptest]
+    fn unbalanced_input_transaction_is_invalid_changed_fee_prop(
+        #[strategy(1usize..=5)] _num_inputs: usize,
+        #[strategy(1usize..=5)] _num_outputs: usize,
+        #[strategy(0usize..=5)] _num_public_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
+            Some(#_num_inputs),
+            #_num_outputs,
+            #_num_public_announcements,
+        ))]
+        mut primitive_witness: PrimitiveWitness,
+        #[strategy(arb())] delta: NativeCurrencyAmount,
+    ) {
+        let fee = primitive_witness.kernel.fee;
+        let kernel_modifier = TransactionKernelModifier::default().fee(fee + delta);
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        assert_both_rust_and_tasm_fail(native_currency_witness, &[NO_INFLATION_VIOLATION]);
     }
 
     #[proptest]
@@ -1483,17 +1534,15 @@ pub mod tests {
     #[test]
     fn fee_can_be_negative_deterministic() {
         let mut test_runner = TestRunner::deterministic();
-        for _ in 0..10 {
-            let fee = NativeCurrencyAmount::arbitrary_non_negative()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            let pw = PrimitiveWitness::arbitrary_with_fee(-fee)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(pw)).unwrap();
-        }
+        let fee = NativeCurrencyAmount::arbitrary_non_negative()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let pw = PrimitiveWitness::arbitrary_with_fee(-fee)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(pw)).unwrap();
     }
 
     #[proptest]
@@ -1539,7 +1588,6 @@ pub mod tests {
 
     test_program_snapshot!(
         NativeCurrency,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "f1d74e829aa26ab4ca51bd237e3da0e7f459c2a2eed8b3f7fe0e35e21a4f12a7a2e193fff80dc524"
+        "f2c7eca6d9c13946c17a641fd5aa1b8813c8c0e86b616f0d8d53ba53ac742f554d01eb5e17fa3673"
     );
 }
