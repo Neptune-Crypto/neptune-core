@@ -150,6 +150,11 @@ impl BasicSnippet for GetSwbfIndicesNew {
         // already been allocated to the relative indices. Uses this allocation
         // that was already made for the relative indices to avoid having to
         // make a new allocation.
+        //
+        // Skip the length indicator of the list, now it is an array. Then store
+        // the minimum u128 in the right place, immediately followning the
+        // array. This BFieldEncoding has a static size: no length or size
+        // indicators.
         let encode_absolute_indices_struct = triton_asm! {
              // _ [minimum_absolute: u128] *offsets_list
             addi {minimum_field_size + 1}
@@ -169,7 +174,6 @@ impl BasicSnippet for GetSwbfIndicesNew {
                 // _ li_hi li_lo r4 r3 r2 r1 r0
 
                 /* Goal: 0 0 li_hi li_lo {0 0 1 li_hi li_lo r4 r3 r2 r1 r0} */
-
                 push 0
                 place 7
                 push 0
@@ -192,6 +196,7 @@ impl BasicSnippet for GetSwbfIndicesNew {
 
                 sponge_absorb
                 // _ 0 0 li_hi li_lo
+                // _ [leaf_index: u128]
 
                 call {divide_by_batch_size}
                 call {mul_by_chunk_size}
