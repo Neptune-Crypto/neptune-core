@@ -414,184 +414,181 @@ impl RemovalRecordList {
 
     /// Inverse of [`Self::convert_from_vec`].
     fn convert_to_vec(self) -> Vec<RemovalRecord> {
-        {
-            let num_leafs_swbfi = self.num_leafs_aocl / u64::from(BATCH_SIZE);
-            let all_tree_heights = get_peak_heights(num_leafs_swbfi);
-            assert_eq!(
-                all_tree_heights.len(),
-                self.authentication_structures.len(),
-                "expected one (possibly empty) authentication structure for each \
+        let num_leafs_swbfi = self.num_leafs_aocl / u64::from(BATCH_SIZE);
+        let all_tree_heights = get_peak_heights(num_leafs_swbfi);
+        assert_eq!(
+            all_tree_heights.len(),
+            self.authentication_structures.len(),
+            "expected one (possibly empty) authentication structure for each \
                 tree in the MMR but got {} authentication structures and {} trees",
-                self.authentication_structures.len(),
-                all_tree_heights.len()
-            );
+            self.authentication_structures.len(),
+            all_tree_heights.len()
+        );
 
-            // populate sparse MMR with chunk hashes
-            let mut sparse_mmr: HashMap<_, Digest> = HashMap::new();
-            let active_window_start = u128::from(num_leafs_swbfi) * u128::from(CHUNK_SIZE);
-            let all_inactive_indices = self
-                .index_sets
-                .iter()
-                .flat_map(|absolute_index_set| absolute_index_set.to_vec())
-                .filter(|&absolute_index| absolute_index < active_window_start);
-            let all_chunk_indices = all_inactive_indices
-                .map(|absolute_index| {
-                    u64::try_from(absolute_index / u128::from(CHUNK_SIZE))
-                        .expect("absolute indices can never be more than 76 bits")
-                })
+        // populate sparse MMR with chunk hashes
+        let mut sparse_mmr: HashMap<_, Digest> = HashMap::new();
+        let active_window_start = u128::from(num_leafs_swbfi) * u128::from(CHUNK_SIZE);
+        let all_inactive_indices = self
+            .index_sets
+            .iter()
+            .flat_map(|absolute_index_set| absolute_index_set.to_vec())
+            .filter(|&absolute_index| absolute_index < active_window_start);
+        let all_chunk_indices = all_inactive_indices
+            .map(|absolute_index| {
+                u64::try_from(absolute_index / u128::from(CHUNK_SIZE))
+                    .expect("absolute indices can never be more than 76 bits")
+            })
+            .sorted()
+            .dedup()
+            .take(self.chunks.len())
+            .collect_vec();
+        let master_chunks_dictionary = all_chunk_indices
+            .iter()
+            .copied()
+            .zip(self.chunks.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        for (&chunk_index, chunk) in all_chunk_indices.iter().zip(self.chunks.iter()) {
+            let chunk_hash = Tip5::hash(chunk);
+            let (merkle_tree_node_index, peak_index) =
+                leaf_index_to_mt_index_and_peak_index(chunk_index, num_leafs_swbfi);
+            let height = all_tree_heights[peak_index as usize];
+            sparse_mmr.insert((height, merkle_tree_node_index), chunk_hash);
+        }
+
+        // populate sparse MMR with authentication structures
+        for (tree_height, authentication_structure) in all_tree_heights
+            .iter()
+            .sorted()
+            .zip_eq(&self.authentication_structures)
+        {
+            let leaf_indices_for_this_tree = sparse_mmr
+                .keys()
+                .filter(|(height, _node_index)| *height == *tree_height)
+                .map(|(_height, node_index)| *node_index ^ (1 << *tree_height))
+                .collect_vec();
+
+            let node_indices_for_authentication_structure =
+                MerkleTree::authentication_structure_node_indices(
+                    1 << *tree_height,
+                    &leaf_indices_for_this_tree,
+                )
+                .expect(
+                    "all leaf indices are guaranteed to be smaller (in log terms) than tree height",
+                )
+                .collect_vec();
+            assert_eq!(
+                authentication_structure.len(),
+                node_indices_for_authentication_structure.len(),
+                "Have authentication structure of len {} but node indices of len {}",
+                authentication_structure.len(),
+                node_indices_for_authentication_structure.len()
+            );
+            for (node_index, node_hash) in node_indices_for_authentication_structure
+                .into_iter()
+                .zip_eq(authentication_structure.iter())
+            {
+                sparse_mmr.insert((*tree_height, node_index), *node_hash);
+            }
+        }
+
+        assert!(sparse_mmr
+            .values()
+            .all(|v| v.to_hex().chars().take(8).collect::<String>() != "be450642"));
+
+        // populate sparse MMR by completing families with parents whenever both
+        // children are already present
+        for &tree_height in &all_tree_heights {
+            loop {
+                let current_tree_indices = sparse_mmr
+                    .keys()
+                    .filter(|(height, _node_index)| *height == tree_height)
+                    .map(|(_height, node_index)| *node_index)
+                    .sorted()
+                    .collect_vec();
+                let absent_parent_nodes = current_tree_indices
+                    .iter()
+                    .tuple_windows()
+                    .filter(|(nil, nir)| **nil == **nir ^ 1)
+                    .map(|(nil, _nir)| *nil >> 1)
+                    .filter(|ni| !current_tree_indices.contains(ni))
+                    .collect_vec();
+                if absent_parent_nodes.is_empty() {
+                    break;
+                }
+                for parent in absent_parent_nodes {
+                    let left_child = parent << 1;
+                    let right_child = left_child ^ 1;
+                    let left_digest = *sparse_mmr
+                        .get(&(tree_height, left_child))
+                        .expect("presence of left child was verified already");
+                    let right_digest = *sparse_mmr
+                        .get(&(tree_height, right_child))
+                        .expect("presence of right child was verified already");
+                    let parent_digest = Tip5::hash_pair(left_digest, right_digest);
+                    sparse_mmr.insert((tree_height, parent), parent_digest);
+                }
+            }
+        }
+
+        // Create removal records one by one
+        let mut removal_records = vec![];
+        for index_set in &self.index_sets {
+            let chunk_indices = index_set
+                .to_vec()
+                .into_iter()
+                .filter(|absolute_index| *absolute_index < active_window_start)
+                .map(|absolute_index| absolute_index / u128::from(CHUNK_SIZE))
+                .map(|u| u64::try_from(u).expect("absolute index can never be more than 72 bits"))
                 .sorted()
                 .dedup()
-                .take(self.chunks.len())
                 .collect_vec();
-            let master_chunks_dictionary = all_chunk_indices
-                .iter()
-                .copied()
-                .zip(self.chunks.iter().cloned())
-                .collect::<HashMap<_, _>>();
-            for (&chunk_index, chunk) in all_chunk_indices.iter().zip(self.chunks.iter()) {
-                let chunk_hash = Tip5::hash(chunk);
-                let (merkle_tree_node_index, peak_index) =
+            let mut target_chunks = vec![];
+            for chunk_index in chunk_indices {
+                let chunk = master_chunks_dictionary.get(&chunk_index).expect("master chunks dictionary should contain entries for all possible chunk indices");
+                let (mut merkle_node_index, peak_index) =
                     leaf_index_to_mt_index_and_peak_index(chunk_index, num_leafs_swbfi);
-                let height = all_tree_heights[peak_index as usize];
-                sparse_mmr.insert((height, merkle_tree_node_index), chunk_hash);
-            }
-
-            // populate sparse MMR with authentication structures
-            for (tree_height, authentication_structure) in all_tree_heights
-                .iter()
-                .sorted()
-                .zip_eq(&self.authentication_structures)
-            {
-                let leaf_indices_for_this_tree = sparse_mmr
-                    .keys()
-                    .filter(|(height, _node_index)| *height == *tree_height)
-                    .map(|(_height, node_index)| *node_index ^ (1 << *tree_height))
-                    .collect_vec();
-
-                let node_indices_for_authentication_structure =
-                    MerkleTree::authentication_structure_node_indices(
-                        1 << *tree_height,
-                        &leaf_indices_for_this_tree,
-                    )
-                    .expect(
-                        "all leaf indices are guaranteed to be smaller (in log terms) than tree height",
-                    )
-                    .collect_vec();
-                assert_eq!(
-                    authentication_structure.len(),
-                    node_indices_for_authentication_structure.len(),
-                    "Have authentication structure of len {} but node indices of len {}",
-                    authentication_structure.len(),
-                    node_indices_for_authentication_structure.len()
-                );
-                for (node_index, node_hash) in node_indices_for_authentication_structure
-                    .into_iter()
-                    .zip_eq(authentication_structure.iter())
-                {
-                    sparse_mmr.insert((*tree_height, node_index), *node_hash);
-                }
-            }
-
-            assert!(sparse_mmr
-                .values()
-                .all(|v| v.to_hex().chars().take(8).collect::<String>() != "be450642"));
-
-            // populate sparse MMR by completing families with parents whenever both
-            // children are already present
-            for &tree_height in &all_tree_heights {
-                loop {
-                    let current_tree_indices = sparse_mmr
-                        .keys()
-                        .filter(|(height, _node_index)| *height == tree_height)
-                        .map(|(_height, node_index)| *node_index)
-                        .sorted()
-                        .collect_vec();
-                    let absent_parent_nodes = current_tree_indices
-                        .iter()
-                        .tuple_windows()
-                        .filter(|(nil, nir)| **nil == **nir ^ 1)
-                        .map(|(nil, _nir)| *nil >> 1)
-                        .filter(|ni| !current_tree_indices.contains(ni))
-                        .collect_vec();
-                    if absent_parent_nodes.is_empty() {
-                        break;
-                    }
-                    for parent in absent_parent_nodes {
-                        let left_child = parent << 1;
-                        let right_child = left_child ^ 1;
-                        let left_digest = *sparse_mmr
-                            .get(&(tree_height, left_child))
-                            .expect("presence of left child was verified already");
-                        let right_digest = *sparse_mmr
-                            .get(&(tree_height, right_child))
-                            .expect("presence of right child was verified already");
-                        let parent_digest = Tip5::hash_pair(left_digest, right_digest);
-                        sparse_mmr.insert((tree_height, parent), parent_digest);
-                    }
-                }
-            }
-
-            // Create removal records one by one
-            let mut removal_records = vec![];
-            for index_set in &self.index_sets {
-                let chunk_indices = index_set
-                    .to_vec()
-                    .into_iter()
-                    .map(|absolute_index| absolute_index / u128::from(CHUNK_SIZE))
-                    .map(|u| {
-                        u64::try_from(u).expect("absolute index can never be more than 72 bits")
-                    })
-                    .sorted()
-                    .dedup()
-                    .collect_vec();
-                let mut target_chunks = vec![];
-                for chunk_index in chunk_indices {
-                    let chunk = master_chunks_dictionary.get(&chunk_index).expect("master chunks dictionary should contain entries for all possible chunk indices");
-                    let (mut merkle_node_index, peak_index) =
-                        leaf_index_to_mt_index_and_peak_index(chunk_index, num_leafs_swbfi);
-                    let tree_height = all_tree_heights[peak_index as usize];
-                    let mut authentication_path = vec![];
-                    while merkle_node_index != 1 {
-                        let digest = sparse_mmr
-                            .get(&(tree_height, merkle_node_index ^ 1))
-                            .copied()
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "node with node index {} on authentication \
+                let tree_height = all_tree_heights[peak_index as usize];
+                let mut authentication_path = vec![];
+                while merkle_node_index != 1 {
+                    let digest = sparse_mmr
+                        .get(&(tree_height, merkle_node_index ^ 1))
+                        .copied()
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "node with node index {} on authentication \
                                     path for tree of height {} must live in sparse \
                                     mmr dictionary, but that dicitonary only has \
                                     nodes with indices {} for that height",
-                                    merkle_node_index ^ 1,
-                                    tree_height,
-                                    sparse_mmr
-                                        .iter()
-                                        .filter(|((height, _node_index), _)| *height == tree_height)
-                                        .map(|((_height, node_index), _)| *node_index)
-                                        .sorted()
-                                        .join(", ")
-                                );
-                            });
-                        authentication_path.push(digest);
-                        merkle_node_index >>= 1;
-                    }
-                    target_chunks.push((
-                        chunk_index,
-                        (
-                            MmrMembershipProof {
-                                authentication_path,
-                            },
-                            chunk.clone(),
-                        ),
-                    ));
+                                merkle_node_index ^ 1,
+                                tree_height,
+                                sparse_mmr
+                                    .iter()
+                                    .filter(|((height, _node_index), _)| *height == tree_height)
+                                    .map(|((_height, node_index), _)| *node_index)
+                                    .sorted()
+                                    .join(", ")
+                            );
+                        });
+                    authentication_path.push(digest);
+                    merkle_node_index >>= 1;
                 }
-                removal_records.push(RemovalRecord {
-                    absolute_indices: *index_set,
-                    target_chunks: ChunkDictionary::new(target_chunks),
-                });
+                target_chunks.push((
+                    chunk_index,
+                    (
+                        MmrMembershipProof {
+                            authentication_path,
+                        },
+                        chunk.clone(),
+                    ),
+                ));
             }
-
-            removal_records
+            removal_records.push(RemovalRecord {
+                absolute_indices: *index_set,
+                target_chunks: ChunkDictionary::new(target_chunks),
+            });
         }
+
+        removal_records
     }
 }
 
@@ -1287,7 +1284,27 @@ mod tests {
         let _ = RemovalRecordList::decode_from_vec(received_over_wire); // no crash
     }
 
-    #[proptest(cases = 10)]
+    #[proptest]
+    fn can_unpack_on_empty_chunk_dictionary(
+        #[strategy(arb())] item: Digest,
+        #[strategy(arb())] sr: Digest,
+        #[strategy(arb())] rp: Digest,
+    ) {
+        for i in 0..BATCH_SIZE as u64 {
+            let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, i);
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: ChunkDictionary::empty(),
+            };
+            let removal_records = vec![removal_record];
+            prop_assert_eq!(
+                removal_records.clone(),
+                RemovalRecordList::try_unpack(removal_records).unwrap()
+            );
+        }
+    }
+
+    #[proptest(cases = 30)]
     fn pack_unpack_happy_path(
         #[strategy(0usize..20)] _num_records: usize,
         #[strategy(arb::<u64>())] _num_leafs_aocl: u64,
@@ -1299,7 +1316,7 @@ mod tests {
         prop_assert_eq!(removal_records, unpacked);
     }
 
-    #[proptest(cases = 10)]
+    #[proptest(cases = 30)]
     fn unpack_cannot_crash(
         #[strategy(1usize..20)] _num_records: usize,
         #[strategy(arb::<u64>())] _num_leafs_aocl: u64,

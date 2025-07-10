@@ -9,11 +9,11 @@ use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 
-/// Newtype for [`TransactionKernel`] for use in the context of
-/// [`BlockTransaction`]s. See [`BlockTransaction`] for more documentation.
-/// The difference betwen regular [`Transaction`]s and [`BlockTransaction`]s is
-/// contained in the kernel, which is why [`BlockTransaction`] has a custom
-/// kernel type but not a custom proof type.
+/// Newtype for [`TransactionKernel`] where removal records are packed. For use
+/// in the context of [`BlockTransaction`]s. See [`BlockTransaction`] for more
+/// documentation. The difference between regular [`Transaction`]s and
+/// [`BlockTransaction`]s is contained in the kernel, which is why
+/// [`BlockTransaction`] has a custom kernel type but not a custom proof type.
 #[derive(Debug, Clone)]
 pub(crate) struct BlockTransactionKernel(TransactionKernel);
 
@@ -60,16 +60,12 @@ impl From<BlockOrRegularTransactionKernel> for TransactionKernel {
 }
 
 /// Essentially a newtype for [`Transaction`], specifically for use in the
-/// context of *the* transaction in a given block.
+/// context of *the* transaction in a given block. Contains packed removal
+/// records.
 ///
-/// The main difference relative to [`Transaction`] is the `inputs`, which are
-/// a [`Vec`] of [`RemovalRecord`]s. Before hard fork 2, these removal records
-/// are not packed; and [`BlockTransaction`] is identical to [`Transaction`].
-/// After hard fork 2, the removal records *are* packed -- and unpacked,
-/// whenever appropriate. The point about packing is that it does not change
-/// type: this operation maps a `Vec<RemovalRecord>` to a `Vec<RemovalRecord>`
-/// purely by removing redundant information that can later be added back
-/// cheaply.
+/// The point about packing is that it does not change type: this operation maps
+/// a `Vec<RemovalRecord>` to a `Vec<RemovalRecord>` purely by removing
+/// redundant information that can later be added back cheaply.
 #[derive(Debug, Clone)]
 pub(crate) struct BlockTransaction {
     pub(crate) kernel: BlockTransactionKernel,
@@ -184,16 +180,20 @@ impl BlockTransaction {
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
     use super::*;
 
     impl BlockTransaction {
         /// Upgrade a regular [`Transaction`] into a [`BlockTransaction`] by
-        /// setting the merge bit. If a proof is supplied, it may become
-        /// invalid. Use only in tests where the proof does not matter.
+        /// setting the merge bit and packing the removal records. If a proof is
+        /// supplied, it will (probably) become invalid. Use only in tests where
+        /// the proof does not matter.
         pub(crate) fn upgrade(tx: Transaction) -> Self {
+            let packed = RemovalRecordList::pack(tx.kernel.inputs.clone());
             let kernel = TransactionKernelModifier::default()
                 .merge_bit(true)
+                .inputs(packed)
                 .modify(tx.kernel);
             let transaction = Transaction {
                 kernel,

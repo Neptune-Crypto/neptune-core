@@ -1259,6 +1259,8 @@ impl ArchivalState {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
+    use std::ops::Deref;
+
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::random;
@@ -1493,6 +1495,7 @@ pub(super) mod tests {
             .transaction;
 
         let transaction = BlockTransaction::upgrade((*sender_tx).clone());
+
         let mock_block_2 = Block::block_template_invalid_proof(
             &block1,
             transaction,
