@@ -12,7 +12,7 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 const LOG2_BATCH_SIZE: u8 = 3;
 const LOG2_CHUNK_SIZE: u8 = 12;
 
-pub struct ComputeAbsoluteIndices;
+pub(crate) struct ComputeAbsoluteIndices;
 
 impl BasicSnippet for ComputeAbsoluteIndices {
     fn inputs(&self) -> Vec<(DataType, String)> {
