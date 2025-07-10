@@ -1265,14 +1265,19 @@ mod tests {
                             .zip(output_utxo_amounts_per_tx)
                             .enumerate()
                             .for_each(|(i, (utxos, amounts))| {
-                                // half_of_coinbase <= total_timelocked_output + half_of_fee =>
-                                // half_of_coinbase - half_of_fee <= total_timelocked_output
+                                // If coinbase transaction, then timelock at least half of total
+                                // output value.
+                                let min_timelocked_cb: NativeCurrencyAmount =
+                                    if coinbase(i).is_some() {
+                                        let mut min_timelocked_cb: NativeCurrencyAmount =
+                                            amounts.iter().cloned().sum();
+                                        min_timelocked_cb.div_two();
+                                        min_timelocked_cb
+                                    } else {
+                                        NativeCurrencyAmount::zero()
+                                    };
+
                                 let mut timelocked_cb_acc = NativeCurrencyAmount::zero();
-                                let mut min_timelocked_cb = coinbase(i)
-                                    .unwrap_or(NativeCurrencyAmount::zero())
-                                    .checked_sub(&fees[i])
-                                    .unwrap_or(NativeCurrencyAmount::zero());
-                                min_timelocked_cb.div_two();
                                 for (utxo, amount) in utxos.iter_mut().zip_eq(amounts) {
                                     *utxo = utxo.new_with_native_currency_amount(amount);
                                     if timelocked_cb_acc < min_timelocked_cb {
@@ -1736,6 +1741,31 @@ mod tests {
         }
     }
 
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn arbitrary_primitive_witness_tuple_is_valid_deterministic() {
+        for num_inputs_a in 0..=2 {
+            for num_outputs_a in 0..=2 {
+                for num_inputs_b in 0..=2 {
+                    for num_outputs_b in 0..=2 {
+                        let mut test_runner = TestRunner::deterministic();
+                        let [pw1, pw2] =
+                            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                                (num_inputs_a, num_outputs_a, 0),
+                                (num_inputs_b, num_outputs_b, 0),
+                            ])
+                            .new_tree(&mut test_runner)
+                            .unwrap()
+                            .current();
+                        assert!(pw1.validate().await.is_ok());
+                        assert!(pw2.validate().await.is_ok());
+                    }
+                }
+            }
+        }
+    }
+
+    #[traced_test]
     #[proptest(cases = 10, async = "tokio")]
     async fn updating_primitive_witness_with_ms_data_works(
         // Notice only SingleProof-backed txs need inputs to allow updating, not PW-backed ones.
@@ -1754,6 +1784,7 @@ mod tests {
         let [own_pw, mined_pw] = pws;
 
         prop_assert!(own_pw.validate().await.is_ok());
+        prop_assert!(mined_pw.validate().await.is_ok());
 
         let ms_update = MutatorSetUpdate::new(
             mined_pw.kernel.inputs.clone(),
