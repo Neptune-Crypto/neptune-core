@@ -21,7 +21,6 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
 use super::commit;
-use super::get_swbf_indices;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::absolute_index_set::AbsoluteIndexSet;
 use super::removal_record::chunk_dictionary::ChunkDictionary;
@@ -64,12 +63,12 @@ impl MsMembershipProof {
 
     /// Compute the indices that will be added to the SWBF if this item is removed.
     pub fn compute_indices(&self, item: Digest) -> AbsoluteIndexSet {
-        AbsoluteIndexSet::new(&get_swbf_indices(
+        AbsoluteIndexSet::compute(
             item,
             self.sender_randomness,
             self.receiver_preimage,
             self.aocl_leaf_index,
-        ))
+        )
     }
 
     /// Update a list of membership proofs in anticipation of an addition. If successful,
@@ -160,12 +159,12 @@ impl MsMembershipProof {
             .zip(own_items.iter())
             .enumerate()
             .for_each(|(i, (mp, &item))| {
-                let absolute_indices = AbsoluteIndexSet::new(&get_swbf_indices(
+                let absolute_indices = AbsoluteIndexSet::compute(
                     item,
                     mp.sender_randomness,
                     mp.receiver_preimage,
                     mp.aocl_leaf_index,
-                ));
+                );
                 for chunk_index in absolute_indices
                     .to_array()
                     .iter()
@@ -299,15 +298,16 @@ impl MsMembershipProof {
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
         // Get Bloom filter indices by recalculating them.
-        let all_indices = get_swbf_indices(
+        let all_indices = AbsoluteIndexSet::compute(
             own_item,
             self.sender_randomness,
             self.receiver_preimage,
             self.aocl_leaf_index,
-        );
+        )
+        .to_array();
         let chunk_indices_set: HashSet<u64> = all_indices
-            .into_iter()
             .map(|bi| (bi / u128::from(CHUNK_SIZE)) as u64)
+            .into_iter()
             .collect::<HashSet<u64>>();
 
         // Insert the new SWBF leaf into a duplicate of the SWBFI MMRA to get

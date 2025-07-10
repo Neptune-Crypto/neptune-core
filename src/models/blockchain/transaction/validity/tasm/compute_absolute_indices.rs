@@ -2,15 +2,9 @@ use tasm_lib::arithmetic;
 use tasm_lib::data_type::ArrayType;
 use tasm_lib::data_type::StructType;
 use tasm_lib::hashing::algebraic_hasher::sample_indices::SampleIndices;
-use tasm_lib::list::higher_order::inner_function::InnerFunction;
-use tasm_lib::list::higher_order::inner_function::RawCode;
-use tasm_lib::list::higher_order::map::Map;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::DataType;
-use tasm_lib::prelude::DynMalloc;
-use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::isa::triton_asm;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
@@ -18,19 +12,9 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 const LOG2_BATCH_SIZE: u8 = 3;
 const LOG2_CHUNK_SIZE: u8 = 12;
 
-#[derive(Debug, Clone, Copy, BFieldCodec, TasmObject)]
-struct NewAbsoluteIndexSet {
-    /// The smallest value of all the absolute indices.
-    minimum: u128,
+pub struct ComputeAbsoluteIndices;
 
-    /// All absolute indices relative to minimum. At least one of these elements
-    /// are guaranteed to be zero as it corresponds to the minimum.
-    offsets: [u32; NUM_TRIALS as usize],
-}
-
-pub struct GetSwbfIndicesNew;
-
-impl BasicSnippet for GetSwbfIndicesNew {
+impl BasicSnippet for ComputeAbsoluteIndices {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::U64, "aocl_leaf".to_string()),
@@ -41,15 +25,15 @@ impl BasicSnippet for GetSwbfIndicesNew {
     }
 
     fn outputs(&self) -> Vec<(tasm_lib::prelude::DataType, String)> {
-        let offsets_array = DataType::Array(Box::new(ArrayType {
+        let distances_array = DataType::Array(Box::new(ArrayType {
             element_type: DataType::U32,
-            length: (NUM_TRIALS - 1) as usize,
+            length: NUM_TRIALS as usize,
         }));
         let return_type = StructType {
-            name: "NewAbsoluteIndexSet".to_owned(),
+            name: "AbsoluteIndexSet".to_owned(),
             fields: vec![
                 ("minimum".to_owned(), DataType::U128),
-                ("offsets".to_owned(), offsets_array),
+                ("distances".to_owned(), distances_array),
             ],
         };
 
@@ -68,7 +52,6 @@ impl BasicSnippet for GetSwbfIndicesNew {
         library: &mut tasm_lib::prelude::Library,
     ) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
         let sample_indices = library.import(Box::new(SampleIndices));
-        let dyn_malloc = library.import(Box::new(DynMalloc));
         let divide_by_batch_size = library.import(Box::new(
             arithmetic::u128::shift_right_static::ShiftRightStatic::<LOG2_BATCH_SIZE>,
         ));
@@ -260,14 +243,11 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
-    use proptest::prop_assert_eq;
-    use proptest_arbitrary_interop::arb;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::Digest;
-    use tasm_lib::prelude::Tip5;
     use tasm_lib::push_encodable;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -277,58 +257,12 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
     use tasm_lib::triton_vm::prelude::BFieldElement;
-    use tasm_lib::twenty_first::prelude::Sponge;
-    use test_strategy::proptest;
 
     use super::*;
     use crate::twenty_first::bfe;
-    use crate::util_types::mutator_set::get_swbf_indices;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
-    const NUM_TRIALS: usize = 45;
-    const LOG2_WINDOW_SIZE: u32 = 20;
-
-    impl NewAbsoluteIndexSet {
-        fn unpack(&self) -> AbsoluteIndexSet {
-            AbsoluteIndexSet::new(&self.offsets.map(|x| x as u128 + self.minimum))
-        }
-    }
-
-    fn get_swbf_indices_new(
-        item: Digest,
-        sender_randomness: Digest,
-        receiver_preimage: Digest,
-        aocl_leaf_index: u64,
-    ) -> NewAbsoluteIndexSet {
-        let batch_index: u128 = aocl_leaf_index as u128 / (1 << LOG2_BATCH_SIZE) as u128;
-        let batch_offset: u128 = batch_index * (1 << LOG2_CHUNK_SIZE) as u128;
-        let leaf_index_bfes = aocl_leaf_index.encode();
-        let input = [
-            item.encode(),
-            sender_randomness.encode(),
-            receiver_preimage.encode(),
-            leaf_index_bfes,
-        ]
-        .concat();
-        let mut sponge = Tip5::init();
-        sponge.pad_and_absorb_all(&input);
-        let relative_indices = sponge.sample_indices(1 << LOG2_WINDOW_SIZE, NUM_TRIALS);
-
-        let minimum = *(relative_indices.iter().min().unwrap());
-        let offsets: [u32; NUM_TRIALS as usize] = relative_indices
-            .into_iter()
-            .map(|x| x - minimum)
-            .collect_vec()
-            .try_into()
-            .unwrap();
-
-        NewAbsoluteIndexSet {
-            minimum: (minimum as u128) + batch_offset,
-            offsets,
-        }
-    }
-
-    impl Function for GetSwbfIndicesNew {
+    impl Function for ComputeAbsoluteIndices {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
@@ -347,8 +281,12 @@ mod tests {
             let receiver_preimage = pop_encodable::<Digest>(stack);
             let aocl_leaf_index = pop_encodable::<u64>(stack);
 
-            let indices =
-                get_swbf_indices_new(item, sender_randomness, receiver_preimage, aocl_leaf_index);
+            let indices = AbsoluteIndexSet::compute(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                aocl_leaf_index,
+            );
 
             // Write struct to memory and return a pointer to it.
             let free_page = rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
@@ -367,7 +305,7 @@ mod tests {
             _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut rng = StdRng::from_seed(seed);
-            let mut stack = GetSwbfIndicesNew.init_stack_for_isolated_run();
+            let mut stack = ComputeAbsoluteIndices.init_stack_for_isolated_run();
             let item: Digest = rng.random();
             let sender_randomness: Digest = rng.random();
             let receiver_preimage: Digest = rng.random();
@@ -390,22 +328,8 @@ mod tests {
         // Run many times to ensure that e.g. the "min" function can find
         // minimum when lowest relative index is either first or last.
         for _ in 0..40 {
-            ShadowedFunction::new(GetSwbfIndicesNew).test();
+            ShadowedFunction::new(ComputeAbsoluteIndices).test();
         }
-    }
-
-    #[proptest]
-    fn unpacking_yields_old_representation(
-        #[strategy(arb())] aocl_leaf_index: u64,
-        #[strategy(arb())] receiver_preimage: Digest,
-        #[strategy(arb())] sender_randomness: Digest,
-        #[strategy(arb())] item: Digest,
-    ) {
-        let old_representation =
-            get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_leaf_index);
-        let new_representation =
-            get_swbf_indices_new(item, sender_randomness, receiver_preimage, aocl_leaf_index);
-        prop_assert_eq!(old_representation, new_representation.unpack().to_array());
     }
 }
 
@@ -418,6 +342,6 @@ mod benches {
 
     #[test]
     fn benchmark() {
-        ShadowedFunction::new(GetSwbfIndicesNew).bench();
+        ShadowedFunction::new(ComputeAbsoluteIndices).bench();
     }
 }

@@ -1,7 +1,6 @@
 pub(crate) mod absolute_index_set;
 pub(crate) mod chunk;
 pub(crate) mod chunk_dictionary;
-pub(crate) mod dense_absolute_index_set;
 pub(crate) mod removal_record_list;
 
 use std::collections::HashMap;
@@ -266,13 +265,15 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use arbitrary::Unstructured;
     use itertools::Itertools;
+    use proptest::collection::vec;
     use proptest::prelude::*;
-    use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -283,10 +284,9 @@ mod tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
 
-    prop_compose! {
-        pub fn propcompose_absindset() (inner in [proptest::prelude::any::<u128>(); NUM_TRIALS as usize]) -> AbsoluteIndexSet {
-            AbsoluteIndexSet::new(&inner)
-        }
+    pub fn propcompose_absindset() -> impl Strategy<Value = AbsoluteIndexSet> {
+        vec(arb::<u8>(), 16_usize + (NUM_TRIALS as usize) * 4)
+            .prop_map(|bytes| AbsoluteIndexSet::arbitrary(&mut Unstructured::new(&bytes)).unwrap())
     }
 
     #[test]
@@ -345,9 +345,9 @@ mod tests {
     fn verify_that_removal_records_and_mp_indices_agree() {
         let (item, mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
-        let mut mp_indices = mp.compute_indices(item).0;
+        let mut mp_indices = mp.compute_indices(item).to_array();
         mp_indices.sort_unstable();
-        let mut removal_rec_indices = removal_record.absolute_indices.0;
+        let mut removal_rec_indices = removal_record.absolute_indices.to_array();
         removal_rec_indices.sort_unstable();
 
         assert_eq!(
@@ -368,7 +368,9 @@ mod tests {
         );
 
         // Verify that changing the absolute indices, changes the hash value
-        removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS as usize / 4] += 1;
+        removal_record_alt
+            .absolute_indices
+            .increment_bloom_filter_index(NUM_TRIALS as usize / 4);
         assert_ne!(
             Hash::hash(&removal_record),
             Hash::hash(&removal_record_alt),
@@ -385,7 +387,7 @@ mod tests {
         // Verify that indices from membership proof and remove records agree
         let mut rr_indices: Vec<u128> = chunks2indices.clone().into_values().concat();
         rr_indices.sort_unstable();
-        let mut mp_indices = mp.compute_indices(item).0;
+        let mut mp_indices = mp.compute_indices(item).to_array();
         mp_indices.sort_unstable();
         assert_eq!(mp_indices.to_vec(), rr_indices);
         assert_eq!(NUM_TRIALS as usize, rr_indices.len());

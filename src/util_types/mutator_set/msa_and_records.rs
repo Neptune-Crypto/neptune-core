@@ -1,9 +1,7 @@
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
-use tasm_lib::twenty_first::prelude::Mmr;
 
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
-use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
@@ -74,7 +72,7 @@ pub mod neptune_arbitrary {
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::super::active_window::ActiveWindow;
-    use super::super::get_swbf_indices;
+
     use super::super::mmra_and_membership_proofs::MmraAndMembershipProofs;
     use super::super::removal_record::absolute_index_set::AbsoluteIndexSet;
     use super::super::removal_record::chunk::Chunk;
@@ -152,7 +150,7 @@ pub mod neptune_arbitrary {
                         .zip(aocl_leaf_indices.iter())
                         .map(
                             |((item, sender_randomness, receiver_preimage), aocl_leaf_index)| {
-                                get_swbf_indices(
+                                AbsoluteIndexSet::compute(
                                     *item,
                                     *sender_randomness,
                                     *receiver_preimage,
@@ -161,7 +159,7 @@ pub mod neptune_arbitrary {
                             },
                         )
                         .collect_vec();
-                    let mut all_bloom_indices = all_index_sets.iter().flatten().copied().collect_vec();
+                    let mut all_bloom_indices = all_index_sets.iter().flat_map(|ais|ais.to_array()).collect_vec();
                     all_bloom_indices.sort();
 
                     // assemble all chunk indices
@@ -225,7 +223,7 @@ pub mod neptune_arbitrary {
                                     let personalized_chunk_dictionaries = all_index_sets
                                         .iter()
                                         .map(|index_set| {
-                                            let mut is = index_set
+                                            let mut is = index_set.to_vec()
                                                 .iter()
                                                 .map(|index| *index / u128::from(CHUNK_SIZE))
                                                 .map(|index| index as u64)
@@ -284,7 +282,7 @@ pub mod neptune_arbitrary {
                                         .iter()
                                         .zip(personalized_chunk_dictionaries.iter())
                                         .map(|(index_set, target_chunks)| RemovalRecord {
-                                            absolute_indices: AbsoluteIndexSet::new(index_set),
+                                            absolute_indices: index_set.to_owned(),
                                             target_chunks: target_chunks.clone(),
                                         })
                                         .collect_vec();
