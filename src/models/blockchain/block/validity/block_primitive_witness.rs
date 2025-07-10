@@ -10,6 +10,7 @@ use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
@@ -88,8 +89,7 @@ impl BlockPrimitiveWitness {
         )
     }
 
-    /// Builds the block body from its witness. Does the input packing if
-    ///  needed.
+    /// Builds the block body from its witness.
     ///
     /// # Panics
     ///
@@ -102,7 +102,7 @@ impl BlockPrimitiveWitness {
                 .expect("Predecessor must have mutator set after");
             let predecessor_msa_digest = predecessor_msa
                 .hash();
-            let transaction_kernel = self.transaction.kernel.deref();
+            let transaction_kernel = TransactionKernel::from(self.transaction.kernel.clone());
             let tx_msa_digest = transaction_kernel.mutator_set_hash;
             assert_eq!(
                 predecessor_msa_digest,

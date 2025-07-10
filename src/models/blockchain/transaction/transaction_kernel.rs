@@ -90,6 +90,7 @@ impl PartialEq for TransactionKernel {
             && self.coinbase == o.coinbase
             && self.timestamp == o.timestamp
             && self.mutator_set_hash == o.mutator_set_hash
+            && self.merge_bit == o.merge_bit
 
         // mast_sequences intentionally skipped.
     }
