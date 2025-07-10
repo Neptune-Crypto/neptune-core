@@ -22,7 +22,6 @@ use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::mmr::bag_peaks::BagPeaks;
 use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecretInLeafIndexOnStack;
 use tasm_lib::neptune::mutator_set;
-use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
@@ -36,15 +35,15 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::shared::NUM_TRIALS;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 const COINBASE_HAS_INPUTS_ERROR: i128 = 1_000_000;
 const COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR: i128 = 1_000_001;
@@ -379,15 +378,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let hash_varlen = library.import(Box::new(HashVarlen));
         let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
         let mmr_verify = library.import(Box::new(MmrVerifyFromSecretInLeafIndexOnStack));
-        let swbf_indices = library.import(Box::new(GetSwbfIndices {
-            num_trials: NUM_TRIALS as usize,
-            window_size: WINDOW_SIZE,
-        }));
 
-        let size_of_u128 = DataType::U128.stack_size();
-        let hash_index_array = library.import(Box::new(HashStaticSize {
-            // size is 4 * NUM_TRIALS as arrays don't contain size indicators
-            size: NUM_TRIALS as usize * size_of_u128,
+        let compute_absolute_indices = library.import(Box::new(ComputeAbsoluteIndices));
+        let hash_absolute_indices = library.import(Box::new(HashStaticSize {
+            size: AbsoluteIndexSet::static_length().expect("absolute indices have a static size"),
         }));
 
         let field_aocl = field!(RemovalRecordsIntegrityWitnessMemory::aocl);
@@ -834,13 +828,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness] [utxo_hash]
 
-                call {swbf_indices}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *computed_bloom_indices
+                call {compute_absolute_indices}
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *absolute_indices
 
-                addi 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl (*computed_bloom_indices as array)
-
-                call {hash_index_array}
+                call {hash_absolute_indices}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices]
 
@@ -852,7 +843,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 {&field_indices}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *claimed_indices[i]
 
-                call {hash_index_array}
+                call {hash_absolute_indices}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices_h] [claimed_indices_h]
 
@@ -1074,6 +1065,7 @@ mod tests {
     use crate::util_types::mutator_set::commit;
 
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
     impl ConsensusProgramSpecification for RemovalRecordsIntegrity {
         fn source(&self) {
@@ -1202,6 +1194,27 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn small_deterministic() {
+        for num_inputs in 0..=2 {
+            for num_outputs in 0..=2 {
+                for num_public_announcements in 0..=1 {
+                    let mut test_runner = TestRunner::deterministic();
+                    let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
+                        Some(num_inputs),
+                        num_outputs,
+                        num_public_announcements,
+                    )
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+                    let witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
+                    prop_positive(witness).unwrap();
+                }
+            }
+        }
     }
 
     #[proptest(cases = 5)]
@@ -1360,14 +1373,45 @@ mod tests {
     }
 
     #[proptest(cases = 4)]
-    fn removal_records_fail_on_bad_absolute_indices(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+    fn removal_records_fail_on_bad_absolute_indices_minimum_value(
+        #[strategy(1..4usize)] _num_inputs: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), 4, 0))]
         mut bad_pw: PrimitiveWitness,
-        #[strategy(0..2usize)] mutated_input: usize,
+        #[strategy(0..#_num_inputs)] mutated_input: usize,
+    ) {
+        let mut bad_inputs = bad_pw.kernel.inputs.clone();
+
+        // Ensure all possible words of minimum is mutated to ensure entire
+        // data structure is hashed and compared.
+        let original_minimum = bad_inputs[mutated_input].absolute_indices.get_minimum();
+        for term in [1, 1 << 32, 1 << 64, 1 << 96] {
+            bad_inputs[mutated_input]
+                .absolute_indices
+                .set_minimum(original_minimum + term);
+            let bad_kernel = TransactionKernelModifier::default()
+                .inputs(bad_inputs.clone())
+                .modify(bad_pw.kernel.clone());
+            bad_pw.kernel = bad_kernel;
+            let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
+            RemovalRecordsIntegrity.test_assertion_failure(
+                bad_witness.standard_input(),
+                bad_witness.nondeterminism(),
+                &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
+            )?;
+        }
+    }
+
+    // Ensure that all of the relative indices (distances) are hashed by
+    // modifying any of them and verifying that the derived and claimed
+    // absolute indices disagree.
+    #[proptest(cases = 30)]
+    fn removal_records_fail_on_bad_absolute_indices(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(1), 2, 2))]
+        mut bad_pw: PrimitiveWitness,
         #[strategy(0..NUM_TRIALS as usize)] mutated_bloom_filter_index: usize,
     ) {
         let mut bad_inputs = bad_pw.kernel.inputs.clone();
-        bad_inputs[mutated_input]
+        bad_inputs[0]
             .absolute_indices
             .increment_bloom_filter_index(mutated_bloom_filter_index);
         let bad_kernel = TransactionKernelModifier::default()
@@ -1384,7 +1428,6 @@ mod tests {
 
     test_program_snapshot!(
         RemovalRecordsIntegrity,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "a7bf63235fe9b8eb4ba14e3698917d4aed142501abf1fb71e86c0b2e0f714615b0ee13b1fb9cddbc"
+        "89a70f4bdf92fabbd605897dba7a22e21e9e7137325ee46aea354cacc3161d30ab1a8dac3de36931"
     );
 }

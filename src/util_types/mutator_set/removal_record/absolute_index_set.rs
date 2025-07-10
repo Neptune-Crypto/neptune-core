@@ -209,6 +209,10 @@ mod tests {
             self.minimum = new_minimum;
         }
 
+        pub(crate) fn get_minimum(&self) -> u128 {
+            self.minimum
+        }
+
         pub(crate) fn set_distance(&mut self, index: usize, new_distance: u32) {
             self.distances[index] = new_distance;
         }
