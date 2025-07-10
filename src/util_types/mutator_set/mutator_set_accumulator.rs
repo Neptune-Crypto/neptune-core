@@ -18,7 +18,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
-use super::get_swbf_indices;
+
 use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::absolute_index_set::AbsoluteIndexSet;
 use super::removal_record::chunk::Chunk;
@@ -118,10 +118,7 @@ impl MutatorSetAccumulator {
 
     /// Return the batch index for the latest addition to the mutator set
     pub fn get_batch_index(&self) -> u64 {
-        match self.aocl.num_leafs() {
-            0 => 0,
-            n => (n - 1) / u64::from(BATCH_SIZE),
-        }
+        self.aocl.num_leafs().saturating_sub(1) / u64::from(BATCH_SIZE)
     }
 
     /// Return the lowest and the highest chunk index that are represented in
@@ -299,12 +296,12 @@ impl MutatorSetAccumulator {
         let window_start = u128::from(current_batch_index) * u128::from(CHUNK_SIZE);
 
         // Get all Bloom filter indices
-        let all_indices = AbsoluteIndexSet::new(&get_swbf_indices(
+        let all_indices = AbsoluteIndexSet::compute(
             item,
             membership_proof.sender_randomness,
             membership_proof.receiver_preimage,
             membership_proof.aocl_leaf_index,
-        ));
+        );
 
         let Ok((indices_in_inactive_swbf, indices_in_active_swbf)) =
             all_indices.split_by_activity(self)
@@ -352,12 +349,12 @@ impl MutatorSetAccumulator {
 
     /// Generates a removal record with which to update the set commitment.
     pub fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
-        let indices: AbsoluteIndexSet = AbsoluteIndexSet::new(&get_swbf_indices(
+        let indices: AbsoluteIndexSet = AbsoluteIndexSet::compute(
             item,
             membership_proof.sender_randomness,
             membership_proof.receiver_preimage,
             membership_proof.aocl_leaf_index,
-        ));
+        );
 
         RemovalRecord {
             absolute_indices: indices,

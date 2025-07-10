@@ -1,16 +1,9 @@
 use std::error::Error;
 use std::fmt;
 
-use itertools::Itertools;
 use tasm_lib::prelude::Digest;
-use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::prelude::Sponge;
 
 use self::addition_record::AdditionRecord;
-use self::shared::BATCH_SIZE;
-use self::shared::CHUNK_SIZE;
-use self::shared::NUM_TRIALS;
-use self::shared::WINDOW_SIZE;
 use crate::models::blockchain::shared::Hash;
 
 pub mod active_window;
@@ -45,34 +38,6 @@ pub enum MutatorSetError {
     },
 }
 
-/// Get the (absolute) indices for removing this item from the mutator set.
-pub fn get_swbf_indices(
-    item: Digest,
-    sender_randomness: Digest,
-    receiver_preimage: Digest,
-    aocl_leaf_index: u64,
-) -> [u128; NUM_TRIALS as usize] {
-    let batch_index: u128 = u128::from(aocl_leaf_index) / u128::from(BATCH_SIZE);
-    let batch_offset: u128 = batch_index * u128::from(CHUNK_SIZE);
-    let leaf_index_bfes = aocl_leaf_index.encode();
-    let input = [
-        item.encode(),
-        sender_randomness.encode(),
-        receiver_preimage.encode(),
-        leaf_index_bfes,
-    ]
-    .concat();
-
-    let mut sponge = Hash::init();
-    Hash::pad_and_absorb_all(&mut sponge, &input);
-    Hash::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
-        .into_iter()
-        .map(|sample_index| u128::from(sample_index) + batch_offset)
-        .collect_vec()
-        .try_into()
-        .unwrap()
-}
-
 /// Generates an addition record from an item and explicit random-
 /// ness. The addition record is itself a commitment to the item.
 pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) -> AdditionRecord {
@@ -94,6 +59,8 @@ mod tests {
     use super::*;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
     use crate::util_types::test_shared::mutator_set::*;
 
     #[test]
@@ -180,44 +147,26 @@ mod tests {
 
     #[test]
     fn ms_get_indices_test() {
-        // Test that `get_indices` behaves as expected, i.e.
-        // that it always returns something of length `NUM_TRIALS`, and that the
-        // returned values are in the expected range.
-
         let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
-        let ret: [u128; NUM_TRIALS as usize] =
-            get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
-        assert_eq!(NUM_TRIALS as usize, ret.len());
-        assert!(ret.iter().all(|&x| x < u128::from(WINDOW_SIZE)));
+        let ret = AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, 0);
+        assert!(ret.to_array().iter().all(|&x| x < u128::from(WINDOW_SIZE)));
     }
 
     #[test]
     fn ms_get_indices_test_big() {
         // Test that `get_indices` behaves as expected. I.e. that it returns indices in the correct range,
         // and always returns something of length `NUM_TRIALS`.
-
-        for _ in 0..1000 {
-            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
-            let ret: [u128; NUM_TRIALS as usize] =
-                get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
-            assert_eq!(NUM_TRIALS as usize, ret.len());
-            assert!(ret.iter().all(|&x| x < u128::from(WINDOW_SIZE)));
-        }
-
-        for _ in 0..1000 {
-            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
-            let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices(
-                item,
-                sender_randomness,
-                receiver_preimage,
-                u64::from(17 * BATCH_SIZE),
-            );
-            assert_eq!(NUM_TRIALS as usize, ret.len());
-            assert!(ret
-                .iter()
-                .all(|&x| (x as u32) < WINDOW_SIZE + 17 * CHUNK_SIZE
-                    && (x as u32) >= 17 * CHUNK_SIZE));
-        }
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+        let ret = AbsoluteIndexSet::compute(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            u64::from(17 * BATCH_SIZE),
+        );
+        assert!(ret
+            .to_array()
+            .iter()
+            .all(|&x| (x as u32) < WINDOW_SIZE + 17 * CHUNK_SIZE && (x as u32) >= 17 * CHUNK_SIZE));
     }
 
     #[apply(shared_tokio_runtime)]

@@ -18,7 +18,7 @@ use super::shared::CHUNK_SIZE;
 use crate::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
 use crate::util_types::archival_mmr::ArchivalMmr;
-use crate::util_types::mutator_set::get_swbf_indices;
+use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::MutatorSetError;
 
 #[derive(Debug, Clone)]
@@ -204,12 +204,13 @@ where
 
         let auth_path_aocl = self.get_aocl_authentication_path(aocl_leaf_index).await?;
         let swbf_indices =
-            get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_leaf_index);
+            AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, aocl_leaf_index);
 
         let batch_index = self.get_batch_index_async().await;
         let window_start = batch_index * u128::from(CHUNK_SIZE);
 
         let chunk_indices: Vec<u64> = swbf_indices
+            .to_array()
             .iter()
             .filter(|bi| **bi < window_start)
             .map(|bi| (*bi / u128::from(CHUNK_SIZE)) as u64)
@@ -347,10 +348,7 @@ where
     }
 
     pub async fn get_batch_index_async(&self) -> u128 {
-        match self.aocl.num_leafs().await {
-            0 => 0,
-            n => u128::from(n - 1) / u128::from(BATCH_SIZE),
-        }
+        self.aocl.num_leafs().await.saturating_sub(1) as u128 / u128::from(BATCH_SIZE)
     }
 
     /// Helper function. Like `add` but also returns the chunk that
@@ -843,7 +841,7 @@ mod tests {
         let mut fake_indices = [2u128; NUM_TRIALS as usize];
         fake_indices[0] = 0;
         let fake_removal_record = RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new(&fake_indices),
+            absolute_indices: AbsoluteIndexSet::new(fake_indices),
             target_chunks: ChunkDictionary::default(),
         };
 

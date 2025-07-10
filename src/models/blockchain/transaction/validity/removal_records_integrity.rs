@@ -942,7 +942,6 @@ pub mod neptune_arbitrary {
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::get_swbf_indices;
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
@@ -1002,9 +1001,9 @@ pub mod neptune_arbitrary {
                         msmp.aocl_leaf_index,
                     )
                 })
-                .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
-                .map(|ais| RemovalRecord {
-                    absolute_indices: AbsoluteIndexSet::new(&ais),
+                .map(|(item, sr, rp, ali)| AbsoluteIndexSet::compute(item, sr, rp, ali))
+                .map(|absolute_indices| RemovalRecord {
+                    absolute_indices,
                     target_chunks: u.arbitrary().unwrap(),
                 })
                 .rev()
@@ -1073,7 +1072,7 @@ mod tests {
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::get_swbf_indices;
+
     use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     impl ConsensusProgramSpecification for RemovalRecordsIntegrity {
@@ -1158,14 +1157,14 @@ mod tests {
                 ));
 
                 // calculate absolute index set
-                let index_set = get_swbf_indices(
+                let index_set = AbsoluteIndexSet::compute(
                     utxo_hash,
                     sender_randomness,
                     receiver_preimage,
                     aocl_leaf_index,
                 );
 
-                assert_eq!(index_set, claimed_absolute_indices.to_array());
+                assert_eq!(index_set, *claimed_absolute_indices);
 
                 input_index += 1;
             }

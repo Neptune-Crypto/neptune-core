@@ -641,8 +641,8 @@ mod tests {
 
     use super::RemovalRecordList;
     use super::*;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::mutator_set::shared::WINDOW_SIZE;
-    use crate::util_types::mutator_set::NUM_TRIALS;
 
     impl RemovalRecord {
         pub(crate) fn arbitrary_synchronized_set(
@@ -690,7 +690,7 @@ mod tests {
                         .zip(relative_index_sets)
                         .map(|(window_start, relative_index_set)| {
                             AbsoluteIndexSet::new(
-                                &relative_index_set
+                                relative_index_set
                                     .into_iter()
                                     .map(|ri| window_start + u128::from(ri))
                                     .collect_vec()
@@ -1270,7 +1270,7 @@ mod tests {
         #[strategy(arb::<u64>())] _num_leafs_aocl: u64,
         #[strategy(RemovalRecord::arbitrary_synchronized_set(#_num_leafs_aocl, #_num_records))]
         removal_records: Vec<RemovalRecord>,
-        #[strategy(0usize..NUM_TRIALS as usize)] abs_index_mutated: usize,
+        #[strategy(0usize..NUM_TRIALS as usize)] distance_index_mutated: usize,
         #[strategy(arb::<usize>())] index_of_change: usize,
     ) {
         let rrl = RemovalRecordList::convert_from_vec(removal_records);
@@ -1278,7 +1278,12 @@ mod tests {
         let length = received_over_wire.len();
         received_over_wire[index_of_change % length]
             .absolute_indices
-            .set_bloom_filter_index(abs_index_mutated, u128::MAX);
+            .set_minimum(u128::MAX);
+        let _ = RemovalRecordList::decode_from_vec(received_over_wire.clone()); // no crash
+
+        received_over_wire[index_of_change % length]
+            .absolute_indices
+            .set_distance(distance_index_mutated, u32::MAX);
         let _ = RemovalRecordList::decode_from_vec(received_over_wire); // no crash
     }
 
@@ -1302,28 +1307,6 @@ mod tests {
         removal_records: Vec<RemovalRecord>,
     ) {
         let _ = RemovalRecordList::try_unpack(removal_records); // no crash
-    }
-
-    #[test]
-    fn too_big_absolute_index_cannot_crash_decoder() {
-        let mut runner = TestRunner::deterministic();
-        let removal_records = RemovalRecord::arbitrary_synchronized_set(100, 2)
-            .new_tree(&mut runner)
-            .unwrap()
-            .current();
-
-        let rrl = RemovalRecordList::convert_from_vec(removal_records);
-        let mut received_over_wire = rrl.encode_as_vec();
-        for i in 0..NUM_TRIALS {
-            received_over_wire[0]
-                .absolute_indices
-                .set_bloom_filter_index(i as usize, u128::MAX);
-        }
-        let result = RemovalRecordList::decode_from_vec(received_over_wire);
-        assert!(matches!(
-            result.unwrap_err(),
-            RemovalRecordListUnpackError::AbsoluteIndexTooBig
-        ));
     }
 
     #[proptest]
