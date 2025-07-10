@@ -399,12 +399,13 @@ impl PrimitiveWitness {
                 return Err(error);
             };
 
-            if let Err(_e) = run_res {
+            if let Err(vm_error) = run_res {
                 // tbd: should we include the VMError in InvalidTypeScript error?
                 let typescript_name = known_type_scripts::typescript_name(*type_script_hash);
                 let error = WitnessValidationError::InvalidTypeScript {
                     type_script_hash: *type_script_hash,
                     type_script_name: typescript_name.to_owned(),
+                    vm_error: vm_error.to_string(),
                 };
                 warn!("{}", error);
                 return Err(error);
@@ -535,10 +536,11 @@ pub enum WitnessValidationError {
     #[error("Too many typescript witnesses. Expected {expected}, got {got}")]
     TooManyTypeScriptWitnesses { expected: usize, got: usize },
 
-    #[error("invalid type script: {type_script_hash}; ({type_script_name})")]
+    #[error("invalid type script: {type_script_hash}; ({type_script_name}). Error:\n{vm_error}")]
     InvalidTypeScript {
         type_script_hash: Digest,
         type_script_name: String,
+        vm_error: String,
     },
 
     #[error("removal records generated from witness do not match transaction kernel inputs")]
