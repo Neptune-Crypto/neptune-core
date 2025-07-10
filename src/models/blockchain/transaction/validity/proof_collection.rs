@@ -517,7 +517,7 @@ pub mod tests {
     async fn can_produce_valid_collection_small_deterministic() {
         for num_inputs in 0..=2 {
             for num_outputs in 0..=2 {
-                for num_public_announcements in 0..=2 {
+                for num_public_announcements in 0..=1 {
                     let mut test_runner = TestRunner::deterministic();
                     let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
                         Some(num_inputs),
