@@ -273,16 +273,17 @@ mod tests {
     use rand::prelude::IndexedRandom;
     use rand::Rng;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
-    use test_strategy::proptest;
 
     use super::*;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
+    use arbitrary::Arbitrary;
 
     pub fn propcompose_absindset() -> impl Strategy<Value = AbsoluteIndexSet> {
         vec(arb::<u8>(), 16_usize + (NUM_TRIALS as usize) * 4)
@@ -617,7 +618,7 @@ mod tests {
         let mut removal_records: Vec<(usize, RemovalRecord)> = vec![];
         let mut items = vec![];
         let mut mps = vec![];
-        for i in 0..12 * BATCH_SIZE + 4 {
+        for i in 0..16 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
@@ -660,14 +661,29 @@ mod tests {
                     i
                 );
             }
+            let just_removal_records = removal_records
+                .iter()
+                .map(|(_, rr)| rr.clone())
+                .collect_vec();
+            assert_eq!(
+                just_removal_records.clone(),
+                RemovalRecordList::try_unpack(RemovalRecordList::pack(
+                    just_removal_records.clone(),
+                ),)
+                .unwrap_or_else(|err| panic!(
+                    "i: {i};\n\n just_removal_records: {just_removal_records:#?}\n. Error:\n{err}"
+                )),
+                "i: {i};\n\n just_removal_records: {just_removal_records:#?}\n"
+            );
 
             let rr = accumulator.drop(item, &mp);
 
             removal_records.push((i as usize, rr));
         }
 
-        // Now apply all removal records one at a time and batch update the remaining removal records
-        for i in 0..12 * BATCH_SIZE + 4 {
+        // Now apply all removal records one at a time and batch update the
+        // remaining removal records to keep them valid.
+        for i in 0..16 * BATCH_SIZE + 4 {
             let remove_idx = rand::rng().random_range(0..removal_records.len());
             let random_removal_record = removal_records.remove(remove_idx).1;
             RemovalRecord::batch_update_from_remove(
@@ -690,6 +706,16 @@ mod tests {
                 );
                 assert!(accumulator.can_remove(removal_record));
             }
+
+            let just_removal_records = removal_records
+                .iter()
+                .map(|(_, rr)| rr.clone())
+                .collect_vec();
+            assert_eq!(
+                just_removal_records.clone(),
+                RemovalRecordList::try_unpack(RemovalRecordList::pack(just_removal_records),)
+                    .unwrap()
+            );
         }
     }
 

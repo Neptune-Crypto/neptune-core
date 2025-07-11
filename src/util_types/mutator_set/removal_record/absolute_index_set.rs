@@ -216,6 +216,10 @@ mod tests {
         pub(crate) fn set_distance(&mut self, index: usize, new_distance: u32) {
             self.distances[index] = new_distance;
         }
+
+        pub(crate) fn new_raw(minimum: u128, distances: [u32; NUM_TRIALS as usize]) -> Self {
+            Self { minimum, distances }
+        }
     }
 
     #[proptest]

@@ -5,6 +5,7 @@ use tasm_lib::prelude::Digest;
 
 use self::addition_record::AdditionRecord;
 use crate::models::blockchain::shared::Hash;
+use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
 pub mod active_window;
 pub mod addition_record;
@@ -45,6 +46,28 @@ pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) 
         Hash::hash_pair(Hash::hash_pair(item, sender_randomness), receiver_digest);
 
     AdditionRecord::new(canonical_commitment)
+}
+
+/// Converts a number of leafs in the AOCL into a number of leafs in the
+/// SWBF-MMR.
+///
+/// Common pitfall. The difference by one reflects the timing mismatch: the
+/// window slides immediately prior to adding the first element of the new
+/// batch, *not* after adding the last element of a batch. The subtraction must
+/// be saturating because the empty mutator set is the exception to this rule:
+/// no window slides occur when the first element is added to the first batch.
+///
+/// |             # leafs AOCL              | # leafs SWBFI |
+/// |:-------------------------------------:|:-------------:|
+/// |                                     0 |             0 |
+/// |                        BATCH_SIZE - 1 |             0 |
+/// |                            BATCH_SIZE |             0 |
+/// |                        BATCH_SIZE + 1 |             1 |
+/// |                        k * BATCH_SIZE |         k - 1 |
+/// | k * BATCH_SIZE + {1, ..., BATCH_SIZE} |             k |
+///
+pub fn aocl_to_swbfi_leaf_counts(aocl_leaf_count: u64) -> u64 {
+    aocl_leaf_count.saturating_sub(1) / u64::from(BATCH_SIZE)
 }
 
 #[cfg(test)]
