@@ -675,7 +675,6 @@ pub(crate) async fn create_block_transaction_from(
         );
         let nop = PrimitiveWitness::from_transaction_details(&nop);
 
-        // ensure that proof-type is SingleProof
         let options = TritonVmProofJobOptionsBuilder::new()
             .template(&job_options)
             .proof_type(TransactionProofType::SingleProof)
