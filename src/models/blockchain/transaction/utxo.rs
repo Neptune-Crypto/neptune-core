@@ -145,6 +145,21 @@ impl Utxo {
             .any(|coin| coin.type_script_hash == NativeCurrency.hash())
     }
 
+    /// Return all type script hashes referenced by any coin in any UTXO,
+    /// without duplicates.
+    /// Always includes [`NativeCurrency`].
+    pub(crate) fn type_script_hashes<'a, I: Iterator<Item = &'a Self>>(utxos: I) -> Vec<Digest> {
+        vec![NativeCurrency.hash()]
+            .into_iter()
+            .chain(
+                utxos
+                    .into_iter()
+                    .flat_map(|utxo| utxo.coins.iter().map(|c| c.type_script_hash).collect_vec()),
+            )
+            .unique()
+            .collect()
+    }
+
     /// Get the amount of native currency that are encapsulated in this UTXO,
     /// regardless of which other coins are present. (Even if that makes the
     /// native currency unspendable.)

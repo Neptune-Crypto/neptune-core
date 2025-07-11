@@ -325,14 +325,16 @@ pub(crate) mod tests {
                             .map(HashLockKey::from_preimage)
                             .map(|hl| hl.lock_script_and_witness())
                             .collect_vec();
-                        let lock_script_hashes = lock_scripts_and_witnesses
+                        let lock_scripts = lock_scripts_and_witnesses
                             .iter()
-                            .map(|lsaw| LockScript::from(lsaw).hash())
+                            .map(|lsaw| LockScript::from(lsaw))
                             .collect_vec();
                         let input_utxos = input_amounts
                             .into_iter()
-                            .zip(lock_script_hashes)
-                            .map(|(amount, hash)| (hash, amount.to_native_coins()).into())
+                            .zip(lock_scripts)
+                            .map(|(amount, lock_script)| {
+                                Utxo::new(lock_script, amount.to_native_coins())
+                            })
                             .collect_vec();
                         let own_items = input_utxos.iter().map(Tip5::hash).collect_vec();
                         let removables = izip!(

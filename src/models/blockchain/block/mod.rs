@@ -1556,7 +1556,6 @@ pub(crate) mod tests {
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
         use crate::triton_vm_job_queue::vm_job_queue;
-        use crate::triton_vm_job_queue::TritonVmJobPriority;
 
         async fn deterministic_empty_block1_proposal() -> (Block, Timestamp, Network, Block) {
             let network = Network::Main;

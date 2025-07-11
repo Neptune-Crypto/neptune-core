@@ -201,12 +201,8 @@ impl PrimitiveWitness {
         let salted_output_utxos = SaltedUtxos::new_with_rng(output_utxos.to_vec(), &mut rng);
         let salted_input_utxos = SaltedUtxos::new_with_rng(input_utxos.clone(), &mut rng);
 
-        let type_script_hashes = input_utxos
-            .iter()
-            .chain(output_utxos.iter())
-            .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash))
-            .unique()
-            .collect_vec();
+        let type_script_hashes =
+            Utxo::type_script_hashes(input_utxos.iter().chain(output_utxos.iter()));
         let type_scripts_and_witnesses = type_script_hashes
             .into_iter()
             .map(|type_script_hash| {
@@ -326,23 +322,12 @@ impl PrimitiveWitness {
         }
 
         // verify that all type required scripts are present.
-        let required_type_script_hashes = vec![NativeCurrency.hash()]
-            .into_iter()
-            .chain(
-                self.output_utxos
-                    .utxos
-                    .iter()
-                    .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash)),
-            )
-            .chain(
-                self.input_utxos
-                    .utxos
-                    .iter()
-                    .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash)),
-            )
-            .unique()
-            .collect_vec();
-
+        let required_type_script_hashes = Utxo::type_script_hashes(
+            self.output_utxos
+                .utxos
+                .iter()
+                .chain(&self.input_utxos.utxos),
+        );
         let type_script_dictionary = self
             .type_scripts_and_witnesses
             .iter()
@@ -366,7 +351,12 @@ impl PrimitiveWitness {
             .iter()
             .find(|tsh| !type_script_dictionary.contains_key(tsh))
         {
-            let error = WitnessValidationError::UnknownTypeScript(*first_missing_type_script_hash);
+            let typescript_name =
+                known_type_scripts::typescript_name(*first_missing_type_script_hash);
+            let error = WitnessValidationError::MissingTypeScriptWitness {
+                type_script_hash: *first_missing_type_script_hash,
+                type_script_name: typescript_name.to_owned(),
+            };
             warn!("{}", error);
             return Err(error);
         }
@@ -530,8 +520,13 @@ pub enum WitnessValidationError {
         kernel_mutator_set_hash: Digest,
     },
 
-    #[error("unknown typescript: {0}")]
-    UnknownTypeScript(Digest),
+    #[error(
+        "missing typescript witness for: {type_script_name},\n with hash:\n {type_script_hash}"
+    )]
+    MissingTypeScriptWitness {
+        type_script_hash: Digest,
+        type_script_name: String,
+    },
 
     #[error("Too many typescript witnesses. Expected {expected}, got {got}")]
     TooManyTypeScriptWitnesses { expected: usize, got: usize },
@@ -1097,6 +1092,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::Network;
+    use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -1569,7 +1566,13 @@ mod tests {
                             kernel: kernel.clone(),
                         }
                         .type_script_and_witness()];
-                        if coinbase.is_some() {
+                        let type_script_hashes = Utxo::type_script_hashes(
+                            salted_input_utxos
+                                .utxos
+                                .iter()
+                                .chain(&salted_output_utxos.utxos),
+                        );
+                        if type_script_hashes.contains(&TimeLock.hash()) {
                             type_scripts_and_witnesses.push(
                                 TimeLockWitness::new(
                                     kernel.clone(),
@@ -1763,6 +1766,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn nop_pw_is_valid() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let nop = TransactionDetails::nop(
+            genesis.mutator_set_accumulator_after().unwrap(),
+            Timestamp::now(),
+            network,
+        );
+        let nop = PrimitiveWitness::from_transaction_details(&nop);
+        assert!(nop.validate().await.is_ok(), "nop PW must be valid");
     }
 
     #[traced_test]

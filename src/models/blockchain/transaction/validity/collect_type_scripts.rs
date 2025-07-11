@@ -55,22 +55,12 @@ impl SecretWitness for CollectTypeScriptsWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        let mut type_script_hashes = vec![NativeCurrency.hash()];
-
-        for utxos in self
-            .salted_input_utxos
-            .utxos
-            .iter()
-            .chain(self.salted_output_utxos.utxos.iter())
-        {
-            for coin in utxos.coins() {
-                let type_script_hash = &coin.type_script_hash;
-                if !type_script_hashes.contains(type_script_hash) {
-                    type_script_hashes.push(*type_script_hash);
-                }
-            }
-        }
-
+        let type_script_hashes = Utxo::type_script_hashes(
+            self.salted_input_utxos
+                .utxos
+                .iter()
+                .chain(&self.salted_output_utxos.utxos),
+        );
         type_script_hashes
             .into_iter()
             .flat_map(|d| d.values())
