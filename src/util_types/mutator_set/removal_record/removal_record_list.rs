@@ -22,14 +22,26 @@ use crate::util_types::mutator_set::shared::BATCH_SIZE;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
 /// A list of [`RemovalRecords`]s without redundant Merkle authentication data.
+///
+/// This is considered a trusted data structure as it's never transmitted over
+/// the network and is only ever used internally.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RemovalRecordList {
+    /// The unchanged absolute indices of the (unpacked) removal records.
     index_sets: Vec<AbsoluteIndexSet>,
+
+    /// One authentication structure for each tree in the MMR.
+    /// TODO: Are MMR trees skipped if they don't have chunks?
     authentication_structures: Vec<Vec<Digest>>,
 
     /// ascending order by chunk index
     chunks: Vec<Chunk>,
 
+    // TODO: Clarify or cleanup.
+    /// A viable estimate of the number of AOCL leafs in the mutator set when the
+    /// removal records are supposed to be valid. Viable means that the number
+    /// is set such that the algorithm should work.Viable means that it explains
+    /// why the SWBF authentication structures have the lengths they do.
     num_leafs_aocl: u64,
 }
 
@@ -49,28 +61,41 @@ impl RemovalRecordList {
     /// implementation calls this one after estimating this argument. Producing
     /// this estimate is time-consuming and error-prone (tests notwithstanding),
     /// so it is better to avoid that step if possible.
+    ///
+    /// TODO: Decide whether this function should be used on untrusted inputs.
+    /// If so, then it should return errors, and not panic.
     pub(crate) fn from_removal_records(
         removal_records: Vec<RemovalRecord>,
         num_leafs_aocl: u64,
     ) -> Self {
-        let num_leafs_swbfi = num_leafs_aocl / u64::from(BATCH_SIZE);
+        let num_leafs_swbfi = num_leafs_aocl.saturating_sub(1) / u64::from(BATCH_SIZE);
         let all_tree_heights = get_peak_heights(num_leafs_swbfi);
         let index_sets = removal_records
             .iter()
             .map(|rr| rr.absolute_indices)
             .collect_vec();
 
-        // compute (good enough approximation of) MMR num leafs
         let mut mmr_leaf_indices = HashSet::<(u32, u64)>::new();
         let mut chunks = HashMap::<u64, Chunk>::new();
         for removal_record in &removal_records {
             for target_chunk in removal_record.target_chunks.iter() {
                 let (chunk_index, (chunk_mmr_mp, chunk)) = target_chunk;
                 if let Some(chunk_already_present) = chunks.insert(*chunk_index, chunk.clone()) {
+                    // TODO: Easy to trigger with inconsistent chunks! Is this
+                    // function ever used in an untrusted setting?
                     assert_eq!(chunk_already_present, chunk.clone());
                 }
-                let tree_height = chunk_mmr_mp.authentication_path.len() as u32;
-                mmr_leaf_indices.insert((tree_height, *chunk_index));
+                let tree_height_according_to_authentication_path =
+                    chunk_mmr_mp.authentication_path.len() as u32;
+                let (_, peak_index) =
+                    leaf_index_to_mt_index_and_peak_index(*chunk_index, num_leafs_swbfi);
+                let tree_height_according_to_num_leafs = all_tree_heights[peak_index as usize];
+                assert_eq!(
+                    tree_height_according_to_num_leafs,
+                    tree_height_according_to_authentication_path
+                );
+                mmr_leaf_indices
+                    .insert((tree_height_according_to_authentication_path, *chunk_index));
             }
         }
 
@@ -79,17 +104,29 @@ impl RemovalRecordList {
         for removal_record in removal_records {
             for target_chunk in removal_record.target_chunks {
                 let (chunk_index, (chunk_mmr_mp, chunk)) = target_chunk;
-                let tree_height = chunk_mmr_mp.authentication_path.len() as u32;
 
-                assert!(all_tree_heights.contains(&tree_height));
+                // Because of previous assert, we can trust this value for the
+                // tree height.
+                let tree_height = chunk_mmr_mp.authentication_path.len() as u32;
 
                 let mut running_digest = Tip5::hash(&chunk);
                 let (mut merkle_node_index, _) =
                     leaf_index_to_mt_index_and_peak_index(chunk_index, num_leafs_swbfi);
-                sparse_mmr.insert((tree_height, merkle_node_index), running_digest);
 
+                // TODO: Can't we use `peak_index` instead of `tree_height` as
+                // the 1st element of the tuple-key?
                 for sibling_digest in chunk_mmr_mp.authentication_path {
-                    sparse_mmr.insert((tree_height, merkle_node_index ^ 1), sibling_digest);
+                    if let Some(kickout) =
+                        sparse_mmr.insert((tree_height, merkle_node_index), running_digest)
+                    {
+                        assert_eq!(kickout, running_digest);
+                    }
+
+                    if let Some(kickout) =
+                        sparse_mmr.insert((tree_height, merkle_node_index ^ 1), sibling_digest)
+                    {
+                        assert_eq!(kickout, sibling_digest);
+                    }
 
                     if merkle_node_index & 1 == 0 {
                         running_digest = Tip5::hash_pair(running_digest, sibling_digest);
@@ -98,7 +135,12 @@ impl RemovalRecordList {
                     }
                     merkle_node_index >>= 1;
                 }
-                sparse_mmr.insert((tree_height, merkle_node_index), running_digest);
+
+                if let Some(kickout) =
+                    sparse_mmr.insert((tree_height, merkle_node_index), running_digest)
+                {
+                    assert_eq!(kickout, running_digest);
+                }
             }
         }
 
@@ -112,11 +154,7 @@ impl RemovalRecordList {
                 .collect_vec();
             let merkle_leaf_indices_for_this_tree = mmr_leaf_indices_for_this_tree
                 .iter()
-                .map(|&li| {
-                    let (merkle_node_index, _peak_index) =
-                        leaf_index_to_mt_index_and_peak_index(li, num_leafs_swbfi);
-                    merkle_node_index ^ (1 << tree_height)
-                })
+                .map(|&li| li & ((1 << tree_height) - 1))
                 .collect_vec();
             let node_indices_in_authentication_structure =
                 MerkleTree::authentication_structure_node_indices(
@@ -157,12 +195,14 @@ impl RemovalRecordList {
         }
     }
 
-    /// Compute a minimum viable lower bound on the number of leafs in the AOCL
-    /// given context inferred from removal records.
+    /// Compute a minimum viable lower bound on the current number of leafs in
+    /// the AOCL given context inferred from removal records, where "current"
+    /// means the point in time when the removal records are supposed to be
+    /// valid.
     ///
     /// The lower bound is *viable*: it suffices to "explain" why the given
-    /// chunks are present and why the authentiation paths have the lengths they
-    /// do.
+    /// chunks are present and why the authentication paths have the lengths
+    /// they do.
     ///
     /// The lower bound is *minimal*: no smaller number satisfies the above
     /// criteria.
@@ -193,13 +233,13 @@ impl RemovalRecordList {
             observed_authentication_path_lengths.len()
         );
         for tree_height in observed_authentication_path_lengths {
-            let effective_tree_height = (1u64 << tree_height) * u64::from(BATCH_SIZE);
-            if aocl_len & effective_tree_height == 0 {
+            let effective_tree_width = (1u64 << tree_height) * u64::from(BATCH_SIZE);
+            if aocl_len & effective_tree_width == 0 {
                 // set the bit in question
-                aocl_len |= effective_tree_height;
+                aocl_len |= effective_tree_width;
 
                 // zero all subsequent bits
-                aocl_len &= u64::MAX - (effective_tree_height - 1);
+                aocl_len &= u64::MAX - (effective_tree_width - 1);
             }
         }
 
@@ -207,8 +247,8 @@ impl RemovalRecordList {
     }
 
     fn compressed_chunk_dictionary(&self) -> ChunkDictionary {
-        let window_start =
-            u128::from(self.num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
+        let num_swbf_leafs = self.num_leafs_aocl.saturating_sub(1) / u64::from(BATCH_SIZE);
+        let window_start = u128::from(num_swbf_leafs) * u128::from(CHUNK_SIZE);
         let chunk_indices = self
             .index_sets
             .iter()
@@ -221,7 +261,7 @@ impl RemovalRecordList {
             .dedup()
             .collect_vec();
 
-        let tree_heights = get_peak_heights(self.num_leafs_aocl / u64::from(BATCH_SIZE))
+        let tree_heights = get_peak_heights(num_swbf_leafs.try_into().unwrap())
             .into_iter()
             .map(u64::from)
             .rev()
@@ -229,22 +269,19 @@ impl RemovalRecordList {
 
         assert_eq!(chunk_indices.len(), self.chunks.len());
 
-        let authentication_structures = self
+        let authentication_structures_as_mmrmps = self
             .authentication_structures
             .iter()
             .cloned()
-            .chain(std::iter::repeat(vec![]));
+            .chain(std::iter::repeat(vec![]))
+            .map(|ap| MmrMembershipProof {
+                authentication_path: ap,
+            });
         let chunk_dictionary = tree_heights
             .iter()
             .copied()
             .chain(std::iter::repeat(0))
-            .zip(
-                authentication_structures
-                    .map(|ap| MmrMembershipProof {
-                        authentication_path: ap,
-                    })
-                    .zip(self.chunks.iter().map(Chunk::pack)),
-            )
+            .zip(authentication_structures_as_mmrmps.zip(self.chunks.iter().map(Chunk::pack)))
             .collect_vec();
         ChunkDictionary {
             dictionary: chunk_dictionary,
@@ -308,7 +345,7 @@ impl RemovalRecordList {
         let mut chunks = vec![];
 
         let mut tree_heights = vec![];
-        for removal_record in removal_records {
+        for removal_record in removal_records.clone() {
             index_sets.push(removal_record.absolute_indices);
             for (tree_height, (mmr_authentication_path, chunk)) in
                 removal_record.target_chunks.iter()
@@ -381,6 +418,7 @@ impl RemovalRecordList {
         removal_records: Vec<RemovalRecord>,
     ) -> Result<Vec<RemovalRecord>, RemovalRecordListUnpackError> {
         let as_removal_record_list = RemovalRecordList::decode_from_vec(removal_records)?;
+        dbg!(as_removal_record_list.clone());
         Ok(as_removal_record_list.convert_to_vec())
     }
 
@@ -414,7 +452,7 @@ impl RemovalRecordList {
 
     /// Inverse of [`Self::convert_from_vec`].
     fn convert_to_vec(self) -> Vec<RemovalRecord> {
-        let num_leafs_swbfi = self.num_leafs_aocl / u64::from(BATCH_SIZE);
+        let num_leafs_swbfi = self.num_leafs_aocl.saturating_sub(1) / u64::from(BATCH_SIZE);
         let all_tree_heights = get_peak_heights(num_leafs_swbfi);
         assert_eq!(
             all_tree_heights.len(),
@@ -424,6 +462,7 @@ impl RemovalRecordList {
             self.authentication_structures.len(),
             all_tree_heights.len()
         );
+        println!("all tree heights: [{}]", all_tree_heights.iter().join(", "));
 
         // populate sparse MMR with chunk hashes
         let mut sparse_mmr: HashMap<_, Digest> = HashMap::new();
@@ -467,6 +506,11 @@ impl RemovalRecordList {
                 .map(|(_height, node_index)| *node_index ^ (1 << *tree_height))
                 .collect_vec();
 
+            println!(
+                "leaf indices for this tree (with height {tree_height}): [{}]",
+                leaf_indices_for_this_tree.iter().join(", ")
+            );
+
             let node_indices_for_authentication_structure =
                 MerkleTree::authentication_structure_node_indices(
                     1 << *tree_height,
@@ -479,9 +523,10 @@ impl RemovalRecordList {
             assert_eq!(
                 authentication_structure.len(),
                 node_indices_for_authentication_structure.len(),
-                "Have authentication structure of len {} but node indices of len {}",
+                "Have authentication structure of len {} but node indices of len {};\nnode indices are: [{}]",
                 authentication_structure.len(),
-                node_indices_for_authentication_structure.len()
+                node_indices_for_authentication_structure.len(),
+                node_indices_for_authentication_structure.iter().join(", ")
             );
             for (node_index, node_hash) in node_indices_for_authentication_structure
                 .into_iter()
@@ -638,6 +683,7 @@ mod tests {
 
     use super::RemovalRecordList;
     use super::*;
+    use crate::util_types::archival_mmr::ArchivalMmr;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
@@ -1049,7 +1095,7 @@ mod tests {
     }
 
     #[proptest]
-    fn convert_many_records(
+    fn convert_many_records_prop(
         #[strategy(0usize..10)] _num_records: usize,
         #[strategy(arb::<u64>())] num_leafs_aocl: u64,
         #[strategy(RemovalRecord::arbitrary_synchronized_set(#num_leafs_aocl, #_num_records))]
@@ -1285,7 +1331,7 @@ mod tests {
     }
 
     #[proptest]
-    fn can_unpack_on_empty_chunk_dictionary(
+    fn can_unpack_one_with_empty_chunk_dictionary_first_batch(
         #[strategy(arb())] item: Digest,
         #[strategy(arb())] sr: Digest,
         #[strategy(arb())] rp: Digest,
@@ -1302,6 +1348,210 @@ mod tests {
                 RemovalRecordList::try_unpack(removal_records).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn more_chunks_than_absolute_index_sets() {
+        let absolute_indices = AbsoluteIndexSet::new_raw(
+            0,
+            [
+                CHUNK_SIZE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+        );
+
+        let node = Tip5::hash(&Chunk::empty_chunk());
+
+        let removal_record = RemovalRecord {
+            absolute_indices,
+            target_chunks: ChunkDictionary {
+                dictionary: vec![
+                    (
+                        0,
+                        (
+                            MmrMembershipProof {
+                                authentication_path: vec![node],
+                            },
+                            Chunk::empty_chunk(),
+                        ),
+                    ),
+                    (
+                        1,
+                        (
+                            MmrMembershipProof {
+                                authentication_path: vec![node],
+                            },
+                            Chunk::empty_chunk(),
+                        ),
+                    ),
+                ],
+            },
+        };
+
+        let not_packed = vec![removal_record];
+        let temp0 = RemovalRecordList::from_removal_records(not_packed.clone(), 17);
+        let packed = temp0.encode_as_vec();
+        let temp1 = RemovalRecordList::decode_from_vec(packed.clone()).unwrap();
+        // assert_eq!(temp0, temp1);
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+        assert_eq!(not_packed, unpacked);
+    }
+
+    #[proptest]
+    fn can_unpack_one_with_empty_chunk_dictionary_second_batch(
+        #[strategy(arb())] item: Digest,
+        #[strategy(arb())] sr: Digest,
+        #[strategy(arb())] rp: Digest,
+    ) {
+        for i in BATCH_SIZE..(BATCH_SIZE + BATCH_SIZE) {
+            let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, i as u64);
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: ChunkDictionary::empty(),
+            };
+            let removal_records = vec![removal_record];
+            prop_assert_eq!(
+                removal_records.clone(),
+                RemovalRecordList::try_unpack(removal_records).unwrap()
+            );
+        }
+    }
+
+    #[proptest]
+    fn unpack_doesnt_crash_with_missing_chunk_dictionary_elements_u8_leaf_index(
+        #[strategy(arb())] item: Digest,
+        #[strategy(arb())] sr: Digest,
+        #[strategy(arb())] rp: Digest,
+        #[strategy(arb())] leaf_index: u8,
+        #[strategy(arb())] num_removal_records: u8,
+    ) {
+        let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index as u64);
+        let removal_record = RemovalRecord {
+            absolute_indices,
+            target_chunks: ChunkDictionary::empty(),
+        };
+        let removal_records = vec![removal_record.clone(); num_removal_records as usize];
+
+        // Ensure no crash
+        let _ = RemovalRecordList::try_unpack(removal_records);
+    }
+
+    #[proptest]
+    fn unpack_doesnt_crash_with_missing_chunk_dictionary_elements_u16_leaf_index(
+        #[strategy(arb())] item: Digest,
+        #[strategy(arb())] sr: Digest,
+        #[strategy(arb())] rp: Digest,
+        #[strategy(arb())] leaf_index: u16,
+    ) {
+        let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index as u64);
+        let removal_record = RemovalRecord {
+            absolute_indices,
+            target_chunks: ChunkDictionary::empty(),
+        };
+        let removal_records = vec![removal_record];
+
+        // Ensure no crash
+        let _ = RemovalRecordList::try_unpack(removal_records);
+    }
+
+    #[proptest]
+    fn can_unpack_two_with_empty_chunk_dictionaries(
+        #[strategy(arb())] item: Digest,
+        #[strategy(arb())] sr: Digest,
+        #[strategy(arb())] rp: Digest,
+    ) {
+        for i in 0..BATCH_SIZE as u64 {
+            let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, i);
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: ChunkDictionary::empty(),
+            };
+            let removal_records = vec![removal_record.clone(), removal_record];
+            prop_assert_eq!(
+                removal_records.clone(),
+                RemovalRecordList::try_unpack(removal_records).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn regression_test_panic_in_try_unpack_1() {
+        let removal_record = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new_raw(
+                68472,
+                [
+                    978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337, 148763,
+                    665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972, 33811, 609715,
+                    863269, 922136, 987473, 682901, 17409, 445788, 483752, 363860, 926460, 577500,
+                    383384, 243946, 140714, 940568, 297642, 259922, 386140, 510946, 0, 956594,
+                    420304, 1010108, 492536, 722694, 222513,
+                ],
+            ),
+            target_chunks: ChunkDictionary { dictionary: vec![] },
+        };
+        let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
+    }
+
+    #[test]
+    fn regression_test_panic_in_try_unpack_2() {
+        let removal_record = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new_raw(
+                52520,
+                [
+                    243715, 749021, 203233, 104747, 535122, 429290, 1016297, 185670, 125329,
+                    208916, 477068, 341103, 39312, 911863, 972772, 52083, 0, 583734, 1022257,
+                    621991, 402132, 474284, 981738, 443185, 769145, 451043, 888760, 871963, 698065,
+                    557752, 118661, 534719, 633834, 566737, 621507, 124789, 848175, 647222, 532410,
+                    693591, 312466, 766203, 730772, 876359, 367876,
+                ],
+            ),
+            target_chunks: ChunkDictionary {
+                dictionary: vec![(
+                    12,
+                    // 21,
+                    (
+                        MmrMembershipProof {
+                            authentication_path: [].to_vec(),
+                        },
+                        Chunk {
+                            relative_indices: [].to_vec(),
+                        },
+                    ),
+                )],
+            },
+        };
+        // let removal_record = RemovalRecord {
+        //     absolute_indices: AbsoluteIndexSet::new_raw(
+        //         68472,
+        //         [
+        //             978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337, 148763,
+        //             665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972, 33811, 609715,
+        //             863269, 922136, 987473, 682901, 17409, 445788, 483752, 363860, 926460, 577500,
+        //             383384, 243946, 140714, 940568, 297642, 259922, 386140, 510946, 0, 956594,
+        //             420304, 1010108, 492536, 722694, 222513,
+        //         ],
+        //     ),
+        //     target_chunks: ChunkDictionary { dictionary: vec![] },
+        // };
+        let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
+    }
+
+    #[test]
+    fn regression_test_panic_in_try_unpack_3() {
+        let removal_record = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new_raw(
+                1u128 << 64,
+                [
+                    978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337, 148763,
+                    665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972, 33811, 609715,
+                    863269, 922136, 987473, 682901, 17409, 445788, 483752, 363860, 926460, 577500,
+                    383384, 243946, 140714, 940568, 297642, 259922, 386140, 510946, 0, 956594,
+                    420304, 1010108, 492536, 722694, 222513,
+                ],
+            ),
+            target_chunks: ChunkDictionary { dictionary: vec![] },
+        };
+        let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
     }
 
     #[proptest(cases = 30)]
