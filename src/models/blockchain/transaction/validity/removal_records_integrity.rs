@@ -1381,8 +1381,10 @@ mod tests {
     ) {
         let mut bad_inputs = bad_pw.kernel.inputs.clone();
 
-        // Ensure all possible words of minimum is mutated to ensure entire
-        // data structure is hashed and compared.
+        // Ensure all possible words of (encoding of) minimum is mutated to
+        // ensure entire data structure is hashed and compared. Missing just one
+        // word in the hashing would make this snippet (and the entire
+        // blockchain) unsound.
         let original_minimum = bad_inputs[mutated_input].absolute_indices.get_minimum();
         for term in [1, 1 << 32, 1 << 64, 1 << 96] {
             bad_inputs[mutated_input]
@@ -1401,29 +1403,33 @@ mod tests {
         }
     }
 
-    // Ensure that all of the relative indices (distances) are hashed by
-    // modifying any of them and verifying that the derived and claimed
-    // absolute indices disagree.
-    #[proptest(cases = 30)]
+    #[proptest(cases = 1)]
     fn removal_records_fail_on_bad_absolute_indices(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(1), 2, 2))]
-        mut bad_pw: PrimitiveWitness,
-        #[strategy(0..NUM_TRIALS as usize)] mutated_bloom_filter_index: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+        good_witness: PrimitiveWitness,
+        #[strategy(0usize..2)] mutated_input: usize,
     ) {
-        let mut bad_inputs = bad_pw.kernel.inputs.clone();
-        bad_inputs[0]
-            .absolute_indices
-            .increment_bloom_filter_index(mutated_bloom_filter_index);
-        let bad_kernel = TransactionKernelModifier::default()
-            .inputs(bad_inputs)
-            .modify(bad_pw.kernel.clone());
-        bad_pw.kernel = bad_kernel;
-        let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
-        RemovalRecordsIntegrity.test_assertion_failure(
-            bad_witness.standard_input(),
-            bad_witness.nondeterminism(),
-            &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
-        )?;
+        // Loop over every single index (in absolute indices) to ensure that
+        // they are all hashed in the check and we aren't accidently skipping
+        // one of the indices. If we were, that would make the entire blockchain
+        // unsound.
+        for mutated_bloom_filter_index in 0..NUM_TRIALS as usize {
+            let mut bad_pw = good_witness.clone();
+            let mut bad_inputs = bad_pw.kernel.inputs.clone();
+            bad_inputs[mutated_input]
+                .absolute_indices
+                .increment_bloom_filter_index(mutated_bloom_filter_index);
+            let bad_kernel = TransactionKernelModifier::default()
+                .inputs(bad_inputs)
+                .modify(bad_pw.kernel.clone());
+            bad_pw.kernel = bad_kernel;
+            let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
+            RemovalRecordsIntegrity.test_assertion_failure(
+                bad_witness.standard_input(),
+                bad_witness.nondeterminism(),
+                &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
+            )?;
+        }
     }
 
     test_program_snapshot!(
