@@ -281,7 +281,7 @@ mod tests {
             let receiver_preimage = pop_encodable::<Digest>(stack);
             let aocl_leaf_index = pop_encodable::<u64>(stack);
 
-            let indices = AbsoluteIndexSet::compute(
+            let absolute_index_set = AbsoluteIndexSet::compute(
                 item,
                 sender_randomness,
                 receiver_preimage,
@@ -291,7 +291,7 @@ mod tests {
             // Write struct to memory and return a pointer to it.
             let free_page = rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             let struct_pointer = free_page + bfe!(1);
-            encode_to_memory(memory, struct_pointer, &indices);
+            encode_to_memory(memory, struct_pointer, &absolute_index_set);
 
             // Unused artifact left on memory address immediately below struct
             encode_to_memory(memory, free_page, &u32::try_from(NUM_TRIALS).unwrap());
