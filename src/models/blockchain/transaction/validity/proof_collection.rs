@@ -501,9 +501,9 @@ pub mod tests {
             NativeCurrencyAmount::coins(50),
             NativeCurrencyAmount::coins(100),
         ] {
-            for fee in [-fee, fee] {
+            for fee_inner in [-fee, fee] {
                 let mut test_runner = TestRunner::deterministic();
-                let primitive_witness = PrimitiveWitness::arbitrary_with_fee(fee)
+                let primitive_witness = PrimitiveWitness::arbitrary_with_fee(fee_inner)
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();

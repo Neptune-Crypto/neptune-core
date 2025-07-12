@@ -140,6 +140,8 @@ pub mod neptune_arbitrary {
                 // unwrap random aocl mmr with membership proofs
                 MmraAndMembershipProofs::arbitrary_with((all_aocl_indices_and_leafs, aocl_size))
                 .prop_flat_map(move |aocl_mmra_and_membership_proofs| {
+                    use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
+
                     let aocl_mmra = aocl_mmra_and_membership_proofs.mmra;
                     let aocl_membership_proofs = aocl_mmra_and_membership_proofs.membership_proofs;
                     let aocl_leaf_indices = aocl_mmra_and_membership_proofs.leaf_indices;
@@ -172,7 +174,7 @@ pub mod neptune_arbitrary {
                     all_chunk_indices.dedup();
 
                     // filter by swbf mmr size
-                    let swbf_mmr_num_leafs = aocl_mmra.num_leafs().saturating_sub(1) / u64::from(BATCH_SIZE);
+                    let swbf_mmr_num_leafs = aocl_to_swbfi_leaf_counts(aocl_mmra.num_leafs());
                     let mmr_chunk_indices = all_chunk_indices
                         .iter()
                         .copied()

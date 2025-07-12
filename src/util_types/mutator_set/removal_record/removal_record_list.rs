@@ -18,6 +18,7 @@ use super::chunk::ChunkUnpackError;
 use super::chunk_dictionary::ChunkDictionary;
 use super::AbsoluteIndexSet;
 use super::RemovalRecord;
+use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
@@ -68,7 +69,7 @@ impl RemovalRecordList {
         removal_records: Vec<RemovalRecord>,
         num_leafs_aocl: u64,
     ) -> Self {
-        let num_leafs_swbfi = num_leafs_aocl.saturating_sub(1) / u64::from(BATCH_SIZE);
+        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
         let all_tree_heights = get_peak_heights(num_leafs_swbfi);
         let index_sets = removal_records
             .iter()
@@ -247,7 +248,7 @@ impl RemovalRecordList {
     }
 
     fn compressed_chunk_dictionary(&self) -> ChunkDictionary {
-        let num_swbf_leafs = self.num_leafs_aocl.saturating_sub(1) / u64::from(BATCH_SIZE);
+        let num_swbf_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
         let window_start = u128::from(num_swbf_leafs) * u128::from(CHUNK_SIZE);
         let chunk_indices = self
             .index_sets
@@ -452,7 +453,7 @@ impl RemovalRecordList {
 
     /// Inverse of [`Self::convert_from_vec`].
     fn convert_to_vec(self) -> Vec<RemovalRecord> {
-        let num_leafs_swbfi = self.num_leafs_aocl.saturating_sub(1) / u64::from(BATCH_SIZE);
+        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
         let all_tree_heights = get_peak_heights(num_leafs_swbfi);
         assert_eq!(
             all_tree_heights.len(),
@@ -683,7 +684,6 @@ mod tests {
 
     use super::RemovalRecordList;
     use super::*;
-    use crate::util_types::archival_mmr::ArchivalMmr;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
@@ -711,7 +711,7 @@ mod tests {
 
             const ROOT_INDEX: u64 = 1_u64;
 
-            let num_leafs_swbfi = num_leafs_aocl / u64::from(BATCH_SIZE);
+            let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
             let mmr_heights = get_peak_heights(num_leafs_swbfi);
             let mmr_max_height = mmr_heights
                 .iter()
@@ -943,7 +943,7 @@ mod tests {
             sparse_mmr: &mut HashMap<(usize, u64), Digest>,
             chunks: &mut HashMap<u64, Chunk>,
         ) -> bool {
-            let num_leafs_swbfi = num_leafs_aocl / u64::from(BATCH_SIZE);
+            let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
 
             let mut consistent_mmr = true;
             let mut insert_new_digest_or_test_equality =
@@ -1190,7 +1190,7 @@ mod tests {
         );
 
         // the estimate explains all authentication path lengths
-        let num_leafs_swbfi = estimate_num_leafs_aocl / u64::from(BATCH_SIZE);
+        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(estimate_num_leafs_aocl);
         for removal_record in &removal_records {
             for mp in removal_record.target_chunks.authentication_paths() {
                 prop_assert_ne!(
@@ -1257,7 +1257,7 @@ mod tests {
         );
 
         // the estimate explains all authentication path lengths
-        let num_leafs_swbfi = estimate_num_leafs_aocl / u64::from(BATCH_SIZE);
+        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(estimate_num_leafs_aocl);
         for removal_record in &removal_records {
             for mp in removal_record.target_chunks.authentication_paths() {
                 assert_ne!(

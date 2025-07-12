@@ -28,6 +28,7 @@ use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
 use crate::models::blockchain::shared::Hash;
+use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 #[cfg_attr(test, derive(Arbitrary))]
@@ -52,8 +53,7 @@ impl MutatorSetAccumulator {
     /// right number of elements in the Bloom filter MMR given the number of
     /// leafs in the AOCL.
     pub(crate) fn is_consistent(&self) -> bool {
-        let expected_num_leafs_bfmmr =
-            self.aocl.num_leafs().saturating_sub(1) / u64::from(BATCH_SIZE);
+        let expected_num_leafs_bfmmr = aocl_to_swbfi_leaf_counts(self.aocl.num_leafs());
         let correct_bfmmr_num_leafs = expected_num_leafs_bfmmr == self.swbf_inactive.num_leafs();
 
         // These unwraps can't fail as that would require some pretty long numbers, even on a 16 bit
@@ -72,7 +72,7 @@ impl MutatorSetAccumulator {
         swbf_inactive: &[Digest],
         swbf_active: &ActiveWindow,
     ) -> Self {
-        let swbf_inactive_leaf_count = aocl_leaf_count / u64::from(BATCH_SIZE);
+        let swbf_inactive_leaf_count = aocl_to_swbfi_leaf_counts(aocl_leaf_count);
         Self {
             aocl: MmrAccumulator::init(aocl.to_vec(), aocl_leaf_count),
             swbf_inactive: MmrAccumulator::init(swbf_inactive.to_vec(), swbf_inactive_leaf_count),
