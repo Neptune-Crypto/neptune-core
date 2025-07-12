@@ -219,7 +219,7 @@ impl RemovalRecordList {
     ) -> u64 {
         let largest_observed_chunk_index =
             observed_chunk_indices.iter().copied().max().unwrap_or(0);
-        let mut aocl_len = largest_observed_chunk_index * u64::from(BATCH_SIZE);
+        let mut swbfi_leaf_count_estimate = largest_observed_chunk_index;
 
         assert!(
             observed_authentication_path_lengths
@@ -234,17 +234,17 @@ impl RemovalRecordList {
             observed_authentication_path_lengths.len()
         );
         for tree_height in observed_authentication_path_lengths {
-            let effective_tree_width = (1u64 << tree_height) * u64::from(BATCH_SIZE);
-            if aocl_len & effective_tree_width == 0 {
+            let tree_width = (1u64 << tree_height);
+            if swbfi_leaf_count_estimate & tree_width == 0 {
                 // set the bit in question
-                aocl_len |= effective_tree_width;
+                swbfi_leaf_count_estimate |= tree_width;
 
                 // zero all subsequent bits
-                aocl_len &= u64::MAX - (effective_tree_width - 1);
+                swbfi_leaf_count_estimate &= u64::MAX - (tree_width - 1);
             }
         }
 
-        aocl_len
+        swbfi_leaf_count_estimate * u64::from(BATCH_SIZE) + 1
     }
 
     fn compressed_chunk_dictionary(&self) -> ChunkDictionary {
@@ -262,7 +262,7 @@ impl RemovalRecordList {
             .dedup()
             .collect_vec();
 
-        let tree_heights = get_peak_heights(num_swbf_leafs.try_into().unwrap())
+        let tree_heights = get_peak_heights(num_swbf_leafs)
             .into_iter()
             .map(u64::from)
             .rev()
@@ -698,7 +698,7 @@ mod tests {
             impl Hasher for SimpleHasher {
                 fn write(&mut self, bytes: &[u8]) {
                     for &b in bytes {
-                        self.0 = self.0.wrapping_mul(31).wrapping_add(b as u64);
+                        self.0 = self.0.wrapping_mul(31).wrapping_add(u64::from(b));
                     }
                 }
 
@@ -719,7 +719,8 @@ mod tests {
                 .max()
                 .map(i64::from)
                 .unwrap_or(-1_i64);
-            let active_window_start = u128::from(num_leafs_swbfi) * u128::from(CHUNK_SIZE);
+            let active_window_start =
+                u128::from(num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
             (
                 vec(0..num_leafs_aocl, num_records),
                 vec(vec(0u32..WINDOW_SIZE, NUM_TRIALS as usize), num_records),
