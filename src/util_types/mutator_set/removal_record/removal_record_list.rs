@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use itertools::Itertools;
+use tasm_lib::mmr::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -52,6 +53,8 @@ pub(crate) enum RemovalRecordListUnpackError {
     InnerDecodingFailure(#[from] Box<dyn core::error::Error + Send + Sync>),
     #[error("Absolute index value cannot exceed 74 bits")]
     AbsoluteIndexTooBig,
+    #[error("removal records are mutually inconsistent")]
+    Inconsistency,
 }
 
 impl RemovalRecordList {
@@ -337,6 +340,116 @@ impl RemovalRecordList {
             .collect_vec()
     }
 
+    /// Check if the [`RemovalRecordList`] is consistent.
+    ///
+    /// Consistency is defined relative to a set of observed chunk indices,
+    /// which itself is inferred from the set of all absolute indices after
+    /// filtering for location outside of the active window. Relative to this
+    /// set of observed chunk indices, consistency is defined as:
+    ///  1. the cardinality of the set of observed chunk indices agrees with the
+    ///     length of the `chunks` list; and
+    ///  2. the observed chunk indices live in k separate Merkle trees of the
+    ///     SWBFI MMR, and k is less than or equal to the pop count of the
+    ///     number of leafs in this MMR, and k agrees with the number of
+    ///     supplied authentication structures; and
+    ///  3. for each such tree, the length of the authentication structure
+    ///     matches with the given leaf indices.
+    fn is_consistent(&self) -> bool {
+        let swbfi_num_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
+        let window_start =
+            u128::from(self.num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
+        let observed_chunk_indices = self
+            .index_sets
+            .iter()
+            .flat_map(|ais| ais.to_vec())
+            .filter(|ai| *ai < window_start)
+            .map(|ai| ai / u128::from(CHUNK_SIZE))
+            .map(|u| u64::try_from(u).unwrap())
+            .unique()
+            .sorted()
+            .collect_vec();
+
+        // 1. cardinality must match
+        if observed_chunk_indices.len() != self.chunks.len() {
+            return false;
+        }
+
+        // compile a usable view of the MMR's known leafs
+        let mut mmr_view = HashSet::new();
+        let all_peak_heights = get_peak_heights(swbfi_num_leafs);
+        for chunk_index in observed_chunk_indices {
+            let (merkle_leaf_index, peak_index) =
+                leaf_index_to_mt_index_and_peak_index(chunk_index, swbfi_num_leafs);
+            let merkle_leaf_index =
+                merkle_leaf_index & (u64::MAX ^ (1 << all_peak_heights[peak_index as usize]));
+            mmr_view.insert((peak_index, merkle_leaf_index));
+            assert!(merkle_leaf_index < (1 << all_peak_heights[peak_index as usize]));
+        }
+        let active_peak_indices = mmr_view.iter().map(|(pi, _mli)| *pi).unique().collect_vec();
+        let merkle_leaf_indices_by_tree = all_peak_heights
+            .iter()
+            .enumerate()
+            .map(|(peak_index, peak_height)| {
+                let leaf_indices_for_this_tree = mmr_view
+                    .iter()
+                    .filter(|(pi, _mli)| *pi == u32::try_from(peak_index).unwrap())
+                    .map(|(_pi, mli)| *mli)
+                    .collect_vec();
+                assert!(leaf_indices_for_this_tree
+                    .iter()
+                    .all(|li| *li < (1 << *peak_height)));
+                leaf_indices_for_this_tree
+            })
+            .collect_vec();
+
+        // 2.a) number of active trees <= pop count of num leafs
+        let total_num_trees = all_peak_heights.len();
+        let num_active_trees = active_peak_indices.len();
+        if num_active_trees > total_num_trees {
+            return false;
+        }
+
+        // 2.b) correct number of authentication structures
+        let num_active_authentication_structures = self
+            .authentication_structures
+            .iter()
+            .map(|auth_struct| auth_struct.len())
+            .filter(|l| *l != 0)
+            .count();
+        if num_active_authentication_structures != num_active_trees {
+            return false;
+        }
+
+        // 3) for each tree, the authentication structure length is correct
+        let expected_authentication_structure_lengths = all_peak_heights
+            .into_iter()
+            .zip(merkle_leaf_indices_by_tree)
+            .map(|(ph, mlis)| {
+                MerkleTree::authentication_structure_node_indices(1_u64 << ph, &mlis)
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "tree height: {} / merkle leaf indices: [{}]",
+                            ph,
+                            mlis.iter().join(", ")
+                        )
+                    })
+                    .len()
+            })
+            .sorted()
+            .collect_vec();
+        let observed_authentication_structure_lengths = self
+            .authentication_structures
+            .iter()
+            .map(|auth_str| auth_str.len())
+            .sorted()
+            .collect_vec();
+        if expected_authentication_structure_lengths != observed_authentication_structure_lengths {
+            return false;
+        }
+
+        true
+    }
+
     /// Inverse of [`Self::encode_as_vec`].
     fn decode_from_vec(
         removal_records: Vec<RemovalRecord>,
@@ -377,12 +490,18 @@ impl RemovalRecordList {
             &tree_heights.iter().map(|u| *u as usize).rev().collect_vec(),
         );
 
-        Ok(Self {
+        let removal_record_list = Self {
             index_sets,
             authentication_structures,
             chunks,
             num_leafs_aocl,
-        })
+        };
+
+        if !removal_record_list.is_consistent() {
+            return Err(RemovalRecordListUnpackError::Inconsistency);
+        }
+
+        Ok(removal_record_list)
     }
 
     fn observed_chunk_indices_from_index_sets(
@@ -467,7 +586,8 @@ impl RemovalRecordList {
 
         // populate sparse MMR with chunk hashes
         let mut sparse_mmr: HashMap<_, Digest> = HashMap::new();
-        let active_window_start = u128::from(num_leafs_swbfi) * u128::from(CHUNK_SIZE);
+        let active_window_start =
+            u128::from(self.num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
         let all_inactive_indices = self
             .index_sets
             .iter()
