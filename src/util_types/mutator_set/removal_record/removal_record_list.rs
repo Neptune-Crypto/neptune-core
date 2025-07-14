@@ -1748,6 +1748,35 @@ mod tests {
         let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
     }
 
+    #[test]
+    fn regression_test_inconsistent_chunk_numbers() {
+        let rr = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new_raw(
+                11025,
+                [
+                    303562, 438177, 630410, 897086, 85806, 902498, 711771, 83670, 172217, 229797,
+                    913208, 115517, 811202, 378771, 604364, 0, 709430, 774335, 90225, 121482,
+                    918330, 719083, 974418, 163557, 289791, 184841, 83269, 982037, 878174, 335870,
+                    40256, 684211, 922441, 129233, 687963, 951374, 69446, 442643, 842572, 622324,
+                    92335, 96421, 358327, 966649, 184166,
+                ],
+            ),
+            target_chunks: ChunkDictionary {
+                dictionary: vec![(2, (MmrMembershipProof::new(vec![]), Chunk::empty_chunk()))],
+            },
+        };
+
+        let rrs = vec![rr];
+        let packed = RemovalRecordList::pack(rrs.clone());
+        println!("packed:\n{packed:#?}");
+        assert_eq!(
+            rrs.clone(),
+            RemovalRecordList::try_unpack(packed)
+                .unwrap_or_else(|err| panic!("rrs: {rrs:#?}\n. Error:\n{err}")),
+            "rrs: {rrs:#?}\n"
+        );
+    }
+
     #[proptest(cases = 30)]
     fn pack_unpack_happy_path(
         #[strategy(0usize..20)] _num_records: usize,
