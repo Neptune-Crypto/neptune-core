@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use tasm_lib::mmr::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -13,6 +12,7 @@ use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use thiserror::Error;
+use tracing::trace;
 
 use super::chunk::Chunk;
 use super::chunk::ChunkUnpackError;
@@ -237,7 +237,7 @@ impl RemovalRecordList {
             observed_authentication_path_lengths.len()
         );
         for tree_height in observed_authentication_path_lengths {
-            let tree_width = (1u64 << tree_height);
+            let tree_width = 1u64 << tree_height;
             if swbfi_leaf_count_estimate & tree_width == 0 {
                 // set the bit in question
                 swbfi_leaf_count_estimate |= tree_width;
@@ -350,9 +350,10 @@ impl RemovalRecordList {
     ///     length of the `chunks` list; and
     ///  2. the observed chunk indices live in k separate Merkle trees of the
     ///     SWBFI MMR, and k is less than or equal to the pop count of the
-    ///     number of leafs in this MMR, and k agrees with the number of
-    ///     supplied authentication structures; and
-    ///  3. for each such tree, the length of the authentication structure
+    ///     number of leafs in this MMR
+    ///  3. the number of authentication structures matches with the number of
+    ///     peaks; and
+    ///  4. for each such tree, the length of the authentication structure
     ///     matches with the given leaf indices.
     fn is_consistent(&self) -> bool {
         let swbfi_num_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
@@ -369,8 +370,13 @@ impl RemovalRecordList {
             .sorted()
             .collect_vec();
 
-        // 1. cardinality must match
+        // 1) cardinality must match
         if observed_chunk_indices.len() != self.chunks.len() {
+            trace!(
+                "No match on cardinality: {} =/= {}",
+                observed_chunk_indices.len(),
+                self.chunks.len()
+            );
             return false;
         }
 
@@ -402,25 +408,30 @@ impl RemovalRecordList {
             })
             .collect_vec();
 
-        // 2.a) number of active trees <= pop count of num leafs
+        // 2) number of active trees <= pop count of num leafs
         let total_num_trees = all_peak_heights.len();
         let num_active_trees = active_peak_indices.len();
         if num_active_trees > total_num_trees {
+            trace!(
+                "Too many active trees: {} / {}",
+                num_active_trees,
+                total_num_trees
+            );
             return false;
         }
 
-        // 2.b) correct number of authentication structures
-        let num_active_authentication_structures = self
-            .authentication_structures
-            .iter()
-            .map(|auth_struct| auth_struct.len())
-            .filter(|l| *l != 0)
-            .count();
-        if num_active_authentication_structures != num_active_trees {
+        // 3) correct number of authentication structures
+        let num_authentication_structures = self.authentication_structures.len();
+        if num_authentication_structures != total_num_trees {
+            trace!(
+                "Wrong number of authentication structures: got {} but expected {}",
+                num_authentication_structures,
+                total_num_trees
+            );
             return false;
         }
 
-        // 3) for each tree, the authentication structure length is correct
+        // 4) for each tree, the authentication structure length is correct
         let expected_authentication_structure_lengths = all_peak_heights
             .into_iter()
             .zip(merkle_leaf_indices_by_tree)
@@ -444,6 +455,11 @@ impl RemovalRecordList {
             .sorted()
             .collect_vec();
         if expected_authentication_structure_lengths != observed_authentication_structure_lengths {
+            trace!(
+                "authentication structure length mismatch\nexpected: [{}]\nobserved: [{}]",
+                expected_authentication_structure_lengths.iter().join(", "),
+                observed_authentication_structure_lengths.iter().join(", ")
+            );
             return false;
         }
 
@@ -582,7 +598,6 @@ impl RemovalRecordList {
             self.authentication_structures.len(),
             all_tree_heights.len()
         );
-        println!("all tree heights: [{}]", all_tree_heights.iter().join(", "));
 
         // populate sparse MMR with chunk hashes
         let mut sparse_mmr: HashMap<_, Digest> = HashMap::new();
@@ -626,11 +641,6 @@ impl RemovalRecordList {
                 .filter(|(height, _node_index)| *height == *tree_height)
                 .map(|(_height, node_index)| *node_index ^ (1 << *tree_height))
                 .collect_vec();
-
-            println!(
-                "leaf indices for this tree (with height {tree_height}): [{}]",
-                leaf_indices_for_this_tree.iter().join(", ")
-            );
 
             let node_indices_for_authentication_structure =
                 MerkleTree::authentication_structure_node_indices(
@@ -801,6 +811,7 @@ mod tests {
     use rand::rng;
     use rand::Rng;
     use test_strategy::proptest;
+    use tracing_test::traced_test;
 
     use super::RemovalRecordList;
     use super::*;
@@ -1471,8 +1482,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn more_chunks_than_absolute_index_sets() {
+    fn more_chunks_than_abs_index_sets() -> RemovalRecord {
         let absolute_indices = AbsoluteIndexSet::new_raw(
             0,
             [
@@ -1481,8 +1491,8 @@ mod tests {
             ],
         );
 
-        let node = Tip5::hash(&Chunk::empty_chunk());
-
+        let empty_chunk = Chunk::empty_chunk();
+        let node = Tip5::hash(&empty_chunk);
         let removal_record = RemovalRecord {
             absolute_indices,
             target_chunks: ChunkDictionary {
@@ -1493,7 +1503,7 @@ mod tests {
                             MmrMembershipProof {
                                 authentication_path: vec![node],
                             },
-                            Chunk::empty_chunk(),
+                            empty_chunk.clone(),
                         ),
                     ),
                     (
@@ -1502,20 +1512,38 @@ mod tests {
                             MmrMembershipProof {
                                 authentication_path: vec![node],
                             },
-                            Chunk::empty_chunk(),
+                            empty_chunk,
                         ),
                     ),
                 ],
             },
         };
 
-        let not_packed = vec![removal_record];
+        assert!(removal_record.is_consistent(17));
+
+        removal_record
+    }
+
+    #[traced_test]
+    #[test]
+    fn more_chunks_than_absolute_index_sets_multiple_steps() {
+        let not_packed = vec![more_chunks_than_abs_index_sets()];
         let temp0 = RemovalRecordList::from_removal_records(not_packed.clone(), 17);
+        println!("temp0: {temp0:#?}");
         let packed = temp0.encode_as_vec();
+        println!("packed: {packed:#?}");
         let temp1 = RemovalRecordList::decode_from_vec(packed.clone()).unwrap();
-        // assert_eq!(temp0, temp1);
+        assert_eq!(temp0, temp1);
         let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
         assert_eq!(not_packed, unpacked);
+    }
+
+    #[traced_test]
+    #[test]
+    fn more_chunks_than_absolute_index_sets_pack() {
+        let not_packed = vec![more_chunks_than_abs_index_sets()];
+        let packed = RemovalRecordList::pack(not_packed.clone());
+        assert_eq!(not_packed, RemovalRecordList::try_unpack(packed).unwrap());
     }
 
     #[proptest]
