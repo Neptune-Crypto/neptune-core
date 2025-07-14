@@ -273,16 +273,17 @@ mod tests {
     use rand::prelude::IndexedRandom;
     use rand::Rng;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
-    use test_strategy::proptest;
 
     use super::*;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
+    use arbitrary::Arbitrary;
 
     pub fn propcompose_absindset() -> impl Strategy<Value = AbsoluteIndexSet> {
         vec(arb::<u8>(), 16_usize + (NUM_TRIALS as usize) * 4)
@@ -660,6 +661,20 @@ mod tests {
                     i
                 );
             }
+            let just_removal_records = removal_records
+                .iter()
+                .map(|(_, rr)| rr.clone())
+                .collect_vec();
+            assert_eq!(
+                just_removal_records.clone(),
+                RemovalRecordList::try_unpack(RemovalRecordList::pack(
+                    just_removal_records.clone(),
+                ),)
+                .unwrap_or_else(|err| panic!(
+                    "i: {i};\n\n just_removal_records: {just_removal_records:#?}\n. Error:\n{err}"
+                )),
+                "i: {i};\n\n just_removal_records: {just_removal_records:#?}\n"
+            );
 
             let rr = accumulator.drop(item, &mp);
 
@@ -690,6 +705,16 @@ mod tests {
                 );
                 assert!(accumulator.can_remove(removal_record));
             }
+
+            let just_removal_records = removal_records
+                .iter()
+                .map(|(_, rr)| rr.clone())
+                .collect_vec();
+            assert_eq!(
+                just_removal_records.clone(),
+                RemovalRecordList::try_unpack(RemovalRecordList::pack(just_removal_records),)
+                    .unwrap()
+            );
         }
     }
 
