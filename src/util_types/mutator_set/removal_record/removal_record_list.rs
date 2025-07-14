@@ -67,7 +67,7 @@ pub(crate) enum RemovalRecordListInconsistency {
         num_chunk_indices: usize,
         num_chunks: usize,
     },
-    #[error("number of authentication structures is inconsistent with the number of trees")]
+    #[error("number of authentication structures {num_authentication_structures} is inconsistent with the number of trees {total_num_trees}")]
     AuthenticationStructureCount {
         num_authentication_structures: usize,
         total_num_trees: usize,
@@ -401,8 +401,7 @@ impl RemovalRecordList {
 
     fn validate_consistency(&self) -> Result<(), RemovalRecordListInconsistency> {
         let swbfi_num_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
-        let window_start =
-            u128::from(self.num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
+        let window_start = u128::from(swbfi_num_leafs) * u128::from(CHUNK_SIZE);
         let observed_chunk_indices = self
             .index_sets
             .iter()

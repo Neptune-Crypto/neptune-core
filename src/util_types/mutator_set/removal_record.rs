@@ -681,7 +681,8 @@ mod tests {
             removal_records.push((i as usize, rr));
         }
 
-        // Now apply all removal records one at a time and batch update the remaining removal records
+        // Now apply all removal records one at a time and batch update the
+        // remaining removal records to keep them valid.
         for i in 0..12 * BATCH_SIZE + 4 {
             let remove_idx = rand::rng().random_range(0..removal_records.len());
             let random_removal_record = removal_records.remove(remove_idx).1;
