@@ -618,7 +618,7 @@ mod tests {
         let mut removal_records: Vec<(usize, RemovalRecord)> = vec![];
         let mut items = vec![];
         let mut mps = vec![];
-        for i in 0..12 * BATCH_SIZE + 4 {
+        for i in 0..16 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
@@ -683,7 +683,7 @@ mod tests {
 
         // Now apply all removal records one at a time and batch update the
         // remaining removal records to keep them valid.
-        for i in 0..12 * BATCH_SIZE + 4 {
+        for i in 0..16 * BATCH_SIZE + 4 {
             let remove_idx = rand::rng().random_range(0..removal_records.len());
             let random_removal_record = removal_records.remove(remove_idx).1;
             RemovalRecord::batch_update_from_remove(

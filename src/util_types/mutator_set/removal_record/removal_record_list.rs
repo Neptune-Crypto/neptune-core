@@ -12,7 +12,6 @@ use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use thiserror::Error;
-use tracing::trace;
 
 use super::chunk::Chunk;
 use super::chunk::ChunkUnpackError;
@@ -33,19 +32,21 @@ pub(crate) struct RemovalRecordList {
     index_sets: Vec<AbsoluteIndexSet>,
 
     /// One authentication structure for each tree in the MMR.
-    /// TODO: Are MMR trees skipped if they don't have chunks?
+    /// If tree has no chunks, the empty list is inserted as element.
+    /// The empty list is *also* inserted for the tree of height 0, if it
+    /// exists.
     authentication_structures: Vec<Vec<Digest>>,
 
     /// ascending order by chunk index
     chunks: Vec<Chunk>,
 
-    // TODO: Clarify or cleanup.
     /// The number of leafs in the AOCL at the point in time when the removal
     /// records are supposed to be valid. If the number is not known exactly,
     /// this field is populated with a viable estimate, meaning that the number
     /// is set such that the algorithm should work. More precisely, viable means
     /// that it explains why the SWBF authentication structures have the lengths
-    /// they do.
+    /// they do. If the removal records are correct, it is a lower bound on the
+    /// number of AOCL leafs in the mutator set.
     num_leafs_aocl: u64,
 }
 
@@ -55,6 +56,14 @@ pub(crate) enum RemovalRecordListUnpackError {
     InnerDecodingFailure(#[from] Box<dyn core::error::Error + Send + Sync>),
     #[error("Absolute index value cannot exceed 74 bits")]
     AbsoluteIndexTooBig,
+    #[error("Illegal tree height: {tree_height}")]
+    IllegalTreeHeight { tree_height: u64 },
+    #[error("List of tree heights contains duplicates.")]
+    DuplicateTreeHeights,
+    #[error(
+        "Non-empty MMR membership proof (for tree with height {tree_height}) when must be empty"
+    )]
+    NonEmptyMmrAuthPath { tree_height: u64 },
     #[error("removal records are mutually inconsistent: {0}")]
     Inconsistency(RemovalRecordListInconsistency),
 }
@@ -84,18 +93,30 @@ pub(crate) enum RemovalRecordListInconsistency {
 }
 
 impl RemovalRecordList {
+    /// When there are more Chunks than trees, this value is used for the tree
+    /// height to indicate it (tree height and authentication structure) should
+    /// be ignored.
     const ENCODING_DELIMITER_IGNORE_TREE_HEIGHT: u64 = u64::MAX;
+
+    /// When there are more trees than Chunks, the tree heights are offset by
+    /// this value to indicate that the associated Chunk should be ignored. Note
+    /// that the associated authentication structure must be empty in this case.
+    const ENCODING_TREE_HEIGHT_OFFSET: u64 = 64;
 
     /// Convert a `Vec` of [`RemovalRecord`]s to a [`RemovalRecordList`].
     ///
     /// The difference between this method and [`Self::convert_from_vec`] is the
-    /// second argument, the number of leafs in the AOCL. The `From`
-    /// implementation calls this one after estimating this argument. Producing
+    /// second argument, the number of leafs in the AOCL. Producing
     /// this estimate is time-consuming and error-prone (tests notwithstanding),
     /// so it is better to avoid that step if possible.
     ///
-    /// TODO: Decide whether this function should be used on untrusted inputs.
-    /// If so, then it should return errors, and not panic.
+    /// This function runs on trusted inputs. It is the caller's responsibility
+    /// to ensure that all removal records are valid and mutually consistent.
+    ///
+    /// # Panics
+    ///
+    ///  - May (probably) panic if removal records are invalid or mutually
+    ///    inconsistent.
     pub(crate) fn from_removal_records(
         removal_records: Vec<RemovalRecord>,
         num_leafs_aocl: u64,
@@ -113,9 +134,11 @@ impl RemovalRecordList {
             for target_chunk in removal_record.target_chunks.iter() {
                 let (chunk_index, (chunk_mmr_mp, chunk)) = target_chunk;
                 if let Some(chunk_already_present) = chunks.insert(*chunk_index, chunk.clone()) {
-                    // TODO: Easy to trigger with inconsistent chunks! Is this
-                    // function ever used in an untrusted setting?
-                    assert_eq!(chunk_already_present, chunk.clone());
+                    assert_eq!(
+                        chunk_already_present,
+                        chunk.clone(),
+                        "removal records are inconsistent: they have distinct chunks for the same chunk index"
+                    );
                 }
                 let tree_height_according_to_authentication_path =
                     chunk_mmr_mp.authentication_path.len() as u32;
@@ -124,7 +147,8 @@ impl RemovalRecordList {
                 let tree_height_according_to_num_leafs = all_tree_heights[peak_index as usize];
                 assert_eq!(
                     tree_height_according_to_num_leafs,
-                    tree_height_according_to_authentication_path
+                    tree_height_according_to_authentication_path,
+                    "removal records are inconsistent: authentication path length disagrees with tree heights according to num leafs"
                 );
                 mmr_leaf_indices
                     .insert((tree_height_according_to_authentication_path, *chunk_index));
@@ -145,19 +169,25 @@ impl RemovalRecordList {
                 let (mut merkle_node_index, _) =
                     leaf_index_to_mt_index_and_peak_index(chunk_index, num_leafs_swbfi);
 
-                // TODO: Can't we use `peak_index` instead of `tree_height` as
-                // the 1st element of the tuple-key?
                 for sibling_digest in chunk_mmr_mp.authentication_path {
                     if let Some(kickout) =
                         sparse_mmr.insert((tree_height, merkle_node_index), running_digest)
                     {
-                        assert_eq!(kickout, running_digest);
+                        assert_eq!(
+                            kickout,
+                            running_digest,
+                            "removal records are inconsistent: they disagree about internal nodes in the SWBFI MMR"
+                        );
                     }
 
                     if let Some(kickout) =
                         sparse_mmr.insert((tree_height, merkle_node_index ^ 1), sibling_digest)
                     {
-                        assert_eq!(kickout, sibling_digest);
+                        assert_eq!(
+                            kickout,
+                            sibling_digest,
+                            "removal records are inconsistent: they disagree about internal nodes in the SWBFI MMR"
+                        );
                     }
 
                     if merkle_node_index & 1 == 0 {
@@ -171,7 +201,11 @@ impl RemovalRecordList {
                 if let Some(kickout) =
                     sparse_mmr.insert((tree_height, merkle_node_index), running_digest)
                 {
-                    assert_eq!(kickout, running_digest);
+                    assert_eq!(
+                        kickout,
+                        running_digest,
+                        "removal records are inconsistent: they disagree about root nodes in the SWBFI MMR"
+                    );
                 }
             }
         }
@@ -210,7 +244,11 @@ impl RemovalRecordList {
             .sorted_by_key(|(chunk_index, _chunk)| *chunk_index)
             .coalesce(|previous, current| {
                 if previous.0 == current.0 {
-                    assert_eq!(previous.1.clone(), current.1.clone());
+                    assert_eq!(
+                        previous.1.clone(),
+                        current.1.clone(),
+                        "removal records are inconsistent: they disagree about chunks with the same index"
+                    );
                     Ok(previous)
                 } else {
                     Err((previous, current))
@@ -262,7 +300,8 @@ impl RemovalRecordList {
         );
         assert_eq!(
             observed_authentication_path_lengths.iter().dedup().count(),
-            observed_authentication_path_lengths.len()
+            observed_authentication_path_lengths.len(),
+            "observed authentication path lengths contains duplicates."
         );
         for tree_height in observed_authentication_path_lengths {
             let tree_width = 1u64 << tree_height;
@@ -278,64 +317,60 @@ impl RemovalRecordList {
         swbfi_leaf_count_estimate * u64::from(BATCH_SIZE) + 1
     }
 
+    /// Compute a [`ChunkDictionary`], densely encoding all the data about
+    /// Chunks, authentication structures, and tree heights. Phrased
+    /// differently, compute a [`ChunkDictionary`] that densely encodes all the
+    /// information contained in [`Self`] *except* the absolute index sets.
+    ///
+    /// Should only be used on locally derived [`RemovalRecordList`].
+    ///
+    /// # Panics
+    ///
+    ///  - If self is inconsistent.
     fn compressed_chunk_dictionary(&self) -> ChunkDictionary {
         let num_swbf_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
-        let window_start = u128::from(num_swbf_leafs) * u128::from(CHUNK_SIZE);
-        let chunk_indices = self
-            .index_sets
-            .iter()
-            .flat_map(|ais| ais.to_vec())
-            .filter(|absolute_index| *absolute_index < window_start)
-            .map(|absolute_index| absolute_index / u128::from(CHUNK_SIZE))
-            .map(u64::try_from)
-            .map(std::result::Result::unwrap)
-            .sorted()
-            .dedup()
-            .collect_vec();
-
         let tree_heights = get_peak_heights(num_swbf_leafs)
             .into_iter()
             .map(u64::from)
             .rev()
             .collect_vec();
 
+        let chunk_indices = self.observed_chunk_indices();
         assert_eq!(chunk_indices.len(), self.chunks.len());
 
-        let num_entries = usize::max(tree_heights.len(), self.chunks.len());
-        let tree_heights_and_authentication_structures = tree_heights
-            .into_iter()
-            .zip_eq(
-                self.authentication_structures
-                    .iter()
-                    .cloned()
-                    .map(MmrMembershipProof::new),
-            )
-            .chain(std::iter::repeat((
-                Self::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT,
-                MmrMembershipProof::new(vec![]),
-            )));
-        let chunk_dictionary = tree_heights_and_authentication_structures.zip(
-            self.chunks
+        let tree_heights_and_authentication_structures = tree_heights.into_iter().zip_eq(
+            self.authentication_structures
                 .iter()
-                .map(Chunk::pack)
-                .chain(std::iter::repeat(Chunk::empty_chunk())),
+                .cloned()
+                .map(MmrMembershipProof::new),
         );
+
+        use itertools::EitherOrBoth::*;
+        let chunk_dictionary = tree_heights_and_authentication_structures
+            .zip_longest(self.chunks.iter().map(Chunk::pack))
+            .map(|x| match x {
+                Both((tree_height, membership_proof), packed_chunk) => {
+                    (tree_height, (membership_proof, packed_chunk))
+                }
+                Left((tree_height, membership_proof)) => (
+                    tree_height + Self::ENCODING_TREE_HEIGHT_OFFSET,
+                    (membership_proof, Chunk::empty_chunk()),
+                ),
+                Right(packed_chunk) => (
+                    Self::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT,
+                    (MmrMembershipProof::new(vec![]), packed_chunk),
+                ),
+            });
         ChunkDictionary {
-            dictionary: chunk_dictionary
-                .take(num_entries)
-                .map(|((l, m), r)| (l, (m, r)))
-                .collect_vec(),
+            dictionary: chunk_dictionary.collect_vec(),
         }
     }
 
     /// Encodes a [`RemovalRecordList`] as a `Vec` of [`RemovalRecord`].
     ///
-    /// For use in combination with [`BFieldCodec`].
-    ///
     /// The encoding follows the following rules:
-    ///  - The absolute index sets are identical. (See the comment on
-    ///    [`DenseAbsoluteIndexSet`] for an explanation why there is no packing
-    ///    of absolute index sets.)
+    ///  - The absolute index sets are identical. There is no packing
+    ///    of absolute index sets.
     ///  - The first removal record is the only one that contains a non-empty
     ///    chunks dictionary. This dictionary contains tuples of the form
     ///    ```notest
@@ -352,18 +387,22 @@ impl RemovalRecordList {
     ///    [`Self::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT`] is used to indicate
     ///    that the associated authentication structure should be ignored. The
     ///    authentication structure will in this case be empty.
-    ///  - All chunks of the `RemovalRecordList` are present exactly once, in
-    ///    the same order in this dictionary.
+    ///  - If there are more trees than Chunks, the tree height is offset by
+    ///    [`Self::ENCODING_TREE_HEIGHT_OFFSET`], and the authentication
+    ///    structure as well as the Chunk are empty.
+    ///  - All chunks of the [`RemovalRecordList`] are present exactly once. The
+    ///    order is the same between self and this dictionary.
     ///  - The authentication structures in this dictionary are the same as
-    ///    those from the like-named field of `RemovalRecordList`. The number of
-    ///    authentication structures is guaranteed to be less than or equal to
-    ///    the number of chunks. When all authentication structures are used,
-    ///    the empty vector is used for padding. The authentication structures
-    ///    do not correlate with the chunks.
+    ///    those from the like-named field of `Self`. The number of
+    ///    authentication structures is guaranteed to be equal to the number of
+    ///    trees inthe SWBFI MMR, except if there are more Chunks than trees.
+    ///    The authentication structures do not correlate with the chunks.
     ///  - The tree heights *do* correlate with the authentication structures:
     ///    they indicate the height of the tree that the authentication
-    ///    structure is for. When all tree heights have been used, 0 is used for
-    ///    padding.
+    ///    structure is for.
+    ///
+    /// See also: [`Self::decode_from_vec`], which computes the inverse of this
+    /// function.
     fn encode_as_vec(&self) -> Vec<RemovalRecord> {
         let chunk_dictionaries = vec![self.compressed_chunk_dictionary()]
             .into_iter()
@@ -390,20 +429,18 @@ impl RemovalRecordList {
     ///     length of the `chunks` list; and
     ///  2. the number of authentication structures matches with the number of
     ///     peaks; and
-    ///  3. for each such tree, the length of the authentication structure
+    ///  3. for each tree in the MMR, the length of the authentication structure
     ///     matches with the given leaf indices.
-    ///
-    /// Error type [`RemovalRecordListInconsistency`] has one variant for every
-    /// failure case.
     fn is_consistent(&self) -> bool {
         self.validate_consistency().is_ok()
     }
 
-    fn validate_consistency(&self) -> Result<(), RemovalRecordListInconsistency> {
+    /// Return the list of unique leaf indices into the SWBFI MMR, corresponding
+    /// to Chunks referenced in the absolute index sets, in ascending order.
+    fn observed_chunk_indices(&self) -> Vec<u64> {
         let swbfi_num_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
         let window_start = u128::from(swbfi_num_leafs) * u128::from(CHUNK_SIZE);
-        let observed_chunk_indices = self
-            .index_sets
+        self.index_sets
             .iter()
             .flat_map(|ais| ais.to_vec())
             .filter(|ai| *ai < window_start)
@@ -411,15 +448,19 @@ impl RemovalRecordList {
             .map(|u| u64::try_from(u).unwrap())
             .unique()
             .sorted()
-            .collect_vec();
+            .collect_vec()
+    }
+
+    /// Computes consistency, but with an error code in case of failure. See
+    /// [`Self::is_consistent`] for more details.
+    ///
+    /// Error type [`RemovalRecordListInconsistency`] has one variant for every
+    /// failure case.
+    fn validate_consistency(&self) -> Result<(), RemovalRecordListInconsistency> {
+        let observed_chunk_indices = self.observed_chunk_indices();
 
         // 1) cardinality must match
         if observed_chunk_indices.len() != self.chunks.len() {
-            trace!(
-                "No match on cardinality: {} =/= {}",
-                observed_chunk_indices.len(),
-                self.chunks.len()
-            );
             return Err(RemovalRecordListInconsistency::Chunks {
                 num_chunk_indices: observed_chunk_indices.len(),
                 num_chunks: self.chunks.len(),
@@ -428,6 +469,7 @@ impl RemovalRecordList {
 
         // compile a usable view of the MMR's known leafs
         let mut mmr_view = HashSet::new();
+        let swbfi_num_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
         let all_peak_heights = get_peak_heights(swbfi_num_leafs);
         for chunk_index in observed_chunk_indices {
             let (merkle_leaf_index, peak_index) =
@@ -435,7 +477,6 @@ impl RemovalRecordList {
             let merkle_leaf_index =
                 merkle_leaf_index & (u64::MAX ^ (1 << all_peak_heights[peak_index as usize]));
             mmr_view.insert((peak_index, merkle_leaf_index));
-            assert!(merkle_leaf_index < (1 << all_peak_heights[peak_index as usize]));
         }
         let active_peak_indices = mmr_view.iter().map(|(pi, _mli)| *pi).unique().collect_vec();
         let merkle_leaf_indices_by_tree = all_peak_heights
@@ -455,7 +496,8 @@ impl RemovalRecordList {
             .collect_vec();
 
         // Assert that number of active trees <= pop count of num leafs.
-        // This fact follows from MMR code.
+        // This fact follows from MMR code. (If not, we want to fail as quickly
+        // as possible.)
         let total_num_trees = all_peak_heights.len();
         let num_active_trees = active_peak_indices.len();
         assert!(num_active_trees <= total_num_trees);
@@ -506,7 +548,9 @@ impl RemovalRecordList {
         Ok(())
     }
 
-    /// Inverse of [`Self::encode_as_vec`].
+    /// Produce a [`RemovalRecordList`] by decoding a [`Vec`] of
+    /// [`RemovalRecord`]. This function computes the inverse of
+    /// [`Self::encode_as_vec`].
     fn decode_from_vec(
         removal_records: Vec<RemovalRecord>,
     ) -> Result<RemovalRecordList, RemovalRecordListUnpackError> {
@@ -520,25 +564,46 @@ impl RemovalRecordList {
             for (tree_height, (mmr_authentication_path, chunk)) in
                 removal_record.target_chunks.iter()
             {
-                if *tree_height != Self::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT {
+                if *tree_height < Self::ENCODING_TREE_HEIGHT_OFFSET {
+                    // use both authentication structure and chunk
                     tree_heights.push(*tree_height);
                     authentication_structures
                         .push(mmr_authentication_path.authentication_path.clone());
-                }
-                let unpacked_chunk =
-                    chunk
-                        .try_unpack()
-                        .map_err(Box::new)
-                        .map_err(|e: Box<ChunkUnpackError>| {
+                    let unpacked_chunk = chunk.try_unpack().map_err(Box::new).map_err(
+                        |e: Box<ChunkUnpackError>| {
                             RemovalRecordListUnpackError::InnerDecodingFailure(e)
-                        })?;
-                chunks.push(unpacked_chunk);
-                assert_eq!(
-                    tree_heights.len(),
-                    tree_heights.iter().unique().count(),
-                    "tree_heights: [{}]",
-                    tree_heights.iter().join(", ")
-                );
+                        },
+                    )?;
+                    chunks.push(unpacked_chunk);
+                } else if *tree_height < 2 * Self::ENCODING_TREE_HEIGHT_OFFSET {
+                    // ignore chunk
+                    let tree_height = *tree_height - Self::ENCODING_TREE_HEIGHT_OFFSET;
+                    tree_heights.push(tree_height);
+                    authentication_structures
+                        .push(mmr_authentication_path.authentication_path.clone());
+
+                    if !mmr_authentication_path.authentication_path.is_empty() {
+                        return Err(RemovalRecordListUnpackError::NonEmptyMmrAuthPath {
+                            tree_height,
+                        });
+                    }
+                } else if *tree_height == Self::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT {
+                    // ignore tree
+                    let unpacked_chunk = chunk.try_unpack().map_err(Box::new).map_err(
+                        |e: Box<ChunkUnpackError>| {
+                            RemovalRecordListUnpackError::InnerDecodingFailure(e)
+                        },
+                    )?;
+                    chunks.push(unpacked_chunk);
+                } else {
+                    return Err(RemovalRecordListUnpackError::IllegalTreeHeight {
+                        tree_height: *tree_height,
+                    });
+                }
+
+                if tree_heights.len() != tree_heights.iter().unique().count() {
+                    return Err(RemovalRecordListUnpackError::DuplicateTreeHeights);
+                }
             }
         }
 
@@ -564,6 +629,8 @@ impl RemovalRecordList {
         Ok(removal_record_list)
     }
 
+    /// Compute the first `number`-many chunk indices corresponding to the given
+    /// absolute indices.
     fn observed_chunk_indices_from_index_sets(
         index_sets: &[AbsoluteIndexSet],
         number: usize,
@@ -589,7 +656,8 @@ impl RemovalRecordList {
     /// Compress a [`Vec`] of [`RemovalRecord`]s densely by packing the same
     /// information into another, *smaller*, [`Vec`] of [`RemovalRecord`]s.
     pub(crate) fn pack(removal_records: Vec<RemovalRecord>) -> Vec<RemovalRecord> {
-        Self::convert_from_vec(removal_records).encode_as_vec()
+        let as_rr_list = Self::convert_from_vec(removal_records);
+        as_rr_list.encode_as_vec()
     }
 
     /// Decompress a [`Vec`] of [`RemovalRecord`]s as packed by [`Self::pack`].
@@ -603,8 +671,18 @@ impl RemovalRecordList {
 
     /// Convert a [`Vec`] of [`RemovalRecord`]s into a [`RemovalRecordList`],
     /// which is a denser representation of the same object. In particular,
-    /// there is no loss of information (unless the input is malicious, but that
-    /// is assumed not to be the case).
+    /// there is no loss of information (unless the input is malicious).
+    ///
+    /// This function assumes that the input is honest. Specifically, that the
+    /// removal records are valid and mutually consistent.
+    ///
+    /// See also [`Self::convert_to_vec`], which computes the inverse of this
+    /// function.
+    ///
+    /// # Panics
+    ///
+    ///  - May (probably) panic if the removal records are invalid or mutually
+    ///    inconsistent.
     fn convert_from_vec(removal_records: Vec<RemovalRecord>) -> Self {
         let observed_chunk_indices = removal_records
             .iter()
@@ -629,7 +707,13 @@ impl RemovalRecordList {
         RemovalRecordList::from_removal_records(removal_records, num_leafs_aocl)
     }
 
-    /// Inverse of [`Self::convert_from_vec`].
+    /// Convert a [`RemovalRecordList`] to a (redundant) [`Vec`] of
+    /// [`RemovalRecord`]s. This function computes the inverse of
+    /// [`Self::convert_from_vec`].
+    ///
+    /// # Panics
+    ///
+    ///  - if `self` is inconsistent.
     fn convert_to_vec(self) -> Vec<RemovalRecord> {
         let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
         let all_tree_heights = get_peak_heights(num_leafs_swbfi);
@@ -1182,6 +1266,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn empty_with_implied_aocl_leaf_count() {
+        let removal_records = Vec::<RemovalRecord>::default();
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+        assert_eq!(removal_records, unpacked);
+    }
+
     #[proptest]
     fn convert_empty(#[strategy(arb::<u64>())] num_leafs_aocl: u64) {
         let removal_records = Vec::<RemovalRecord>::new();
@@ -1381,8 +1473,7 @@ mod tests {
         }
 
         // the estimate explains all chunks
-        let window_start =
-            u128::from(estimate_num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
+        let window_start = u128::from(num_leafs_swbfi) * u128::from(CHUNK_SIZE);
         let would_be_observed_chunk_indices = removal_records
             .iter()
             .flat_map(|rr| rr.absolute_indices.to_array())
@@ -1527,6 +1618,105 @@ mod tests {
         }
     }
 
+    #[test]
+    fn three_chunks_one_tree() {
+        let absolute_indices = AbsoluteIndexSet::new_raw(
+            0,
+            [
+                CHUNK_SIZE,
+                CHUNK_SIZE * 2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        );
+
+        // Build removal record as it'll look when window has slid exactly four
+        // times. So implied num leafs AOCL is [33,40].
+        let empty_chunk = Chunk::empty_chunk();
+        let leaf = Tip5::hash(&empty_chunk);
+        let node = Tip5::hash_pair(leaf, leaf);
+        let removal_record = RemovalRecord {
+            absolute_indices,
+            target_chunks: ChunkDictionary {
+                dictionary: vec![
+                    (
+                        0,
+                        (
+                            MmrMembershipProof {
+                                authentication_path: vec![leaf, node],
+                            },
+                            empty_chunk.clone(),
+                        ),
+                    ),
+                    (
+                        1,
+                        (
+                            MmrMembershipProof {
+                                authentication_path: vec![leaf, node],
+                            },
+                            empty_chunk.clone(),
+                        ),
+                    ),
+                    (
+                        2,
+                        (
+                            MmrMembershipProof {
+                                authentication_path: vec![leaf, node],
+                            },
+                            empty_chunk.clone(),
+                        ),
+                    ),
+                ],
+            },
+        };
+
+        let removal_records = vec![removal_record];
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+        assert_eq!(removal_records, unpacked);
+    }
+
     fn more_chunks_than_abs_index_sets() -> RemovalRecord {
         let absolute_indices = AbsoluteIndexSet::new_raw(
             0,
@@ -1574,9 +1764,7 @@ mod tests {
     fn more_chunks_than_absolute_index_sets_multiple_steps() {
         let not_packed = vec![more_chunks_than_abs_index_sets()];
         let temp0 = RemovalRecordList::from_removal_records(not_packed.clone(), 17);
-        println!("temp0: {temp0:#?}");
         let packed = temp0.encode_as_vec();
-        println!("packed: {packed:#?}");
         let temp1 = RemovalRecordList::decode_from_vec(packed.clone()).unwrap();
         assert_eq!(temp0, temp1);
         let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
@@ -1749,7 +1937,7 @@ mod tests {
     }
 
     #[test]
-    fn regression_test_inconsistent_chunk_numbers() {
+    fn regression_test_chunk_numbers() {
         let rr = RemovalRecord {
             absolute_indices: AbsoluteIndexSet::new_raw(
                 11025,
@@ -1768,7 +1956,6 @@ mod tests {
 
         let rrs = vec![rr];
         let packed = RemovalRecordList::pack(rrs.clone());
-        println!("packed:\n{packed:#?}");
         assert_eq!(
             rrs.clone(),
             RemovalRecordList::try_unpack(packed)
