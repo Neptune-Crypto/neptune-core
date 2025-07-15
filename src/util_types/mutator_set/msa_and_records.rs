@@ -68,16 +68,18 @@ pub mod neptune_arbitrary {
     use proptest::strategy::BoxedStrategy;
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use tasm_lib::prelude::Tip5;
     use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::super::active_window::ActiveWindow;
-
     use super::super::mmra_and_membership_proofs::MmraAndMembershipProofs;
     use super::super::removal_record::absolute_index_set::AbsoluteIndexSet;
     use super::super::removal_record::chunk::Chunk;
     use super::super::removal_record::chunk_dictionary::ChunkDictionary;
-    use super::super::shared::BATCH_SIZE;
     use super::super::shared::CHUNK_SIZE;
     use super::*;
     use crate::util_types::mutator_set::commit;
@@ -120,15 +122,15 @@ pub mod neptune_arbitrary {
                 .prop_flat_map(move |removed_aocl_indices| {
 
                 // Ensure AOCL indices are unique. Just add indices
-                // deterministically if they are not, since all Hell would
-                // break loose if we spun up an RNG in this context.
+                // deterministically if they are not. All Hell would break
+                // loose if we didn't use deterministic RNG here.
                 let mut removed_aocl_indices: HashSet<_> = removed_aocl_indices.into_iter().collect();
-                let mut j = 1u64;
-                let a_big_prime = (1u64 << 63) - 165;
-                let a_small_prime = 961749043;
+                let rng_seed: [u8; Digest::BYTES] = Tip5::hash(&removables).into();
+                let rng_seed: [u8; 32] = rng_seed.into_iter().take(32).collect_vec().try_into().unwrap();
+                let mut rng: StdRng = SeedableRng::from_seed(rng_seed);
                 while removed_aocl_indices.len() < removables.len() {
-                    removed_aocl_indices.insert((j.wrapping_mul(a_big_prime).wrapping_add(a_small_prime)) % aocl_size);
-                    j += 1;
+                    let rand: u64 = rng.random();
+                    removed_aocl_indices.insert(rand % aocl_size);
                 }
 
                 // prepare unwrap

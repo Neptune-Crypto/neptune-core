@@ -34,7 +34,8 @@ pub(crate) struct RemovalRecordList {
     /// One authentication structure for each tree in the MMR.
     /// If tree has no chunks, the empty list is inserted as element.
     /// The empty list is *also* inserted for the tree of height 0, if it
-    /// exists.
+    /// exists. The list is sorted by ascending tree height, *i.e.*, smallest
+    /// tree first.
     authentication_structures: Vec<Vec<Digest>>,
 
     /// ascending order by chunk index
@@ -60,10 +61,6 @@ pub(crate) enum RemovalRecordListUnpackError {
     IllegalTreeHeight { tree_height: u64 },
     #[error("List of tree heights contains duplicates.")]
     DuplicateTreeHeights,
-    #[error(
-        "Non-empty MMR membership proof (for tree with height {tree_height}) when must be empty"
-    )]
-    NonEmptyMmrAuthPath { tree_height: u64 },
     #[error("removal records are mutually inconsistent: {0}")]
     Inconsistency(RemovalRecordListInconsistency),
 }
@@ -388,8 +385,7 @@ impl RemovalRecordList {
     ///    that the associated authentication structure should be ignored. The
     ///    authentication structure will in this case be empty.
     ///  - If there are more trees than Chunks, the tree height is offset by
-    ///    [`Self::ENCODING_TREE_HEIGHT_OFFSET`], and the authentication
-    ///    structure as well as the Chunk are empty.
+    ///    [`Self::ENCODING_TREE_HEIGHT_OFFSET`], and the Chunk is empty.
     ///  - All chunks of the [`RemovalRecordList`] are present exactly once. The
     ///    order is the same between self and this dictionary.
     ///  - The authentication structures in this dictionary are the same as
@@ -581,12 +577,6 @@ impl RemovalRecordList {
                     tree_heights.push(tree_height);
                     authentication_structures
                         .push(mmr_authentication_path.authentication_path.clone());
-
-                    if !mmr_authentication_path.authentication_path.is_empty() {
-                        return Err(RemovalRecordListUnpackError::NonEmptyMmrAuthPath {
-                            tree_height,
-                        });
-                    }
                 } else if *tree_height == Self::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT {
                     // ignore tree
                     let unpacked_chunk = chunk.try_unpack().map_err(Box::new).map_err(
@@ -925,6 +915,7 @@ mod tests {
     use std::mem;
 
     use proptest::collection::vec;
+    use proptest::prelude::Arbitrary;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
     use proptest::prop_assert;
@@ -944,6 +935,7 @@ mod tests {
 
     use super::RemovalRecordList;
     use super::*;
+    use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
@@ -1902,19 +1894,6 @@ mod tests {
                 )],
             },
         };
-        // let removal_record = RemovalRecord {
-        //     absolute_indices: AbsoluteIndexSet::new_raw(
-        //         68472,
-        //         [
-        //             978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337, 148763,
-        //             665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972, 33811, 609715,
-        //             863269, 922136, 987473, 682901, 17409, 445788, 483752, 363860, 926460, 577500,
-        //             383384, 243946, 140714, 940568, 297642, 259922, 386140, 510946, 0, 956594,
-        //             420304, 1010108, 492536, 722694, 222513,
-        //         ],
-        //     ),
-        //     target_chunks: ChunkDictionary { dictionary: vec![] },
-        // };
         let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
     }
 
@@ -2215,5 +2194,205 @@ mod tests {
         let packed = RemovalRecordList::pack(removal_records.clone());
         let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
         assert_eq!(removal_records, unpacked);
+    }
+
+    #[proptest]
+    fn pack_unpack_identity_from_msa_and_records_tiny(
+        #[strategy(1usize..3)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=20)] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        let removal_records = msa_and_records.unpacked_removal_records();
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        prop_assert_eq!(removal_records, unpacked);
+    }
+
+    #[proptest]
+    fn pack_unpack_identity_from_msa_and_records_very_small(
+        #[strategy(1usize..=4)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=30)] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        let removal_records = msa_and_records.unpacked_removal_records();
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        prop_assert_eq!(removal_records, unpacked);
+    }
+
+    #[test]
+    fn bug_hunt_auth_path_not_empty() {
+        let num_leafs = 128;
+        let mut test_runner = TestRunner::deterministic();
+        let mut rng = rng();
+
+        for _ in 0..1000 {
+            let item: Digest = rng.random();
+            let msa_and_records = MsaAndRecords::arbitrary_with((
+                vec![(item, Digest::default(), Digest::default()); 2],
+                num_leafs,
+            ))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+            let removal_records = msa_and_records.unpacked_removal_records();
+
+            for rr in &removal_records {
+                assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+            }
+
+            assert_eq!(
+                removal_records.len(),
+                removal_records
+                    .iter()
+                    .map(|x| x.absolute_indices)
+                    .unique()
+                    .count()
+            );
+
+            let packed = RemovalRecordList::pack(removal_records.clone());
+            let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+            assert_eq!(removal_records, unpacked);
+        }
+    }
+
+    #[proptest]
+    fn pack_unpack_identity_from_msa_and_records_tie_down(
+        #[strategy((2u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy(MsaAndRecords::arbitrary_with((vec![(Digest::default(), Digest::default(), Digest::default()); 2], #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        let removal_records = msa_and_records.unpacked_removal_records();
+
+        for rr in &removal_records {
+            assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+        }
+
+        assert_eq!(
+            removal_records.len(),
+            removal_records
+                .iter()
+                .map(|x| x.absolute_indices)
+                .unique()
+                .count()
+        );
+
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        prop_assert_eq!(removal_records, unpacked);
+    }
+
+    #[proptest]
+    fn pack_unpack_identity_from_msa_and_records_small_aocl(
+        #[strategy(0usize..30)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        let removal_records = msa_and_records.unpacked_removal_records();
+        for rr in &removal_records {
+            assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+        }
+
+        assert_eq!(
+            removal_records.len(),
+            removal_records
+                .iter()
+                .map(|x| x.absolute_indices)
+                .unique()
+                .count()
+        );
+
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        prop_assert_eq!(removal_records, unpacked);
+    }
+
+    #[proptest(cases = 30)]
+    fn pack_unpack_identity_from_msa_and_records_midi_aocl(
+        #[strategy(0usize..30)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=(u16::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        let removal_records = msa_and_records.unpacked_removal_records();
+        for rr in &removal_records {
+            assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+        }
+
+        assert_eq!(
+            removal_records.len(),
+            removal_records
+                .iter()
+                .map(|x| x.absolute_indices)
+                .unique()
+                .count()
+        );
+
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        prop_assert_eq!(removal_records, unpacked);
+    }
+
+    #[proptest(cases = 30)]
+    fn pack_unpack_identity_from_msa_and_records_medium_aocl(
+        #[strategy(0usize..30)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=(u32::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        let removal_records = msa_and_records.unpacked_removal_records();
+        for rr in &removal_records {
+            assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+        }
+
+        assert_eq!(
+            removal_records.len(),
+            removal_records
+                .iter()
+                .map(|x| x.absolute_indices)
+                .unique()
+                .count()
+        );
+
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        prop_assert_eq!(removal_records, unpacked);
+    }
+
+    #[proptest(cases = 30)]
+    fn pack_unpack_identity_from_msa_and_records_big_aocl(
+        #[strategy(0usize..10)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=(u64::MAX / 2))] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        let removal_records = msa_and_records.unpacked_removal_records();
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        prop_assert_eq!(removal_records, unpacked);
     }
 }
