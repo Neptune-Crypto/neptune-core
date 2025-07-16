@@ -169,10 +169,9 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
     let new_kernel = TransactionKernelModifier::default()
         .outputs(new_outputs)
         .inputs(new_inputs)
-        .merge_bit(true)
         .modify(transaction.kernel.clone());
     transaction.kernel = new_kernel;
-    let transaction = BlockTransaction::try_from(transaction).unwrap();
+    let transaction = BlockTransaction::upgrade(transaction);
 
     let mut block = Block::block_template_invalid_proof(
         previous_block,

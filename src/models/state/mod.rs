@@ -1404,8 +1404,13 @@ impl GlobalState {
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
                 // revert removals
-                let removal_records = revert_block.kernel.body.transaction_kernel.inputs.clone();
-                for removal_record in removal_records.iter().rev() {
+                for removal_record in revert_block
+                    .mutator_set_update(network)
+                    .expect("Stored block must have mutator set update")
+                    .removals
+                    .iter()
+                    .rev()
+                {
                     membership_proof.revert_update_from_remove(removal_record);
                 }
 
