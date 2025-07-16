@@ -36,17 +36,19 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 
-const BAD_COINBASE_SIZE_ERROR: i128 = 1_000_030;
-const BAD_SALTED_UTXOS_ERROR: i128 = 1_000_031;
-const NO_INFLATION_VIOLATION: i128 = 1_000_032;
-const COINBASE_TIMELOCK_INSUFFICIENT: i128 = 1_000_033;
-const FEE_EXCEEDS_MAX: i128 = 1_000_034;
-const FEE_EXCEEDS_MIN: i128 = 1_000_035;
-const SUM_OF_OUTPUTS_EXCEEDS_MAX: i128 = 1_000_036;
-const SUM_OF_OUTPUTS_IS_NEGATIVE: i128 = 1_000_037;
-const COINBASE_IS_SET_AND_FEE_IS_NEGATIVE: i128 = 1_000_038;
-pub(crate) const INVALID_COIN_AMOUNT: i128 = 1_000_039;
-const INVALID_COINBASE_DISCRIMINANT: i128 = 1_000_040;
+impl NativeCurrency {
+    pub(crate) const BAD_COINBASE_SIZE_ERROR: i128 = 1_000_030;
+    pub(crate) const BAD_SALTED_UTXOS_ERROR: i128 = 1_000_031;
+    pub(crate) const NO_INFLATION_VIOLATION: i128 = 1_000_032;
+    pub(crate) const COINBASE_TIMELOCK_INSUFFICIENT: i128 = 1_000_033;
+    pub(crate) const FEE_EXCEEDS_MAX: i128 = 1_000_034;
+    pub(crate) const FEE_EXCEEDS_MIN: i128 = 1_000_035;
+    pub(crate) const SUM_OF_OUTPUTS_EXCEEDS_MAX: i128 = 1_000_036;
+    pub(crate) const SUM_OF_OUTPUTS_IS_NEGATIVE: i128 = 1_000_037;
+    pub(crate) const COINBASE_IS_SET_AND_FEE_IS_NEGATIVE: i128 = 1_000_038;
+    pub(crate) const INVALID_COIN_AMOUNT: i128 = 1_000_039;
+    pub(crate) const INVALID_COINBASE_DISCRIMINANT: i128 = 1_000_040;
+}
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -150,7 +152,7 @@ impl ConsensusProgram for NativeCurrency {
             // _ coinbase_size (coinbase_size == 1) (coinbase_size == 5)
 
             add
-            assert error_id {BAD_COINBASE_SIZE_ERROR}
+            assert error_id {Self::BAD_COINBASE_SIZE_ERROR}
             // _ coinbase_size
         );
 
@@ -173,7 +175,7 @@ impl ConsensusProgram for NativeCurrency {
             // _ *salted_utxos [salted_utxos_hash] [sud]
 
             {&digest_eq}
-            assert error_id {BAD_SALTED_UTXOS_ERROR}
+            assert error_id {Self::BAD_SALTED_UTXOS_ERROR}
             // _ *salted_utxos
         };
 
@@ -205,7 +207,7 @@ impl ConsensusProgram for NativeCurrency {
             eq
             // _ [total_output] [timelocked_amount] (total_output / 2 <= timelocked_amount)
 
-            assert error_id {COINBASE_TIMELOCK_INSUFFICIENT}
+            assert error_id {Self::COINBASE_TIMELOCK_INSUFFICIENT}
             // _ [total_output] [timelocked_amount]
 
             return
@@ -303,7 +305,7 @@ impl ConsensusProgram for NativeCurrency {
             dup 1 push 1 eq
             // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant (coinbase_discriminant == 0) (coinbase_discriminant == 1)
 
-            add assert error_id {INVALID_COINBASE_DISCRIMINANT}
+            add assert error_id {Self::INVALID_COINBASE_DISCRIMINANT}
             // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant
 
             dup 1 addi {coin_size-1} read_mem {coin_size} pop 1
@@ -340,7 +342,7 @@ impl ConsensusProgram for NativeCurrency {
             push 0 eq
             // _ [txkmh] *ncw *coinbase *fee (!coinbase_discriminant || !sign)
 
-            assert error_id {COINBASE_IS_SET_AND_FEE_IS_NEGATIVE}
+            assert error_id {Self::COINBASE_IS_SET_AND_FEE_IS_NEGATIVE}
             // _ [txkmh] *ncw *coinbase *fee
 
 
@@ -484,7 +486,7 @@ impl ConsensusProgram for NativeCurrency {
             push 0 eq
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] (max_nau >= total_output)
 
-            assert error_id {SUM_OF_OUTPUTS_EXCEEDS_MAX}
+            assert error_id {Self::SUM_OF_OUTPUTS_EXCEEDS_MAX}
 
             push 0
             push 0
@@ -504,7 +506,7 @@ impl ConsensusProgram for NativeCurrency {
             push 0 eq
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] (total_output >= 0)
 
-            assert error_id {SUM_OF_OUTPUTS_IS_NEGATIVE}
+            assert error_id {Self::SUM_OF_OUTPUTS_IS_NEGATIVE}
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount]
 
 
@@ -567,7 +569,7 @@ impl ConsensusProgram for NativeCurrency {
             push 0 eq
             // _ [txkmh] *ncw [total_input] [total_output] [fee] (fee <= max_amount)
 
-            assert error_id {FEE_EXCEEDS_MAX}
+            assert error_id {Self::FEE_EXCEEDS_MAX}
             // _ [txkmh] *ncw [total_input] [total_output] [fee]
 
             {&push_min_amount}
@@ -586,7 +588,7 @@ impl ConsensusProgram for NativeCurrency {
             push 0 eq
             // _ [txkmh] *ncw [total_input] [total_output] [fee] (fee >= min_amount)
 
-            assert error_id {FEE_EXCEEDS_MIN}
+            assert error_id {Self::FEE_EXCEEDS_MIN}
             // _ [txkmh] *ncw [total_input] [total_output] [fee]
 
             call {u128_overflowing_add}
@@ -596,7 +598,7 @@ impl ConsensusProgram for NativeCurrency {
             {&compare_coin_amount}
             // _ [txkmh] *ncw (total_input == total_output')
 
-            assert error_id {NO_INFLATION_VIOLATION}
+            assert error_id {Self::NO_INFLATION_VIOLATION}
             // _ [txkmh] *ncw
 
             pop 1
@@ -1087,7 +1089,7 @@ pub mod tests {
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
             witness.nondeterminism(),
-            &[NO_INFLATION_VIOLATION],
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
         )?;
     }
 
@@ -1123,7 +1125,10 @@ pub mod tests {
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
             witness.nondeterminism(),
-            &[NO_INFLATION_VIOLATION, COINBASE_TIMELOCK_INSUFFICIENT],
+            &[
+                NativeCurrency::NO_INFLATION_VIOLATION,
+                NativeCurrency::COINBASE_TIMELOCK_INSUFFICIENT,
+            ],
         )?;
     }
 
@@ -1249,7 +1254,7 @@ pub mod tests {
             .test_assertion_failure(
                 bad_native_currency_witness.standard_input(),
                 bad_native_currency_witness.nondeterminism(),
-                &[COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
+                &[NativeCurrency::COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
             )
             .unwrap();
     }
@@ -1272,7 +1277,7 @@ pub mod tests {
             .test_assertion_failure(
                 bad_native_currency_witness.standard_input(),
                 bad_native_currency_witness.nondeterminism(),
-                &[COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
+                &[NativeCurrency::COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
             )
             .unwrap();
     }
@@ -1365,7 +1370,7 @@ pub mod tests {
             let result = NativeCurrency.test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
-                &[NO_INFLATION_VIOLATION],
+                &[NativeCurrency::NO_INFLATION_VIOLATION],
             );
             assert!(result.is_ok());
         }
@@ -1397,7 +1402,10 @@ pub mod tests {
         let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(new_coinbase));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        assert_both_rust_and_tasm_fail(native_currency_witness, &[NO_INFLATION_VIOLATION]);
+        assert_both_rust_and_tasm_fail(
+            native_currency_witness,
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
+        );
     }
 
     #[proptest]
@@ -1421,7 +1429,10 @@ pub mod tests {
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
 
-        assert_both_rust_and_tasm_fail(native_currency_witness, &[NO_INFLATION_VIOLATION]);
+        assert_both_rust_and_tasm_fail(
+            native_currency_witness,
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
+        );
     }
 
     #[proptest]
@@ -1441,7 +1452,10 @@ pub mod tests {
         let kernel_modifier = TransactionKernelModifier::default().fee(fee + delta);
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        assert_both_rust_and_tasm_fail(native_currency_witness, &[NO_INFLATION_VIOLATION]);
+        assert_both_rust_and_tasm_fail(
+            native_currency_witness,
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
+        );
     }
 
     #[proptest]
@@ -1463,7 +1477,10 @@ pub mod tests {
             .timestamp(primitive_witness.kernel.timestamp + delta);
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        assert_both_rust_and_tasm_fail(native_currency_witness, &[COINBASE_TIMELOCK_INSUFFICIENT]);
+        assert_both_rust_and_tasm_fail(
+            native_currency_witness,
+            &[NativeCurrency::COINBASE_TIMELOCK_INSUFFICIENT],
+        );
     }
 
     #[proptest(cases = 50)]
@@ -1492,7 +1509,10 @@ pub mod tests {
             .timestamp(primitive_witness.kernel.timestamp + delta);
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        assert_both_rust_and_tasm_fail(native_currency_witness, &[COINBASE_TIMELOCK_INSUFFICIENT]);
+        assert_both_rust_and_tasm_fail(
+            native_currency_witness,
+            &[NativeCurrency::COINBASE_TIMELOCK_INSUFFICIENT],
+        );
     }
 
     #[proptest(cases = 1)]
@@ -1566,7 +1586,7 @@ pub mod tests {
         // of all inputs.
         assert_both_rust_and_tasm_fail(
             NativeCurrencyWitness::from(primitive_witness),
-            &[INVALID_COIN_AMOUNT],
+            &[NativeCurrency::INVALID_COIN_AMOUNT],
         );
     }
 
@@ -1579,7 +1599,7 @@ pub mod tests {
     ) {
         assert_both_rust_and_tasm_fail(
             NativeCurrencyWitness::from(primitive_witness),
-            &[FEE_EXCEEDS_MIN],
+            &[NativeCurrency::FEE_EXCEEDS_MIN],
         );
 
         // It is actually impossible to trigger this assert error id -- or is it?
