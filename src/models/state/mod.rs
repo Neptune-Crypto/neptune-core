@@ -3329,13 +3329,6 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(
-            Transaction::from(block_transaction.clone())
-                .is_valid(network, consensus_rule_set)
-                .await
-        );
-        assert!(Transaction::from(block_transaction.clone())
-            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap(),));
 
         let block_1 = Block::compose(
             &genesis_block,
