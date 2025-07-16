@@ -218,7 +218,9 @@ impl RemovalRecord {
         required_chunk_indices == proven_chunk_indices
     }
 
-    /// Validates that a removal record is synchronized against the inactive part of the SWBF
+    /// Validates that a removal record is synchronized against the inactive
+    /// part of the SWBF, and that all required chunk/MMR membership proofs are
+    /// present.
     pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
         self.validate_inner(mutator_set).is_ok()
     }
