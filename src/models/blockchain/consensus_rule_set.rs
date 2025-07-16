@@ -260,10 +260,7 @@ pub(crate) mod tests {
         for _ in 0..blocks_to_mine {
             now = now + Timestamp::hours(1);
             let (next_block, expected_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
-            println!("block height: {}", next_block.header().height);
-
             assert!(next_block.is_valid(&predecessor, now, network).await);
-
             bob.set_new_self_composed_tip(next_block.clone(), expected_composer_utxos)
                 .await
                 .unwrap();
@@ -288,17 +285,13 @@ pub(crate) mod tests {
         );
 
         // 3. create blocks with enough outputs to give some/all owned UTXOs
-        //    non-empty chunk dictionaries. (HF-1)
-        let num_blocks_with_many_outputs = 2;
+        //    non-empty chunk dictionaries. This serves to check that the
+        //    membership proofs/removal records are updated correctly.
+        let num_blocks_with_many_outputs = 4;
         for _ in 0..num_blocks_with_many_outputs {
-            let now = now + Timestamp::hours(1);
+            now = now + Timestamp::hours(1);
             let next_block = block_with_n_outputs(bob.clone(), 24, now).await;
-            println!("block height: {}", next_block.header().height);
-
             assert!(next_block.is_valid(&predecessor, now, network).await);
-            // TODO: Assert that HardFork1 consensus rules are followed for
-            // this block.
-
             bob.set_new_tip(next_block.clone()).await.unwrap();
             predecessor = next_block;
         }
