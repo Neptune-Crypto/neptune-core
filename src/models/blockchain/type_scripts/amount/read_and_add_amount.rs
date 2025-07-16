@@ -9,7 +9,7 @@ use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use crate::api::export::NativeCurrencyAmount;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::type_scripts::amount::BAD_STATE_SIZE_ERROR;
-use crate::models::blockchain::type_scripts::native_currency::INVALID_COIN_AMOUNT;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ReadAndAddAmount;
@@ -93,7 +93,7 @@ impl BasicSnippet for ReadAndAddAmount {
                     push 0 eq
                     // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount] (max_amount >= coin_amount)
 
-                    assert error_id {INVALID_COIN_AMOUNT}
+                    assert error_id {NativeCurrency::INVALID_COIN_AMOUNT}
                     // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount]
 
                     pick 8 pick 8 pick 8 pick 8
