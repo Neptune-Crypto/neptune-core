@@ -1232,10 +1232,6 @@ impl GlobalState {
         trace!("monitored_utxos.len() = {num_mutxos}");
         for i in 0..num_mutxos {
             let mut monitored_utxo = monitored_utxos.get(i).await;
-            if monitored_utxo.spent_in_block.is_some() {
-                trace!("Not restoring because UTXO is marked as spent");
-                continue;
-            }
 
             if monitored_utxo.is_synced_to(tip_hash) {
                 trace!("Not restoring because UTXO is marked as synced");
@@ -1272,7 +1268,21 @@ impl GlobalState {
             };
 
             if !ams_ref.ams().verify(ms_item, &restored_msmp).await {
-                warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain? Or maybe it was spent?", aocl_leaf_index);
+                // If the UTXO was spent *and* its membership proof is invalid
+                // after attempting to resync, then that expenditure must still
+                // be canonical.
+                // On the contrary, if the UTXO was spent and resync succeeded,
+                // then the expenditure was reverted. This is the reason why
+                // we do not filter out UTXOs that were marked as spent before
+                // attempting to resync the membership proof. However, if we
+                // get here, then we know that the resulting membership proof is
+                // invalid.
+                // So instead, we use the information that the UTXO was spent
+                // only for suppressing the following log message, which would
+                // be rather noisy otherwise.
+                if monitored_utxo.spent_in_block.is_none() {
+                    warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", aocl_leaf_index);
+                }
                 continue;
             }
 
