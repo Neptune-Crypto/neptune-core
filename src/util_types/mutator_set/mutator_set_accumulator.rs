@@ -118,7 +118,7 @@ impl MutatorSetAccumulator {
 
     /// Return the batch index for the latest addition to the mutator set
     pub fn get_batch_index(&self) -> u64 {
-        self.aocl.num_leafs().saturating_sub(1) / u64::from(BATCH_SIZE)
+        aocl_to_swbfi_leaf_counts(self.aocl.num_leafs())
     }
 
     /// Return the lowest and the highest chunk index that are represented in
@@ -195,28 +195,33 @@ impl MutatorSetAccumulator {
             .collect()
     }
 
-    /// Check if a removal record can be applied to a mutator set. Returns false if either
-    /// the MMR membership proofs are unsynced, or if all its indices are already set.
+    /// Check if a removal record can be applied to a mutator set. Returns false
+    /// if either the MMR membership proofs are unsynced, or if all its indices
+    /// are already set, or if the chunk dictionary is missing entries.
     pub fn can_remove(&self, removal_record: &RemovalRecord) -> bool {
         let mut have_absent_index = false;
+
+        // Validate verifies that the all required chunk/MMR membership proof
+        // pairs are present, and that all MMR membership proofs are valid
+        // against the mutator set accumulator.
         if !removal_record.validate(self) {
             return false;
         }
 
         for inserted_index in removal_record.absolute_indices.to_vec() {
             // determine if inserted index lives in active window
-            let active_window_start =
-                u128::from(self.aocl.num_leafs() / u64::from(BATCH_SIZE)) * u128::from(CHUNK_SIZE);
+            let swbfi_num_leafs = self.get_batch_index();
+            let active_window_start = u128::from(swbfi_num_leafs) * u128::from(CHUNK_SIZE);
             if inserted_index < active_window_start {
                 let inserted_index_chunkidx = (inserted_index / u128::from(CHUNK_SIZE)) as u64;
-                if let Some((_mmr_mp, chunk)) =
-                    removal_record.target_chunks.get(&inserted_index_chunkidx)
-                {
-                    let relative_index = (inserted_index % u128::from(CHUNK_SIZE)) as u32;
-                    if !chunk.contains(relative_index) {
-                        have_absent_index = true;
-                        break;
-                    }
+                let (_mmr_mp, chunk) = removal_record
+                    .target_chunks
+                    .get(&inserted_index_chunkidx)
+                    .expect("Presence of required MMR MPs should have already been established.");
+                let relative_index = (inserted_index % u128::from(CHUNK_SIZE)) as u32;
+                if !chunk.contains(relative_index) {
+                    have_absent_index = true;
+                    break;
                 }
             } else {
                 let relative_index = (inserted_index - active_window_start) as u32;
@@ -533,6 +538,97 @@ mod tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::mutator_set::shared::WINDOW_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
+
+    mod can_remove {
+        use proptest::collection::vec;
+        use proptest_arbitrary_interop::arb;
+
+        use super::*;
+        use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+        use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
+
+        #[proptest]
+        fn missing_chunk_dictionary_entry_small(
+            #[strategy((1u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 1usize))]
+            _removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+        ) {
+            let mut removal_record = msa_and_records.unpacked_removal_records()[0].clone();
+
+            // Only test removal records with non-empty chunk dictionaries
+            prop_assume!(!removal_record.target_chunks.dictionary.is_empty());
+
+            assert!(msa_and_records
+                .mutator_set_accumulator
+                .can_remove(&removal_record));
+
+            // Remove one element from the chunk dictionary and confirm failure.
+            removal_record.target_chunks.dictionary.pop();
+
+            assert!(!msa_and_records
+                .mutator_set_accumulator
+                .can_remove(&removal_record));
+        }
+
+        #[proptest]
+        fn missing_chunk_dictionary_entry(
+            #[strategy(0usize..30)] _num_removals: usize,
+            #[strategy((#_num_removals as u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+            _removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+        ) {
+            let removal_records = msa_and_records.unpacked_removal_records();
+            for rr in &removal_records {
+                assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+            }
+
+            // Filter out removal records that have non-empty chunk
+            // dictionaries since they are required for this negative test.
+            let mut removal_records = removal_records
+                .into_iter()
+                .filter(|rr| !rr.target_chunks.dictionary.is_empty())
+                .collect_vec();
+
+            // Remove one element from the chunk dictionary and confirm failure.
+            for rr in &mut removal_records {
+                rr.target_chunks.dictionary.pop();
+            }
+
+            for rr in &removal_records {
+                assert!(!msa_and_records.mutator_set_accumulator.can_remove(rr));
+            }
+        }
+
+        #[proptest]
+        fn can_remove_agrees_with_update_result(
+            #[strategy(0usize..30)] _num_removals: usize,
+            #[strategy((#_num_removals as u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+            _removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+        ) {
+            let removal_records = msa_and_records.unpacked_removal_records();
+            for rr in &removal_records {
+                assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+            }
+
+            let original_msa = msa_and_records.mutator_set_accumulator;
+            for rr in removal_records {
+                let mut mutated_msa = original_msa.clone();
+                let as_msu = MutatorSetUpdate::new(vec![rr.clone()], vec![]);
+                assert!(as_msu.apply_to_accumulator(&mut mutated_msa).is_ok());
+                assert!(
+                    !mutated_msa.can_remove(&rr),
+                    "Can remove must return false after RR has been applied"
+                );
+            }
+        }
+    }
 
     #[test]
     fn active_window_chunk_interval_unit_test() {
