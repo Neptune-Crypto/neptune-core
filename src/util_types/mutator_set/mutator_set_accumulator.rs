@@ -134,8 +134,13 @@ impl MutatorSetAccumulator {
         )
     }
 
-    /// Remove a record and return the chunks that have been updated in this process,
-    /// after applying the update. Does not mutate the removal record.
+    /// Remove a record and return the chunks that have been updated in this
+    /// process, after applying the update. Does not mutate the removal record.
+    ///
+    /// It's the callers responsibility to call `can_remove` before invocing
+    /// this function, as the chunks are read from the removal records, that
+    /// must thus be valid and synced to the current state of the mutator set.
+    /// Otherwise, the mutator set will end up in an invalid state.
     pub fn remove_helper(&mut self, removal_record: &RemovalRecord) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index();
         let active_window_start = u128::from(batch_index) * u128::from(CHUNK_SIZE);
@@ -145,11 +150,12 @@ impl MutatorSetAccumulator {
         let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
             removal_record.get_chunkidx_to_indices_dict();
 
-        for (chunk_index, indices) in chunkindices_to_indices_dict {
+        for (chunk_index, absolute_indices) in chunkindices_to_indices_dict {
             if chunk_index >= batch_index {
                 // index is in the active part, so insert it in the active part of the Bloom filter
-                for index in indices {
-                    let relative_index = (index - active_window_start) as u32;
+                for index in absolute_indices {
+                    let relative_index = u32::try_from(index - active_window_start)
+                        .expect("Relative index for active window must be valid u32");
                     self.swbf_active.insert(relative_index);
                 }
 
@@ -169,7 +175,7 @@ impl MutatorSetAccumulator {
                         removal_record
                     )
                 });
-            for index in indices {
+            for index in absolute_indices {
                 let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
                 relevant_chunk.1.insert(relative_index);
             }
@@ -208,10 +214,10 @@ impl MutatorSetAccumulator {
             return false;
         }
 
+        let swbfi_num_leafs = self.get_batch_index();
+        let active_window_start = u128::from(swbfi_num_leafs) * u128::from(CHUNK_SIZE);
         for inserted_index in removal_record.absolute_indices.to_vec() {
             // determine if inserted index lives in active window
-            let swbfi_num_leafs = self.get_batch_index();
-            let active_window_start = u128::from(swbfi_num_leafs) * u128::from(CHUNK_SIZE);
             if inserted_index < active_window_start {
                 let inserted_index_chunkidx = (inserted_index / u128::from(CHUNK_SIZE)) as u64;
                 let (_mmr_mp, chunk) = removal_record
@@ -540,8 +546,11 @@ mod tests {
     use crate::util_types::test_shared::mutator_set::*;
 
     mod can_remove {
+        use proptest::arbitrary::Arbitrary;
         use proptest::collection::vec;
+        use proptest::test_runner::TestRunner;
         use proptest_arbitrary_interop::arb;
+        use rand::rng;
 
         use super::*;
         use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -586,20 +595,45 @@ mod tests {
                 assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
             }
 
-            // Filter out removal records that have non-empty chunk
-            // dictionaries since they are required for this negative test.
-            let mut removal_records = removal_records
-                .into_iter()
-                .filter(|rr| !rr.target_chunks.dictionary.is_empty())
-                .collect_vec();
-
             // Remove one element from the chunk dictionary and confirm failure.
-            for rr in &mut removal_records {
-                rr.target_chunks.dictionary.pop();
+            for rr in removal_records {
+                for i in 0..rr.target_chunks.dictionary.len() {
+                    let mut bad = rr.clone();
+                    bad.target_chunks.dictionary.remove(i);
+                    assert!(!msa_and_records.mutator_set_accumulator.can_remove(&bad));
+                }
             }
+        }
 
-            for rr in &removal_records {
-                assert!(!msa_and_records.mutator_set_accumulator.can_remove(rr));
+        #[test]
+        fn can_remove_false_when_already_removed_small_aocl() {
+            // Verify that `can_remove` always returns false when the item has
+            // already been removed. Do this for AOCL leaf count from 1 to ..
+            let mut test_runner = TestRunner::deterministic();
+
+            let mut rng = rng();
+            for num_leafs in 1..=(3 * BATCH_SIZE as usize) {
+                let msa_and_records = MsaAndRecords::arbitrary_with((
+                    vec![(rng.random(), rng.random(), Digest::default()); num_leafs],
+                    num_leafs as u64,
+                ))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+
+                let removal_records = msa_and_records.unpacked_removal_records();
+                for rr in &removal_records {
+                    assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+                }
+
+                for rr in removal_records {
+                    let mut mutated_msa = msa_and_records.mutator_set_accumulator.clone();
+                    mutated_msa.remove(&rr);
+                    assert!(
+                        !mutated_msa.can_remove(&rr),
+                        "Can remove must return false after RR has been applied"
+                    );
+                }
             }
         }
 

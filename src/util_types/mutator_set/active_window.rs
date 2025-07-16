@@ -109,6 +109,9 @@ impl ActiveWindow {
         self.sbf.sort();
     }
 
+    /// # Panics
+    ///
+    /// - if the index is not less than window size
     pub fn insert(&mut self, index: u32) {
         assert!(
             index < WINDOW_SIZE,
