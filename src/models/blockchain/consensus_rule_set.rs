@@ -1,8 +1,5 @@
 use strum_macros::EnumIter;
 
-use super::block::BLOCK_HEIGHT_HF_1;
-use super::block::BLOCK_HEIGHT_HF_2_MAINNET;
-use super::block::BLOCK_HEIGHT_HF_2_NOT_MAINNET;
 use super::block::MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1;
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
@@ -63,14 +60,11 @@ impl ConsensusRuleSet {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::hash::Hash;
 
     use itertools::Itertools;
-    use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use tasm_lib::prelude::Tip5;
     use tracing_test::traced_test;
 
     use crate::api::export::GlobalStateLock;
@@ -88,25 +82,18 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+    use crate::config_models::cli_args;
     use crate::mine_loop::compose_block_helper;
-    use crate::mine_loop::create_block_transaction;
     use crate::mine_loop::create_block_transaction_from;
     use crate::mine_loop::TxMergeOrigin;
+    use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::consensus_rule_set;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
     use crate::tests::tokio_runtime;
     use crate::triton_vm_job_queue::vm_job_queue;
-    use crate::{
-        config_models::cli_args,
-        models::{
-            blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness,
-            state::wallet::wallet_entropy::WalletEntropy,
-        },
-        tests::shared::globalstate::mock_genesis_global_state_with_block,
-    };
 
     use super::*;
 
@@ -227,7 +214,7 @@ pub(crate) mod tests {
 
     #[traced_test]
     #[test]
-    fn test_activation_of_hard_fork_2() {
+    fn new_blocks_at_block_height_10_000() {
         // We want to use the following block primitive witness generator (which
         // uses async code on the inside) in combination with async code. We
         // make this test function async because we would be entering into the
@@ -235,16 +222,16 @@ pub(crate) mod tests {
         // witness once, in this synchronous wrapper, and continue
         // asynchronously with the helper function.
 
-        let init_block_heigth = BLOCK_HEIGHT_HF_2_MAINNET.checked_sub(8).unwrap();
+        let init_block_heigth = BlockHeight::from(10_000u64);
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height(init_block_heigth);
 
-        tokio_runtime().block_on(test_activation_of_hard_fork_2_continue_async(bpw));
+        tokio_runtime().block_on(new_blocks_at_block_height_10_000_async(bpw));
     }
 
-    async fn test_activation_of_hard_fork_2_continue_async(
+    async fn new_blocks_at_block_height_10_000_async(
         block_primitive_witness: BlockPrimitiveWitness,
     ) {
-        // 1. generate state synced to height HF2-8.
+        // 1. generate state synced to height
         let mut rng = StdRng::seed_from_u64(55512345);
         let network = Network::Main;
         let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
@@ -256,25 +243,20 @@ pub(crate) mod tests {
             ..Default::default()
         };
 
-        let (fake_genesis, block_minus8) =
+        let (fake_genesis, block_10_000) =
             Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness).await;
-        let mut now = block_minus8.header().timestamp;
-        assert!(block_minus8.is_valid(&fake_genesis, now, network).await);
+        let mut now = block_10_000.header().timestamp;
+        assert!(block_10_000.is_valid(&fake_genesis, now, network).await);
 
         let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
-        bob.set_new_tip(block_minus8.clone()).await.unwrap();
+        bob.set_new_tip(block_10_000.clone()).await.unwrap();
 
-        let expected_block_height = BLOCK_HEIGHT_HF_2_MAINNET.checked_sub(8).unwrap();
         let observed_block_height = bob.lock_guard().await.chain.light_state().header().height;
-        assert_eq!(
-            expected_block_height,
-            observed_block_height,
-            "Expected block height {expected_block_height} must match observed {observed_block_height}");
-        assert_eq!(expected_block_height, block_minus8.header().height);
+        assert_eq!(BlockHeight::from(10_000u64), observed_block_height,);
 
-        // 2. get a positive balance, by mining. (HF2-3)
+        // 2. get a positive balance, by mining.
         let blocks_to_mine = 5;
-        let mut predecessor = block_minus8;
+        let mut predecessor = block_10_000;
         for _ in 0..blocks_to_mine {
             now = now + Timestamp::hours(1);
             let (next_block, expected_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
@@ -282,18 +264,14 @@ pub(crate) mod tests {
 
             assert!(next_block.is_valid(&predecessor, now, network).await);
 
-            // TODO: Assert that HardFork1 consensus rules are followed for mined block.
             bob.set_new_self_composed_tip(next_block.clone(), expected_composer_utxos)
                 .await
                 .unwrap();
             predecessor = next_block;
         }
 
-        let hopefully_minus_3 = bob.lock_guard().await.chain.light_state().header().height;
-        assert_eq!(
-            BLOCK_HEIGHT_HF_2_MAINNET.checked_sub(3).unwrap(),
-            hopefully_minus_3
-        );
+        let hopefully_plus_5 = bob.lock_guard().await.chain.light_state().header().height;
+        assert_eq!(BlockHeight::from(10_005u64), hopefully_plus_5);
         assert!(
             bob.api()
                 .wallet()

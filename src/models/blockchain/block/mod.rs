@@ -70,19 +70,6 @@ use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
-/// Block height for 1st hardfork that increases block size limit to allow for
-/// more inputs per transaction. Specifies the 1st block under which the new
-/// rules apply.
-pub(crate) const BLOCK_HEIGHT_HF_1: BlockHeight = BlockHeight::new(BFieldElement::new(6_000));
-
-/// Specifies the 1st block under which the new rules apply.
-pub(crate) const BLOCK_HEIGHT_HF_2_MAINNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(16_000));
-
-/// Specifies the 1st block under which the new rules apply.
-pub(crate) const BLOCK_HEIGHT_HF_2_NOT_MAINNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(1000));
-
 /// With removal records only represented by their absolute index set, the block
 /// size limit of 1.000.000 `BFieldElement`s allows for a "balanced" block
 /// (equal number of inputs and outputs, no public announcements) of ~10.000
