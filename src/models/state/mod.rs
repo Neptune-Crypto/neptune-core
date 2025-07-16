@@ -4410,6 +4410,8 @@ mod tests {
             );
         }
 
+        // TODO: Remove this ignore ASAP
+        #[ignore = "ignore until we have enough blocks on reboot"]
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn can_restore_from_real_mainnet_data_with_reorganizations() {
