@@ -36,7 +36,6 @@ use crate::tests::shared::Randomness;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// Create a block containing the supplied transaction kernel, starting from
@@ -105,8 +104,9 @@ pub(crate) fn invalid_block_with_transaction(
         .apply_to_accumulator(&mut next_mutator_set)
         .unwrap();
 
+    let transaction = BlockTransaction::upgrade(transaction);
     let body = BlockBody::new(
-        transaction.kernel,
+        transaction.kernel.into(),
         next_mutator_set,
         previous_block.body().lock_free_mmr_accumulator.clone(),
         block_mmr,
