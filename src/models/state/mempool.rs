@@ -212,7 +212,8 @@ impl Mempool {
     ///
     /// Returns true if transaction is already known *and* if the proof quality
     /// contained in the mempool is higher than the argument. Returns false if
-    /// the transaction represents a mutator set update.
+    /// the transaction represents a mutator set update, since the mempool
+    /// should probably be updated with this new (updated) transaction.
     pub(crate) fn contains_with_higher_proof_quality(
         &self,
         new_tx_txid: TransactionKernelId,
@@ -2416,6 +2417,7 @@ mod tests {
         use proptest::prop_assert;
         use proptest::prop_assert_eq;
         use proptest::prop_assert_ne;
+        use proptest::prop_assume;
         use test_strategy::proptest;
 
         use super::*;
@@ -2592,10 +2594,14 @@ mod tests {
             };
             let [mempool_tx, mined_tx] = pws;
 
+            // Build the mutator set update and skip test case if it's empty, as
+            // this test assumes an update to the mutator set takes place.
             let ms_update = MutatorSetUpdate::new(
                 mined_tx.kernel.inputs.clone(),
                 mined_tx.kernel.outputs.clone(),
             );
+            prop_assume!(!ms_update.is_empty());
+
             let updated_tx =
                 PrimitiveWitness::update_with_new_ms_data(mempool_tx.clone(), ms_update);
 
@@ -2633,7 +2639,7 @@ mod tests {
                     updated_tx.proof.proof_quality().unwrap(),
                     updated_tx.kernel.mutator_set_hash
                 ),
-                "Must return false since tx updated"
+                "Must return false since updated tx not yet known to mempool"
             );
             mempool.insert(updated_tx.clone(), upgrade_priority);
             let in_mempool_end = mempool.get(txid).map(|tx| tx.to_owned()).unwrap();
@@ -2645,7 +2651,7 @@ mod tests {
                     updated_tx.proof.proof_quality().unwrap(),
                     updated_tx.kernel.mutator_set_hash
                 ),
-                "Must return true after insertion"
+                "Must return true after insertion of updated tx"
             );
         }
     }
