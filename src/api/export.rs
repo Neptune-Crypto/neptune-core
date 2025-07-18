@@ -2,6 +2,7 @@
 //!
 //! They are exported here in one location for convenience.
 
+pub use crate::api::redeem::redemption_report::RedemptionReport;
 pub use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 pub use crate::api::wallet::WalletBalances;

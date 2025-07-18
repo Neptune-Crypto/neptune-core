@@ -46,6 +46,7 @@
 //! not to hold the lock too long or cause a deadlock situation.
 mod api_impl;
 pub mod export;
+pub mod redeem;
 pub mod regtest;
 pub mod tx_initiation;
 pub mod wallet;

@@ -230,6 +230,7 @@ impl Timestamp {
         parts.join(", ")
     }
 
+    /// Format the timestamp as e.g. "2018-01-26T18:30:09.453+00:00".
     pub fn standard_format(&self) -> String {
         let naive = NaiveDateTime::from_timestamp_millis(self.0.value().try_into().unwrap_or(0));
         let Some(naive) = naive else {
