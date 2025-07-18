@@ -1,3 +1,4 @@
+use std::fs;
 use std::io;
 use std::io::stdout;
 use std::io::Write;
@@ -23,6 +24,7 @@ use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use neptune_cash::models::state::wallet::address::KeyType;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::models::state::wallet::change_policy::ChangePolicy;
@@ -232,6 +234,38 @@ enum Command {
 
     /// retrieve size of mempool in bytes (in RAM)
     MempoolSize,
+
+    /// Produce a redemption claim for owned UTXOs.
+    ///
+    /// Arguments:
+    ///
+    ///  - `--directory` (optional): specifies where to store the redemption
+    ///    claims. If no directory is supplied, default value
+    ///    "redemption-claims/" is used. In either case, the directory will be
+    ///    created if it does not already exist; and it must be writable.
+    ///  - `--address` (optional): specifies a generation receiving address
+    ///    (`nolgam1*`) into which to consolidate redeemed UTXOs. If no address
+    ///    is supplied, the current node's premine receiving address will be
+    ///    used.
+    RedeemUtxos {
+        #[clap(long)]
+        directory: Option<PathBuf>,
+
+        #[clap(long)]
+        address: Option<String>,
+    },
+
+    /// Verify redemption claims.
+    ///
+    /// Arguments:
+    ///
+    ///  - `--directory` (optional): specifies where to find the redemption
+    ///    claims. If no directory is supplied, default value
+    ///    "redemption-claims/" will be used.
+    VerifyRedemption {
+        #[clap(long)]
+        directory: Option<PathBuf>,
+    },
 
     /******** BLOCKCHAIN STATISTICS ********/
     /// Show block intervals in milliseconds, in reverse chronological order.
@@ -923,6 +957,54 @@ async fn main() -> Result<()> {
             println!("{} bytes", size_in_bytes);
         }
 
+        Command::RedeemUtxos { directory, address } => {
+            let address = if address.is_none() {
+                None
+            } else {
+                let raw = address.unwrap();
+                match GenerationReceivingAddress::from_bech32m(&raw, Network::Main) {
+                    Ok(gra) => Some(gra),
+                    Err(e) => {
+                        println!("Failed to parse supplied address: {e}");
+                        return Ok(());
+                    }
+                }
+            };
+
+            let directory = match ensure_writable_dir(directory, "redemption-claims/".into()) {
+                Ok(d) => d,
+                Err(e) => {
+                    println!("Could not ensure writeable directory: {e}");
+                    return Ok(());
+                }
+            };
+
+            println!(
+                "Got directory ({}) and address ({}).",
+                directory.to_string_lossy(),
+                address
+                    .map(|gra| gra.to_bech32m(Network::Main).unwrap())
+                    .unwrap_or("None".to_string())
+            );
+        }
+
+        Command::VerifyRedemption { directory } => {
+            let default_directory: PathBuf = "redemption-claims/".into();
+            let directory = match ensure_readable_dir(directory.clone(), default_directory.clone())
+            {
+                Some(d) => d,
+                None => {
+                    println!(
+                        "Directory \"{}\" does not exist or is not readable.",
+                        directory.unwrap_or(default_directory).to_string_lossy()
+                    );
+                    return Ok(());
+                }
+            };
+
+            println!("Got directory ({}).", directory.to_string_lossy());
+        }
+
         /******** BLOCKCHAIN STATISTICS ********/
         Command::BlockIntervals {
             last_block,
@@ -1479,4 +1561,76 @@ impl FromStr for HexDigest {
 
         Ok(digest)
     }
+}
+
+/// Attempts to ensure the given directory (or the given default) exists and is
+/// writable.
+///
+/// - Returns the usable directory PathBuf if successful.
+/// - Otherwise, returns a relevant io::Error.
+///
+/// Credit to [https://www.perplexity.ai].
+pub fn ensure_writable_dir(path_opt: Option<PathBuf>, default: PathBuf) -> io::Result<PathBuf> {
+    // Use default directory if Option is None
+    let dir = path_opt.unwrap_or_else(|| default);
+
+    // Create the directory if it doesn't exist
+    if !dir.exists() {
+        if let Err(e) = fs::create_dir_all(&dir) {
+            return Err(io::Error::new(
+                e.kind(),
+                format!("Failed to create directory {:?}: {e}", dir),
+            ));
+        }
+    }
+
+    // Check that it's a directory
+    if !dir.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Path {:?} is not a directory", dir),
+        ));
+    }
+
+    // Check that it is writable by attempting to create a zero-byte file
+    let test_file = dir.join(".writetest");
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&test_file)
+    {
+        Ok(_) => {
+            // Clean up after test
+            let _ = fs::remove_file(&test_file);
+        }
+        Err(e) => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("Directory {:?} is not writable: {e}", dir),
+            ));
+        }
+    }
+
+    Ok(dir)
+}
+
+/// Attempts to ensure the given directory (or the given default) exists and is
+/// readable.
+pub fn ensure_readable_dir(path: Option<PathBuf>, default: PathBuf) -> Option<PathBuf> {
+    let dir = path.unwrap_or_else(|| default);
+
+    // Check if the directory exists
+    if !dir.exists() || !dir.is_dir() {
+        return None;
+    }
+
+    // Check if directory is readable by attempting to read its entries
+    let directory = match fs::read_dir(&dir) {
+        Ok(_) => dir,
+        Err(_) => {
+            return None;
+        }
+    };
+
+    Some(directory)
 }
