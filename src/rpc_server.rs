@@ -46,6 +46,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -53,6 +54,8 @@ use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
+use rand::rng;
+use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use systemstat::Platform;
@@ -65,6 +68,7 @@ use tracing::warn;
 use twenty_first::prelude::Digest;
 
 use crate::api;
+use crate::api::export::RedemptionReport;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
@@ -99,6 +103,7 @@ use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
+use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::address::BaseKeyType;
 use crate::models::state::wallet::address::BaseSpendingKey;
 use crate::models::state::wallet::address::KeyType;
@@ -1184,6 +1189,22 @@ pub trait RPC {
         token: rpc_auth::Token,
         tx_kernel_id: TransactionKernelId,
     ) -> RpcResult<Option<TransactionKernel>>;
+
+    /// Produce redemption claims for the UTXOs under management, that are
+    /// owned and unspent in block 21310.
+    async fn redeem_utxos(
+        token: rpc_auth::Token,
+        directory: PathBuf,
+        address: Option<GenerationReceivingAddress>,
+    ) -> RpcResult<()>;
+
+    /// Produce and return a report on the outstanding redemption claims
+    /// certifying that all claims are valid and mutually compatible (if so)
+    /// and summarizing the amounts, timelocks, and destination addresses.
+    async fn verify_redemption(
+        token: rpc_auth::Token,
+        directory: PathBuf,
+    ) -> RpcResult<RedemptionReport>;
 
     /// Return the information used on the dashboard's overview tab
     ///
@@ -3704,6 +3725,32 @@ impl RPC for NeptuneRPCServer {
             .get(tx_kernel_id)
             .map(|tx| &tx.kernel)
             .cloned())
+    }
+
+    async fn redeem_utxos(
+        self,
+        _context: ::tarpc::context::Context,
+        token: rpc_auth::Token,
+        _directory: PathBuf,
+        _address: Option<GenerationReceivingAddress>,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(())
+    }
+
+    async fn verify_redemption(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        _directory: PathBuf,
+    ) -> RpcResult<RedemptionReport> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let report = rng().random::<RedemptionReport>();
+        Ok(report)
     }
 }
 

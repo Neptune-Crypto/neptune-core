@@ -19,6 +19,7 @@ use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use neptune_cash::api::redeem::redemption_report::RedemptionReportDisplayFormat;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
@@ -262,9 +263,14 @@ enum Command {
     ///  - `--directory` (optional): specifies where to find the redemption
     ///    claims. If no directory is supplied, default value
     ///    "redemption-claims/" will be used.
+    ///  - `--format` (optional): specifies which format to use for the table
+    ///    in the report. Options are "reabable" (default) and "detailed".
     VerifyRedemption {
         #[clap(long)]
         directory: Option<PathBuf>,
+
+        #[clap(long, default_value_t)]
+        format: RedemptionReportDisplayFormat,
     },
 
     /******** BLOCKCHAIN STATISTICS ********/
@@ -988,7 +994,7 @@ async fn main() -> Result<()> {
             );
         }
 
-        Command::VerifyRedemption { directory } => {
+        Command::VerifyRedemption { directory, format } => {
             let default_directory: PathBuf = "redemption-claims/".into();
             let directory = match ensure_readable_dir(directory.clone(), default_directory.clone())
             {
@@ -1002,7 +1008,8 @@ async fn main() -> Result<()> {
                 }
             };
 
-            println!("Got directory ({}).", directory.to_string_lossy());
+            let report = client.verify_redemption(ctx, token, directory).await??;
+            println!("{}", report.render(format));
         }
 
         /******** BLOCKCHAIN STATISTICS ********/
