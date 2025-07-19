@@ -68,6 +68,7 @@
 pub mod builder;
 pub mod error;
 pub mod initiator;
+pub mod redeem;
 pub mod send;
 
 #[cfg(test)]

@@ -47,6 +47,11 @@ impl Api {
         self.global_state_lock.clone().into()
     }
 
+    // Retrieve a redeemer in immutable context.
+    pub fn redeemer(&self) -> api::tx_initiation::redeem::Redeemer {
+        self.global_state_lock.clone().into()
+    }
+
     /// retrieve a transaction sender in mutable context.
     pub fn tx_sender_mut(&mut self) -> api::tx_initiation::send::TransactionSender {
         self.global_state_lock.clone().into()

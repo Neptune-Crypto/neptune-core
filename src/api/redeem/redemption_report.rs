@@ -262,7 +262,7 @@ impl Distribution<RedemptionReport> for StandardUniform {
                 .take(len)
                 .map(char::from)
                 .collect();
-            format!("{}", name)
+            name.to_string()
         }
 
         let num_invalids = rng.random_range(0..5);

@@ -3731,13 +3731,19 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: ::tarpc::context::Context,
         token: rpc_auth::Token,
-        _directory: PathBuf,
-        _address: Option<GenerationReceivingAddress>,
+        directory: PathBuf,
+        address: Option<GenerationReceivingAddress>,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(())
+        // delta-time to expire time-locks
+        let four_years = Timestamp::years(4);
+        Ok(self.state.api().redeemer().start_redeeming_utxos(
+            directory,
+            address,
+            Timestamp::now() + four_years,
+        )?)
     }
 
     async fn verify_redemption(
@@ -3755,6 +3761,8 @@ impl RPC for NeptuneRPCServer {
 }
 
 pub mod error {
+    use crate::api::tx_initiation::redeem::RedeemError;
+
     use super::*;
 
     /// enumerates possible rpc api errors
@@ -3793,6 +3801,9 @@ pub mod error {
 
         #[error("claim error: {0}")]
         ClaimError(String),
+
+        #[error("redeem error: {0}")]
+        RedeemError(String),
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -3827,6 +3838,12 @@ pub mod error {
 
     impl From<ClaimError> for RpcError {
         fn from(err: ClaimError) -> Self {
+            RpcError::ClaimError(err.to_string())
+        }
+    }
+
+    impl From<RedeemError> for RpcError {
+        fn from(err: RedeemError) -> Self {
             RpcError::ClaimError(err.to_string())
         }
     }

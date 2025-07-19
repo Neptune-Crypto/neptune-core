@@ -526,7 +526,7 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
     blocks
 }
 
-mod tests {
+pub(crate) mod tests {
     use macro_rules_attr::apply;
 
     use crate::tests::shared_tokio_runtime;
