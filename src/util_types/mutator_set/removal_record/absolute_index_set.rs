@@ -113,7 +113,7 @@ impl AbsoluteIndexSet {
             .unwrap();
 
         Self {
-            minimum: (minimum as u128) + batch_offset,
+            minimum: u128::from(minimum) + batch_offset,
             distances,
         }
     }
@@ -127,7 +127,7 @@ impl AbsoluteIndexSet {
         // sets. Malicious absolute index sets will not have a valid proof, so
         // there is no risk of applying such objects to the mutator set.
         self.distances
-            .map(|x| (x as u128).saturating_add(self.minimum))
+            .map(|x| u128::from(x).saturating_add(self.minimum))
     }
 
     /// Split the [`AbsoluteIndexSet`] into two parts, one for chunks in the

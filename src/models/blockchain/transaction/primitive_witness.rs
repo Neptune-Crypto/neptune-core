@@ -25,7 +25,6 @@ use crate::api::export::TxInputList;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::type_scripts::known_type_scripts;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
-use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;

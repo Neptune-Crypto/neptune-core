@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::sync::OnceLock;
 
 use tasm_lib::twenty_first::prelude::Mmr;
@@ -9,7 +8,6 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;

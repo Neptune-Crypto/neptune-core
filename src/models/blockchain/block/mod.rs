@@ -771,26 +771,14 @@ impl Block {
         };
 
         // 1.d)
+        // Some later checks rely on this one to not panic. At least `can_remove`.
         if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
             return Err(BlockValidationError::ProofValidity);
-        }
-
-        // 1.e)
-        if self.size() > consensus_rule_set.max_block_size() {
-            return Err(BlockValidationError::MaxSize);
         }
 
         // 2.a)
         let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
             .map_err(BlockValidationError::from)?;
-
-        // 2.b)
-        let msa_before = previous_block.mutator_set_accumulator_after()?;
-        for removal_record in &inputs {
-            if !msa_before.can_remove(removal_record) {
-                return Err(BlockValidationError::RemovalRecordsValid);
-            }
-        }
 
         // 2.c)
         let mut absolute_index_sets = inputs
@@ -803,46 +791,15 @@ impl Block {
             return Err(BlockValidationError::RemovalRecordsUnique);
         }
 
-        let mutator_set_update = MutatorSetUpdate::new(
-            inputs.clone(),
-            self.body().transaction_kernel.outputs.clone(),
-        );
-        let mut msa = msa_before;
-        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
-
-        // 2.d)
-        if ms_update_result.is_err() {
-            return Err(BlockValidationError::MutatorSetUpdatePossible);
-        };
-
-        // 2.e)
-        if msa.hash() != self.body().mutator_set_accumulator.hash() {
-            return Err(BlockValidationError::MutatorSetUpdateIntegral);
+        // 2.i)
+        let fee = self.kernel.body.transaction_kernel.fee;
+        if fee.is_negative() {
+            return Err(BlockValidationError::NegativeFee);
         }
 
         // 2.f)
         if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
             return Err(BlockValidationError::TransactionTimestamp);
-        }
-
-        let block_subsidy = Self::block_subsidy(self.kernel.header.height);
-        let coinbase = self.kernel.body.transaction_kernel.coinbase;
-        if let Some(coinbase) = coinbase {
-            // 2.g)
-            if coinbase > block_subsidy {
-                return Err(BlockValidationError::CoinbaseTooBig);
-            }
-
-            // 2.h)
-            if coinbase.is_negative() {
-                return Err(BlockValidationError::CoinbaseTooSmall);
-            }
-        }
-
-        // 2.i)
-        let fee = self.kernel.body.transaction_kernel.fee;
-        if fee.is_negative() {
-            return Err(BlockValidationError::NegativeFee);
         }
 
         // 2.j)
@@ -867,6 +824,48 @@ impl Block {
             .is_some_and(|max| self.body().transaction_kernel.public_announcements.len() > max)
         {
             return Err(BlockValidationError::TooManyPublicAnnouncements);
+        }
+
+        if let Some(coinbase) = self.kernel.body.transaction_kernel.coinbase {
+            // 2.h)
+            if coinbase.is_negative() {
+                return Err(BlockValidationError::CoinbaseTooSmall);
+            }
+
+            // 2.g)
+            if coinbase > Self::block_subsidy(self.kernel.header.height) {
+                return Err(BlockValidationError::CoinbaseTooBig);
+            }
+        }
+
+        // 1.e)
+        if self.size() > consensus_rule_set.max_block_size() {
+            return Err(BlockValidationError::MaxSize);
+        }
+
+        // 2.b)
+        let msa_before = previous_block.mutator_set_accumulator_after()?;
+        for removal_record in &inputs {
+            if !msa_before.can_remove(removal_record) {
+                return Err(BlockValidationError::RemovalRecordsValid);
+            }
+        }
+
+        let mutator_set_update = MutatorSetUpdate::new(
+            inputs.clone(),
+            self.body().transaction_kernel.outputs.clone(),
+        );
+        let mut msa = msa_before;
+        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
+
+        // 2.d)
+        if ms_update_result.is_err() {
+            return Err(BlockValidationError::MutatorSetUpdatePossible);
+        };
+
+        // 2.e)
+        if msa.hash() != self.body().mutator_set_accumulator.hash() {
+            return Err(BlockValidationError::MutatorSetUpdateIntegral);
         }
 
         Ok(())
