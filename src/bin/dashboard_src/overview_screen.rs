@@ -13,7 +13,6 @@ use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::state::mining_status::MiningStatus;
 use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
-use neptune_cash::prelude::twenty_first;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Margin;
