@@ -22,9 +22,9 @@ use super::receiving_address::ReceivingAddress;
 use super::symmetric_key;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
