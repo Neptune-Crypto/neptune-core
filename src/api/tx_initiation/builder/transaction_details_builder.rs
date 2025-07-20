@@ -10,6 +10,7 @@
 //! see [builder](super) for examples of using the builders together.
 use std::sync::Arc;
 
+use itertools::Itertools;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
@@ -78,19 +79,23 @@ impl TransactionDetailsBuilder {
         self
     }
 
-    /// Adds a single public announcement.
+    /// adds a list of outputs.  See [TxOutputListBuilder](super::tx_output_list_builder::TxOutputListBuilder)
+    pub fn outputs(mut self, mut tx_output_list: TxOutputList) -> Self {
+        self.tx_outputs.append(&mut tx_output_list);
+        self
+    }
+
+    /// Add many public announcements.
     ///
     /// Use this method for public announcements that are *not* encrypted UTXO
     /// notifications. The encrypted UTXO notifications are generated on the fly
     /// at a later stage.
-    pub fn public_announcement(mut self, public_announcement: PublicAnnouncement) -> Self {
-        self.public_announcements.push(public_announcement);
-        self
-    }
-
-    /// adds a list of outputs.  See [TxOutputListBuilder](super::tx_output_list_builder::TxOutputListBuilder)
-    pub fn outputs(mut self, mut tx_output_list: TxOutputList) -> Self {
-        self.tx_outputs.append(&mut tx_output_list);
+    pub fn public_announcements<Iter: IntoIterator<Item = PublicAnnouncement>>(
+        mut self,
+        public_announcements: Iter,
+    ) -> Self {
+        self.public_announcements
+            .append(&mut public_announcements.into_iter().collect_vec());
         self
     }
 
