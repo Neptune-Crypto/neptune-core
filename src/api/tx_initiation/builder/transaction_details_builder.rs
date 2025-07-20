@@ -17,6 +17,7 @@ use tasm_lib::prelude::Digest;
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::lock_script::LockScript;
+use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -40,6 +41,7 @@ use crate::WalletState;
 pub struct TransactionDetailsBuilder {
     tx_inputs: TxInputList,
     tx_outputs: TxOutputList,
+    public_announcements: Vec<PublicAnnouncement>,
     fee: NativeCurrencyAmount,
     coinbase: Option<NativeCurrencyAmount>,
     change_policy: ChangePolicy,
@@ -73,6 +75,16 @@ impl TransactionDetailsBuilder {
     /// adds an output
     pub fn output(mut self, tx_output: TxOutput) -> Self {
         self.tx_outputs.push(tx_output);
+        self
+    }
+
+    /// Adds a single public announcement.
+    ///
+    /// Use this method for public announcements that are *not* encrypted UTXO
+    /// notifications. The encrypted UTXO notifications are generated on the fly
+    /// at a later stage.
+    pub fn public_announcement(mut self, public_announcement: PublicAnnouncement) -> Self {
+        self.public_announcements.push(public_announcement);
         self
     }
 
@@ -251,7 +263,7 @@ impl TransactionDetailsBuilder {
             state_lock.tip().await
         };
 
-        Ok(TransactionDetails::new(
+        let transaction_details = TransactionDetails::new(
             tx_inputs,
             tx_outputs,
             fee,
@@ -261,7 +273,10 @@ impl TransactionDetailsBuilder {
                 .mutator_set_accumulator_after()
                 .expect("Block from state must have mutator set after"),
             state_lock.cli().network,
-        ))
+        )
+        .with_public_announcements(self.public_announcements);
+
+        Ok(transaction_details)
     }
 
     // ##multicoin## : should probably accept a Coin and CoinAmount arg?
