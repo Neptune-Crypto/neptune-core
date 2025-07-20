@@ -26,8 +26,8 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
 

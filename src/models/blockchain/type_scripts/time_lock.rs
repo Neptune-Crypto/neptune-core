@@ -694,8 +694,8 @@ pub mod neptune_arbitrary {
 
     use super::super::native_currency_amount::NativeCurrencyAmount;
     use super::*;
-    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 
     impl Arbitrary for TimeLockWitness {
         /// Parameters are:
