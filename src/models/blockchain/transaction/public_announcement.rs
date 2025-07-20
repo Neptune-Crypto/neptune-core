@@ -10,12 +10,13 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-/// represents arbitrary data that can be stored in a transaction on the public blockchain
+/// Represents arbitrary data that can be stored in a transaction on the public
+/// blockchain.
 ///
-/// initially these are used for transmitting encrypted secrets necessary
-/// for a utxo recipient to identify and claim it.
+/// These are typically used for transmitting encrypted UTXO notifications, so
+/// that a recipient can identify and claim the UTXO.
 ///
-/// See [Transaction]
+/// See [Transaction](super::Transaction).
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, TasmObject,
 )]
