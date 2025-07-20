@@ -13,6 +13,7 @@ use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 pub mod lock_script;
 pub mod primitive_witness;
+pub mod public_announcement;
 pub mod transaction_kernel;
 pub mod transaction_proof;
 pub mod utxo;
@@ -20,19 +21,15 @@ pub mod validity;
 
 use anyhow::ensure;
 use anyhow::Result;
-#[cfg(any(test, feature = "arbitrary-impls"))]
-use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tracing::info;
 pub(crate) use transaction_proof::TransactionProof;
-use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use validity::proof_collection::ProofCollection;
 use validity::single_proof::SingleProof;
@@ -47,26 +44,6 @@ use self::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::proof::Claim;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-
-/// represents arbitrary data that can be stored in a transaction on the public blockchain
-///
-/// initially these are used for transmitting encrypted secrets necessary
-/// for a utxo recipient to identify and claim it.
-///
-/// See [Transaction]
-#[derive(
-    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, TasmObject,
-)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
-pub struct PublicAnnouncement {
-    pub message: Vec<BFieldElement>,
-}
-
-impl PublicAnnouncement {
-    pub fn new(message: Vec<BFieldElement>) -> Self {
-        Self { message }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
