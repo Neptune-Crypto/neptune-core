@@ -424,6 +424,173 @@ impl GenerationReceivingAddress {
     }
 }
 
+pub(crate) mod public_key_encoding {
+    use itertools::Itertools;
+    use rand::rng;
+    use rand::Rng;
+    use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm::prelude::BFieldCodec;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::twenty_first::error::BFieldCodecError;
+    use tasm_lib::twenty_first::math::lattice;
+
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+
+    fn public_key_static_length() -> usize {
+        let mut rng = rng();
+        let (_, public_key) = lattice::kem::keygen(rng.random());
+        encode_public_key(&public_key).len()
+    }
+
+    pub(super) fn encode_public_key(public_key: &lattice::kem::PublicKey) -> Vec<BFieldElement> {
+        let bytes = bincode::serialize(public_key).unwrap();
+        let mut bfes = vec![];
+        for chunk in bytes.chunks(7) {
+            let padded_chunk = chunk.iter().copied().pad_using(8, |_| 0u8).collect_vec();
+            let integer = u64::from_le_bytes(padded_chunk.try_into().unwrap());
+            bfes.push(BFieldElement::new(integer));
+        }
+        bfes
+    }
+
+    pub(super) fn try_decode_public_key(
+        unparsed: &[BFieldElement],
+    ) -> Result<lattice::kem::PublicKey, BFieldCodecError> {
+        let mut bytes = vec![];
+        for bfe in unparsed {
+            let array = bfe.value().to_le_bytes();
+            (array[7] == 0)
+                .then_some(true)
+                .ok_or(BFieldCodecError::ElementOutOfRange)?;
+            bytes.append(&mut array[0..7].to_vec());
+        }
+        bincode::deserialize(&bytes).map_err(|e| BFieldCodecError::InnerDecodingFailure(e))
+    }
+
+    impl BFieldCodec for GenerationReceivingAddress {
+        type Error = BFieldCodecError;
+
+        fn decode(sequence: &[BFieldElement]) -> std::result::Result<Box<Self>, Self::Error> {
+            let (unparsed_lock_after_image, remainder) = sequence
+                .split_at_checked(Digest::static_length().unwrap())
+                .ok_or(BFieldCodecError::SequenceTooShort)?;
+            let lock_after_image = *Digest::decode(unparsed_lock_after_image)
+                .map_err(|e| BFieldCodecError::InnerDecodingFailure(Box::new(e)))?;
+
+            let (unparsed_privacy_digest, remainder) = remainder
+                .split_at_checked(Digest::static_length().unwrap())
+                .ok_or(BFieldCodecError::SequenceTooShort)?;
+            let privacy_digest = *Digest::decode(unparsed_privacy_digest)
+                .map_err(|e| BFieldCodecError::InnerDecodingFailure(Box::new(e)))?;
+
+            let (unparsed_public_key, remainder) = remainder
+                .split_at_checked(public_key_static_length())
+                .ok_or(BFieldCodecError::SequenceTooShort)?;
+            let public_key = try_decode_public_key(unparsed_public_key)?;
+
+            let (unparsed_receiver_identifier, remainder) = remainder
+                .split_at_checked(BFieldElement::static_length().unwrap())
+                .ok_or(BFieldCodecError::SequenceTooShort)?;
+            let receiver_identifier = *BFieldElement::decode(unparsed_receiver_identifier)?;
+
+            remainder
+                .is_empty()
+                .then_some(true)
+                .ok_or_else(|| BFieldCodecError::SequenceTooLong)?;
+
+            Ok(Box::new(Self {
+                receiver_identifier,
+                encryption_key: public_key,
+                privacy_digest,
+                lock_after_image,
+            }))
+        }
+
+        fn encode(&self) -> Vec<BFieldElement> {
+            [
+                // self.lock_after_image
+                self.lock_after_image.encode(),
+                // self.privacy_digest
+                self.privacy_digest.encode(),
+                // self.encryption_key
+                encode_public_key(&self.encryption_key),
+                // self.receiver_identifier
+                self.receiver_identifier.encode(),
+            ]
+            .concat()
+        }
+
+        fn static_length() -> Option<usize> {
+            Some(
+                [
+                    // self.receiver_identifier
+                    BFieldElement::static_length().unwrap(),
+                    // self.encryption_key
+                    public_key_static_length(),
+                    // self.privacy_digest
+                    Digest::static_length().unwrap(),
+                    // self.lock_after_image
+                    Digest::static_length().unwrap(),
+                ]
+                .into_iter()
+                .sum(),
+            )
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use proptest::collection::vec;
+        use proptest::prop_assert_eq;
+        use proptest_arbitrary_interop::arb;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+        use test_strategy::proptest;
+
+        use super::*;
+
+        #[proptest]
+        fn try_decode_public_key_inverts_encode(#[strategy(arb())] seed: [u8; 32]) {
+            let (_, public_key) = lattice::kem::keygen(seed);
+            let as_bfes = encode_public_key(&public_key);
+            let as_public_key_again = try_decode_public_key(&as_bfes).unwrap();
+            prop_assert_eq!(public_key, as_public_key_again);
+        }
+
+        #[test]
+        fn try_decode_public_key_inverts_encode_zero_seed() {
+            let seed = [0u8; 32];
+            let (_, public_key) = lattice::kem::keygen(seed);
+            let as_bfes = encode_public_key(&public_key);
+            let as_public_key_again = try_decode_public_key(&as_bfes).unwrap();
+            assert_eq!(public_key, as_public_key_again);
+        }
+
+        #[proptest]
+        fn try_decode_public_key_cannot_crash(
+            #[strategy(vec(arb::<BFieldElement>(), 0..1000))] bfes: Vec<BFieldElement>,
+        ) {
+            let _ = try_decode_public_key(&bfes); // no crash
+        }
+
+        #[proptest]
+        fn decode_receiving_address_inverts_encode(#[strategy(arb())] seed: [u8; 32]) {
+            let mut rng = StdRng::from_seed(seed);
+            let receiving_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+            let as_bfes = receiving_address.encode();
+            let as_receiving_address_again = *GenerationReceivingAddress::decode(&as_bfes).unwrap();
+            prop_assert_eq!(receiving_address, as_receiving_address_again);
+        }
+
+        #[proptest]
+        fn decode_receiving_address_cannot_crash(
+            #[strategy(vec(arb::<BFieldElement>(), 0..1000))] bfes: Vec<BFieldElement>,
+        ) {
+            let _ = GenerationReceivingAddress::decode(&bfes); // no crash
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
