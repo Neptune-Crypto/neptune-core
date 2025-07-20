@@ -90,7 +90,7 @@ mod tests {
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;

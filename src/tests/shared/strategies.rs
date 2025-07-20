@@ -43,7 +43,7 @@ prop_compose! {
         inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict(), num_inputs),
         outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
         public_announcements in collection::vec(collection::vec(arb::<tasm_lib::triton_vm::prelude::BFieldElement>(), 10..59), num_public_announcements).prop_map(
-            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message|crate::models::blockchain::transaction::PublicAnnouncement{message}))
+            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message|crate::models::blockchain::transaction::public_announcement::PublicAnnouncement{message}))
         ),
         fee in arb::<NativeCurrencyAmount>(),
         coinbase in arb::<Option<NativeCurrencyAmount>>(),

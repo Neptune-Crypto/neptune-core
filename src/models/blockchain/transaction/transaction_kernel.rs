@@ -12,7 +12,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::prelude::Digest;
 
 use super::primitive_witness::PrimitiveWitness;
-use super::PublicAnnouncement;
+use super::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;

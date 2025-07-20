@@ -11,7 +11,7 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use super::SpendingKey;
 use crate::config_models::network::Network;
-use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::state::wallet::address::common::network_hrp_char;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 

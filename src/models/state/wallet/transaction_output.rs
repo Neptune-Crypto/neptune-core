@@ -10,7 +10,7 @@ use super::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;

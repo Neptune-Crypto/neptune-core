@@ -583,7 +583,7 @@ pub mod neptune_arbitrary {
     use proptest_arbitrary_interop::arb;
 
     use super::super::lock_script::LockScript;
-    use super::super::PublicAnnouncement;
+    use super::super::public_announcement::PublicAnnouncement;
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
@@ -1111,7 +1111,7 @@ mod tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
-    use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;

@@ -13,7 +13,7 @@ use super::symmetric_key;
 use super::KeyType;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 
