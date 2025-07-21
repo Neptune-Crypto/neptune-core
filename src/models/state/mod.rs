@@ -1035,6 +1035,7 @@ impl GlobalState {
             is_archival_node: self.chain.is_archival_node(),
             is_bootstrapper_node: self.cli().bootstrap,
             timestamp: SystemTime::now(),
+            extra_data: Default::default(),
         }
     }
 
