@@ -431,7 +431,10 @@ impl BlockProposalRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum PeerMessage {
-    Handshake(Box<(Vec<u8>, HandshakeData)>),
+    Handshake {
+        magic_value: [u8; 15],
+        data: Box<HandshakeData>,
+    },
     Block(Box<TransferBlock>),
     BlockNotificationRequest,
     BlockNotification(PeerBlockNotification),
@@ -471,7 +474,7 @@ pub(crate) enum PeerMessage {
 impl PeerMessage {
     pub fn get_type(&self) -> String {
         match self {
-            PeerMessage::Handshake(_) => "handshake",
+            PeerMessage::Handshake { .. } => "handshake",
             PeerMessage::Block(_) => "block",
             PeerMessage::BlockNotificationRequest => "block notification request",
             PeerMessage::BlockNotification(_) => "block notification",
@@ -498,7 +501,7 @@ impl PeerMessage {
 
     pub fn ignore_when_not_sync(&self) -> bool {
         match self {
-            PeerMessage::Handshake(_) => false,
+            PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
@@ -525,7 +528,7 @@ impl PeerMessage {
     /// Function to filter out messages that should not be handled while the client is syncing
     pub fn ignore_during_sync(&self) -> bool {
         match self {
-            PeerMessage::Handshake(_) => false,
+            PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => true,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,

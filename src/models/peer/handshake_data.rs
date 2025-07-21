@@ -12,7 +12,7 @@ pub(crate) type VersionString = ArrayString<U30>;
 
 /// Datastruct defining the handshake peers exchange when establishing a new
 /// connection.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct HandshakeData {
     pub tip_header: BlockHeader,
     pub listen_port: Option<u16>,
