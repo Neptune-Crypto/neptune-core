@@ -49,9 +49,10 @@ pub(crate) type InstanceId = u128;
 pub(crate) const SYNC_CHALLENGE_POW_WITNESS_LENGTH: usize = 10;
 pub(crate) const SYNC_CHALLENGE_NUM_BLOCK_PAIRS: usize = 10;
 
-trait Sanction {
+pub(crate) trait Sanction {
     fn severity(self) -> i32;
 }
+
 /// The reason for degrading a peer's standing
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum NegativePeerSanction {
@@ -69,7 +70,8 @@ pub enum NegativePeerSanction {
 
     FloodPeerListResponse,
     BlockRequestUnknownHeight,
-    // Be careful about using this too much as it's bad for log opportunities
+
+    // Be careful about using this too much as it's bad for log opportunities.
     InvalidMessage,
     NonMinedTransactionHasCoinbase,
     TooShortBlockBatch,
@@ -472,6 +474,7 @@ pub(crate) enum PeerMessage {
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),
+    // New variants must be added here at the bottom to be backwards compatible.
 }
 
 impl PeerMessage {

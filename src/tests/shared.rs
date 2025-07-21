@@ -85,6 +85,7 @@ pub enum MockError {
     WrongSend,
     UnexpectedSend,
     UnexpectedRead,
+    ReadError,
 }
 
 impl std::fmt::Display for MockError {
@@ -93,6 +94,7 @@ impl std::fmt::Display for MockError {
             MockError::WrongSend => write!(f, "WrongSend"),
             MockError::UnexpectedSend => write!(f, "UnexpectedSend"),
             MockError::UnexpectedRead => write!(f, "UnexpectedRead"),
+            MockError::ReadError => write!(f, "ReadError"),
         }
     }
 }
@@ -103,6 +105,10 @@ impl std::error::Error for MockError {}
 pub enum Action<Item> {
     Read(Item),
     Write(Item),
+
+    /// Simulates an error when reading the peer's message. Consider adding an
+    /// error type here to better simulate e.g. a deserialization error.
+    ReadError,
     // Todo: Some tests with these things
     // Wait(Duration),
     // ReadError(Option<Arc<io::Error>>),
@@ -145,13 +151,13 @@ impl<Item> stream::Stream for Mock<Item> {
     type Item = Result<Item, MockError>;
 
     fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(Action::Read(a)) = self.actions.pop() {
-            Poll::Ready(Some(Ok(a)))
-        } else {
+        match self.actions.pop() {
+            Some(Action::Read(a)) => Poll::Ready(Some(Ok(a))),
+            Some(Action::ReadError) => Poll::Ready(Some(Err(MockError::ReadError))),
             // Returning `Poll::Ready(None)` here would probably simulate better
             // a peer closing the connection. Otherwise, we have to close with a
             // `Bye` in all tests.
-            Poll::Ready(Some(Err(MockError::UnexpectedRead)))
+            _ => Poll::Ready(Some(Err(MockError::UnexpectedRead))),
         }
     }
 }
