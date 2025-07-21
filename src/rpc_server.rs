@@ -54,8 +54,6 @@ use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
-use rand::rng;
-use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use systemstat::Platform;
@@ -72,6 +70,8 @@ use crate::api::export::RedemptionReport;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use crate::api::tx_initiation::redeem::RedeemError;
+use crate::api::tx_initiation::redeem::RedemptionValidationError;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
@@ -3750,18 +3750,21 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-        _directory: PathBuf,
+        directory: PathBuf,
     ) -> RpcResult<RedemptionReport> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let report = rng().random::<RedemptionReport>();
-        Ok(report)
+        Ok(self
+            .state
+            .api()
+            .redeemer()
+            .validate_redemption(directory)
+            .await?)
     }
 }
 
 pub mod error {
-    use crate::api::tx_initiation::redeem::RedeemError;
 
     use super::*;
 
@@ -3804,6 +3807,9 @@ pub mod error {
 
         #[error("redeem error: {0}")]
         RedeemError(String),
+
+        #[error("redemption validation error: {0}")]
+        RedemptionValidationError(String),
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
@@ -3844,7 +3850,13 @@ pub mod error {
 
     impl From<RedeemError> for RpcError {
         fn from(err: RedeemError) -> Self {
-            RpcError::ClaimError(err.to_string())
+            RpcError::RedeemError(err.to_string())
+        }
+    }
+
+    impl From<RedemptionValidationError> for RpcError {
+        fn from(err: RedemptionValidationError) -> Self {
+            RpcError::RedemptionValidationError(err.to_string())
         }
     }
 

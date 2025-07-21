@@ -25,14 +25,18 @@ use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use thiserror::Error;
+use tokio::fs;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
 use crate::api::export::ChangePolicy;
 use crate::api::export::GlobalStateLock;
 use crate::api::export::NativeCurrencyAmount;
+use crate::api::export::Network;
+use crate::api::export::RedemptionReport;
 use crate::api::export::StateLock;
 use crate::api::export::Timestamp;
+use crate::api::export::Transaction;
 use crate::api::export::TransactionDetails;
 use crate::api::export::TransactionProofType;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
@@ -40,14 +44,20 @@ use crate::api::tx_initiation::builder::transaction_details_builder::Transaction
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::error::CreateTxError;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::triton_vm_job_queue::vm_job_queue;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 /// provides a redeem_utxos() method to produce the UTXO redemption transaction.
 #[derive(Debug, Clone)]
@@ -243,8 +253,9 @@ impl Redeemer {
         // Add plaintext output UTXOs as public announcements.
         let mut public_announcements = vec![];
         for tx_output in &tx_outputs {
+            let utxo_triple = UtxoTriple::from(tx_output.clone());
             let public_announcement = PublicAnnouncement {
-                message: tx_output.utxo().encode(),
+                message: utxo_triple.encode(),
             };
             public_announcements.push(public_announcement);
         }
@@ -354,4 +365,206 @@ impl Redeemer {
             path.to_string_lossy()
         );
     }
+
+    /// Validate many UTXO redemption claims. Verify that they are valid
+    /// transactions and mutually compatible. Produce a report.
+    pub async fn validate_redemption(
+        &self,
+        directory: PathBuf,
+    ) -> Result<RedemptionReport, RedemptionValidationError> {
+        // read claims from disk
+        let redemption_claims = Self::load_redemption_claims_from_directory(directory).await?;
+
+        // validate claims individually
+        let mut invalid_claims = vec![];
+        let network = Network::Main;
+        for (file_path, transaction) in &redemption_claims {
+            if !transaction.is_valid(network).await {
+                invalid_claims.push((file_path, transaction));
+            }
+        }
+        if !invalid_claims.is_empty() {
+            let file_names_of_invalid_claims = invalid_claims
+                .into_iter()
+                .map(|(file_path, _tx)| file_path)
+                .cloned()
+                .collect_vec();
+            return Err(RedemptionValidationError::InvalidClaims(
+                file_names_of_invalid_claims,
+            ));
+        }
+
+        // validate synchronization to current mutator set hash
+        let mut mutator_set_accumulator = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .map_err(|_e| RedemptionValidationError::InvalidChainState)?;
+        let mutator_set_hash = mutator_set_accumulator.hash();
+        let mut unsynced_claims = vec![];
+        for (file_path, transaction) in &redemption_claims {
+            if transaction.kernel.mutator_set_hash != mutator_set_hash {
+                unsynced_claims.push((file_path, transaction));
+            }
+        }
+        if !unsynced_claims.is_empty() {
+            let file_names_of_unsynced_claims = unsynced_claims
+                .into_iter()
+                .map(|(file_path, _tx)| file_path)
+                .cloned()
+                .collect_vec();
+            return Err(RedemptionValidationError::UnsyncedClaims(
+                file_names_of_unsynced_claims,
+            ));
+        }
+
+        // validate earliest possible AOCL leaf indices
+        let absolute_index_set_to_earliest_possible_aocl_leaf_index =
+            |absolute_index_set: AbsoluteIndexSet| {
+                let max_absolute_index = absolute_index_set.to_array().into_iter().max().unwrap();
+                let window_start = max_absolute_index.next_multiple_of(u128::from(CHUNK_SIZE))
+                    - u128::from(WINDOW_SIZE);
+                u64::try_from(window_start / u128::from(CHUNK_SIZE))
+                    .expect("mutator set arithmetic guarantees that AOCL indices are valid u64s")
+            };
+        let num_utxos_in_premine = Block::premine_utxos(network).len();
+        let mut all_removal_records = redemption_claims
+            .iter()
+            .flat_map(|(_fp, tx)| tx.kernel.inputs.clone())
+            .collect_vec();
+        for removal_record in &all_removal_records {
+            let earliest_possible_aocl_leaf_index =
+                absolute_index_set_to_earliest_possible_aocl_leaf_index(
+                    removal_record.absolute_indices,
+                );
+            if earliest_possible_aocl_leaf_index < u64::try_from(num_utxos_in_premine).unwrap() {
+                return Err(RedemptionValidationError::PotentialPremineClaim(
+                    earliest_possible_aocl_leaf_index,
+                ));
+            }
+        }
+
+        // validate mutual compatibility with mutator set
+        while let Some(removal_record) = all_removal_records.pop() {
+            if !mutator_set_accumulator.can_remove(&removal_record) {
+                return Err(RedemptionValidationError::MutuallyIncompatibleClaims);
+            }
+            RemovalRecord::batch_update_from_remove(
+                &mut all_removal_records.iter_mut().collect_vec(),
+                &removal_record,
+            );
+            mutator_set_accumulator.remove(&removal_record);
+        }
+
+        // parse claims; validate public announcements; produce report
+        let mut report = RedemptionReport::new();
+        for (file_path, transaction) in redemption_claims {
+            let mut utxo_triples = vec![];
+            let mut destination = None;
+            for (j, public_announcement) in
+                transaction.kernel.public_announcements.iter().enumerate()
+            {
+                let address_parse_result =
+                    GenerationReceivingAddress::decode(&public_announcement.message);
+                let utxo_parse_result = UtxoTriple::decode(&public_announcement.message);
+
+                if address_parse_result.is_err() && utxo_parse_result.is_err() {
+                    return Err(RedemptionValidationError::UnparsablePublicAnnouncement(
+                        file_path, j,
+                    ));
+                }
+
+                if let Ok(utxo_triple) = utxo_parse_result {
+                    if !transaction
+                        .kernel
+                        .outputs
+                        .contains(&utxo_triple.addition_record())
+                    {
+                        return Err(RedemptionValidationError::UtxoNotOutput(file_path, j));
+                    }
+                    utxo_triples.push(*utxo_triple);
+                }
+
+                if let Ok(address) = address_parse_result {
+                    destination = Some(*address);
+                }
+            }
+
+            let Some(destination) = destination else {
+                return Err(RedemptionValidationError::MissingDestinationAddress);
+            };
+
+            for utxo_triple in utxo_triples {
+                report.add_row(
+                    utxo_triple.utxo().get_native_currency_amount(),
+                    utxo_triple.utxo().release_date(),
+                    destination,
+                );
+            }
+        }
+
+        Ok(report)
+    }
+
+    async fn load_redemption_claims_from_directory(
+        dir: PathBuf,
+    ) -> Result<Vec<(PathBuf, Transaction)>, RedemptionValidationError> {
+        let mut transactions = Vec::new();
+        let mut rd = fs::read_dir(&dir)
+            .await
+            .map_err(RedemptionValidationError::ReadDir)?;
+        while let Some(entry) = rd
+            .next_entry()
+            .await
+            .map_err(RedemptionValidationError::ReadDir)?
+        {
+            let file_path = entry.path();
+            // skip directories
+            let metadata = fs::metadata(&file_path)
+                .await
+                .map_err(|e| RedemptionValidationError::FileRead(file_path.clone(), e))?;
+            if !metadata.is_file() {
+                continue;
+            }
+
+            let bytes = fs::read(&file_path)
+                .await
+                .map_err(|e| RedemptionValidationError::FileRead(file_path.clone(), e))?;
+
+            let transaction = bincode::deserialize::<Transaction>(&bytes)
+                .map_err(|e| RedemptionValidationError::Deserialize(file_path.clone(), e))?;
+
+            transactions.push((file_path, transaction));
+        }
+        Ok(transactions)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum RedemptionValidationError {
+    #[error("error reading directory: {0}")]
+    ReadDir(#[from] std::io::Error),
+    #[error("error reading file '{0}': {1}")]
+    FileRead(PathBuf, #[source] std::io::Error),
+    #[error("failed to deserialize file `{0}`: {1}")]
+    Deserialize(PathBuf, #[source] Box<bincode::ErrorKind>),
+    #[error("chain state is invalid: could not produce mutator set accumulator after")]
+    InvalidChainState,
+    #[error("invalid claims:\n{0:#?}")]
+    InvalidClaims(Vec<PathBuf>),
+    #[error("unsynced claims:\n{0:#?}")]
+    UnsyncedClaims(Vec<PathBuf>),
+    #[error("one or more claims are mutually incompatible")]
+    MutuallyIncompatibleClaims,
+    #[error("potential premine claim: lower bound on AOCL leaf index is {0} < num premine UTXOs")]
+    PotentialPremineClaim(u64),
+    #[error("public announcement {1} of {0} cannot be parsed as UTXO or address")]
+    UnparsablePublicAnnouncement(PathBuf, usize),
+    #[error("parsed UTXO of public announcement {1} of {0} is not present in transaction outputs")]
+    UtxoNotOutput(PathBuf, usize),
+    #[error("destination address is missing")]
+    MissingDestinationAddress,
 }

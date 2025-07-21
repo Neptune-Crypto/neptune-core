@@ -1,7 +1,4 @@
-use std::path::PathBuf;
-
 use itertools::Itertools;
-use rand::distr::Alphanumeric;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::rng;
@@ -34,6 +31,17 @@ pub struct RedemptionReportEntry {
 }
 
 impl RedemptionReportEntry {
+    fn new(
+        amount: NativeCurrencyAmount,
+        earliest_release_date: Option<Timestamp>,
+        address: GenerationReceivingAddress,
+    ) -> Self {
+        Self {
+            amount,
+            earliest_release_date,
+            address,
+        }
+    }
     fn headings() -> [String; 3] {
         ["amount", "earliest release date", "address"].map(|s| s.to_string())
     }
@@ -138,12 +146,24 @@ impl Distribution<RedemptionReportEntry> for StandardUniform {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedemptionReport {
-    invalids: Vec<PathBuf>,
-    conflicts: Vec<PathBuf>,
     table: Vec<RedemptionReportEntry>,
 }
 
 impl RedemptionReport {
+    pub fn new() -> Self {
+        Self { table: vec![] }
+    }
+
+    pub fn add_row(
+        &mut self,
+        amount: NativeCurrencyAmount,
+        release_date: Option<Timestamp>,
+        address: GenerationReceivingAddress,
+    ) {
+        self.table
+            .push(RedemptionReportEntry::new(amount, release_date, address));
+    }
+
     fn render_header(format: RedemptionReportDisplayFormat) -> String {
         let headings = RedemptionReportEntry::headings();
         let column_widths = RedemptionReportEntry::column_widths(format);
@@ -211,82 +231,19 @@ impl RedemptionReport {
         )
     }
 
-    fn render_invalids(&self) -> String {
-        if self.invalids.is_empty() {
-            "None.".to_string()
-        } else {
-            let mut s = "".to_string();
-            for invalid in &self.invalids {
-                s = format!("{s}{}\n", invalid.to_string_lossy());
-            }
-            s
-        }
-    }
-
-    fn render_conflicts(&self) -> String {
-        if self.conflicts.is_empty() {
-            "None.".to_string()
-        } else {
-            let mut s = "".to_string();
-            for conflict in &self.conflicts {
-                s = format!("{s}{}\n", conflict.to_string_lossy());
-            }
-            s
-        }
-    }
-
     pub fn render(&self, format: RedemptionReportDisplayFormat) -> String {
-        let invalids = format!("# Invalid\n\n{}\n\n", self.render_invalids(),);
-        let conflicts = format!("# Conflicts\n\n{}\n\n", self.render_conflicts());
-        let table = format!("# Table\n\n{}\n", self.render_table(format));
-
-        let mut s = "".to_string();
-        if !self.invalids.is_empty() {
-            s = format!("{s}{}", invalids);
-        }
-
-        if !self.conflicts.is_empty() {
-            s = format!("{s}{}", conflicts);
-        }
-
-        format!("{s}{}", table)
+        format!("# Table\n\n{}\n", self.render_table(format))
     }
 }
 
 impl Distribution<RedemptionReport> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> RedemptionReport {
-        pub fn random_filename<R: Rng + ?Sized>(rng: &mut R) -> String {
-            let len = rng.random_range(40..50);
-            let name: String = rng
-                .sample_iter(&Alphanumeric)
-                .take(len)
-                .map(char::from)
-                .collect();
-            name.to_string()
-        }
-
-        let num_invalids = rng.random_range(0..5);
-        let invalids = (0..num_invalids)
-            .map(|_| random_filename(rng))
-            .map(PathBuf::from)
-            .collect_vec();
-
-        let num_conflicts = rng.random_range(0..5);
-        let conflicts = (0..num_conflicts)
-            .map(|_| random_filename(rng))
-            .map(PathBuf::from)
-            .collect_vec();
-
         let num_rows = rng.random_range(0..25);
         let table = (0..num_rows)
             .map(|_| rng.random::<RedemptionReportEntry>())
             .collect_vec();
 
-        RedemptionReport {
-            invalids,
-            conflicts,
-            table,
-        }
+        RedemptionReport { table }
     }
 }
 
