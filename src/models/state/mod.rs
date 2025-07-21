@@ -2090,7 +2090,6 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -2309,6 +2308,8 @@ mod tests {
     }
 
     mod restore_monitored_utxo_data {
+        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
+
         use super::*;
 
         #[traced_test]
@@ -2817,11 +2818,12 @@ mod tests {
                             let sender_randomness: Digest = rng.random();
                             let receiver_preimage: Digest = rng.random();
 
-                            let addition_record = commit(
-                                Tip5::hash(&utxo),
+                            let utxo_triple = UtxoTriple {
+                                utxo: utxo.clone(),
                                 sender_randomness,
-                                receiver_preimage.hash(),
-                            );
+                                receiver_digest: receiver_preimage.hash(),
+                            };
+                            let addition_record = utxo_triple.addition_record();
                             outputs.push(addition_record);
 
                             new_spendable_utxos.push((utxo, sender_randomness, receiver_preimage));
@@ -2869,11 +2871,12 @@ mod tests {
                             if let Some((utxo, sender_randomness, receiver_preimage)) =
                                 new_spendable_utxos.iter().find(
                                     |(utxo, sender_randomness, receiver_preimage)| {
-                                        commit(
-                                            Tip5::hash(utxo),
-                                            *sender_randomness,
-                                            receiver_preimage.hash(),
-                                        ) == addition_record
+                                        let utxo_triple = UtxoTriple {
+                                            utxo: utxo.clone(),
+                                            sender_randomness: *sender_randomness,
+                                            receiver_digest: receiver_preimage.hash(),
+                                        };
+                                        utxo_triple.addition_record() == addition_record
                                     },
                                 )
                             {

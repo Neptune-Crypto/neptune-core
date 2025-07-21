@@ -104,8 +104,7 @@ mod tests {
     mod worker {
         use super::*;
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-        use crate::prelude::twenty_first::prelude::Tip5;
-        use crate::util_types::mutator_set::commit;
+        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 
         /// this tests the generate_public_announcement() and
         /// scan_for_announced_utxos() methods with a [SpendingKey]
@@ -124,11 +123,12 @@ mod tests {
             let sender_randomness: Digest = random();
 
             // 3. create an addition record to verify against later.
-            let expected_addition_record = commit(
-                Tip5::hash(&utxo),
+            let utxo_triple = UtxoTriple {
+                utxo: utxo.clone(),
                 sender_randomness,
-                key.to_address().privacy_digest(),
-            );
+                receiver_digest: key.to_address().privacy_digest(),
+            };
+            let expected_addition_record = utxo_triple.addition_record();
 
             // 4. create a mock tx with no inputs or outputs
             let mut mock_tx = make_mock_transaction(vec![], vec![]);

@@ -17,6 +17,7 @@ pub mod public_announcement;
 pub mod transaction_kernel;
 pub mod transaction_proof;
 pub mod utxo;
+pub(crate) mod utxo_triple;
 pub mod validity;
 
 use anyhow::ensure;
@@ -284,13 +285,13 @@ pub(crate) mod tests {
     use proptest::test_runner::TestRunner;
     use rand::random;
     use tasm_lib::prelude::Digest;
-    use tasm_lib::triton_vm::prelude::Tip5;
     use tests::primitive_witness::SaltedUtxos;
     use tests::utxo::Utxo;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::blocks::mock_block_from_transaction_and_msa;
@@ -298,7 +299,6 @@ pub(crate) mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl Transaction {
@@ -361,7 +361,12 @@ pub(crate) mod tests {
             LockScript::anyone_can_spend(),
             NativeCurrencyAmount::coins(42),
         );
-        let ar = commit(Tip5::hash(&output_1), random(), random());
+        let ar = UtxoTriple {
+            utxo: output_1.clone(),
+            sender_randomness: random(),
+            receiver_digest: random(),
+        }
+        .addition_record();
 
         // Verify that a sane timestamp is returned. `make_mock_transaction` must follow
         // the correct time convention for this test to work.
