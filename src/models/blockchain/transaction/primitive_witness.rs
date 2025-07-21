@@ -568,6 +568,7 @@ pub mod neptune_arbitrary {
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
+    use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
@@ -575,7 +576,6 @@ pub mod neptune_arbitrary {
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::generation_address;
-    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
     impl PrimitiveWitness {
@@ -874,7 +874,12 @@ pub mod neptune_arbitrary {
                 .zip(output_sender_randomnesses.clone())
                 .zip(output_receiver_digests.clone())
                 .map(|((utxo, sender_randomness), receiver_digest)| {
-                    commit(Hash::hash(utxo), sender_randomness, receiver_digest)
+                    UtxoTriple {
+                        utxo: utxo.clone(),
+                        sender_randomness,
+                        receiver_digest,
+                    }
+                    .addition_record()
                 })
                 .collect_vec();
 
@@ -1095,6 +1100,7 @@ mod tests {
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::transaction::announcement::Announcement;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
+    use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
@@ -1105,7 +1111,6 @@ mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::tests::shared_tokio_runtime;
-    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -1512,7 +1517,14 @@ mod tests {
                             output_sender_randomnesses.clone(),
                             output_receiver_digests.clone(),
                         )
-                        .map(|(utxo, sr, rd)| commit(Tip5::hash(&utxo), sr, rd))
+                        .map(|(utxo, sender_randomness, receiver_digest)| {
+                            UtxoTriple {
+                                utxo,
+                                sender_randomness,
+                                receiver_digest,
+                            }
+                            .addition_record()
+                        })
                         .collect_vec();
 
                         let kernel = TransactionKernelProxy {

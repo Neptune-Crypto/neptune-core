@@ -1907,6 +1907,7 @@ pub(crate) mod tests {
 
     mod guesser_fee_utxos {
         use super::*;
+        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
@@ -1937,7 +1938,14 @@ pub(crate) mod tests {
                 .guesser_fee_utxos()
                 .unwrap()
                 .iter()
-                .map(|utxo| commit(Tip5::hash(utxo), block1.hash(), guesser_preimage.hash()))
+                .map(|utxo| {
+                    UtxoTriple {
+                        utxo: utxo.clone(),
+                        sender_randomness: block1.hash(),
+                        receiver_digest: guesser_preimage.hash(),
+                    }
+                    .addition_record()
+                })
                 .collect_vec();
             assert_eq!(ars, ars_from_wallet);
 
