@@ -2007,6 +2007,7 @@ pub(crate) mod tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
+    use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -2403,11 +2404,8 @@ pub(crate) mod tests {
             .wallet_state
             .add_expected_utxos(expected_bad_utxos)
             .await;
-        let bad_addition_record = commit(
-            Tip5::hash(&bad_txo.utxo()),
-            txo.sender_randomness(),
-            txo.receiver_digest(),
-        );
+        let bad_utxo_triple = UtxoTriple::from(bad_txo);
+        let bad_addition_record = bad_utxo_triple.addition_record();
         let bad_kernel = TransactionKernelModifier::default()
             .outputs(vec![bad_addition_record])
             .modify(tx_block2.kernel.clone());
@@ -2509,11 +2507,7 @@ pub(crate) mod tests {
             .wallet_state
             .add_expected_utxos(expected_bad_utxos)
             .await;
-        let bad_addition_record = commit(
-            Tip5::hash(&bad_txo.utxo()),
-            txo.sender_randomness(),
-            txo.receiver_digest(),
-        );
+        let bad_addition_record = UtxoTriple::from(bad_txo).addition_record();
         let bad_kernel = TransactionKernelModifier::default()
             .outputs(vec![bad_addition_record])
             .modify(tx_block2.kernel.clone());
@@ -3773,7 +3767,6 @@ pub(crate) mod tests {
         use super::*;
         use crate::models::blockchain::transaction::lock_script::LockScript;
         use crate::tests::shared::mock_tx::make_mock_transaction;
-        use crate::util_types::mutator_set::commit;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -3793,11 +3786,12 @@ pub(crate) mod tests {
 
             let sender_randomness: Digest = rand::random();
             let receiver_preimage: Digest = rand::random();
-            let expected_addition_record = commit(
-                Hash::hash(&mock_utxo),
+            let mock_triple = UtxoTriple {
+                utxo: mock_utxo.clone(),
                 sender_randomness,
-                receiver_preimage.hash(),
-            );
+                receiver_digest: receiver_preimage.hash(),
+            };
+            let expected_addition_record = mock_triple.addition_record();
             wallet
                 .add_expected_utxo(ExpectedUtxo::new(
                     mock_utxo.clone(),
@@ -3819,11 +3813,12 @@ pub(crate) mod tests {
             assert_eq!(1, ret_with_tx_containing_utxo.len());
 
             // Call scan but with another input. Verify that it returns the empty list
-            let another_addition_record = commit(
-                Hash::hash(&mock_utxo),
-                rand::random(),
-                receiver_preimage.hash(),
-            );
+            let bad_triple = UtxoTriple {
+                utxo: mock_utxo.clone(),
+                sender_randomness: rand::random(),
+                receiver_digest: receiver_preimage.hash(),
+            };
+            let another_addition_record = bad_triple.addition_record();
             let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
             let ret_with_tx_without_utxo = wallet
                 .scan_for_expected_utxos(&tx_without_utxo.kernel.outputs)
