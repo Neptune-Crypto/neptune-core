@@ -31,6 +31,7 @@ pub(crate) struct HandshakeData {
     /// compare own timestamp to peer's or to a list of peers.
     pub timestamp: SystemTime,
 
-    /// Use this field to add extra data in a backwards compatible manner.
+    /// Use this field to add extra data in a backwards compatible manner. An
+    /// encoding should be selected for this. Currently unused.
     pub extra_data: ExtraDataString,
 }

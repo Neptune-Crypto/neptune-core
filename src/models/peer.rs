@@ -382,6 +382,9 @@ pub enum ConnectionRefusedReason {
     IncompatibleVersion,
     MaxPeerNumberExceeded,
     SelfConnect,
+
+    /// Use for any other reasons, when adding new reasons in the future.
+    Other(u8),
 }
 
 impl From<InternalConnectionStatus> for TransferConnectionStatus {
