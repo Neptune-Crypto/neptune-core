@@ -21,6 +21,10 @@ pub(crate) struct HandshakeData {
     pub version: VersionString,
     pub is_archival_node: bool,
 
+    /// Indicates whether node acts as a bootstrapping node in a network
+    /// context.
+    pub is_bootstrapper_node: bool,
+
     /// Client's timestamp when the handshake was generated. Can be used to
     /// compare own timestamp to peer's or to a list of peers.
     pub timestamp: SystemTime,

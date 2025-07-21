@@ -225,6 +225,7 @@ pub(crate) fn get_dummy_handshake_data_for_genesis(network: Network) -> Handshak
         network,
         version: get_dummy_version(),
         is_archival_node: true,
+        is_bootstrapper_node: false,
         timestamp: SystemTime::now(),
     }
 }
