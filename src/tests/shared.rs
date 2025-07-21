@@ -165,7 +165,7 @@ impl<Item> stream::Stream for Mock<Item> {
 pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     ExpectedUtxo {
         utxo: Utxo::new_native_currency(
-            LockScript::anyone_can_spend(),
+            LockScript::anyone_can_spend().hash(),
             NativeCurrencyAmount::zero(),
         ),
         addition_record: AdditionRecord::new(Default::default()),

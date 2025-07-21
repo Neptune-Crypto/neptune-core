@@ -1,6 +1,7 @@
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
+use itertools::Itertools;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;
@@ -10,6 +11,7 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 
@@ -148,6 +150,31 @@ pub fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8
     let mut result = [0u8; NUM_OUT_BYTES];
     hasher.finalize_xof_into(&mut result);
     result
+}
+
+/// Generate a lock script that verifies knowledge of a hash preimage, given
+/// the after-image.
+///
+/// Satisfaction of this lock script establishes the UTXO owner's assent to
+/// the transaction.
+pub(crate) fn lock_script_from_after_image(after_image: Digest) -> LockScript {
+    let push_spending_lock_digest_to_stack = after_image
+        .values()
+        .iter()
+        .rev()
+        .map(|elem| triton_instr!(push elem.value()))
+        .collect_vec();
+
+    let instructions = triton_asm!(
+        divine 5
+        hash
+        {&push_spending_lock_digest_to_stack}
+        assert_vector
+        read_io 5
+        halt
+    );
+
+    instructions.into()
 }
 
 #[cfg(test)]

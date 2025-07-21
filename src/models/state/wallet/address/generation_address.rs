@@ -27,6 +27,7 @@ use bech32::ToBase32;
 use bech32::Variant;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::lattice;
 use tasm_lib::twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
@@ -36,7 +37,6 @@ use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use super::hash_lock_key::HashLockKey;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -136,6 +136,7 @@ pub struct GenerationReceivingAddress {
     receiver_identifier: BFieldElement,
     encryption_key: lattice::kem::PublicKey,
 
+    /// After-image of the privacy preimage
     privacy_digest: Digest,
     lock_after_image: Digest,
 }
@@ -162,7 +163,11 @@ impl GenerationSpendingKey {
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
-        HashLockKey::from_preimage(self.unlock_key_preimage).lock_script_and_witness()
+        let lock_script = common::lock_script_from_after_image(self.generate_spending_lock());
+        LockScriptAndWitness::new_with_nondeterminism(
+            lock_script.program,
+            NonDeterminism::new(self.unlock_key_preimage.reversed().values()),
+        )
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
@@ -376,7 +381,7 @@ impl GenerationReceivingAddress {
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
-        HashLockKey::lock_script_from_after_image(self.lock_after_image)
+        common::lock_script_from_after_image(self.lock_after_image)
     }
 
     pub(crate) fn generate_public_announcement(

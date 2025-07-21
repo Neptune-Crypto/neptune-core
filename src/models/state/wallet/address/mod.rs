@@ -5,27 +5,14 @@
 //!
 //! (especially since we now have a key type with no corresponding address)
 mod addressable_key;
-mod base_key;
 mod common;
-mod receiving_address;
-
 pub mod encrypted_utxo_notification;
 pub mod generation_address;
-pub(crate) mod hash_lock_key;
+mod receiving_address;
 pub mod symmetric_key;
 
-pub use addressable_key::AddressableKey;
-pub use addressable_key::AddressableKeyType;
-pub use base_key::BaseKeyType;
-pub use base_key::BaseSpendingKey;
-
-// these aliases exist to lower number of diffs in an already large
-// pull-request.  They could be removed in a future commit if we replace all
-// instances in the codebase.  So then most APIs would use AddressableKey and a
-// few would use BaseKey.
-pub type KeyType = AddressableKeyType;
-pub type SpendingKey = AddressableKey;
-
+pub use addressable_key::KeyType;
+pub use addressable_key::SpendingKey;
 pub use receiving_address::ReceivingAddress;
 
 #[cfg(test)]
@@ -116,7 +103,7 @@ mod tests {
         pub fn scan_for_announced_utxos(key: SpendingKey) {
             // 1. generate a utxo with amount = 10
             let utxo = Utxo::new_native_currency(
-                key.to_address().lock_script(),
+                key.to_address().lock_script_hash(),
                 NativeCurrencyAmount::coins(10),
             );
 
@@ -174,7 +161,7 @@ mod tests {
 
             // 1. create utxo with random amount
             let amount = NativeCurrencyAmount::coins(rng.random_range(0..42000000));
-            let utxo = Utxo::new_native_currency(key.to_address().lock_script(), amount);
+            let utxo = Utxo::new_native_currency(key.to_address().lock_script_hash(), amount);
 
             // 2. generate sender randomness
             let sender_randomness: Digest = random();

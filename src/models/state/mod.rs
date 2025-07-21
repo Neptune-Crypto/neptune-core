@@ -1120,14 +1120,6 @@ impl GlobalState {
             return Ok(());
         }
 
-        let existing_guesser_preimages = self
-            .wallet_state
-            .wallet_db
-            .guesser_preimages()
-            .get_all()
-            .await;
-        let mut new_guesser_preimages = vec![];
-
         // For all recovery data where we did not find a matching monitored UTXO,
         // recover the MS membership proof, and insert a new monitored UTXO into the
         // wallet database.
@@ -1142,13 +1134,6 @@ impl GlobalState {
             if current_aocl_leaf_count <= incoming_utxo.aocl_index {
                 warn!("Cannot restore UTXO with AOCL index {} because it is in the future from our tip. Current AOCL leaf count is {current_aocl_leaf_count}. Maybe this UTXO can be recovered once more blocks are downloaded from peers?", incoming_utxo.aocl_index);
                 continue;
-            }
-
-            // Check if UTXO is guesser-reward and associated key doesn't already exist.
-            if incoming_utxo.is_guesser_fee()
-                && !existing_guesser_preimages.contains(&incoming_utxo.receiver_preimage)
-            {
-                new_guesser_preimages.push(incoming_utxo.receiver_preimage);
             }
 
             let ms_item = Hash::hash(&incoming_utxo.utxo);
@@ -1205,13 +1190,6 @@ impl GlobalState {
                 .push(restored_mutxo)
                 .await;
             restored_mutxos += 1;
-        }
-
-        // Update state with all guesser-preimage keys from guesser-fee UTXOs
-        for new_guesser_preimage in new_guesser_preimages {
-            self.wallet_state
-                .add_raw_hash_key(new_guesser_preimage)
-                .await;
         }
 
         self.wallet_state.wallet_db.persist().await;
@@ -2088,8 +2066,7 @@ mod tests {
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
-    use crate::models::state::wallet::address::BaseSpendingKey;
+    use crate::models::state::wallet::address::SpendingKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
@@ -2358,7 +2335,6 @@ mod tests {
                 .monitored_utxos_mut()
                 .clear()
                 .await;
-            state.wallet_state.clear_raw_hash_keys().await;
             state
                 .wallet_state
                 .wallet_db
@@ -2449,13 +2425,6 @@ mod tests {
                 monitored_utxos.pop().await;
                 monitored_utxos.pop().await;
 
-                let guesser_preimage_keys = global_state.wallet_state.wallet_db.guesser_preimages();
-                assert_eq!(
-                    1,
-                    guesser_preimage_keys.len().await,
-                    "Exactly Nonce-preimage must be stored to DB"
-                );
-                global_state.wallet_state.clear_raw_hash_keys().await;
                 global_state
                     .wallet_state
                     .wallet_db
@@ -2479,31 +2448,13 @@ mod tests {
                         .is_empty()
                         .await
                 );
-                assert!(
-                    global_state
-                        .wallet_state
-                        .wallet_db
-                        .guesser_preimages()
-                        .is_empty()
-                        .await
-                );
-                assert_eq!(
-                    0,
-                    global_state
-                        .wallet_state
-                        .get_known_raw_hash_lock_keys()
-                        .count()
-                );
             }
 
             // Recover the MUTXO from the recovery data, and verify that MUTXOs are restored
             // Also verify that this operation is idempotent by running it multiple times.
             let genesis_block = Block::genesis(network);
             let block1 = global_state.chain.archival_state().get_tip().await;
-            let block1_guesser_preimage = global_state
-                .wallet_state
-                .wallet_entropy
-                .guesser_preimage(genesis_block.hash());
+            let guesser_key = global_state.wallet_state.wallet_entropy.guesser_fee_key();
             for _ in 0..3 {
                 global_state
                     .restore_monitored_utxos_from_recovery_data()
@@ -2558,30 +2509,6 @@ mod tests {
                         "MUTXO must have the correct latest block digest value"
                     );
                 }
-
-                // Verify that guesser-fee UTXO keys have also been restored.
-                let cached_hash_lock_keys = global_state
-                    .wallet_state
-                    .get_known_raw_hash_lock_keys()
-                    .collect_vec();
-                assert_eq!(
-                    vec![BaseSpendingKey::RawHashLock(HashLockKey::from_preimage(
-                        block1_guesser_preimage
-                    ))],
-                    cached_hash_lock_keys,
-                    "Cached hash lock keys must match expected value after recovery"
-                );
-                let persisted_hash_lock_keys = global_state
-                    .wallet_state
-                    .wallet_db
-                    .guesser_preimages()
-                    .get_all()
-                    .await;
-                assert_eq!(
-                    vec![block1_guesser_preimage],
-                    persisted_hash_lock_keys,
-                    "Persisted hash lock keys must match expected value after recovery"
-                );
             }
         }
 
@@ -2829,7 +2756,7 @@ mod tests {
                         let num_outputs = rng.random_range(0..10);
                         for _ in 0..num_outputs {
                             let utxo = Utxo::new_native_currency(
-                                LockScript::anyone_can_spend(),
+                                LockScript::anyone_can_spend().hash(),
                                 NativeCurrencyAmount::coins(rng.random_range(0..100)),
                             );
                             let sender_randomness: Digest = rng.random();

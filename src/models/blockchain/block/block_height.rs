@@ -12,6 +12,7 @@ use num_traits::One;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -21,7 +22,18 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 /// is P-1 = 2^64 - 2^32. With an average block time of 588 seconds, this
 /// maximum will be reached roughly 344 trillion years after launch. Not urgent.
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec, GetSize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Hash,
+    BFieldCodec,
+    TasmObject,
+    GetSize,
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct BlockHeight(BFieldElement);

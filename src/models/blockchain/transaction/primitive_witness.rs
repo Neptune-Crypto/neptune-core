@@ -960,7 +960,7 @@ pub mod neptune_arbitrary {
                 .zip(input_amounts)
                 .map(|(lock_script_and_witness, amount)| {
                     Utxo::new(
-                        LockScript::from(lock_script_and_witness),
+                        lock_script_and_witness.program.hash(),
                         amount.to_native_coins(),
                     )
                 })
@@ -1107,7 +1107,6 @@ mod tests {
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
