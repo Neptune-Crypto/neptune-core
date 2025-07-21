@@ -1792,43 +1792,6 @@ mod tests {
     }
 
     #[proptest]
-    fn unpack_doesnt_crash_with_missing_chunk_dictionary_elements_u8_leaf_index(
-        #[strategy(arb())] item: Digest,
-        #[strategy(arb())] sr: Digest,
-        #[strategy(arb())] rp: Digest,
-        #[strategy(arb())] leaf_index: u8,
-        #[strategy(arb())] num_removal_records: u8,
-    ) {
-        let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index as u64);
-        let removal_record = RemovalRecord {
-            absolute_indices,
-            target_chunks: ChunkDictionary::empty(),
-        };
-        let removal_records = vec![removal_record.clone(); num_removal_records as usize];
-
-        // Ensure no crash
-        let _ = RemovalRecordList::try_unpack(removal_records);
-    }
-
-    #[proptest]
-    fn unpack_doesnt_crash_with_missing_chunk_dictionary_elements_u16_leaf_index(
-        #[strategy(arb())] item: Digest,
-        #[strategy(arb())] sr: Digest,
-        #[strategy(arb())] rp: Digest,
-        #[strategy(arb())] leaf_index: u16,
-    ) {
-        let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index as u64);
-        let removal_record = RemovalRecord {
-            absolute_indices,
-            target_chunks: ChunkDictionary::empty(),
-        };
-        let removal_records = vec![removal_record];
-
-        // Ensure no crash
-        let _ = RemovalRecordList::try_unpack(removal_records);
-    }
-
-    #[proptest]
     fn can_unpack_two_with_empty_chunk_dictionaries(
         #[strategy(arb())] item: Digest,
         #[strategy(arb())] sr: Digest,
@@ -1846,73 +1809,6 @@ mod tests {
                 RemovalRecordList::try_unpack(removal_records).unwrap()
             );
         }
-    }
-
-    #[test]
-    fn regression_test_panic_in_try_unpack_1() {
-        let removal_record = RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new_raw(
-                68472,
-                [
-                    978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337, 148763,
-                    665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972, 33811, 609715,
-                    863269, 922136, 987473, 682901, 17409, 445788, 483752, 363860, 926460, 577500,
-                    383384, 243946, 140714, 940568, 297642, 259922, 386140, 510946, 0, 956594,
-                    420304, 1010108, 492536, 722694, 222513,
-                ],
-            ),
-            target_chunks: ChunkDictionary { dictionary: vec![] },
-        };
-        let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
-    }
-
-    #[test]
-    fn regression_test_panic_in_try_unpack_2() {
-        let removal_record = RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new_raw(
-                52520,
-                [
-                    243715, 749021, 203233, 104747, 535122, 429290, 1016297, 185670, 125329,
-                    208916, 477068, 341103, 39312, 911863, 972772, 52083, 0, 583734, 1022257,
-                    621991, 402132, 474284, 981738, 443185, 769145, 451043, 888760, 871963, 698065,
-                    557752, 118661, 534719, 633834, 566737, 621507, 124789, 848175, 647222, 532410,
-                    693591, 312466, 766203, 730772, 876359, 367876,
-                ],
-            ),
-            target_chunks: ChunkDictionary {
-                dictionary: vec![(
-                    12,
-                    // 21,
-                    (
-                        MmrMembershipProof {
-                            authentication_path: [].to_vec(),
-                        },
-                        Chunk {
-                            relative_indices: [].to_vec(),
-                        },
-                    ),
-                )],
-            },
-        };
-        let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
-    }
-
-    #[test]
-    fn regression_test_panic_in_try_unpack_3() {
-        let removal_record = RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new_raw(
-                1u128 << 64,
-                [
-                    978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337, 148763,
-                    665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972, 33811, 609715,
-                    863269, 922136, 987473, 682901, 17409, 445788, 483752, 363860, 926460, 577500,
-                    383384, 243946, 140714, 940568, 297642, 259922, 386140, 510946, 0, 956594,
-                    420304, 1010108, 492536, 722694, 222513,
-                ],
-            ),
-            target_chunks: ChunkDictionary { dictionary: vec![] },
-        };
-        let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
     }
 
     #[test]
@@ -1953,16 +1849,6 @@ mod tests {
         let packed = RemovalRecordList::pack(removal_records.clone());
         let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
         prop_assert_eq!(removal_records, unpacked);
-    }
-
-    #[proptest(cases = 30)]
-    fn unpack_cannot_crash(
-        #[strategy(1usize..20)] _num_records: usize,
-        #[strategy(arb::<u64>())] _num_leafs_aocl: u64,
-        #[strategy(RemovalRecord::arbitrary_synchronized_set(#_num_leafs_aocl, #_num_records))]
-        removal_records: Vec<RemovalRecord>,
-    ) {
-        let _ = RemovalRecordList::try_unpack(removal_records); // no crash
     }
 
     #[proptest]
@@ -2046,121 +1932,6 @@ mod tests {
             "{:.2}% reduction",
             (1.0 - (average_size_smart / average_size_naive)) * 100.0
         );
-    }
-
-    fn removal_record_list_with_inconsistent_chunks() -> RemovalRecordList {
-        let index_sets = vec![AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize])];
-        let authentication_structures = vec![];
-        let chunks = vec![Chunk::empty_chunk(); 2];
-        let num_leafs_aocl = 2_u64;
-        RemovalRecordList {
-            index_sets,
-            authentication_structures,
-            chunks,
-            num_leafs_aocl,
-        }
-    }
-
-    fn removal_record_list_with_inconsistent_number_of_authentication_structures(
-    ) -> RemovalRecordList {
-        let index_sets = vec![AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize])];
-        let authentication_structures = vec![vec![]; 10];
-        let chunks = vec![Chunk::empty_chunk(); 1];
-        let num_leafs_aocl = 9_u64;
-        RemovalRecordList {
-            index_sets,
-            authentication_structures,
-            chunks,
-            num_leafs_aocl,
-        }
-    }
-
-    fn removal_record_list_with_inconsistent_authentication_structure_lengths() -> RemovalRecordList
-    {
-        let mut rng = rng();
-        let index_sets = vec![AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize])];
-        let authentication_structures = vec![vec![rng.random::<Digest>(); 20]; 1];
-        let chunks = vec![Chunk::empty_chunk(); 1];
-        let num_leafs_aocl = 9_u64;
-        RemovalRecordList {
-            index_sets,
-            authentication_structures,
-            chunks,
-            num_leafs_aocl,
-        }
-    }
-
-    #[test]
-    fn all_inconsistencies_can_be_triggered() {
-        let mut observed_inconsistency_codes = vec![];
-        for function in [
-            removal_record_list_with_inconsistent_chunks,
-            removal_record_list_with_inconsistent_number_of_authentication_structures,
-            removal_record_list_with_inconsistent_authentication_structure_lengths,
-        ] {
-            observed_inconsistency_codes.push(function().validate_consistency().unwrap_err());
-        }
-
-        let all_inconsistency_codes = RemovalRecordListInconsistency::iter().collect_vec();
-
-        assert_eq!(
-            all_inconsistency_codes
-                .into_iter()
-                .map(|v| mem::discriminant(&v))
-                .collect_vec(),
-            observed_inconsistency_codes
-                .into_iter()
-                .map(|v| mem::discriminant(&v))
-                .collect_vec()
-        );
-    }
-
-    #[proptest]
-    fn removal_record_list_is_inconsistent_or_convert_to_vec_succeeds(
-        #[strategy(vec(arb(), 0usize..10))] index_sets: Vec<AbsoluteIndexSet>,
-        #[strategy(vec(vec(arb(), 0..32_usize), 0..{NUM_TRIALS as usize}))]
-        authentication_structures: Vec<Vec<Digest>>,
-        #[strategy(vec(arb(), 0usize..(NUM_TRIALS as usize)))] chunks: Vec<Chunk>,
-        #[strategy(arb())] num_leafs_aocl: u64,
-    ) {
-        let removal_record_list = RemovalRecordList {
-            index_sets,
-            authentication_structures,
-            chunks,
-            num_leafs_aocl,
-        };
-
-        if removal_record_list.is_consistent() {
-            RemovalRecordList::convert_to_vec(removal_record_list); // no crash
-        }
-    }
-
-    fn inconsistent_absolute_index_set() -> BoxedStrategy<AbsoluteIndexSet> {
-        (arb::<u128>(), [arb::<u32>(); NUM_TRIALS as usize])
-            .prop_map(|(minimum, distances)| AbsoluteIndexSet::new_raw(minimum, distances))
-            .boxed()
-    }
-
-    #[proptest]
-    fn removal_record_list_is_inconsistent_or_convert_to_vec_succeeds_inconsistent_ais(
-        #[strategy(vec(inconsistent_absolute_index_set(), 0usize..10))] index_sets: Vec<
-            AbsoluteIndexSet,
-        >,
-        #[strategy(vec(vec(arb(), 0..32_usize), 0..{NUM_TRIALS as usize}))]
-        authentication_structures: Vec<Vec<Digest>>,
-        #[strategy(vec(arb(), 0usize..(NUM_TRIALS as usize)))] chunks: Vec<Chunk>,
-        #[strategy(arb())] num_leafs_aocl: u64,
-    ) {
-        let removal_record_list = RemovalRecordList {
-            index_sets,
-            authentication_structures,
-            chunks,
-            num_leafs_aocl,
-        };
-
-        if removal_record_list.is_consistent() {
-            RemovalRecordList::convert_to_vec(removal_record_list); // no crash
-        }
     }
 
     #[test]
@@ -2394,5 +2165,379 @@ mod tests {
         let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
 
         prop_assert_eq!(removal_records, unpacked);
+    }
+
+    mod try_unpack_no_crash {
+        use proptest::collection;
+        use proptest::prop_assume;
+
+        use crate::util_types::mutator_set::msa_and_records;
+
+        use super::*;
+
+        #[test]
+        fn try_unpack_big_ais() {
+            let absolute_indices =
+                AbsoluteIndexSet::new_raw(u128::MAX, [u32::MAX; NUM_TRIALS as usize]);
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: ChunkDictionary::empty(),
+            };
+
+            let removal_records = vec![removal_record];
+
+            // Ensure no crash, and that an error is returned.
+            assert!(RemovalRecordList::try_unpack(removal_records).is_err());
+        }
+
+        #[test]
+        fn too_many_chunks() {
+            let absolute_indices_with_one_chunk_idx =
+                AbsoluteIndexSet::new_raw(0, [0; NUM_TRIALS as usize]);
+            for num_rrs in 1..4 {
+                for num_chunks in 2..5 {
+                    let too_many_chunk_elements = (0..num_chunks)
+                        .map(|i| {
+                            (
+                                i as u64,
+                                (MmrMembershipProof::new(vec![]), Chunk::empty_chunk()),
+                            )
+                        })
+                        .collect_vec();
+                    let removal_record = RemovalRecord {
+                        absolute_indices: absolute_indices_with_one_chunk_idx,
+                        target_chunks: ChunkDictionary::new(too_many_chunk_elements),
+                    };
+                    let removal_records = vec![removal_record.clone(); num_rrs];
+
+                    // Ensure no crash, and that an error is returned.
+                    assert!(RemovalRecordList::try_unpack(removal_records).is_err());
+                }
+            }
+        }
+
+        #[proptest]
+        fn arbitrary_chunk_dict(
+            #[strategy(arb())] item: Digest,
+            #[strategy(arb())] sr: Digest,
+            #[strategy(arb())] rp: Digest,
+            #[strategy(arb())] leaf_index_u16: u16,
+            #[strategy(0usize..8)] num_removal_records: usize,
+            #[strategy(1usize..20)] _num_chunk_dictionary_entries: usize,
+            #[strategy(collection::vec(arb::<Digest>(), #_num_chunk_dictionary_entries))]
+            auth_path_nodes: Vec<Digest>,
+            #[strategy(collection::vec(arb::<u16>(), #_num_chunk_dictionary_entries))]
+            chunk_indices: Vec<u16>,
+            #[strategy(collection::vec(arb::<u16>(), #_num_chunk_dictionary_entries))]
+            relative_indices: Vec<u16>,
+        ) {
+            let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index_u16 as u64);
+            let chunk_dictionary = chunk_indices
+                .into_iter()
+                .map(|chk_idx| {
+                    (
+                        chk_idx as u64,
+                        (
+                            MmrMembershipProof::new(auth_path_nodes.clone()),
+                            Chunk {
+                                relative_indices: relative_indices
+                                    .clone()
+                                    .into_iter()
+                                    .map(|x| x as u32)
+                                    .collect_vec(),
+                            },
+                        ),
+                    )
+                })
+                .collect_vec();
+            let chunk_dictionary = ChunkDictionary::new(chunk_dictionary);
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: chunk_dictionary,
+            };
+            let removal_records = vec![removal_record.clone(); num_removal_records];
+
+            // Ensure no crash
+            let _ = RemovalRecordList::try_unpack(removal_records);
+        }
+
+        #[proptest]
+        fn repeated_tree_height(
+            #[strategy(1usize..10)] _num_removals: usize,
+            #[strategy(0usize..#_num_removals)] insert_index: usize,
+            #[strategy((#_num_removals as u64)..=(u16::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+            _removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+        ) {
+            let mut packed = msa_and_records.packed_removal_records();
+            prop_assume!(packed[0].target_chunks.len() > insert_index);
+            prop_assert!(RemovalRecordList::try_unpack(packed.clone()).is_ok());
+
+            let cloned_entry = packed[0].target_chunks.dictionary[insert_index].clone();
+            packed[0]
+                .target_chunks
+                .dictionary
+                .insert(insert_index, cloned_entry);
+            prop_assert!(RemovalRecordList::try_unpack(packed).is_err());
+        }
+
+        #[proptest(cases = 40)]
+        fn missing_tree_height(
+            #[strategy(2usize..10)] _num_removals: usize,
+            #[strategy(0usize..#_num_removals)] remove_index: usize,
+            #[strategy((#_num_removals as u64)..=(u16::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+            _removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+        ) {
+            let mut packed = msa_and_records.packed_removal_records();
+            prop_assert!(RemovalRecordList::try_unpack(packed.clone()).is_ok());
+            prop_assume!(packed[0].target_chunks.len() > remove_index);
+
+            packed[0].target_chunks.dictionary.remove(remove_index);
+
+            // Ensure no panic. We cannot guarantee that the unpacking will
+            // fail since the removing of a chunk might correspond to a valid
+            // packed removal record list for a smaller number of AOCL leafs. In
+            // that case, though, the later `can_remove` must fail.
+            let res = RemovalRecordList::try_unpack(packed);
+            if let Ok(unpacked) = res {
+                let mut all_can_be_removed = true;
+                for rr in unpacked {
+                    all_can_be_removed = all_can_be_removed
+                        && msa_and_records.mutator_set_accumulator.can_remove(&rr);
+                }
+                assert!(!all_can_be_removed);
+            }
+        }
+
+        #[proptest]
+        fn unpack_doesnt_crash_with_missing_chunk_dictionary_elements_multiple_leaf_index_ranges(
+            #[strategy(arb())] item: Digest,
+            #[strategy(arb())] sr: Digest,
+            #[strategy(arb())] rp: Digest,
+            #[strategy(arb())] leaf_index_u8: u8,
+            #[strategy(arb())] leaf_index_u16: u16,
+            #[strategy(arb())] leaf_index_u32: u32,
+            #[strategy(arb())] leaf_index_u64: u64,
+            #[strategy(1usize..20)] num_removal_records: usize,
+        ) {
+            for leaf_index in [
+                leaf_index_u8 as u64,
+                leaf_index_u16 as u64,
+                leaf_index_u32 as u64,
+                leaf_index_u64 as u64,
+            ] {
+                let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index);
+                let removal_record = RemovalRecord {
+                    absolute_indices,
+                    target_chunks: ChunkDictionary::empty(),
+                };
+                let removal_records = vec![removal_record.clone(); num_removal_records];
+
+                // Ensure no crash
+                let _ = RemovalRecordList::try_unpack(removal_records);
+            }
+        }
+
+        #[test]
+        fn regression_test_panic_in_try_unpack_1() {
+            let removal_record = RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::new_raw(
+                    68472,
+                    [
+                        978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337,
+                        148763, 665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972,
+                        33811, 609715, 863269, 922136, 987473, 682901, 17409, 445788, 483752,
+                        363860, 926460, 577500, 383384, 243946, 140714, 940568, 297642, 259922,
+                        386140, 510946, 0, 956594, 420304, 1010108, 492536, 722694, 222513,
+                    ],
+                ),
+                target_chunks: ChunkDictionary { dictionary: vec![] },
+            };
+            let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
+        }
+
+        #[test]
+        fn regression_test_panic_in_try_unpack_2() {
+            let removal_record = RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::new_raw(
+                    52520,
+                    [
+                        243715, 749021, 203233, 104747, 535122, 429290, 1016297, 185670, 125329,
+                        208916, 477068, 341103, 39312, 911863, 972772, 52083, 0, 583734, 1022257,
+                        621991, 402132, 474284, 981738, 443185, 769145, 451043, 888760, 871963,
+                        698065, 557752, 118661, 534719, 633834, 566737, 621507, 124789, 848175,
+                        647222, 532410, 693591, 312466, 766203, 730772, 876359, 367876,
+                    ],
+                ),
+                target_chunks: ChunkDictionary {
+                    dictionary: vec![(
+                        12,
+                        // 21,
+                        (
+                            MmrMembershipProof {
+                                authentication_path: [].to_vec(),
+                            },
+                            Chunk {
+                                relative_indices: [].to_vec(),
+                            },
+                        ),
+                    )],
+                },
+            };
+            let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
+        }
+
+        #[test]
+        fn regression_test_panic_in_try_unpack_3() {
+            let removal_record = RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::new_raw(
+                    1u128 << 64,
+                    [
+                        978335, 226333, 668833, 627770, 413862, 994662, 458634, 680471, 997337,
+                        148763, 665905, 463593, 26385, 237585, 835622, 175521, 711544, 353972,
+                        33811, 609715, 863269, 922136, 987473, 682901, 17409, 445788, 483752,
+                        363860, 926460, 577500, 383384, 243946, 140714, 940568, 297642, 259922,
+                        386140, 510946, 0, 956594, 420304, 1010108, 492536, 722694, 222513,
+                    ],
+                ),
+                target_chunks: ChunkDictionary { dictionary: vec![] },
+            };
+            let _ = RemovalRecordList::try_unpack(vec![removal_record]); // no crash
+        }
+
+        #[proptest(cases = 30)]
+        fn unpack_cannot_crash(
+            #[strategy(1usize..20)] _num_records: usize,
+            #[strategy(arb::<u64>())] _num_leafs_aocl: u64,
+            #[strategy(RemovalRecord::arbitrary_synchronized_set(#_num_leafs_aocl, #_num_records))]
+            removal_records: Vec<RemovalRecord>,
+        ) {
+            // Attempt to unpack a list of removal records that are not packed.
+            // Ensure no crash.
+            let _ = RemovalRecordList::try_unpack(removal_records); // no crash
+        }
+
+        #[proptest]
+        fn try_unpack_repeated_tree_height() {}
+
+        #[proptest]
+        fn removal_record_list_is_inconsistent_or_convert_to_vec_succeeds(
+            #[strategy(vec(arb(), 0usize..10))] index_sets: Vec<AbsoluteIndexSet>,
+            #[strategy(vec(vec(arb(), 0..32_usize), 0..{NUM_TRIALS as usize}))]
+            authentication_structures: Vec<Vec<Digest>>,
+            #[strategy(vec(arb(), 0usize..(NUM_TRIALS as usize)))] chunks: Vec<Chunk>,
+            #[strategy(arb())] num_leafs_aocl: u64,
+        ) {
+            let removal_record_list = RemovalRecordList {
+                index_sets,
+                authentication_structures,
+                chunks,
+                num_leafs_aocl,
+            };
+
+            if removal_record_list.is_consistent() {
+                RemovalRecordList::convert_to_vec(removal_record_list); // no crash
+            }
+        }
+
+        fn removal_record_list_with_inconsistent_chunks() -> RemovalRecordList {
+            let index_sets = vec![AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize])];
+            let authentication_structures = vec![];
+            let chunks = vec![Chunk::empty_chunk(); 2];
+            let num_leafs_aocl = 2_u64;
+            RemovalRecordList {
+                index_sets,
+                authentication_structures,
+                chunks,
+                num_leafs_aocl,
+            }
+        }
+
+        fn removal_record_list_with_inconsistent_number_of_authentication_structures(
+        ) -> RemovalRecordList {
+            let index_sets = vec![AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize])];
+            let authentication_structures = vec![vec![]; 10];
+            let chunks = vec![Chunk::empty_chunk(); 1];
+            let num_leafs_aocl = 9_u64;
+            RemovalRecordList {
+                index_sets,
+                authentication_structures,
+                chunks,
+                num_leafs_aocl,
+            }
+        }
+
+        fn removal_record_list_with_inconsistent_authentication_structure_lengths(
+        ) -> RemovalRecordList {
+            let mut rng = rng();
+            let index_sets = vec![AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize])];
+            let authentication_structures = vec![vec![rng.random::<Digest>(); 20]; 1];
+            let chunks = vec![Chunk::empty_chunk(); 1];
+            let num_leafs_aocl = 9_u64;
+            RemovalRecordList {
+                index_sets,
+                authentication_structures,
+                chunks,
+                num_leafs_aocl,
+            }
+        }
+
+        #[test]
+        fn all_inconsistencies_can_be_triggered() {
+            let mut observed_inconsistency_codes = vec![];
+            for function in [
+                removal_record_list_with_inconsistent_chunks,
+                removal_record_list_with_inconsistent_number_of_authentication_structures,
+                removal_record_list_with_inconsistent_authentication_structure_lengths,
+            ] {
+                observed_inconsistency_codes.push(function().validate_consistency().unwrap_err());
+            }
+
+            let all_inconsistency_codes = RemovalRecordListInconsistency::iter().collect_vec();
+
+            assert_eq!(
+                all_inconsistency_codes
+                    .into_iter()
+                    .map(|v| mem::discriminant(&v))
+                    .collect_vec(),
+                observed_inconsistency_codes
+                    .into_iter()
+                    .map(|v| mem::discriminant(&v))
+                    .collect_vec()
+            );
+        }
+
+        fn inconsistent_absolute_index_set() -> BoxedStrategy<AbsoluteIndexSet> {
+            (arb::<u128>(), [arb::<u32>(); NUM_TRIALS as usize])
+                .prop_map(|(minimum, distances)| AbsoluteIndexSet::new_raw(minimum, distances))
+                .boxed()
+        }
+
+        #[proptest]
+        fn removal_record_list_is_inconsistent_or_convert_to_vec_succeeds_inconsistent_ais(
+            #[strategy(vec(inconsistent_absolute_index_set(), 0usize..10))] index_sets: Vec<
+                AbsoluteIndexSet,
+            >,
+            #[strategy(vec(vec(arb(), 0..32_usize), 0..{NUM_TRIALS as usize}))]
+            authentication_structures: Vec<Vec<Digest>>,
+            #[strategy(vec(arb(), 0usize..(NUM_TRIALS as usize)))] chunks: Vec<Chunk>,
+            #[strategy(arb())] num_leafs_aocl: u64,
+        ) {
+            let removal_record_list = RemovalRecordList {
+                index_sets,
+                authentication_structures,
+                chunks,
+                num_leafs_aocl,
+            };
+
+            if removal_record_list.is_consistent() {
+                RemovalRecordList::convert_to_vec(removal_record_list); // no crash
+            }
+        }
     }
 }
