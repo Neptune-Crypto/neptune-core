@@ -2800,17 +2800,17 @@ mod tests {
             assert_eq!(peer_handshake_data.version, own_handshake_data.version,);
             let mock_stream = tokio_test::io::Builder::new()
                 .read(
-                    &to_bytes(&PeerMessage::Handshake(Box::new((
-                        crate::MAGIC_STRING_REQUEST.to_vec(),
-                        peer_handshake_data.clone(),
-                    ))))
+                    &to_bytes(&PeerMessage::Handshake {
+                        magic_value: *crate::MAGIC_STRING_REQUEST,
+                        data: Box::new(peer_handshake_data.clone()),
+                    })
                     .unwrap(),
                 )
                 .write(
-                    &to_bytes(&PeerMessage::Handshake(Box::new((
-                        crate::MAGIC_STRING_RESPONSE.to_vec(),
-                        own_handshake_data.clone(),
-                    ))))
+                    &to_bytes(&PeerMessage::Handshake {
+                        magic_value: *crate::MAGIC_STRING_RESPONSE,
+                        data: Box::new(own_handshake_data.clone()),
+                    })
                     .unwrap(),
                 )
                 .write(

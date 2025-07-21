@@ -1216,7 +1216,7 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::Handshake(_) => {
+            PeerMessage::Handshake { .. } => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Handshake");
 
                 // The handshake should have been sent during connection
