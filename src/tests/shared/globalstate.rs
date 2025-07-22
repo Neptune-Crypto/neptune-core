@@ -117,11 +117,13 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
 ) -> GlobalStateLock {
     let network = cli_args.network;
     let wallet = WalletEntropy::devnet_wallet();
-    let own_key = wallet.nth_generation_spending_key_for_tests(0);
+    let composer_key = wallet.composer_fee_key();
     let mut global_state_lock =
         mock_genesis_global_state(2, wallet.clone(), cli_args.clone()).await;
     let mut previous_block = Block::genesis(network);
 
+    let guesser_key = wallet.guesser_fee_key();
+    let guesser_address = guesser_key.to_address();
     for coinbase_sender_randomness in coinbase_sender_randomness_coll {
         let (next_block, composer_utxos) =
             super::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
@@ -129,9 +131,9 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<const NUM_BLOCKS_MI
                 vec![],
                 vec![],
                 None,
-                own_key,
+                composer_key,
                 coinbase_sender_randomness,
-                (0.5, wallet.guesser_preimage(previous_block.hash())),
+                (0.5, guesser_address.into()),
                 network,
             )
             .await;
@@ -225,7 +227,9 @@ pub(crate) fn get_dummy_handshake_data_for_genesis(network: Network) -> Handshak
         network,
         version: get_dummy_version(),
         is_archival_node: true,
+        is_bootstrapper_node: false,
         timestamp: SystemTime::now(),
+        extra_data: Default::default(),
     }
 }
 

@@ -10,7 +10,7 @@ use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::state::wallet::address::BaseKeyType;
-use neptune_cash::models::state::wallet::address::BaseSpendingKey;
+use neptune_cash::models::state::wallet::address::SpendingKey;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
@@ -35,7 +35,7 @@ use unicode_width::UnicodeWidthStr;
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
-type AddressUpdate = BaseSpendingKey;
+type AddressUpdate = SpendingKey;
 type AddressUpdateArc = Arc<std::sync::Mutex<Vec<AddressUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;

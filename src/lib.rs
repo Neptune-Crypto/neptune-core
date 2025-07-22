@@ -97,8 +97,8 @@ pub const SUCCESS_EXIT_CODE: i32 = 0;
 pub const COMPOSITION_FAILED_EXIT_CODE: i32 = 159;
 
 /// Magic string to ensure other program is Neptune Core
-pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
-pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
+pub const MAGIC_STRING_REQUEST: &[u8; 15] = b"7B8AB7FC438F411";
+pub const MAGIC_STRING_RESPONSE: &[u8; 15] = b"Hello Neptune!\n";
 const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;

@@ -447,7 +447,7 @@ mod tests {
         // This block throws away four UTXOs.
         let msa_tip_previous = next_block.mutator_set_accumulator_after().unwrap().clone();
         let output_utxo = Utxo::new_native_currency(
-            LockScript::anyone_can_spend(),
+            LockScript::anyone_can_spend().hash(),
             NativeCurrencyAmount::coins(200),
         );
         let tx_outputs: TxOutputList = vec![TxOutput::no_notification(
@@ -1069,7 +1069,7 @@ mod tests {
         .unwrap();
         let one_money: NativeCurrencyAmount = NativeCurrencyAmount::coins(1);
         let anyone_can_spend_utxo =
-            Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
+            Utxo::new_native_currency(LockScript::anyone_can_spend().hash(), one_money);
         let tx_output =
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletEntropy::devnet_wallet().nth_symmetric_key_for_tests(0);

@@ -132,7 +132,7 @@ impl RegTestPrivate {
         let guesser_key = gs
             .wallet_state
             .wallet_entropy
-            .guesser_spending_key(tip_block.hash());
+            .guesser_fee_key(tip_block.hash());
 
         // retrieve selected tx from mempool for block inclusion.
         let txs_from_mempool = if include_mempool_txs {

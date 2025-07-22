@@ -1216,7 +1216,7 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::Handshake(_) => {
+            PeerMessage::Handshake { .. } => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Handshake");
 
                 // The handshake should have been sent during connection
@@ -1730,9 +1730,15 @@ impl PeerLoopHandler {
                     let peer_message = match peer_message {
                         Ok(message) => message,
                         Err(err) => {
+                            // Don't disconnect if message type is unknown, as
+                            // this allows the adding of new message types in
+                            // the future. Consider only keeping connection open
+                            // if this is a deserialization error, and close
+                            // otherwise.
                             let msg = format!("Error when receiving from peer: {peer_address}");
-                            error!("{msg}. Error: {err}");
-                            bail!("{msg}. Closing connection.");
+                            warn!("{msg}. Error: {err}");
+                            self.punish(NegativePeerSanction::InvalidMessage).await?;
+                            continue;
                         }
                     };
                     let Some(peer_message) = peer_message else {
@@ -1966,6 +1972,7 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
+    use crate::models::peer::Sanction;
     use crate::models::state::mempool::upgrade_priority::UpgradePriority;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -1980,6 +1987,46 @@ mod tests {
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
     use crate::tests::shared_tokio_runtime;
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn no_disconnect_on_invalid_message() {
+        // This test is intended to simulate a deserialization error, which
+        // would occur if the node is connected to a newer version of the
+        // software which has new variants of `PeerMessage`. The intended
+        // behavior is that a small punishment is applied but that the
+        // connection stays open.
+        let mock = Mock::new(vec![Action::ReadError, Action::Read(PeerMessage::Bye)]);
+
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
+            get_test_genesis_setup(Network::Beta, 1, cli_args::Args::default())
+                .await
+                .unwrap();
+
+        let peer_address = get_dummy_socket_address(2);
+        let from_main_rx_clone = peer_broadcast_tx.subscribe();
+        let mut peer_loop_handler =
+            PeerLoopHandler::new(to_main_tx, state_lock.clone(), peer_address, hsd, true, 1);
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await
+            .unwrap();
+
+        let peer_standing = state_lock
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(peer_address.ip())
+            .await;
+        assert_eq!(
+            NegativePeerSanction::InvalidMessage.severity(),
+            peer_standing.unwrap().standing
+        );
+        assert_eq!(
+            NegativePeerSanction::InvalidMessage,
+            peer_standing.unwrap().latest_punishment.unwrap().0
+        );
+    }
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]

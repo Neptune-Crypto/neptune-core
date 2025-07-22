@@ -26,6 +26,7 @@ pub(crate) struct IncomingUtxo {
     pub(crate) utxo: Utxo,
     pub(crate) sender_randomness: Digest,
     pub(crate) receiver_preimage: Digest,
+    pub(crate) is_guesser_fee: bool,
 }
 
 impl From<&ExpectedUtxo> for IncomingUtxo {
@@ -34,6 +35,7 @@ impl From<&ExpectedUtxo> for IncomingUtxo {
             utxo: eu.utxo.clone(),
             sender_randomness: eu.sender_randomness,
             receiver_preimage: eu.receiver_preimage,
+            is_guesser_fee: false,
         }
     }
 }
@@ -47,12 +49,6 @@ impl IncomingUtxo {
         )
     }
 
-    /// Returns true iff this UTXO is a guesser reward.
-    pub(crate) fn is_guesser_fee(&self) -> bool {
-        self.utxo
-            .is_lockscript_with_preimage(self.receiver_preimage)
-    }
-
     pub(crate) fn from_utxo_notification_payload(
         payload: UtxoNotificationPayload,
         receiver_preimage: Digest,
@@ -61,6 +57,7 @@ impl IncomingUtxo {
             utxo: payload.utxo,
             sender_randomness: payload.sender_randomness,
             receiver_preimage,
+            is_guesser_fee: false,
         }
     }
 

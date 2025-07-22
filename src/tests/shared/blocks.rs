@@ -5,8 +5,10 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+use crate::api::export::GenerationSpendingKey;
 use crate::api::export::GlobalStateLock;
 use crate::api::export::Network;
+use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::mine_loop::composer_parameters::ComposerParameters;
@@ -17,6 +19,7 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
+use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
@@ -55,7 +58,7 @@ pub(crate) fn mock_block_from_transaction_and_msa(
         prev_block_digest: genesis_block.hash().hash(),
         timestamp: tx_kernel.timestamp,
         nonce: Digest::default(),
-        guesser_digest: Digest::default(),
+        guesser_receiver_data: GuesserReceiverData::default(),
         cumulative_proof_of_work: genesis_block.header().cumulative_proof_of_work,
         difficulty: genesis_block.header().difficulty,
     };
@@ -87,7 +90,7 @@ pub(crate) fn invalid_block_with_transaction(
         prev_block_digest: previous_block.hash(),
         timestamp: transaction.kernel.timestamp,
         nonce: Digest::default(),
-        guesser_digest: Digest::default(),
+        guesser_receiver_data: GuesserReceiverData::default(),
         cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
         difficulty: previous_block.header().difficulty,
     };
@@ -128,10 +131,10 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
     coinbase_sender_randomness: Digest,
-    guesser_parameters: (f64, Digest),
+    guesser_parameters: (f64, ReceivingAddress),
     network: Network,
 ) -> (Block, Vec<ExpectedUtxo>) {
-    let (guesser_fraction, guesser_preimage) = guesser_parameters;
+    let (guesser_fraction, guesser_address) = guesser_parameters;
 
     // Build coinbase UTXO and associated data
     let block_timestamp = match block_timestamp {
@@ -180,7 +183,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         None,
         network,
     );
-    block.set_header_guesser_digest(guesser_preimage.hash());
+    block.set_header_guesser_address(guesser_address);
 
     let composer_expected_utxos = composer_txos
         .iter()
@@ -233,6 +236,9 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
     coinbase_sender_randomness: Digest,
     network: Network,
 ) -> (Block, Vec<ExpectedUtxo>) {
+    let deterministic_generation_spending_key =
+        GenerationSpendingKey::derive_from_seed(Digest::default());
+    let guesser_address = deterministic_generation_spending_key.to_address();
     make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
         previous_block,
         inputs,
@@ -240,7 +246,7 @@ pub(crate) async fn make_mock_block_with_inputs_and_outputs(
         block_timestamp,
         composer_key,
         coinbase_sender_randomness,
-        (0f64, Digest::default()),
+        (0f64, guesser_address.into()),
         network,
     )
     .await
@@ -273,16 +279,17 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     )
     .await?;
 
-    let guesser_preimage = global_state_lock
+    let guesser_key = global_state_lock
         .lock_guard()
         .await
         .wallet_state
         .wallet_entropy
-        .guesser_preimage(tip_block.hash());
+        .guesser_fee_key();
+    let guesser_address = guesser_key.to_address();
     let network = global_state_lock.cli().network;
     let mut block =
         Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None, network);
-    block.set_header_guesser_digest(guesser_preimage.hash());
+    block.set_header_guesser_address(guesser_address.into());
 
     global_state_lock
         .set_new_self_composed_tip(block.clone(), expected_composer_utxos)

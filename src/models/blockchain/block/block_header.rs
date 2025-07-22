@@ -7,6 +7,7 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
@@ -19,7 +20,9 @@ use super::difficulty_control::difficulty_control;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use super::Block;
+use crate::api::export::ReceivingAddress;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -56,7 +59,9 @@ pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
 
 pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
+)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct BlockHeader {
     pub version: BFieldElement,
@@ -74,8 +79,8 @@ pub struct BlockHeader {
     /// The difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: Difficulty,
 
-    /// The lock after-image for the guesser fee UTXOs
-    pub(crate) guesser_digest: Digest,
+    /// Information for the guesser to take custody of the guesser UTXOs.
+    pub guesser_receiver_data: GuesserReceiverData,
 }
 
 impl Display for BlockHeader {
@@ -87,7 +92,8 @@ impl Display for BlockHeader {
             Cumulative Proof-of-Work: {}\n\
             Difficulty: {}\n\
             Version: {}\n\
-            Guesser digest: {}\n\
+            Guesser receiver digest: {}\n\
+            Guesser lock script hash: {}\n\
             nonce: {}\n",
             self.height,
             self.timestamp.standard_format(),
@@ -95,7 +101,8 @@ impl Display for BlockHeader {
             self.cumulative_proof_of_work,
             self.difficulty,
             self.version,
-            self.guesser_digest.to_hex(),
+            self.guesser_receiver_data.receiver_digest.to_hex(),
+            self.guesser_receiver_data.lock_script_hash.to_hex(),
             self.nonce.to_hex()
         );
 
@@ -128,13 +135,10 @@ impl BlockHeader {
             #[cfg(test)]
             difficulty: Difficulty::MINIMUM,
 
-            guesser_digest: Digest::new(bfe_array![
-                0x49742773206E6F6Fu64,
-                0x6E20736F6D657768u64,
-                0x6572652E0Au64,
-                0,
-                0
-            ]),
+            guesser_receiver_data: GuesserReceiverData {
+                receiver_digest: Digest::default(),
+                lock_script_hash: Digest::default(),
+            },
         }
     }
 
@@ -162,8 +166,18 @@ impl BlockHeader {
             nonce: Digest::default(),
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
-            guesser_digest: Digest::default(),
+            guesser_receiver_data: GuesserReceiverData {
+                receiver_digest: Digest::default(),
+                lock_script_hash: Digest::default(),
+            },
         }
+    }
+
+    pub(crate) fn was_guessed_by(&self, address: ReceivingAddress) -> bool {
+        let address_receiver_digest = address.privacy_digest();
+        let address_lock_script_hash = address.lock_script_hash();
+        self.guesser_receiver_data.receiver_digest == address_receiver_digest
+            && self.guesser_receiver_data.lock_script_hash == address_lock_script_hash
     }
 }
 
@@ -197,7 +211,7 @@ impl MastHash for BlockHeader {
             self.nonce.encode(),
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
-            self.guesser_digest.encode(),
+            self.guesser_receiver_data.encode(),
         ]
     }
 }
@@ -264,7 +278,7 @@ impl BlockHeader {
         let nonce = arb::<Digest>();
         let cumulative_proof_of_work = arb::<ProofOfWork>();
         let difficulty = arb::<Difficulty>();
-        let guesser_digest = arb::<Digest>();
+        let guesser_receiver_data = arb::<GuesserReceiverData>();
 
         (
             version,
@@ -273,7 +287,7 @@ impl BlockHeader {
             nonce,
             cumulative_proof_of_work,
             difficulty,
-            guesser_digest,
+            guesser_receiver_data,
         )
             .prop_map(
                 move |(
@@ -283,7 +297,7 @@ impl BlockHeader {
                     nonce,
                     cumulative_proof_of_work,
                     difficulty,
-                    guesser_digest,
+                    guesser_receiver_data,
                 )| {
                     BlockHeader {
                         version,
@@ -293,7 +307,7 @@ impl BlockHeader {
                         nonce,
                         cumulative_proof_of_work,
                         difficulty,
-                        guesser_digest,
+                        guesser_receiver_data,
                     }
                 },
             )
@@ -309,7 +323,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
 
-    pub fn random_block_header() -> BlockHeader {
+    pub(crate) fn random_block_header() -> BlockHeader {
         let mut rng = rand::rng();
         BlockHeader {
             version: rng.random(),
@@ -321,7 +335,10 @@ pub(crate) mod tests {
                 rng.random::<[u32; ProofOfWork::NUM_LIMBS]>(),
             ),
             difficulty: Difficulty::new(rng.random::<[u32; Difficulty::NUM_LIMBS]>()),
-            guesser_digest: rng.random(),
+            guesser_receiver_data: GuesserReceiverData {
+                receiver_digest: rng.random(),
+                lock_script_hash: rng.random(),
+            },
         }
     }
 

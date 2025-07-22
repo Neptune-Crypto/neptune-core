@@ -260,7 +260,7 @@ impl TxOutputListBuilder {
                 OutputFormat::AddressAndAmountAndMedium(address, amt, medium) => {
                     let sender_randomness = wallet_entropy
                         .generate_sender_randomness(block_height, address.privacy_digest());
-                    let utxo = Utxo::new_native_currency(address.lock_script(), amt);
+                    let utxo = Utxo::new_native_currency(address.lock_script_hash(), amt);
                     let owned = wallet_state.can_unlock(&utxo);
 
                     TxOutput::native_currency(amt, sender_randomness, address, medium, owned)

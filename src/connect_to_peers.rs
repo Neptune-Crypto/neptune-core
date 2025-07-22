@@ -266,18 +266,23 @@ where
     >::new(length_delimited, SymmetricalBincode::default());
 
     // Complete Neptune handshake
-    let Some(PeerMessage::Handshake(payload)) = peer.try_next().await? else {
+    let Some(PeerMessage::Handshake {
+        magic_value,
+        data: peer_handshake_data,
+    }) = peer.try_next().await?
+    else {
         bail!("Didn't get handshake on connection attempt");
     };
-    let (magic_string_request, peer_handshake_data) = *payload;
     ensure!(
-        magic_string_request == MAGIC_STRING_REQUEST,
-        "Expected magic value, got {magic_string_request:?}",
+        magic_value == *MAGIC_STRING_REQUEST,
+        "Expected magic value, got {magic_value:?}",
     );
 
-    let handshake_response = Box::new((MAGIC_STRING_RESPONSE.to_vec(), own_handshake_data.clone()));
-    peer.send(PeerMessage::Handshake(handshake_response))
-        .await?;
+    let handshake_response = PeerMessage::Handshake {
+        magic_value: *MAGIC_STRING_RESPONSE,
+        data: Box::new(own_handshake_data.clone()),
+    };
+    peer.send(handshake_response).await?;
 
     // Verify peer network before moving on
     let peer_network = peer_handshake_data.network;
@@ -322,7 +327,7 @@ where
         peer_task_to_main_tx,
         state,
         peer_address,
-        peer_handshake_data,
+        *peer_handshake_data,
         true,
         peer_distance,
     );
@@ -429,19 +434,22 @@ where
     > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
 
     // Make Neptune handshake
-    peer.send(PeerMessage::Handshake(Box::new((
-        Vec::from(MAGIC_STRING_REQUEST),
-        own_handshake.to_owned(),
-    ))))
-    .await?;
+    let outgoing_handshake = PeerMessage::Handshake {
+        magic_value: *MAGIC_STRING_REQUEST,
+        data: Box::new(own_handshake.to_owned()),
+    };
+    peer.send(outgoing_handshake).await?;
     debug!("Awaiting connection status response from {peer_address}");
 
-    let Some(PeerMessage::Handshake(handshake_payload)) = peer.try_next().await? else {
+    let Some(PeerMessage::Handshake {
+        magic_value,
+        data: other_handshake,
+    }) = peer.try_next().await?
+    else {
         bail!("Didn't get handshake response from {peer_address}");
     };
-    let (magic_string_response, other_handshake) = *handshake_payload;
     ensure!(
-        magic_string_response == MAGIC_STRING_RESPONSE,
+        magic_value == *MAGIC_STRING_RESPONSE,
         "Didn't get expected magic value for handshake from {peer_address}",
     );
 
@@ -495,7 +503,7 @@ where
         peer_task_to_main_tx,
         state,
         peer_address,
-        other_handshake,
+        *other_handshake,
         false,
         peer_distance,
     );
@@ -592,14 +600,14 @@ mod tests {
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
-            .write(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_REQUEST.to_vec(),
-                own_handshake.clone(),
-            ))))?)
-            .read(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_RESPONSE.to_vec(),
-                other_handshake,
-            ))))?)
+            .write(&to_bytes(&PeerMessage::Handshake {
+                magic_value: *MAGIC_STRING_REQUEST,
+                data: Box::new(own_handshake.clone()),
+            })?)
+            .read(&to_bytes(&PeerMessage::Handshake {
+                magic_value: *MAGIC_STRING_RESPONSE,
+                data: Box::new(other_handshake),
+            })?)
             .read(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
             ))?)
@@ -813,15 +821,14 @@ mod tests {
             .net
             .register_peer_disconnection(node_0_handshake_data.instance_id, SystemTime::now());
 
-        // check that an immediate reconnection attempt is rejected
-        let handshake_request = PeerMessage::Handshake(Box::new((
-            MAGIC_STRING_REQUEST.to_vec(),
-            node_0_handshake_data,
-        )));
-        let handshake_response = PeerMessage::Handshake(Box::new((
-            MAGIC_STRING_RESPONSE.to_vec(),
-            handshake.clone(),
-        )));
+        let handshake_request = PeerMessage::Handshake {
+            magic_value: *MAGIC_STRING_REQUEST,
+            data: Box::new(node_0_handshake_data.clone()),
+        };
+        let handshake_response = PeerMessage::Handshake {
+            magic_value: *MAGIC_STRING_RESPONSE,
+            data: Box::new(handshake.clone()),
+        };
         let rejected_connection = Builder::new()
             .read(&to_bytes(&handshake_request)?)
             .write(&to_bytes(&handshake_response)?)
@@ -879,14 +886,14 @@ mod tests {
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
-            .read(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_REQUEST.to_vec(),
-                other_handshake,
-            ))))?)
-            .write(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_RESPONSE.to_vec(),
-                own_handshake.clone(),
-            ))))?)
+            .read(&to_bytes(&PeerMessage::Handshake {
+                magic_value: *MAGIC_STRING_REQUEST,
+                data: Box::new(other_handshake),
+            })?)
+            .write(&to_bytes(&PeerMessage::Handshake {
+                magic_value: *MAGIC_STRING_RESPONSE,
+                data: Box::new(own_handshake.clone()),
+            })?)
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
             ))?)
@@ -920,10 +927,10 @@ mod tests {
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
-            .read(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_RESPONSE.to_vec(),
-                other_handshake,
-            ))))?)
+            .read(&to_bytes(&PeerMessage::Handshake {
+                magic_value: *MAGIC_STRING_RESPONSE,
+                data: Box::new(other_handshake),
+            })?)
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
@@ -949,14 +956,14 @@ mod tests {
         let other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet);
         let own_handshake = get_dummy_handshake_data_for_genesis(Network::Beta);
         let mock = Builder::new()
-            .read(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_REQUEST.to_vec(),
-                other_handshake,
-            ))))?)
-            .write(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_RESPONSE.to_vec(),
-                own_handshake.clone(),
-            ))))?)
+            .read(&to_bytes(&PeerMessage::Handshake {
+                magic_value: *MAGIC_STRING_REQUEST,
+                data: Box::new(other_handshake),
+            })?)
+            .write(&to_bytes(&PeerMessage::Handshake {
+                magic_value: *MAGIC_STRING_RESPONSE,
+                data: Box::new(own_handshake),
+            })?)
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
@@ -1012,17 +1019,17 @@ mod tests {
         // Test that the same logic is applied when going through the full connection process
         let mock = Builder::new()
             .read(
-                &to_bytes(&PeerMessage::Handshake(Box::new((
-                    MAGIC_STRING_REQUEST.to_vec(),
-                    other_handshake,
-                ))))
+                &to_bytes(&PeerMessage::Handshake {
+                    magic_value: *MAGIC_STRING_REQUEST,
+                    data: Box::new(other_handshake),
+                })
                 .unwrap(),
             )
             .write(
-                &to_bytes(&PeerMessage::Handshake(Box::new((
-                    MAGIC_STRING_RESPONSE.to_vec(),
-                    own_handshake.clone(),
-                ))))
+                &to_bytes(&PeerMessage::Handshake {
+                    magic_value: *MAGIC_STRING_RESPONSE,
+                    data: Box::new(own_handshake.clone()),
+                })
                 .unwrap(),
             )
             .build();
@@ -1051,14 +1058,20 @@ mod tests {
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
-            .read(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_REQUEST.to_vec(),
-                other_handshake,
-            ))))?)
-            .write(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_RESPONSE.to_vec(),
-                own_handshake.clone(),
-            ))))?)
+            .read(
+                &to_bytes(&PeerMessage::Handshake {
+                    magic_value: *MAGIC_STRING_REQUEST,
+                    data: Box::new(other_handshake),
+                })
+                .unwrap(),
+            )
+            .write(
+                &to_bytes(&PeerMessage::Handshake {
+                    magic_value: *MAGIC_STRING_RESPONSE,
+                    data: Box::new(own_handshake.clone()),
+                })
+                .unwrap(),
+            )
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded),
             ))?)
@@ -1177,14 +1190,20 @@ mod tests {
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
-            .read(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_REQUEST.to_vec(),
-                other_handshake,
-            ))))?)
-            .write(&to_bytes(&PeerMessage::Handshake(Box::new((
-                MAGIC_STRING_RESPONSE.to_vec(),
-                own_handshake.clone(),
-            ))))?)
+            .read(
+                &to_bytes(&PeerMessage::Handshake {
+                    magic_value: *MAGIC_STRING_REQUEST,
+                    data: Box::new(other_handshake),
+                })
+                .unwrap(),
+            )
+            .write(
+                &to_bytes(&PeerMessage::Handshake {
+                    magic_value: *MAGIC_STRING_RESPONSE,
+                    data: Box::new(own_handshake.clone()),
+                })
+                .unwrap(),
+            )
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Refused(ConnectionRefusedReason::BadStanding),
             ))?)

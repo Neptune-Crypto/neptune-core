@@ -131,14 +131,6 @@ impl RustyWalletDatabase {
         &mut self.tables.sent_transactions
     }
 
-    pub fn guesser_preimages(&self) -> &DbtVec<Digest> {
-        &self.tables.guesser_preimages
-    }
-
-    pub fn guesser_preimages_mut(&mut self) -> &mut DbtVec<Digest> {
-        &mut self.tables.guesser_preimages
-    }
-
     /// Get the hash of the block to which this database is synced.
     pub fn get_sync_label(&self) -> Digest {
         self.tables.sync_label.get()

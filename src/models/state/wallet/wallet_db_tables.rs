@@ -20,7 +20,7 @@ use crate::prelude::twenty_first;
 ///  [migrate_db](super::migrate_db).
 ///
 /// note: the very first schema version was 0, ie u16::default()
-pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 1;
+pub(super) const WALLET_DB_SCHEMA_VERSION: u16 = 0;
 
 /// represents logical "tables" in the Wallet database as used by `DbtSchema`.
 ///
@@ -80,13 +80,8 @@ pub(super) struct WalletDbTables {
     // table number: 6
     pub(super) symmetric_key_counter: DbtSingleton<u64>,
 
-    /// list of pre-images to guesser digests in blocks we found. Allows wallet
-    /// to spend guesser-fee UTXOs.
-    // table number: 7
-    pub(super) guesser_preimages: DbtVec<Digest>,
-
     #[allow(dead_code)]
-    // table number: 8
+    // table number: 7
     pub(super) schema_version: DbtSingleton<u16>,
 }
 
@@ -126,8 +121,6 @@ impl WalletDbTables {
             .new_singleton::<u64>("symmetric_key_counter")
             .await;
 
-        let guesser_preimages = storage.schema.new_vec::<Digest>("guesser_preimages").await;
-
         let schema_version = storage.schema.new_singleton::<u16>("schema_version").await;
 
         WalletDbTables {
@@ -138,7 +131,6 @@ impl WalletDbTables {
             counter,
             generation_key_counter,
             symmetric_key_counter,
-            guesser_preimages,
             schema_version,
         }
     }

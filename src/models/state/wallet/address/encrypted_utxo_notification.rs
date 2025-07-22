@@ -9,7 +9,7 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
-use super::SpendingKey;
+use crate::api::export::SpendingKey;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::address::common::network_hrp_char;
