@@ -771,16 +771,6 @@ impl Block {
             return Err(BlockValidationError::ProofQuality);
         };
 
-        // 1.d)
-        // Some later checks rely on this one to not panic. At least `can_remove`.
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
-            return Err(BlockValidationError::ProofValidity);
-        }
-
-        // 2.a)
-        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
-            .map_err(BlockValidationError::from)?;
-
         // 2.c)
         let mut absolute_index_sets = inputs
             .iter()
@@ -839,6 +829,25 @@ impl Block {
             }
         }
 
+        // 2.e)
+        if msa.hash() != self.body().mutator_set_accumulator.hash() {
+            return Err(BlockValidationError::MutatorSetUpdateIntegral);
+        }
+
+        /* https://github.com/Neptune-Crypto/neptune-core/pull/629#issuecomment-3102280982
+        > That function (RemovalRecordList::try_unpack) is tested for an inability to crash, and since it's the first thing that needs to be done for the mutator set update validity check, it's the main line of defense against malicious data. */
+        // 2.a)
+        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
+            .map_err(BlockValidationError::from)?;
+
+        /* Costs estimation and (ir)relevance: <https://github.com/Neptune-Crypto/neptune-core/pull/629#issuecomment-3104854940>. \
+        For #215 @skaunov going to freely change the checks order after this one (expensive) and before the previous one (cheap) without mixing. */
+        // 1.d)
+        // Some later checks rely on this one to not panic. At least `can_remove`.
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
+            return Err(BlockValidationError::ProofValidity);
+        }
+
         // 1.e)
         if self.size() > consensus_rule_set.max_block_size() {
             return Err(BlockValidationError::MaxSize);
@@ -863,11 +872,6 @@ impl Block {
         if ms_update_result.is_err() {
             return Err(BlockValidationError::MutatorSetUpdatePossible);
         };
-
-        // 2.e)
-        if msa.hash() != self.body().mutator_set_accumulator.hash() {
-            return Err(BlockValidationError::MutatorSetUpdateIntegral);
-        }
 
         Ok(())
     }
