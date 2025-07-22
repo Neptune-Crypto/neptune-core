@@ -10,7 +10,7 @@ use twenty_first::prelude::Digest;
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
 
@@ -30,7 +30,7 @@ pub fn derive_receiver_id(seed: Digest) -> BFieldElement {
 }
 
 /// Derive a seed and a nonce deterministically, in order to produce
-/// deterministic public announcements, since these are needed to be able to
+/// deterministic announcements, since these are needed to be able to
 /// reuse proofs for tests. These values are used in the encryption
 /// step.
 pub fn deterministically_derive_seed_and_nonce(
@@ -47,41 +47,35 @@ pub fn deterministically_derive_seed_and_nonce(
     (seed, e4)
 }
 
-/// retrieves key-type field from a [PublicAnnouncement]
+/// retrieves key-type field from a [Announcement]
 ///
 /// returns an error if the field is not present
-pub fn key_type_from_public_announcement(
-    announcement: &PublicAnnouncement,
-) -> Result<BFieldElement> {
+pub fn key_type_from_announcement(announcement: &Announcement) -> Result<BFieldElement> {
     match announcement.message.first() {
         Some(key_type) => Ok(*key_type),
-        None => bail!("Public announcement does not contain key type."),
+        None => bail!("announcement does not contain key type."),
     }
 }
 
-/// retrieves ciphertext field from a [PublicAnnouncement]
+/// retrieves ciphertext field from a [Announcement]
 ///
 /// returns an error if the input is too short
-pub fn ciphertext_from_public_announcement(
-    announcement: &PublicAnnouncement,
-) -> Result<Vec<BFieldElement>> {
+pub fn ciphertext_from_announcement(announcement: &Announcement) -> Result<Vec<BFieldElement>> {
     ensure!(
         announcement.message.len() > 2,
-        "Public announcement does not contain ciphertext.",
+        "announcement does not contain ciphertext.",
     );
 
     Ok(announcement.message[2..].to_vec())
 }
 
-/// retrieves receiver identifier field from a [PublicAnnouncement]
+/// retrieves receiver identifier field from a [Announcement]
 ///
 /// returns an error if the input is too short
-pub fn receiver_identifier_from_public_announcement(
-    announcement: &PublicAnnouncement,
-) -> Result<BFieldElement> {
+pub fn receiver_identifier_from_announcement(announcement: &Announcement) -> Result<BFieldElement> {
     match announcement.message.get(1) {
         Some(id) => Ok(*id),
-        None => bail!("Public announcement does not contain receiver ID"),
+        None => bail!("announcement does not contain receiver ID"),
     }
 }
 

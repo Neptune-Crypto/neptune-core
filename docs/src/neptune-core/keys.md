@@ -44,7 +44,7 @@ They are primarily intended for sending funds to third party wallets.  They can 
 
 `Generation` keys and addresses use the lattice-based public key encryption scheme described in Section 2.7 of [this paper](https://eprint.iacr.org/2022/1041.pdf). This choice of cryptosystem was made because of its native compatibility with the Oxfoi prime, $2^{64} - 2^{32} + 1$, which is the field into which Neptune encodes all blockchain data. (It does this, in turn, because Triton VM only works over this field.) Furthermore, according to current understanding, the parameters and underlying mathematics guarantee security long into the future and, in particular, even against attacks mounted on quantum computers.
 
-The address encodes the public key using bech32m. The human readable prefix "nolga" stands for "Neptune oxfoi lattice-based generation address". The public announcement encodes a ciphertext which, when decrypted with the correct key, yields the UTXO information.
+The address encodes the public key using bech32m. The human readable prefix "nolga" stands for "Neptune oxfoi lattice-based generation address". The announcement encodes a ciphertext which, when decrypted with the correct key, yields the UTXO information.
 
 #### Naming
 

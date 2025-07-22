@@ -17,8 +17,8 @@ use tasm_lib::prelude::Digest;
 
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -42,7 +42,7 @@ use crate::WalletState;
 pub struct TransactionDetailsBuilder {
     tx_inputs: TxInputList,
     tx_outputs: TxOutputList,
-    public_announcements: Vec<PublicAnnouncement>,
+    announcements: Vec<Announcement>,
     fee: NativeCurrencyAmount,
     coinbase: Option<NativeCurrencyAmount>,
     change_policy: ChangePolicy,
@@ -85,17 +85,18 @@ impl TransactionDetailsBuilder {
         self
     }
 
-    /// Add many public announcements.
+    /// Add many custom announcements.
     ///
-    /// Use this method for public announcements that are *not* encrypted UTXO
+    ///
+    /// Use this method for announcements that are *not* encrypted UTXO
     /// notifications. The encrypted UTXO notifications are generated on the fly
     /// at a later stage.
-    pub fn public_announcements<Iter: IntoIterator<Item = PublicAnnouncement>>(
+    pub fn custom_announcements<Iter: IntoIterator<Item = Announcement>>(
         mut self,
-        public_announcements: Iter,
+        announcements: Iter,
     ) -> Self {
-        self.public_announcements
-            .append(&mut public_announcements.into_iter().collect_vec());
+        self.announcements
+            .append(&mut announcements.into_iter().collect_vec());
         self
     }
 
@@ -279,7 +280,7 @@ impl TransactionDetailsBuilder {
                 .expect("Block from state must have mutator set after"),
             state_lock.cli().network,
         )
-        .with_public_announcements(self.public_announcements);
+        .with_announcements(self.announcements);
 
         Ok(transaction_details)
     }

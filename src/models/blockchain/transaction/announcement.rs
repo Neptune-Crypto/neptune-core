@@ -21,17 +21,17 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, TasmObject,
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
-pub struct PublicAnnouncement {
+pub struct Announcement {
     pub message: Vec<BFieldElement>,
 }
 
-impl PublicAnnouncement {
+impl Announcement {
     pub fn new(message: Vec<BFieldElement>) -> Self {
         Self { message }
     }
 }
 
-impl LowerHex for PublicAnnouncement {
+impl LowerHex for Announcement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for m in &self.message {
             // big-endian (Arabic)
@@ -41,7 +41,7 @@ impl LowerHex for PublicAnnouncement {
     }
 }
 
-impl Display for PublicAnnouncement {
+impl Display for Announcement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // add hex delimiter, then use hex formatter
         write!(f, "0x{:x}", self)
@@ -57,7 +57,7 @@ pub enum ParsePublicAnnouncementError {
     NonCanonicalRepresentation,
 }
 
-impl TryFrom<String> for PublicAnnouncement {
+impl TryFrom<String> for Announcement {
     type Error = ParsePublicAnnouncementError;
 
     fn try_from(unparsed: String) -> Result<Self, Self::Error> {
@@ -101,16 +101,14 @@ mod tests {
     use super::*;
 
     #[proptest]
-    fn try_from_string_inverts_display_format(
-        #[strategy(arb())] public_announcement: PublicAnnouncement,
-    ) {
-        let as_hex = format!("{}", public_announcement);
-        let as_announcement_again = PublicAnnouncement::try_from(as_hex).unwrap();
-        prop_assert_eq!(public_announcement, as_announcement_again);
+    fn try_from_string_inverts_display_format(#[strategy(arb())] announcement: Announcement) {
+        let as_hex = format!("{}", announcement);
+        let as_announcement_again = Announcement::try_from(as_hex).unwrap();
+        prop_assert_eq!(announcement, as_announcement_again);
     }
 
     #[proptest]
     fn try_from_string_cannot_crash(s: String) {
-        let _announcement = PublicAnnouncement::try_from(s); // no crash
+        let _announcement = Announcement::try_from(s); // no crash
     }
 }

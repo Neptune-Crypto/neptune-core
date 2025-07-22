@@ -11,9 +11,9 @@ use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::prelude::twenty_first;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 
+pub mod announcement;
 pub mod lock_script;
 pub mod primitive_witness;
-pub mod public_announcement;
 pub mod transaction_kernel;
 pub mod transaction_proof;
 pub mod utxo;
@@ -329,7 +329,7 @@ pub(crate) mod tests {
         let empty_kernel = TransactionKernelProxy {
             inputs: vec![],
             outputs: vec![],
-            public_announcements: vec![],
+            announcements: vec![],
             fee: NativeCurrencyAmount::coins(0),
             coinbase: None,
             timestamp: Default::default(),
@@ -478,8 +478,8 @@ pub(crate) mod tests {
             updated_with_block.kernel.outputs
         );
         assert_eq!(
-            to_be_updated.kernel.public_announcements,
-            updated_with_block.kernel.public_announcements
+            to_be_updated.kernel.announcements,
+            updated_with_block.kernel.announcements
         );
         assert_eq!(
             to_be_updated.kernel.inputs.len(),

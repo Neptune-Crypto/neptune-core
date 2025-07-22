@@ -20,9 +20,9 @@ use super::common;
 use super::generation_address;
 use super::receiving_address::ReceivingAddress;
 use super::symmetric_key;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
@@ -33,7 +33,7 @@ use crate::BFieldElement;
 // nice since they are (presently) defined in separate files.
 //
 // anyway it is a desirable property that AddressableKeyType variants match the values
-// actually stored in PublicAnnouncement.
+// actually stored in Announcement.
 
 /// Enumerates key types with corresponding addresses
 ///
@@ -93,14 +93,14 @@ impl From<AddressableKeyType> for BFieldElement {
     }
 }
 
-impl TryFrom<&PublicAnnouncement> for AddressableKeyType {
+impl TryFrom<&Announcement> for AddressableKeyType {
     type Error = anyhow::Error;
 
-    fn try_from(pa: &PublicAnnouncement) -> Result<Self> {
-        match common::key_type_from_public_announcement(pa) {
+    fn try_from(pa: &Announcement) -> Result<Self> {
+        match common::key_type_from_announcement(pa) {
             Ok(kt) if kt == Self::Generation.into() => Ok(Self::Generation),
             Ok(kt) if kt == Self::Symmetric.into() => Ok(Self::Symmetric),
-            _ => bail!("encountered PublicAnnouncement of unknown type"),
+            _ => bail!("encountered Announcement of unknown type"),
         }
     }
 }
@@ -245,7 +245,7 @@ impl AddressableKey {
         }
     }
 
-    /// Scans all public announcements in a `Transaction` and return all
+    /// Scans all announcements in a `Transaction` and return all
     /// UTXOs that are recognized by this spending key.
     ///
     /// Note that a single `Transaction` may represent an entire block.
@@ -262,21 +262,21 @@ impl AddressableKey {
         let receiver_identifier = self.receiver_identifier();
         let receiver_preimage = self.privacy_preimage();
 
-        // for all public announcements
+        // for all announcements
         tx_kernel
-            .public_announcements
+            .announcements
             .iter()
 
             // ... that are marked as encrypted to our key type
-            .filter(|pa| self.matches_public_announcement_key_type(pa))
+            .filter(|pa| self.matches_announcement_key_type(pa))
 
             // ... that match the receiver_id of this key
             .filter(move |pa| {
-                matches!(common::receiver_identifier_from_public_announcement(pa), Ok(r) if r == receiver_identifier)
+                matches!(common::receiver_identifier_from_announcement(pa), Ok(r) if r == receiver_identifier)
             })
 
             // ... that have a ciphertext field
-            .filter_map(|pa| self.ok_warn(common::ciphertext_from_public_announcement(pa)))
+            .filter_map(|pa| self.ok_warn(common::ciphertext_from_announcement(pa)))
 
             // ... which can be decrypted with this key
             .filter_map(|c| self.ok_warn(self.decrypt(&c)))
@@ -298,14 +298,14 @@ impl AddressableKey {
         match result {
             Ok(v) => Some(v),
             Err(e) => {
-                warn!("possible loss of funds! skipping public announcement for {:?} key with receiver_identifier: {}.  error: {}", AddressableKeyType::from(self), self.receiver_identifier(), e.to_string());
+                warn!("possible loss of funds! skipping announcement for {:?} key with receiver_identifier: {}.  error: {}", AddressableKeyType::from(self), self.receiver_identifier(), e.to_string());
                 None
             }
         }
     }
 
-    /// returns true if the [PublicAnnouncement] has a type-flag that matches the type of this key
-    pub(super) fn matches_public_announcement_key_type(&self, pa: &PublicAnnouncement) -> bool {
+    /// returns true if the [Announcement] has a type-flag that matches the type of this key
+    pub(super) fn matches_announcement_key_type(&self, pa: &Announcement) -> bool {
         matches!(AddressableKeyType::try_from(pa), Ok(kt) if kt == AddressableKeyType::from(self))
     }
 }

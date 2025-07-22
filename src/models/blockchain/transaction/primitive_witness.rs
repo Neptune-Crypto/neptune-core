@@ -435,7 +435,7 @@ impl PrimitiveWitness {
             return Err(error);
         }
 
-        // public announcements: there isn't anything to verify
+        // announcements: there isn't anything to verify
 
         Ok(())
     }
@@ -563,8 +563,8 @@ pub mod neptune_arbitrary {
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
 
+    use super::super::announcement::Announcement;
     use super::super::lock_script::LockScript;
-    use super::super::public_announcement::PublicAnnouncement;
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
@@ -580,28 +580,28 @@ pub mod neptune_arbitrary {
 
     impl PrimitiveWitness {
         /// Strategy for generating a `PrimitiveWitness` with the given number of
-        /// inputs, outputs, and public announcements. If `num_inputs` is set to
+        /// inputs, outputs, and announcements. If `num_inputs` is set to
         /// `None`, then the `PrimitiveWitness` is for a coinbase transaction.
         pub fn arbitrary_with_size_numbers(
             num_inputs: Option<usize>,
             num_outputs: usize,
-            num_public_announcements: usize,
+            num_announcements: usize,
         ) -> BoxedStrategy<Self> {
             Self::arbitrary_with_size_numbers_and_merge_bit(
                 num_inputs,
                 num_outputs,
-                num_public_announcements,
+                num_announcements,
                 false,
             )
         }
 
         /// Strategy for generating a `PrimitiveWitness` with the given number of
-        /// inputs, outputs, and public announcements. If `num_inputs` is set to
+        /// inputs, outputs, and announcements. If `num_inputs` is set to
         /// `None`, then the `PrimitiveWitness` is for a coinbase transaction.
         pub(crate) fn arbitrary_with_size_numbers_and_merge_bit(
             num_inputs: Option<usize>,
             num_outputs: usize,
-            num_public_announcements: usize,
+            num_announcements: usize,
             merge_bit: bool,
         ) -> BoxedStrategy<Self> {
             // Primitive witnesses may not simultaneously have inputs and set a
@@ -619,7 +619,7 @@ pub mod neptune_arbitrary {
             //  - amounts (inputs)
             //  - lock script preimages (outputs)
             //  - amounts (outputs)
-            //  - public announcements
+            //  - publiannouncements
             //  - fee
             //  - timestamp
             (
@@ -628,7 +628,7 @@ pub mod neptune_arbitrary {
                 vec(arb::<u64>(), num_inputs),
                 vec(arb::<Digest>(), num_outputs),
                 vec(arb::<u64>(), num_outputs),
-                vec(arb::<PublicAnnouncement>(), num_public_announcements),
+                vec(arb::<Announcement>(), num_announcements),
                 arb::<u64>(),
                 arb::<Timestamp>(),
             )
@@ -639,7 +639,7 @@ pub mod neptune_arbitrary {
                         input_dist,
                         output_address_seeds,
                         output_dist,
-                        public_announcements,
+                        announcements,
                         fee_dist,
                         timestamp,
                     )| {
@@ -718,7 +718,7 @@ pub mod neptune_arbitrary {
                             &input_utxos,
                             &input_lock_scripts_and_witnesses,
                             &output_utxos,
-                            &public_announcements,
+                            &announcements,
                             fee,
                             maybe_coinbase,
                             timestamp,
@@ -733,14 +733,14 @@ pub mod neptune_arbitrary {
             input_utxos: &[Utxo],
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
             output_utxos: &[Utxo],
-            public_announcements: &[PublicAnnouncement],
+            announcements: &[Announcement],
             fee: NativeCurrencyAmount,
             coinbase: Option<NativeCurrencyAmount>,
         ) -> BoxedStrategy<PrimitiveWitness> {
             let input_utxos = input_utxos.to_vec();
             let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.to_vec();
             let output_utxos = output_utxos.to_vec();
-            let public_announcements = public_announcements.to_vec();
+            let announcements = announcements.to_vec();
 
             let merge_bit = false;
             arb::<Timestamp>()
@@ -749,7 +749,7 @@ pub mod neptune_arbitrary {
                         &input_utxos,
                         &input_lock_scripts_and_witnesses,
                         &output_utxos,
-                        &public_announcements,
+                        &announcements,
                         fee,
                         coinbase,
                         now,
@@ -764,7 +764,7 @@ pub mod neptune_arbitrary {
             input_utxos: &[Utxo],
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
             output_utxos: &[Utxo],
-            public_announcements: &[PublicAnnouncement],
+            announcements: &[Announcement],
             fee: NativeCurrencyAmount,
             coinbase: Option<NativeCurrencyAmount>,
             timestamp: Timestamp,
@@ -774,7 +774,7 @@ pub mod neptune_arbitrary {
             let num_outputs = output_utxos.len();
             let input_utxos = input_utxos.to_vec();
             let output_utxos = output_utxos.to_vec();
-            let public_announcements = public_announcements.to_vec();
+            let announcements = announcements.to_vec();
             let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.to_vec();
 
             // unwrap:
@@ -821,7 +821,7 @@ pub mod neptune_arbitrary {
                             input_lock_scripts_and_witnesses.clone();
                         let input_utxos = input_utxos.clone();
                         let output_utxos = output_utxos.clone();
-                        let public_announcements = public_announcements.clone();
+                        let announcements = announcements.clone();
 
                         // unwrap random mutator set accumulator with membership proofs and removal records
                         MsaAndRecords::arbitrary_with((input_triples, aocl_size))
@@ -831,7 +831,7 @@ pub mod neptune_arbitrary {
                                     input_utxos.clone(),
                                     input_lock_scripts_and_witnesses.clone(),
                                     output_utxos.clone(),
-                                    public_announcements.clone(),
+                                    announcements.clone(),
                                     output_sender_randomnesses.clone(),
                                     output_receiver_digests.clone(),
                                     fee,
@@ -854,7 +854,7 @@ pub mod neptune_arbitrary {
             input_utxos: Vec<Utxo>,
             input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
             output_utxos: Vec<Utxo>,
-            public_announcements: Vec<PublicAnnouncement>,
+            announcements: Vec<Announcement>,
             output_sender_randomnesses: Vec<Digest>,
             output_receiver_digests: Vec<Digest>,
             fee: NativeCurrencyAmount,
@@ -881,7 +881,7 @@ pub mod neptune_arbitrary {
             let kernel = TransactionKernelProxy {
                 inputs: input_removal_records.clone(),
                 outputs: output_commitments.clone(),
-                public_announcements: public_announcements.to_vec(),
+                announcements: announcements.to_vec(),
                 fee,
                 coinbase,
                 timestamp,
@@ -1093,7 +1093,7 @@ mod tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
-    use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
+    use crate::models::blockchain::transaction::announcement::Announcement;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
@@ -1172,7 +1172,7 @@ mod tests {
             let nested_vec_strategy_digests =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
-                |counts: [usize; N]| counts.map(|count| vec(arb::<PublicAnnouncement>(), count));
+                |counts: [usize; N]| counts.map(|count| vec(arb::<Announcement>(), count));
             let nested_vec_strategy_amounts = |counts: [usize; N]| {
                 counts.map(|count| vec(NativeCurrencyAmount::arbitrary_non_negative(), count))
             };
@@ -1210,7 +1210,7 @@ mod tests {
                             input_amountss,
                             input_address_seedss,
                             mut output_utxos,
-                            public_announcements_nested,
+                            announcements_nested,
                             mut fees,
                             mut input_sender_randomnesses,
                             mut input_receiver_preimages,
@@ -1313,7 +1313,7 @@ mod tests {
                                     0..N,
                                     split_msa_and_records,
                                     timestamps,
-                                    public_announcements_nested.clone(),
+                                    announcements_nested.clone(),
                                     output_sender_randomnesses_nested.clone(),
                                     output_receiver_digests_nested.clone(),
                                     fees.clone(),
@@ -1328,7 +1328,7 @@ mod tests {
                                         index,
                                         msaar,
                                         timestamp,
-                                        public_announcements,
+                                        announcements,
                                         output_sender_randomnesses,
                                         output_receiver_digests,
                                         fee,
@@ -1353,7 +1353,7 @@ mod tests {
                                             input_utxos,
                                             input_lock_scripts_and_witnesses_,
                                             output_utxos_,
-                                            public_announcements,
+                                            announcements,
                                             output_sender_randomnesses,
                                             output_receiver_digests,
                                             fee,
@@ -1465,7 +1465,7 @@ mod tests {
                 vec(arb::<Digest>(), num_outputs),
                 arb::<[BFieldElement; 3]>(),
                 arb::<[BFieldElement; 3]>(),
-                vec(arb::<PublicAnnouncement>(), num_announcements),
+                vec(arb::<Announcement>(), num_announcements),
             )
                 .prop_map(
                     move |(
@@ -1476,7 +1476,7 @@ mod tests {
                         output_receiver_digests,
                         input_salt,
                         output_salt,
-                        public_announcements,
+                        announcements,
                     )| {
                         let total_input_amount = input_utxos
                             .iter()
@@ -1518,7 +1518,7 @@ mod tests {
                         let kernel = TransactionKernelProxy {
                             inputs: input_removal_records.clone(),
                             outputs: output_addition_records,
-                            public_announcements,
+                            announcements,
                             fee,
                             coinbase,
                             timestamp,
@@ -1700,13 +1700,13 @@ mod tests {
         // Notice only SingleProof-backed txs need inputs to allow updating, not PW-backed ones.
         #[strategy(0usize..20)] _num_inputs_own: usize,
         #[strategy(0usize..20)] _num_outputs_own: usize,
-        #[strategy(0usize..20)] _num_public_announcements_own: usize,
+        #[strategy(0usize..20)] _num_announcements_own: usize,
         #[strategy(0usize..20)] _num_inputs_mined: usize,
         #[strategy(0usize..20)] _num_outputs_mined: usize,
-        #[strategy(0usize..20)] _num_public_announcements_mined: usize,
+        #[strategy(0usize..20)] _num_announcements_mined: usize,
         #[strategy(PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets(
-            [(#_num_inputs_own, #_num_outputs_own, #_num_public_announcements_own),
-            (#_num_inputs_mined, #_num_outputs_mined, #_num_public_announcements_mined),],
+            [(#_num_inputs_own, #_num_outputs_own, #_num_announcements_own),
+            (#_num_inputs_mined, #_num_outputs_mined, #_num_announcements_mined),],
     ))]
         pws: [PrimitiveWitness; 2],
     ) {
@@ -1740,12 +1740,12 @@ mod tests {
         let network = Network::Main;
         for num_inputs in 0..=2 {
             for num_outputs in 0..=2 {
-                for num_public_announcements in 0..=2 {
+                for num_announcements in 0..=2 {
                     let mut test_runner = TestRunner::deterministic();
                     let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
                         Some(num_inputs),
                         num_outputs,
-                        num_public_announcements,
+                        num_announcements,
                     )
                     .new_tree(&mut test_runner)
                     .unwrap()
@@ -1765,10 +1765,10 @@ mod tests {
     async fn lock_script_failure_negative_test(
         #[strategy(3usize..10)] _num_inputs: usize,
         #[strategy(3usize..10)] _num_outputs: usize,
-        #[strategy(3usize..10)] _num_public_announcements: usize,
+        #[strategy(3usize..10)] _num_announcements: usize,
         #[strategy(0usize..#_num_inputs)] mutated_lockscript_witness: usize,
         #[strategy(arb())] bad_preimage: Digest,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_announcements
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
@@ -1789,9 +1789,9 @@ mod tests {
     async fn type_script_failure_negative_test(
         #[strategy(3usize..10)] _num_inputs: usize,
         #[strategy(3usize..10)] _num_outputs: usize,
-        #[strategy(3usize..10)] _num_public_announcements: usize,
+        #[strategy(3usize..10)] _num_announcements: usize,
         #[strategy(arb())] rng_seed: u64,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_announcements
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
@@ -1813,8 +1813,8 @@ mod tests {
     async fn arbitrary_transaction_is_valid(
         #[strategy(3usize..10)] _num_inputs: usize,
         #[strategy(3usize..10)] _num_outputs: usize,
-        #[strategy(3usize..10)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
+        #[strategy(3usize..10)] _num_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_announcements
         ))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {

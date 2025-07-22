@@ -83,7 +83,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
             crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy {
                 inputs,
                 outputs,
-                public_announcements: vec![],
+                announcements: vec![],
                 fee: NativeCurrencyAmount::coins(1),
                 timestamp,
                 coinbase: None,

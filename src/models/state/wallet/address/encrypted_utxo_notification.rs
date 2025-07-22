@@ -11,7 +11,7 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use super::SpendingKey;
 use crate::config_models::network::Network;
-use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::state::wallet::address::common::network_hrp_char;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 
@@ -60,15 +60,15 @@ impl EncryptedUtxoNotification {
         }
     }
 
-    /// Convert an encrypted UTXO notification to a public announcement. Leaks
+    /// Convert an encrypted UTXO notification to a announcement. Leaks
     /// privacy in the form of `receiver_identifier` is addresses are reused.
     /// Never leaks actual UTXO info such as amount transferred.
-    pub(crate) fn into_public_announcement(self) -> PublicAnnouncement {
+    pub(crate) fn into_announcement(self) -> Announcement {
         // We could use `BfieldCodec` encode here. But it might be a bit faster
-        // to filter out irrelevant public announcement if we don't have to
+        // to filter out irrelevant announcement if we don't have to
         // attempt a decoding to a specific data type first but can instead just
         // read out b-field elements and skip items based on that.
-        PublicAnnouncement::new(self.into_message())
+        Announcement::new(self.into_message())
     }
 
     pub(crate) fn into_bech32m(self, network: Network) -> String {

@@ -8,7 +8,7 @@ use crate::models::blockchain::block::Block;
 /// When scan mode is active, an extra step is performed by the wallet state
 /// when updating the wallet state with a new block. This extra step checks to
 /// see if the incoming block has a height captured by the target range and if
-/// so, scans the block for public announcements that can be decrypted by
+/// so, scans the block for announcements that can be decrypted by
 /// *future* keys, meaning keys that are derived deterministically from the
 /// wallet secret seed but with future derivation indices. If an incoming
 /// message is observed, the derivation index counter is updated accordingly.

@@ -58,13 +58,13 @@ impl TransactionKernel {
             .collect_vec();
         let output_hash = Tip5::hash_varlen(&output_hash);
 
-        // No permutation of public announcements allowed
-        let public_announcements_hash = self
-            .public_announcements
+        // No permutation of announcements allowed
+        let announcements_hash = self
+            .announcements
             .iter()
             .flat_map(|x| Tip5::hash_varlen(&x.message).values().to_vec())
             .collect_vec();
-        let public_announcements_hash = Tip5::hash_varlen(&public_announcements_hash);
+        let announcements_hash = Tip5::hash_varlen(&announcements_hash);
 
         let fee_hash = Tip5::hash(&self.fee);
 
@@ -77,7 +77,7 @@ impl TransactionKernel {
         let mut digests = vec![
             index_set_hash,
             output_hash,
-            public_announcements_hash,
+            announcements_hash,
             fee_hash,
             coinbase_hash,
             merge_bit_hash,

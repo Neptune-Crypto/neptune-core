@@ -11,8 +11,8 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::prelude::Digest;
 
+use super::announcement::Announcement;
 use super::primitive_witness::PrimitiveWitness;
-use super::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -31,7 +31,7 @@ pub struct TransactionKernel {
     // note: see field descriptions in [`TransactionKernelProxy`]
     pub inputs: Vec<RemovalRecord>,
     pub outputs: Vec<AdditionRecord>,
-    pub public_announcements: Vec<PublicAnnouncement>,
+    pub announcements: Vec<Announcement>,
     pub fee: NativeCurrencyAmount,
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
@@ -57,7 +57,7 @@ impl std::fmt::Display for TransactionKernel {
 kernel hash: {mast_hash}
 inputs: {inputs}
 outputs: {outputs}
-public_announcements: {announcements}
+announcements: {announcements}
 coinbase: {coinbase}
 timestamp: {timestamp}
 mutator_set_hash: {ms_hash}
@@ -66,7 +66,7 @@ merge_bit: {merge_bit}
             mast_hash = self.mast_hash().to_hex(),
             inputs = self.inputs.len(),
             outputs = self.outputs.len(),
-            announcements = self.public_announcements.len(),
+            announcements = self.announcements.len(),
             coinbase = self
                 .coinbase
                 .unwrap_or_else(|| NativeCurrencyAmount::coins(0)),
@@ -84,7 +84,7 @@ impl PartialEq for TransactionKernel {
     fn eq(&self, o: &Self) -> bool {
         self.inputs == o.inputs
             && self.outputs == o.outputs
-            && self.public_announcements == o.public_announcements
+            && self.announcements == o.announcements
             && self.fee == o.fee
             && self.coinbase == o.coinbase
             && self.timestamp == o.timestamp
@@ -156,7 +156,7 @@ impl TransactionKernel {
 pub enum TransactionKernelField {
     Inputs,
     Outputs,
-    PublicAnnouncements,
+    Announcements,
     Fee,
     Coinbase,
     Timestamp,
@@ -181,7 +181,7 @@ impl MastHash for TransactionKernel {
 
                 let output_utxos_sequence = self.outputs.encode();
 
-                let pubscript_sequence = self.public_announcements.encode();
+                let announcements_sequence = self.announcements.encode();
 
                 let fee_sequence = self.fee.encode();
 
@@ -196,7 +196,7 @@ impl MastHash for TransactionKernel {
                 vec![
                     input_utxos_sequence,
                     output_utxos_sequence,
-                    pubscript_sequence,
+                    announcements_sequence,
                     fee_sequence,
                     coinbase_sequence,
                     timestamp_sequence,
@@ -219,14 +219,14 @@ pub mod neptune_arbitrary {
         fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
             let num_inputs = u.int_in_range(0..=4)?;
             let num_outputs = u.int_in_range(0..=4)?;
-            let num_public_announcements = u.int_in_range(0..=2)?;
+            let num_announcements = u.int_in_range(0..=2)?;
             let inputs: Vec<RemovalRecord> = (0..num_inputs)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
             let outputs: Vec<AdditionRecord> = (0..num_outputs)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
-            let public_announcements: Vec<PublicAnnouncement> = (0..num_public_announcements)
+            let announcements: Vec<Announcement> = (0..num_announcements)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
             let fee: NativeCurrencyAmount = u.arbitrary()?;
@@ -238,7 +238,7 @@ pub mod neptune_arbitrary {
             let transaction_kernel = TransactionKernelProxy {
                 inputs,
                 outputs,
-                public_announcements,
+                announcements,
                 fee,
                 coinbase,
                 timestamp,
@@ -269,7 +269,7 @@ pub struct TransactionKernelProxy {
     pub outputs: Vec<AdditionRecord>,
 
     /// list of public-announcements to include in blockchain
-    pub public_announcements: Vec<PublicAnnouncement>,
+    pub announcements: Vec<Announcement>,
 
     /// tx fee amount
     pub fee: NativeCurrencyAmount,
@@ -292,7 +292,7 @@ impl From<TransactionKernel> for TransactionKernelProxy {
         Self {
             inputs: k.inputs,
             outputs: k.outputs,
-            public_announcements: k.public_announcements,
+            announcements: k.announcements,
             fee: k.fee,
             coinbase: k.coinbase,
             timestamp: k.timestamp,
@@ -307,7 +307,7 @@ impl TransactionKernelProxy {
         TransactionKernel {
             inputs: self.inputs,
             outputs: self.outputs,
-            public_announcements: self.public_announcements,
+            announcements: self.announcements,
             fee: self.fee,
             coinbase: self.coinbase,
             timestamp: self.timestamp,
@@ -329,7 +329,7 @@ impl TransactionKernelProxy {
 pub struct TransactionKernelModifier {
     pub inputs: Option<Vec<RemovalRecord>>,
     pub outputs: Option<Vec<AdditionRecord>>,
-    pub public_announcements: Option<Vec<PublicAnnouncement>>,
+    pub announcements: Option<Vec<Announcement>>,
     pub fee: Option<NativeCurrencyAmount>,
     pub coinbase: Option<Option<NativeCurrencyAmount>>,
     pub timestamp: Option<Timestamp>,
@@ -349,8 +349,8 @@ impl TransactionKernelModifier {
         self
     }
     /// set modified public-announcements
-    pub fn public_announcements(mut self, pa: Vec<PublicAnnouncement>) -> Self {
-        self.public_announcements = Some(pa);
+    pub fn announcements(mut self, announcements: Vec<Announcement>) -> Self {
+        self.announcements = Some(announcements);
         self
     }
     /// set modified fee
@@ -390,7 +390,7 @@ impl TransactionKernelModifier {
         TransactionKernel {
             inputs: self.inputs.unwrap_or(k.inputs),
             outputs: self.outputs.unwrap_or(k.outputs),
-            public_announcements: self.public_announcements.unwrap_or(k.public_announcements),
+            announcements: self.announcements.unwrap_or(k.announcements),
             fee: self.fee.unwrap_or(k.fee),
             coinbase: self.coinbase.unwrap_or(k.coinbase),
             timestamp: self.timestamp.unwrap_or(k.timestamp),
@@ -498,22 +498,18 @@ pub mod tests {
     }
 
     #[proptest]
-    fn decode_public_announcement(
-        #[strategy(arb::<PublicAnnouncement>())] pubscript: PublicAnnouncement,
-    ) {
-        let encoded = pubscript.encode();
-        let decoded = *PublicAnnouncement::decode(&encoded).unwrap();
-        assert_eq!(pubscript, decoded);
+    fn decode_announcement(#[strategy(arb::<Announcement>())] announcement: Announcement) {
+        let encoded = announcement.encode();
+        let decoded = *Announcement::decode(&encoded).unwrap();
+        assert_eq!(announcement, decoded);
     }
 
     #[proptest]
-    fn decode_public_announcements(
-        #[strategy([arb(), arb()])] pubscripts: [PublicAnnouncement; 2],
-    ) {
-        let pubscripts = pubscripts.to_vec();
-        let encoded = pubscripts.encode();
-        let decoded = *Vec::<PublicAnnouncement>::decode(&encoded).unwrap();
-        assert_eq!(pubscripts, decoded);
+    fn decode_announcements(#[strategy([arb(), arb()])] announcements: [Announcement; 2]) {
+        let announcements = announcements.to_vec();
+        let encoded = announcements.encode();
+        let decoded = *Vec::<Announcement>::decode(&encoded).unwrap();
+        assert_eq!(announcements, decoded);
     }
 
     #[proptest]
@@ -541,7 +537,7 @@ pub mod tests {
                 outputs: vec![AdditionRecord {
                     canonical_commitment
                 }],
-                public_announcements: Default::default(),
+                announcements: Default::default(),
                 fee: NativeCurrencyAmount::one(),
                 coinbase: None,
                 timestamp: Default::default(),

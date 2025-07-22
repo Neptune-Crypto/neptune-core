@@ -51,7 +51,7 @@ pub struct UpdateWitness {
     pub(crate) old_swbfa_hash: Digest,
     pub(crate) aocl_successor_proof: MmrSuccessorProof,
     pub(crate) outputs_hash: Digest,
-    pub(crate) public_announcements_hash: Digest,
+    pub(crate) announcements_hash: Digest,
 }
 
 impl UpdateWitness {
@@ -96,7 +96,7 @@ impl UpdateWitness {
             old_swbfa_hash: Hash::hash(&old_msa.swbf_active),
             aocl_successor_proof,
             outputs_hash: Hash::hash(&new_kernel.outputs),
-            public_announcements_hash: Hash::hash(&new_kernel.public_announcements),
+            announcements_hash: Hash::hash(&new_kernel.announcements),
         }
     }
 
@@ -138,11 +138,11 @@ impl UpdateWitness {
                 // outputs
                 self.old_kernel.mast_path(TransactionKernelField::Outputs),
                 self.new_kernel.mast_path(TransactionKernelField::Outputs),
-                // public announcements
+                // announcements
                 self.old_kernel
-                    .mast_path(TransactionKernelField::PublicAnnouncements),
+                    .mast_path(TransactionKernelField::Announcements),
                 self.new_kernel
-                    .mast_path(TransactionKernelField::PublicAnnouncements),
+                    .mast_path(TransactionKernelField::Announcements),
                 // fee
                 self.old_kernel.mast_path(TransactionKernelField::Fee),
                 self.new_kernel.mast_path(TransactionKernelField::Fee),
@@ -305,8 +305,7 @@ impl BasicSnippet for UpdateBranch {
         let field_timestamp = field!(TransactionKernel::timestamp);
         let inputs_field_with_size = field_with_size!(TransactionKernel::inputs);
         let outputs_field_with_size = field_with_size!(TransactionKernel::outputs);
-        let public_announcements_field_with_size =
-            field_with_size!(TransactionKernel::public_announcements);
+        let announcements_field_with_size = field_with_size!(TransactionKernel::announcements);
         let fee_field_with_size = field_with_size!(TransactionKernel::fee);
 
         let authenticate_merge_bit = triton_asm! {
@@ -543,8 +542,8 @@ impl BasicSnippet for UpdateBranch {
                 {&authenticate_field_twice_with_no_change(&outputs_field_with_size, TransactionKernelField::Outputs)}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
 
-                /* Authenticate public announcements and verify no-change */
-                {&authenticate_field_twice_with_no_change(&public_announcements_field_with_size, TransactionKernelField::PublicAnnouncements)}
+                /* Authenticate announcements and verify no-change */
+                {&authenticate_field_twice_with_no_change(&announcements_field_with_size, TransactionKernelField::Announcements)}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
 
                 /* Authenticate fee and verify no-change */
@@ -799,18 +798,18 @@ pub(crate) mod tests {
                 TransactionKernel::MAST_HEIGHT as u32,
             );
 
-            // public announcements are identical
-            let public_announcements_hash: Digest = uw.public_announcements_hash;
+            // announcements are identical
+            let announcements_hash: Digest = uw.announcements_hash;
             tasm::tasmlib_hashing_merkle_verify(
                 old_txk_digest,
-                TransactionKernelField::PublicAnnouncements as u32,
-                public_announcements_hash,
+                TransactionKernelField::Announcements as u32,
+                announcements_hash,
                 TransactionKernel::MAST_HEIGHT as u32,
             );
             tasm::tasmlib_hashing_merkle_verify(
                 new_txk_digest,
-                TransactionKernelField::PublicAnnouncements as u32,
-                public_announcements_hash,
+                TransactionKernelField::Announcements as u32,
+                announcements_hash,
                 TransactionKernel::MAST_HEIGHT as u32,
             );
 
