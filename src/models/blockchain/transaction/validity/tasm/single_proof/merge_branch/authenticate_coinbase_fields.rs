@@ -316,7 +316,7 @@ mod tests {
         TransactionKernelProxy {
             inputs: vec![],
             outputs: vec![],
-            public_announcements: vec![],
+            announcements: vec![],
             fee: NativeCurrencyAmount::zero(),
             coinbase: cb,
             timestamp: Timestamp::now(),

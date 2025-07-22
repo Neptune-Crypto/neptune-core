@@ -1055,8 +1055,8 @@ pub mod tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::shared::Hash;
+    use crate::models::blockchain::transaction::announcement::Announcement;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-    use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::type_scripts::native_currency_amount::tests::invalid_positive_amount;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
@@ -1307,8 +1307,8 @@ pub mod tests {
     fn balanced_transaction_is_valid(
         #[strategy(0usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
-        #[strategy(0usize..=1)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements))]
+        #[strategy(0usize..=1)] _num_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_announcements))]
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
@@ -1320,12 +1320,12 @@ pub mod tests {
     fn native_currency_is_valid_for_primitive_witness_with_timelock(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
-        #[strategy(0usize..=1)] _num_public_announcements: usize,
+        #[strategy(0usize..=1)] _num_announcements: usize,
         #[strategy(arb::<Timestamp>())] _now: Timestamp,
         #[strategy(arbitrary_primitive_witness_with_active_timelocks(
             #_num_inputs,
             #_num_outputs,
-            #_num_public_announcements,
+            #_num_announcements,
             #_now,
         ))]
         primitive_witness: PrimitiveWitness,
@@ -1357,20 +1357,18 @@ pub mod tests {
     fn unbalanced_transaction_without_coinbase_is_invalid_prop(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(0usize..=3)] _num_public_announcements: usize,
+        #[strategy(0usize..=3)] _num_announcements: usize,
         #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
         #[strategy(vec(arb::<LockScriptAndWitness>(), #_num_inputs))]
         _input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
         #[strategy(vec(arb::<Utxo>(), #_num_outputs))] _output_utxos: Vec<Utxo>,
-        #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
-            PublicAnnouncement,
-        >,
+        #[strategy(vec(arb(), #_num_announcements))] _announcements: Vec<Announcement>,
         #[strategy(arb())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
             &#_input_utxos,
             &#_input_lock_scripts_and_witnesses,
             &#_output_utxos,
-            &#_public_announcements,
+            &#_announcements,
             #_fee,
             None,
         ))]
@@ -1390,21 +1388,19 @@ pub mod tests {
     fn unbalanced_transaction_with_coinbase_is_invalid(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(1usize..=3)] _num_announcements: usize,
         #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _coinbase: NativeCurrencyAmount,
         #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
         #[strategy(vec(arb::<LockScriptAndWitness>(), #_num_inputs))]
         _input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
         #[strategy(vec(arb::<Utxo>(), #_num_outputs))] _output_utxos: Vec<Utxo>,
-        #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
-            PublicAnnouncement,
-        >,
+        #[strategy(vec(arb(), #_num_announcements))] _announcements: Vec<Announcement>,
         #[strategy(arb())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
             &#_input_utxos,
             &#_input_lock_scripts_and_witnesses,
             &#_output_utxos,
-            &#_public_announcements,
+            &#_announcements,
             #_fee,
             Some(#_coinbase),
         ))]
@@ -1557,13 +1553,13 @@ pub mod tests {
             let input_lock_scripts_and_witnesses =
                 sample(vec(arb::<LockScriptAndWitness>(), 3), &mut tr);
             let output_utxos = sample(vec(arb::<Utxo>(), 3), &mut tr);
-            let public_announcements = sample(vec(arb(), 3), &mut tr);
+            let announcements = sample(vec(arb(), 3), &mut tr);
             let fee = sample(NativeCurrencyAmount::arbitrary_non_negative(), &mut tr);
             let primitive_witness = PrimitiveWitness::arbitrary_primitive_witness_with(
                 &input_utxos,
                 &input_lock_scripts_and_witnesses,
                 &output_utxos,
-                &public_announcements,
+                &announcements,
                 fee,
                 None,
             )
@@ -1585,11 +1581,11 @@ pub mod tests {
     #[proptest]
     fn coinbase_transaction_with_not_enough_funds_timelocked_is_invalid(
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(1usize..=3)] _num_announcements: usize,
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements,
+            #_num_announcements,
         ))]
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())]
@@ -1610,11 +1606,11 @@ pub mod tests {
     #[proptest]
     fn coinbase_transaction_with_too_early_release_is_invalid_fixed_delta(
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(1usize..=3)] _num_announcements: usize,
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements,
+            #_num_announcements,
         ))]
         mut primitive_witness: PrimitiveWitness,
     ) {
@@ -1632,11 +1628,11 @@ pub mod tests {
     #[proptest(cases = 50)]
     fn coinbase_transaction_with_too_early_release_is_invalid_prop_delta(
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(1usize..=3)] _num_announcements: usize,
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements,
+            #_num_announcements,
         ))]
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())]

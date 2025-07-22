@@ -22,7 +22,7 @@ If scan mode is active, `neptune-core` will execute an extra step whenever a new
 This extra scan mode step:
  - Reproduces the guesser UTXO as if your node had guessed the block.
  - Reproduces the composer UTXOs as if your node had composed the block. For the guesser fee fraction it takes whatever is set with the command-line argument (and so you had better make sure this command-line argument agrees with the argument you were using when you were composing[^1]).
- - Tries to decrypt the public announcements using keys derived from *future* derivation indices, and bumps the derivation index according to any matches it finds.
+ - Tries to decrypt the announcements using keys derived from *future* derivation indices, and bumps the derivation index according to any matches it finds.
 
 Scan mode is not guaranteed to find all lost UTXOs. However, there are tunable parameters with which you can regulate the likelihood of catching lost UTXOs, exchanging speed for success probability.
 

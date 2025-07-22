@@ -85,13 +85,13 @@ pub(crate) const MAX_BLOCK_SIZE_AFTER_HF_1: usize = 1_000_000;
 
 /// With removal records only represented by their absolute index set, the block
 /// size limit of 1.000.000 `BFieldElement`s allows for a "balanced" block
-/// (equal number of inputs and outputs, no public announcements) of ~10.000
+/// (equal number of inputs and outputs, no announcements) of ~10.000
 /// input and outputs. To prevent an attacker from making it costly to run an
 /// archival node, the number of outputs is restricted. For simplicity though
-/// this limit is enforced for inputs, outputs, and public announcements. This
-/// restriction on the number of public announcements also makes it feasible for
+/// this limit is enforced for inputs, outputs, and announcements. This
+/// restriction on the number of announcements also makes it feasible for
 /// wallets to scan through all.
-const MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
+const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
 
 /// Duration of timelock for half of all mining rewards.
 ///
@@ -464,7 +464,7 @@ impl Block {
             outputs: genesis_tx_outputs,
             fee: NativeCurrencyAmount::coins(0),
             timestamp: network.launch_date(),
-            public_announcements: vec![],
+            announcements: vec![],
             coinbase: Some(total_premine_amount),
             mutator_set_hash: MutatorSetAccumulator::default().hash(),
             merge_bit: false,
@@ -890,23 +890,23 @@ impl Block {
         if self.header().height >= BLOCK_HEIGHT_HF_1 {
             // 2.i)
             if self.body().transaction_kernel.inputs.len()
-                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
+                > MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1
             {
                 return Err(BlockValidationError::TooManyInputs);
             }
 
             // 2.j)
             if self.body().transaction_kernel.outputs.len()
-                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
+                > MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1
             {
                 return Err(BlockValidationError::TooManyOutputs);
             }
 
             // 2.k)
-            if self.body().transaction_kernel.public_announcements.len()
-                > MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
+            if self.body().transaction_kernel.announcements.len()
+                > MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1
             {
-                return Err(BlockValidationError::TooManyPublicAnnouncements);
+                return Err(BlockValidationError::TooManyAnnouncements);
             }
         }
 

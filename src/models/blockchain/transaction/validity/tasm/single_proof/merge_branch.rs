@@ -57,7 +57,7 @@ pub struct MergeWitness {
 impl MergeWitness {
     /// Generate a `MergeWitness` from two transactions (kernels plus proofs).
     /// Assumes the transactions can be merged. Also takes randomness for shuffling
-    /// the concatenations of inputs, outputs, and public announcements.
+    /// the concatenations of inputs, outputs, and announcements.
     pub(crate) fn from_transactions(
         left_kernel: TransactionKernel,
         left_proof: Proof,
@@ -99,19 +99,19 @@ impl MergeWitness {
         inputs.shuffle(&mut rng);
         let mut outputs = [left_kernel.outputs.clone(), right_kernel.outputs.clone()].concat();
         outputs.shuffle(&mut rng);
-        let mut public_announcements = [
-            left_kernel.public_announcements.clone(),
-            right_kernel.public_announcements.clone(),
+        let mut announcements = [
+            left_kernel.announcements.clone(),
+            right_kernel.announcements.clone(),
         ]
         .concat();
-        public_announcements.shuffle(&mut rng);
+        announcements.shuffle(&mut rng);
 
         let old_coinbase = left_kernel.coinbase.or(right_kernel.coinbase);
 
         TransactionKernelProxy {
             inputs,
             outputs,
-            public_announcements,
+            announcements,
             fee: left_kernel.fee + right_kernel.fee,
             coinbase: old_coinbase,
             timestamp: max(left_kernel.timestamp, right_kernel.timestamp),
@@ -148,11 +148,11 @@ impl MergeWitness {
             self.right_kernel.mast_path(TransactionKernelField::Outputs),
             self.new_kernel.mast_path(TransactionKernelField::Outputs),
             self.left_kernel
-                .mast_path(TransactionKernelField::PublicAnnouncements),
+                .mast_path(TransactionKernelField::Announcements),
             self.right_kernel
-                .mast_path(TransactionKernelField::PublicAnnouncements),
+                .mast_path(TransactionKernelField::Announcements),
             self.new_kernel
-                .mast_path(TransactionKernelField::PublicAnnouncements),
+                .mast_path(TransactionKernelField::Announcements),
             self.left_kernel.mast_path(TransactionKernelField::Fee),
             self.right_kernel.mast_path(TransactionKernelField::Fee),
             self.new_kernel.mast_path(TransactionKernelField::Fee),
@@ -225,7 +225,7 @@ impl BasicSnippet for MergeBranch {
             TransactionKernelField::Outputs,
         )));
         let authenticate_txk_pub_announcement_field = library.import(Box::new(
-            AuthenticateTxkField(TransactionKernelField::PublicAnnouncements),
+            AuthenticateTxkField(TransactionKernelField::Announcements),
         ));
         let authenticate_txk_fee_field =
             library.import(Box::new(AuthenticateTxkField(TransactionKernelField::Fee)));
@@ -255,16 +255,16 @@ impl BasicSnippet for MergeBranch {
         )));
 
         let hash_varlen = library.import(Box::new(HashVarlen));
-        let hash_public_announcement = RawCode::new(
-            triton_asm! {hash_public_announcement: call {hash_varlen} return },
+        let hash_announcement = RawCode::new(
+            triton_asm! {hash_announcement: call {hash_varlen} return },
             DataType::Tuple(vec![DataType::VoidPointer, DataType::Bfe]),
             DataType::Digest,
         );
         let hash_1_list_of_announcements = library.import(Box::new(Map::new(
-            InnerFunction::RawCode(hash_public_announcement.clone()),
+            InnerFunction::RawCode(hash_announcement.clone()),
         )));
         let hash_2_lists_of_announcements = library.import(Box::new(ChainMap::<2>::new(
-            InnerFunction::RawCode(hash_public_announcement),
+            InnerFunction::RawCode(hash_announcement),
         )));
 
         let digest_len = u32::try_from(Digest::LEN).unwrap();
@@ -811,12 +811,12 @@ impl BasicSnippet for MergeBranch {
             assert
             // _ *merge_witness *l_txk *r_txk *n_txk
 
-            /* Check integrity of public announcement fields */
+            /* Check integrity of announcement fields */
             push {left_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk [left_txk_digest]
             dup 7
-            {&field_with_size!(TransactionKernel::public_announcements)}
+            {&field_with_size!(TransactionKernel::announcements)}
             // _ *merge_witness *l_txk *r_txk *n_txk [left_txk_digest] *l_txk_pa size
 
             dup 1
@@ -828,7 +828,7 @@ impl BasicSnippet for MergeBranch {
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa [right_txk_digest]
             dup 7
-            {&field_with_size!(TransactionKernel::public_announcements)}
+            {&field_with_size!(TransactionKernel::announcements)}
             // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa [right_txk_digest] *r_txk_pa size
 
             dup 1
@@ -842,7 +842,7 @@ impl BasicSnippet for MergeBranch {
             // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa [new_txk_digest]
 
             dup 7
-            {&field_with_size!(TransactionKernel::public_announcements)}
+            {&field_with_size!(TransactionKernel::announcements)}
             // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa [new_txk_digest] *n_txk_pa size
 
             dup 1
@@ -982,33 +982,33 @@ pub(crate) mod tests {
             let merged_outputs = new_outputs.iter().map(Tip5::hash).sorted().collect_vec();
             assert_eq!(to_merge_outputs, merged_outputs);
 
-            // new public announcements is a permutation of operands' public
+            // new announcements is a permutation of operands' public
             // announcements' concatenation
-            let left_public_announcements = &mw.left_kernel.public_announcements;
-            let right_public_announcements = &mw.right_kernel.public_announcements;
-            let new_public_announcements = &mw.new_kernel.public_announcements;
+            let left_announcements = &mw.left_kernel.announcements;
+            let right_announcements = &mw.right_kernel.announcements;
+            let new_announcements = &mw.new_kernel.announcements;
 
-            let assert_public_announcement_integrity = |merkle_root, announcements| {
-                let leaf_index = TransactionKernelField::PublicAnnouncements as u32;
+            let assert_announcement_integrity = |merkle_root, announcements| {
+                let leaf_index = TransactionKernelField::Announcements as u32;
                 let leaf = Tip5::hash(announcements);
                 tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
             };
-            assert_public_announcement_integrity(left_txk_digest, left_public_announcements);
-            assert_public_announcement_integrity(right_txk_digest, right_public_announcements);
-            assert_public_announcement_integrity(new_txk_digest, new_public_announcements);
+            assert_announcement_integrity(left_txk_digest, left_announcements);
+            assert_announcement_integrity(right_txk_digest, right_announcements);
+            assert_announcement_integrity(new_txk_digest, new_announcements);
 
-            let to_merge_public_announcements = left_public_announcements
+            let to_merge_announcements = left_announcements
                 .iter()
-                .chain(right_public_announcements)
+                .chain(right_announcements)
                 .map(Tip5::hash)
                 .sorted()
                 .collect_vec();
-            let merged_public_announcements = new_public_announcements
+            let merged_announcements = new_announcements
                 .iter()
                 .map(Tip5::hash)
                 .sorted()
                 .collect_vec();
-            assert_eq!(to_merge_public_announcements, merged_public_announcements);
+            assert_eq!(to_merge_announcements, merged_announcements);
 
             // new fee is sum of operand fees
             let left_fee = mw.left_kernel.fee;

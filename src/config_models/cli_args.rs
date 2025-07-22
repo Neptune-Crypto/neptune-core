@@ -195,9 +195,9 @@ pub struct Args {
     ///
     /// Composers and proof-upgraders can gobble a portion of the fee of
     /// transactions they work on, by directing it to an output only they can
-    /// spend. By default, a public announcement is added to the transaction to
+    /// spend. By default, an announcement is added to the transaction to
     /// enable the composer or proof-upgrader to recover such UTXOs after
-    /// restoring the wallet from seed phrase. This public announcement is
+    /// restoring the wallet from seed phrase. This announcement is
     /// encryped by default under a symmetric key.
     ///
     /// Valid options:

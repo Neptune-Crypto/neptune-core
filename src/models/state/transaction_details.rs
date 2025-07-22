@@ -12,9 +12,9 @@ use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
-use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -45,8 +45,8 @@ pub struct TransactionDetails {
     pub tx_inputs: TxInputList,
     pub tx_outputs: TxOutputList,
 
-    /// Public announcements *excluding* encrypted UTXO notifications.
-    public_announcements: Vec<PublicAnnouncement>,
+    /// announcements *excluding* encrypted UTXO notifications.
+    announcements: Vec<Announcement>,
     pub fee: NativeCurrencyAmount,
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
@@ -71,7 +71,7 @@ impl Display for TransactionDetails {
     change_outputs: {},
     owned_outputs: {},
     network: {},
-    public announcements (excluding encrypted UTXO notifications):\n[{}],
+    announcements (excluding encrypted UTXO notifications):\n[{}],
 "#,
             self.timestamp.standard_format(),
             self.spend_amount(),
@@ -99,7 +99,7 @@ impl Display for TransactionDetails {
                 .map(|o| o.native_currency_amount())
                 .join(", "),
             self.network,
-            self.public_announcements
+            self.announcements
                 .iter()
                 .map(|pa| format!("{pa}"))
                 .join(",\n"),
@@ -263,7 +263,7 @@ impl TransactionDetails {
         Self {
             tx_inputs: tx_inputs.into(),
             tx_outputs: tx_outputs.into(),
-            public_announcements: vec![],
+            announcements: vec![],
             fee,
             coinbase,
             timestamp,
@@ -272,27 +272,26 @@ impl TransactionDetails {
         }
     }
 
-    /// Extend the [`TransactionDetails`] object with public announcements.
+    /// Extend the [`TransactionDetails`] object with announcements.
     ///
-    /// Use this method for public announcements that are *not* encrypted UTXO
+    /// Use this method for announcements that are *not* encrypted UTXO
     /// notifications.
     ///
-    /// Public announcements are not part of the main constructor [`Self::new`]
+    /// Announcements are not part of the main constructor [`Self::new`]
     /// because in the common case they are not necessary. If there are
     /// encrypted UTXO notifications, these are computed on the fly from the
-    /// transaction outputs. This function should only be used for public
+    /// transaction outputs. This function should only be used for
     /// announcements that are not encrypted UTXO notifications, which is an
     /// exceptional case.
-    pub(crate) fn with_public_announcements<Iter: IntoIterator<Item = PublicAnnouncement>>(
+    pub(crate) fn with_announcements<Iter: IntoIterator<Item = Announcement>>(
         mut self,
-        public_announcements: Iter,
+        announcements: Iter,
     ) -> Self {
-        let public_announcements = self
-            .public_announcements
+        self.announcements = self
+            .announcements
             .into_iter()
-            .chain(public_announcements)
+            .chain(announcements)
             .collect_vec();
-        self.public_announcements = public_announcements;
         self
     }
 
@@ -319,14 +318,10 @@ impl TransactionDetails {
             .await
     }
 
-    /// Produce the list of public announcements, including the UTXO
+    /// Produce the list of announcements, including the UTXO
     /// notifications.
-    pub fn public_announcements(&self) -> Vec<PublicAnnouncement> {
-        [
-            self.public_announcements.clone(),
-            self.tx_outputs.public_announcements(),
-        ]
-        .concat()
+    pub fn announcements(&self) -> Vec<Announcement> {
+        [self.announcements.clone(), self.tx_outputs.announcements()].concat()
     }
 
     pub fn primitive_witness(&self) -> PrimitiveWitness {
@@ -344,7 +339,7 @@ impl TransactionDetails {
         TransactionKernelProxy {
             inputs: removal_records,
             outputs: self.tx_outputs.addition_records(),
-            public_announcements: self.public_announcements(),
+            announcements: self.announcements(),
             fee: self.fee,
             coinbase: self.coinbase,
             timestamp: self.timestamp,

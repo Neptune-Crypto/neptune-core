@@ -2072,13 +2072,10 @@ pub(crate) mod tests {
                 // Verify that the public notifications/expected UTXOs match
                 if notification_policy == FeeNotificationPolicy::OffChain {
                     assert_eq!(num_expected_outputs, expected_utxos.len());
-                    assert!(transaction.kernel.public_announcements.is_empty());
+                    assert!(transaction.kernel.announcements.is_empty());
                 } else {
                     assert!(expected_utxos.is_empty());
-                    assert_eq!(
-                        num_expected_outputs,
-                        transaction.kernel.public_announcements.len()
-                    );
+                    assert_eq!(num_expected_outputs, transaction.kernel.announcements.len());
                 }
             }
         }
