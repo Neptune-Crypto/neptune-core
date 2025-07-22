@@ -434,6 +434,7 @@ impl BlockProposalRequest {
     }
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum PeerMessage {
     Handshake {
