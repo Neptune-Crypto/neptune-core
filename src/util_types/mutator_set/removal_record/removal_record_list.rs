@@ -953,7 +953,7 @@ impl RemovalRecord {
             .map(i64::from)
             .unwrap_or(-1_i64);
         let active_window_start =
-            u128::from(num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
+            u128::from(aocl_to_swbfi_leaf_counts(num_leafs_aocl)) * u128::from(CHUNK_SIZE);
         (
                 vec(0..num_leafs_aocl, num_records),
                 vec(vec(0u32..WINDOW_SIZE, crate::util_types::mutator_set::shared::NUM_TRIALS as usize), num_records),
@@ -962,7 +962,7 @@ impl RemovalRecord {
                     let absolute_index_sets = aocl_indices
                         .into_iter()
                         .map(|aocl_index| {
-                            u128::from(aocl_index) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE)
+                            u128::from(aocl_to_swbfi_leaf_counts(aocl_index)) * u128::from(CHUNK_SIZE)
                         })
                         .zip(relative_index_sets)
                         .map(|(window_start, relative_index_set)| {
@@ -1295,6 +1295,22 @@ mod tests {
         #[strategy(RemovalRecord::arbitrary_synchronized_set(#_num_aocl_leafs, #_num_records))]
         _removal_records: Vec<RemovalRecord>,
     ) {
+    }
+
+    #[proptest]
+    fn arbitrary_synchronized_set_of_removal_records_consistency_small_num_aocl_leafs(
+        #[strategy(1u64..(u8::MAX as u64))] num_leafs_aocl: u64,
+        #[strategy(0usize..10)] _num_records: usize,
+        #[strategy(RemovalRecord::arbitrary_synchronized_set(#num_leafs_aocl, #_num_records))]
+        removal_records: Vec<RemovalRecord>,
+    ) {
+        prop_assert!(removal_records
+            .iter()
+            .all(|rr| rr.is_consistent(num_leafs_aocl)));
+        prop_assert!(RemovalRecord::are_mutually_consistent(
+            &removal_records,
+            num_leafs_aocl
+        ));
     }
 
     #[proptest]
