@@ -7,8 +7,10 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +50,16 @@ impl UnlockedUtxo {
         let item = self.mutator_set_item();
         let msmp = &self.membership_proof;
         mutator_set.drop(item, msmp)
+    }
+
+    pub(crate) fn absolute_index_set(&self) -> AbsoluteIndexSet {
+        let item = self.mutator_set_item();
+        AbsoluteIndexSet::new(&get_swbf_indices(
+            item,
+            self.membership_proof.sender_randomness,
+            self.membership_proof.receiver_preimage,
+            self.membership_proof.aocl_leaf_index,
+        ))
     }
 
     pub(crate) fn addition_record(&self) -> AdditionRecord {

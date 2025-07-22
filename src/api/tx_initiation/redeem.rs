@@ -44,7 +44,6 @@ use crate::api::tx_initiation::builder::transaction_details_builder::Transaction
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::public_announcement::PublicAnnouncement;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -56,8 +55,36 @@ use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::triton_vm_job_queue::vm_job_queue;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::shared::BATCH_SIZE;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
+
+/// The number of UTXOs in the premine, as a const.
+const NUM_UTXOS_IN_PREMINE: usize = 80;
+
+/// The threshold for the lower bound on the AOCL index.
+///
+/// Every absolute index set defines an interval of AOCL indices that could have
+/// generated it. When the minimum of this range is less than this value, the
+/// UTXO cannot be reclaimed because it cannot reliably be distinguished from a
+/// premine UTXO.
+const ALLOWABLE_AOCL_INDEX_LOWER_BOUND: u64 = NUM_UTXOS_IN_PREMINE as u64;
+
+/// Compute the lower bound on the AOCL leaf index from the absolute index set.
+fn absolute_index_set_to_aocl_leaf_index_lower_bound(ais: AbsoluteIndexSet) -> u64 {
+    let window_start_lower_bound = ais
+        .to_array()
+        .into_iter()
+        .max()
+        .unwrap()
+        .next_multiple_of(u128::from(CHUNK_SIZE))
+        - u128::from(WINDOW_SIZE);
+    let chunk_index_lower_bound = window_start_lower_bound / u128::from(CHUNK_SIZE);
+    let aocl_leaf_index_lower_bound = chunk_index_lower_bound * u128::from(BATCH_SIZE) + 1;
+    aocl_leaf_index_lower_bound
+        .try_into()
+        .expect("AOCL leaf indices are guaranteed to fit in u64s")
+}
 
 /// provides a redeem_utxos() method to produce the UTXO redemption transaction.
 #[derive(Debug, Clone)]
@@ -180,6 +207,11 @@ impl Redeemer {
                     .wallet_spendable_inputs(timestamp)
                     .await
                     .into_iter()
+                    .filter(|tx_input| {
+                        absolute_index_set_to_aocl_leaf_index_lower_bound(
+                            tx_input.absolute_index_set(),
+                        ) >= ALLOWABLE_AOCL_INDEX_LOWER_BOUND
+                    })
                     .collect(),
             )
             .policy(crate::api::export::InputSelectionPolicy::ByProvidedOrder)
@@ -273,6 +305,7 @@ impl Redeemer {
             .fee(NativeCurrencyAmount::coins(0))
             .change_policy(ChangePolicy::ExactChange)
             .public_announcements(public_announcements)
+            .timestamp(timestamp)
             .build(&mut state_lock)
             .await
             .map_err(RedeemError::from)?;
@@ -422,25 +455,14 @@ impl Redeemer {
         }
 
         // validate earliest possible AOCL leaf indices
-        let absolute_index_set_to_earliest_possible_aocl_leaf_index =
-            |absolute_index_set: AbsoluteIndexSet| {
-                let max_absolute_index = absolute_index_set.to_array().into_iter().max().unwrap();
-                let window_start = max_absolute_index.next_multiple_of(u128::from(CHUNK_SIZE))
-                    - u128::from(WINDOW_SIZE);
-                u64::try_from(window_start / u128::from(CHUNK_SIZE))
-                    .expect("mutator set arithmetic guarantees that AOCL indices are valid u64s")
-            };
-        let num_utxos_in_premine = Block::premine_utxos(network).len();
         let mut all_removal_records = redemption_claims
             .iter()
             .flat_map(|(_fp, tx)| tx.kernel.inputs.clone())
             .collect_vec();
         for removal_record in &all_removal_records {
             let earliest_possible_aocl_leaf_index =
-                absolute_index_set_to_earliest_possible_aocl_leaf_index(
-                    removal_record.absolute_indices,
-                );
-            if earliest_possible_aocl_leaf_index < u64::try_from(num_utxos_in_premine).unwrap() {
+                absolute_index_set_to_aocl_leaf_index_lower_bound(removal_record.absolute_indices);
+            if earliest_possible_aocl_leaf_index < ALLOWABLE_AOCL_INDEX_LOWER_BOUND {
                 return Err(RedemptionValidationError::PotentialPremineClaim(
                     earliest_possible_aocl_leaf_index,
                 ));
@@ -567,4 +589,179 @@ pub enum RedemptionValidationError {
     UtxoNotOutput(PathBuf, usize),
     #[error("destination address is missing")]
     MissingDestinationAddress,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::api::redeem::redemption_report::RedemptionReportDisplayFormat;
+    use crate::config_models::cli_args;
+    use crate::models::blockchain::block::{Block, MINING_REWARD_TIME_LOCK_PERIOD};
+    use crate::models::state::tests::helper;
+    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::{invalid_block_with_transaction, make_mock_block};
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared_tokio_runtime;
+    use macro_rules_attr::apply;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+    use tracing_test::traced_test;
+
+    use super::*;
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn redeem_utxos_happy_path() {
+        let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(435745678874);
+        let mut alice = mock_genesis_global_state(
+            2,
+            WalletEntropy::new_pseudorandom(rng.random()),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let mut alice_gsl = alice.lock_guard_mut().await;
+        let alice_key = alice_gsl
+            .wallet_state
+            .wallet_entropy
+            .nth_generation_spending_key(0);
+        let bob_secret = WalletEntropy::new_random();
+        let bob_key = bob_secret.nth_generation_spending_key(0);
+        let genesis_block = alice_gsl.chain.archival_state().get_tip().await;
+        let mut current_block = genesis_block.clone();
+
+        // stuff happens
+        let num_blocks = 15;
+        let a_blocks =
+            helper::make_one_branch(network, &current_block, num_blocks, &bob_key, rng.random())
+                .await;
+        for block in &a_blocks {
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+        }
+        current_block = a_blocks.last().unwrap().clone();
+        let timestamp_0 = current_block.header().timestamp;
+
+        // alice mines 3 blocks
+        for _ in 0..3 {
+            let (block, alice_composer_expected_utxos) =
+                make_mock_block(network, &current_block, None, alice_key, rng.random()).await;
+            alice_gsl
+                .wallet_state
+                .add_expected_utxos(alice_composer_expected_utxos)
+                .await;
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+            current_block = block;
+        }
+        const LIQUID_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(64);
+        let wallet_status_1 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_1 = current_block.header().timestamp;
+        assert_eq!(
+            alice_gsl
+                .wallet_state
+                .confirmed_available_balance(&wallet_status_1, timestamp_1),
+            LIQUID_BLOCK_SUBSIDY * 3
+        );
+
+        // continue for a while
+        let b_blocks =
+            helper::make_one_branch(network, &current_block, num_blocks, &bob_key, rng.random())
+                .await;
+        for block in &b_blocks {
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+        }
+        current_block = b_blocks.last().unwrap().clone();
+
+        // initiate transaction
+        let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
+        drop(alice_gsl); // drop lock to free up api
+        let tx_a = helper::send_coins(&mut alice, NativeCurrencyAmount::coins(10), rando).await;
+        alice_gsl = alice.lock_guard_mut().await; //re-acquire lock
+        let block_after_a = invalid_block_with_transaction(&current_block, tx_a);
+        current_block = block_after_a;
+        alice_gsl.set_new_tip(current_block.clone()).await.unwrap();
+
+        let wallet_status_3 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_3 = current_block.header().timestamp;
+        let wallet_balance_3 = alice_gsl
+            .wallet_state
+            .confirmed_available_balance(&wallet_status_3, timestamp_3);
+        assert_eq!(
+            wallet_balance_3,
+            (LIQUID_BLOCK_SUBSIDY * 3)
+                .checked_sub(&NativeCurrencyAmount::coins(10))
+                .unwrap(),
+            "wallet balance: {wallet_balance_3}"
+        );
+
+        // continue for another while
+        let c_blocks =
+            helper::make_one_branch(network, &current_block, num_blocks, &bob_key, rng.random())
+                .await;
+        for block in &c_blocks {
+            alice_gsl.set_new_tip(block.clone()).await.unwrap();
+        }
+        current_block = c_blocks.last().unwrap().to_owned();
+
+        // prepare temp directory
+        let directory = "utxo-redemption-claims-directory-temp".to_string();
+        tokio::fs::remove_dir_all(directory.clone())
+            .await
+            .unwrap_or_else(|e| panic!("could not delete temp directory for tests: {e}"));
+        tokio::fs::create_dir_all(directory.clone())
+            .await
+            .unwrap_or_else(|e| panic!("could not create temp direcrory for tests: {e}"));
+
+        // produce redemption claim
+        let address = GenerationReceivingAddress::derive_from_seed(rng.random());
+        let timestamp = current_block.header().timestamp + Timestamp::years(4);
+        drop(alice_gsl); // free up api
+        alice
+            .api()
+            .redeemer()
+            .redeem_utxos(directory.clone().into(), Some(address), timestamp)
+            .await;
+
+        // verify redemption
+        let produced_report = alice
+            .api()
+            .redeemer()
+            .validate_redemption(directory.clone().into())
+            .await
+            .unwrap();
+
+        // match the obtained report against what we expect
+        let mut expected_report = RedemptionReport::new();
+        expected_report.add_row(wallet_balance_3, None, address);
+        expected_report.add_row(
+            LIQUID_BLOCK_SUBSIDY * 3,
+            // offset by 30 minutes because that's how the composer UTXOs are made
+            Some(
+                timestamp_0
+                    + network.target_block_interval()
+                    + MINING_REWARD_TIME_LOCK_PERIOD
+                    + Timestamp::minutes(30),
+            ),
+            address,
+        );
+
+        assert_eq!(
+            expected_report,
+            produced_report,
+            "Expected:\n\n{}\n\nProduced:\n\n{}",
+            expected_report.render(RedemptionReportDisplayFormat::Readable),
+            produced_report.render(RedemptionReportDisplayFormat::Readable)
+        );
+
+        // clean up the temp directory
+        tokio::fs::remove_dir_all(directory)
+            .await
+            .unwrap_or_else(|e| panic!("could not delete temp direcrory for tests: {e}"));
+    }
+
+    #[test]
+    fn num_utxos_in_premine_agrees_with_const() {
+        assert_eq!(
+            NUM_UTXOS_IN_PREMINE,
+            Block::premine_utxos(Network::Main).len()
+        );
+    }
 }

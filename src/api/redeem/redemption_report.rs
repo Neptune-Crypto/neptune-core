@@ -23,7 +23,7 @@ pub enum RedemptionReportDisplayFormat {
     Detailed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RedemptionReportEntry {
     amount: NativeCurrencyAmount,
     earliest_release_date: Option<Timestamp>,
@@ -144,7 +144,7 @@ impl Distribution<RedemptionReportEntry> for StandardUniform {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RedemptionReport {
     table: Vec<RedemptionReportEntry>,
 }

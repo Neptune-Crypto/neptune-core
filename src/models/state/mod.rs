@@ -2117,7 +2117,7 @@ impl GlobalState {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub(crate) mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use num_traits::CheckedSub;
@@ -2166,7 +2166,7 @@ mod tests {
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-    mod helper {
+    pub(crate) mod helper {
 
         use futures::future;
 
