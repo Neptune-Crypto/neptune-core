@@ -342,7 +342,7 @@ impl RemovalRecordList {
                 .map(MmrMembershipProof::new),
         );
 
-        use itertools::EitherOrBoth::*;
+        use itertools::EitherOrBoth::{Both, Left, Right};
         let chunk_dictionary = tree_heights_and_authentication_structures
             .zip_longest(self.chunks.iter().map(Chunk::pack))
             .map(|x| match x {
@@ -907,75 +907,56 @@ impl BFieldCodec for RemovalRecordList {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use proptest::collection::vec;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use proptest::prelude::*;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use std::hash::BuildHasherDefault;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use std::hash::Hasher;
 
-    use std::hash::BuildHasherDefault;
-    use std::hash::Hasher;
-    use std::mem;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
-    use proptest::collection::vec;
-    use proptest::prelude::Arbitrary;
-    use proptest::prelude::BoxedStrategy;
-    use proptest::prelude::Strategy;
-    use proptest::prop_assert;
-    use proptest::prop_assert_eq;
-    use proptest::prop_assert_ne;
-    use proptest::strategy::ValueTree;
-    use proptest::test_runner::Config;
-    use proptest::test_runner::RngAlgorithm;
-    use proptest::test_runner::TestRng;
-    use proptest::test_runner::TestRunner;
-    use proptest_arbitrary_interop::arb;
-    use rand::rng;
-    use rand::Rng;
-    use strum::IntoEnumIterator;
-    use test_strategy::proptest;
-    use tracing_test::traced_test;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl RemovalRecord {
+    pub(crate) fn arbitrary_synchronized_set(
+        num_leafs_aocl: u64,
+        num_records: usize,
+    ) -> BoxedStrategy<Vec<RemovalRecord>> {
+        #[derive(Default)]
+        struct SimpleHasher(u64);
 
-    use super::RemovalRecordList;
-    use super::*;
-    use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
-
-    impl RemovalRecord {
-        pub(crate) fn arbitrary_synchronized_set(
-            num_leafs_aocl: u64,
-            num_records: usize,
-        ) -> BoxedStrategy<Vec<RemovalRecord>> {
-            #[derive(Default)]
-            struct SimpleHasher(u64);
-
-            impl Hasher for SimpleHasher {
-                fn write(&mut self, bytes: &[u8]) {
-                    for &b in bytes {
-                        self.0 = self.0.wrapping_mul(31).wrapping_add(u64::from(b));
-                    }
-                }
-
-                fn finish(&self) -> u64 {
-                    self.0
+        impl Hasher for SimpleHasher {
+            fn write(&mut self, bytes: &[u8]) {
+                for &b in bytes {
+                    self.0 = self.0.wrapping_mul(31).wrapping_add(u64::from(b));
                 }
             }
 
-            type HashMapWithHasher<K, V> = HashMap<K, V, BuildHasherDefault<SimpleHasher>>;
+            fn finish(&self) -> u64 {
+                self.0
+            }
+        }
 
-            const ROOT_INDEX: u64 = 1_u64;
+        type HashMapWithHasher<K, V> = HashMap<K, V, BuildHasherDefault<SimpleHasher>>;
 
-            let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
-            let mmr_heights = get_peak_heights(num_leafs_swbfi);
-            let mmr_max_height = mmr_heights
-                .iter()
-                .copied()
-                .max()
-                .map(i64::from)
-                .unwrap_or(-1_i64);
-            let active_window_start =
-                u128::from(num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
-            (
+        const ROOT_INDEX: u64 = 1_u64;
+
+        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
+        let mmr_heights = get_peak_heights(num_leafs_swbfi);
+        let mmr_max_height = mmr_heights
+            .iter()
+            .copied()
+            .max()
+            .map(i64::from)
+            .unwrap_or(-1_i64);
+        let active_window_start =
+            u128::from(num_leafs_aocl) / u128::from(BATCH_SIZE) * u128::from(CHUNK_SIZE);
+        (
                 vec(0..num_leafs_aocl, num_records),
-                vec(vec(0u32..WINDOW_SIZE, NUM_TRIALS as usize), num_records),
+                vec(vec(0u32..WINDOW_SIZE, crate::util_types::mutator_set::shared::NUM_TRIALS as usize), num_records),
             )
                 .prop_flat_map(move |(aocl_indices, relative_index_sets)| {
                     let absolute_index_sets = aocl_indices
@@ -1011,7 +992,7 @@ mod tests {
                     (
                         vec(vec(0..CHUNK_SIZE, 0..51), all_chunk_indices.len()),
                         vec(
-                            arb::<Digest>(),
+                            proptest_arbitrary_interop::arb::<Digest>(),
                             usize::try_from(mmr_max_height+1).unwrap_or(usize::MAX)
                                 * all_chunk_indices.len(),
                         ),
@@ -1166,8 +1147,38 @@ mod tests {
                         })
                 })
                 .boxed()
-        }
+    }
+}
 
+#[cfg(test)]
+mod tests {
+    use std::mem;
+
+    use proptest::collection::vec;
+    use proptest::prelude::Arbitrary;
+    use proptest::prelude::BoxedStrategy;
+    use proptest::prelude::Strategy;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::prop_assert_ne;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::Config;
+    use proptest::test_runner::RngAlgorithm;
+    use proptest::test_runner::TestRng;
+    use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
+    use rand::rng;
+    use rand::Rng;
+    use strum::IntoEnumIterator;
+    use test_strategy::proptest;
+    use tracing_test::traced_test;
+
+    use super::RemovalRecordList;
+    use super::*;
+    use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
+
+    impl RemovalRecord {
         /// Test if the removal records are consistent.
         ///
         /// 1. The authentication paths end in the same root -- even across
@@ -2170,8 +2181,6 @@ mod tests {
     mod try_unpack_no_crash {
         use proptest::collection;
         use proptest::prop_assume;
-
-        use crate::util_types::mutator_set::msa_and_records;
 
         use super::*;
 

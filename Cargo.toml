@@ -49,7 +49,7 @@ track-lock-location = []
 track-lock-time = []
 
 # implements arbitrary::Arbitrary for various types
-arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop"]
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest"]
 
 # for sending trace events to tokio-console utility
 tokio-console = ["dep:console-subscriber"]

@@ -348,7 +348,7 @@ where
     }
 
     pub async fn get_batch_index_async(&self) -> u128 {
-        self.aocl.num_leafs().await.saturating_sub(1) as u128 / u128::from(BATCH_SIZE)
+        u128::from(self.aocl.num_leafs().await.saturating_sub(1)) / u128::from(BATCH_SIZE)
     }
 
     /// Helper function. Like `add` but also returns the chunk that
