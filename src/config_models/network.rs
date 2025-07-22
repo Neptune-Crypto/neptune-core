@@ -12,12 +12,6 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
-// p2p warning: #[non_exhaustive] added after v0.2.2.  (probably in v0.3.0).
-// v0.2.2 and below are not able to deserialize this type if new variants are
-// added.
-//
-// therefore: new variants cannot be added until entire network has upgraded to
-// v0.3.0 or higher.
 #[derive(
     Clone,
     Copy,
