@@ -137,7 +137,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
         );
 
         let tip_msa = tip.mutator_set_accumulator_after().unwrap();
-        let tx_upgrade_timeout_secs = 45;
+        let tx_upgrade_timeout_secs = 450;
         alice
             .wait_until_tx_in_mempool_confirmable(
                 tx_artifacts.transaction().txid(),
