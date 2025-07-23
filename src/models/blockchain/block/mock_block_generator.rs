@@ -5,6 +5,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 
+use crate::api::export::ReceivingAddress;
 use crate::config_models::network::Network;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
@@ -24,7 +25,6 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 
 use super::block_transaction::BlockOrRegularTransaction;
@@ -38,7 +38,7 @@ impl MockBlockGenerator {
     pub fn mock_block_from_tx_without_pow(
         predecessor: Block,
         block_tx: BlockTransaction,
-        guesser_key: HashLockKey,
+        guesser_address: ReceivingAddress,
         network: Network,
     ) -> Block {
         let timestamp = block_tx.kernel.timestamp;
@@ -48,7 +48,9 @@ impl MockBlockGenerator {
         let body = primitive_witness.body().to_owned();
         let mut header =
             primitive_witness.header(timestamp, Network::RegTest.target_block_interval());
-        header.guesser_digest = guesser_key.after_image();
+        header.guesser_receiver_data.receiver_digest = guesser_address.privacy_digest();
+        header.guesser_receiver_data.lock_script_hash = guesser_address.lock_script_hash();
+
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
@@ -64,14 +66,14 @@ impl MockBlockGenerator {
     fn mock_block_from_tx(
         predecessor: Arc<Block>,
         block_tx: BlockTransaction,
-        guesser_key: HashLockKey,
+        guesser_address: ReceivingAddress,
         seed: [u8; 32],
         network: Network,
     ) -> Block {
         let mut block = Self::mock_block_from_tx_without_pow(
             (*predecessor).clone(),
             block_tx,
-            guesser_key,
+            guesser_address,
             network,
         );
 
@@ -104,12 +106,13 @@ impl MockBlockGenerator {
         }
     }
 
-    /// Merge two transactions for tests, without the hassle of proving but such
-    /// that the result seems valid.
+    /// Merge two transactions for tests, without proving but such that the
+    /// result seems valid.
     fn fake_merge_block_transactions_for_tests(
         lhs: BlockOrRegularTransaction,
         rhs: Transaction,
         shuffle_seed: [u8; 32],
+        #[expect(unused_variables, reason = "anticipate future fork")]
         consensus_rule_set: ConsensusRuleSet,
     ) -> Result<BlockTransaction> {
         assert!(
@@ -198,7 +201,7 @@ impl MockBlockGenerator {
     pub fn mock_successor_with_pow(
         predecessor: Arc<Block>,
         composer_parameters: ComposerParameters,
-        guesser_key: HashLockKey,
+        guesser_address: ReceivingAddress,
         timestamp: Timestamp,
         seed: [u8; 32],
         mempool_tx: Vec<Transaction>,
@@ -219,12 +222,18 @@ impl MockBlockGenerator {
         let prev = predecessor.clone();
 
         let block = if with_valid_pow {
-            Self::mock_block_from_tx(predecessor, block_tx, guesser_key, rng.random(), network)
+            Self::mock_block_from_tx(
+                predecessor,
+                block_tx,
+                guesser_address,
+                rng.random(),
+                network,
+            )
         } else {
             Self::mock_block_from_tx_without_pow(
                 (*predecessor).clone(),
                 block_tx,
-                guesser_key,
+                guesser_address,
                 network,
             )
         };

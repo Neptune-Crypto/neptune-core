@@ -4,6 +4,7 @@ use std::sync::Arc;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
+use itertools::Itertools;
 use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
@@ -60,6 +61,32 @@ impl LockScript {
         self.program.hash()
     }
 
+    /// Generate a lock script that verifies knowledge of a hash preimage, given
+    /// the after-image. This type of lock script is called "standard hash
+    /// lock".
+    ///
+    /// Satisfaction of this lock script establishes the UTXO owner's assent to
+    /// the transaction.
+    pub fn standard_hash_lock_from_after_image(after_image: Digest) -> LockScript {
+        let push_spending_lock_digest_to_stack = after_image
+            .values()
+            .iter()
+            .rev()
+            .map(|elem| triton_instr!(push elem.value()))
+            .collect_vec();
+
+        let instructions = triton_asm!(
+            divine 5
+            hash
+            {&push_spending_lock_digest_to_stack}
+            assert_vector
+            read_io 5
+            halt
+        );
+
+        instructions.into()
+    }
+
     /// A lock script that is guaranteed to fail
     pub(crate) fn burn() -> Self {
         Self {
@@ -110,6 +137,17 @@ impl LockScriptAndWitness {
             nd_tokens: witness.individual_tokens,
             nd_digests: witness.digests,
         }
+    }
+
+    /// Create a [`LockScriptAndWitness`] whose lock script is a standard hash
+    /// lock, from the preimage.
+    pub(crate) fn standard_hash_lock_from_preimage(preimage: Digest) -> LockScriptAndWitness {
+        let after_image = preimage.hash();
+        let lock_script = LockScript::standard_hash_lock_from_after_image(after_image);
+        LockScriptAndWitness::new_with_nondeterminism(
+            lock_script.program,
+            NonDeterminism::new(preimage.reversed().values()),
+        )
     }
 
     #[cfg(test)]

@@ -415,22 +415,6 @@ impl RemovalRecordList {
             .collect_vec()
     }
 
-    /// Check if the [`RemovalRecordList`] is consistent.
-    ///
-    /// Consistency is defined relative to a set of observed chunk indices,
-    /// which itself is inferred from the set of all absolute indices after
-    /// filtering for location outside of the active window. Relative to this
-    /// set of observed chunk indices, consistency is defined as:
-    ///  1. the cardinality of the set of observed chunk indices agrees with the
-    ///     length of the `chunks` list; and
-    ///  2. the number of authentication structures matches with the number of
-    ///     peaks; and
-    ///  3. for each tree in the MMR, the length of the authentication structure
-    ///     matches with the given leaf indices.
-    fn is_consistent(&self) -> bool {
-        self.validate_consistency().is_ok()
-    }
-
     /// Return the list of unique leaf indices into the SWBFI MMR, corresponding
     /// to Chunks referenced in the absolute index sets, in ascending order.
     fn observed_chunk_indices(&self) -> Vec<u64> {
@@ -447,8 +431,18 @@ impl RemovalRecordList {
             .collect_vec()
     }
 
-    /// Computes consistency, but with an error code in case of failure. See
-    /// [`Self::is_consistent`] for more details.
+    /// Computes consistency, with an error code in case of failure.
+    ///
+    /// Consistency is defined relative to a set of observed chunk indices,
+    /// which itself is inferred from the set of all absolute indices after
+    /// filtering for location outside of the active window. Relative to this
+    /// set of observed chunk indices, consistency is defined as:
+    ///  1. the cardinality of the set of observed chunk indices agrees with the
+    ///     length of the `chunks` list; and
+    ///  2. the number of authentication structures matches with the number of
+    ///     peaks; and
+    ///  3. for each tree in the MMR, the length of the authentication structure
+    ///     matches with the given leaf indices.
     ///
     /// Error type [`RemovalRecordListInconsistency`] has one variant for every
     /// failure case.
@@ -2465,7 +2459,7 @@ mod tests {
                 num_leafs_aocl,
             };
 
-            if removal_record_list.is_consistent() {
+            if removal_record_list.validate_consistency().is_ok() {
                 RemovalRecordList::convert_to_vec(removal_record_list); // no crash
             }
         }
@@ -2560,7 +2554,7 @@ mod tests {
                 num_leafs_aocl,
             };
 
-            if removal_record_list.is_consistent() {
+            if removal_record_list.validate_consistency().is_ok() {
                 RemovalRecordList::convert_to_vec(removal_record_list); // no crash
             }
         }

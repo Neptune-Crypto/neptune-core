@@ -13,6 +13,7 @@ pub mod archival_mutator_set;
 pub mod authenticated_item;
 pub mod mmra_and_membership_proofs;
 pub mod ms_membership_proof;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod msa_and_records;
 pub mod mutator_set_accumulator;
 pub mod removal_record;

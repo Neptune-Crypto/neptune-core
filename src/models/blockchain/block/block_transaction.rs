@@ -168,6 +168,7 @@ impl BlockTransaction {
         shuffle_seed: [u8; 32],
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
+        #[expect(unused_variables, reason = "anticipate future fork")]
         consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<BlockTransaction> {
         let merge_witness = MergeWitness::for_composition(coinbase, other, shuffle_seed);

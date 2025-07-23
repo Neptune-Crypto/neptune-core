@@ -354,7 +354,7 @@ pub(crate) mod tests {
     #[test]
     fn tx_get_timestamp_test() {
         let output_1 = Utxo::new_native_currency(
-            LockScript::anyone_can_spend(),
+            LockScript::anyone_can_spend().hash(),
             NativeCurrencyAmount::coins(42),
         );
         let ar = commit(Tip5::hash(&output_1), random(), random());

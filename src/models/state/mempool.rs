@@ -1044,7 +1044,6 @@ mod tests {
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -1144,7 +1143,7 @@ mod tests {
         network: Network,
     ) -> Vec<MempoolEvent> {
         let mut updated_txs = vec![];
-        let mutator_set_update = new_block.mutator_set_update(network).unwrap();
+        let mutator_set_update = new_block.mutator_set_update().unwrap();
         for job in update_jobs {
             match job {
                 MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
@@ -1217,7 +1216,7 @@ mod tests {
     ) {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block.header().height);
         let old_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
-        let mutator_set_update = new_block.mutator_set_update(network).unwrap();
+        let mutator_set_update = new_block.mutator_set_update().unwrap();
 
         while let Some((old_kernel, old_single_proof, upgrade_priority)) =
             mempool.preferred_update()

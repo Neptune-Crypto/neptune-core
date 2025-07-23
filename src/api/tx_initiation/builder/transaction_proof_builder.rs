@@ -274,6 +274,7 @@ impl<'a> TransactionProofBuilder<'a> {
         // note: evaluation order must match order stated in the method doc-comment.
 
         if proof_job_options.job_settings.proof_type.is_single_proof() {
+            #[expect(unused_variables, reason = "anticipate future fork")]
             let consensus_rule_set =
                 consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
 

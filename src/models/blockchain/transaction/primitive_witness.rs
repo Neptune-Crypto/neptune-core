@@ -27,7 +27,6 @@ use crate::models::blockchain::type_scripts::known_type_scripts;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -568,7 +567,6 @@ pub mod neptune_arbitrary {
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
 
-    use super::super::lock_script::LockScript;
     use super::super::PublicAnnouncement;
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
@@ -959,7 +957,7 @@ pub mod neptune_arbitrary {
                 .zip(input_amounts)
                 .map(|(lock_script_and_witness, amount)| {
                     Utxo::new(
-                        LockScript::from(lock_script_and_witness),
+                        lock_script_and_witness.program.hash(),
                         amount.to_native_coins(),
                     )
                 })
@@ -1043,7 +1041,8 @@ pub mod neptune_arbitrary {
                     let liquid_utxo = Utxo::new(
                         generation_address::GenerationSpendingKey::derive_from_seed(*seed)
                             .to_address()
-                            .lock_script(),
+                            .lock_script()
+                            .hash(),
                         amount.to_native_coins(),
                     );
                     let mut utxos = vec![liquid_utxo];
@@ -1053,7 +1052,7 @@ pub mod neptune_arbitrary {
                                 .to_address()
                                 .lock_script();
                         let timelocked_utxo = Utxo::new(
-                            lock_script,
+                            lock_script.hash(),
                             [
                                 amount.to_native_coins(),
                                 vec![TimeLock::until(release_date)],
@@ -1106,7 +1105,6 @@ mod tests {
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
@@ -1680,7 +1678,8 @@ mod tests {
                             timelocked_amount.div_two();
                             assert!(total_amount >= timelocked_amount);
                             let timelocked_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[0]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[0])
+                                    .hash(),
                                 timelocked_amount,
                             )
                             .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
@@ -1689,7 +1688,8 @@ mod tests {
                                 total_amount.checked_sub(&timelocked_amount).unwrap();
                             liquid_amount = liquid_amount.checked_add(&(-fee)).unwrap();
                             let liquid_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[0]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[0])
+                                    .hash(),
                                 liquid_amount,
                             );
 
@@ -1708,7 +1708,8 @@ mod tests {
                                 first_amount.div_two();
                             }
                             let first_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[0]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[0])
+                                    .hash(),
                                 first_amount,
                             )
                             .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
@@ -1719,7 +1720,8 @@ mod tests {
                                 .checked_sub(&fee)
                                 .unwrap();
                             let second_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[1]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[1])
+                                    .hash(),
                                 second_amount,
                             );
 

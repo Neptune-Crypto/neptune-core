@@ -18,14 +18,12 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use super::lock_script::LockScript;
 use crate::models::blockchain::type_scripts::known_type_scripts::is_known_type_script_with_valid_state;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
@@ -117,8 +115,11 @@ impl From<(Digest, Vec<Coin>)> for Utxo {
 }
 
 impl Utxo {
-    pub fn new(lock_script: LockScript, coins: Vec<Coin>) -> Self {
-        (lock_script.hash(), coins).into()
+    pub fn new(lock_script_hash: Digest, coins: Vec<Coin>) -> Self {
+        Self {
+            lock_script_hash,
+            coins,
+        }
     }
 
     pub fn coins(&self) -> &[Coin] {
@@ -129,14 +130,11 @@ impl Utxo {
         self.lock_script_hash
     }
 
-    /// Returns true iff this UTXO is a lock script with the preimage provided
-    /// as input argument.
-    pub(crate) fn is_lockscript_with_preimage(&self, preimage: Digest) -> bool {
-        self.lock_script_hash == HashLockKey::from_preimage(preimage).lock_script_hash()
-    }
-
-    pub fn new_native_currency(lock_script: LockScript, amount: NativeCurrencyAmount) -> Self {
-        Self::new(lock_script, vec![Coin::new_native_currency(amount)])
+    pub fn new_native_currency(lock_script_hash: Digest, amount: NativeCurrencyAmount) -> Self {
+        Self {
+            coins: vec![Coin::new_native_currency(amount)],
+            lock_script_hash,
+        }
     }
 
     pub fn has_native_currency(&self) -> bool {
@@ -293,6 +291,7 @@ pub mod neptune_arbitrary {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 mod tests {
+    use crate::models::blockchain::transaction::lock_script::LockScript;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
@@ -363,7 +362,7 @@ mod tests {
         let no_lock = LockScript::new(triton_program!(halt));
         let mut coins = NativeCurrencyAmount::coins(1).to_native_coins();
         coins.push(TimeLock::until(release_date));
-        let utxo = Utxo::new(no_lock, coins);
+        let utxo = Utxo::new(no_lock.hash(), coins);
 
         prop_assert!(!utxo.can_spend_at(release_date - delta));
         prop_assert!(utxo.is_timelocked());

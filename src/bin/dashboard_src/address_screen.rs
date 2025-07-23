@@ -8,9 +8,9 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
+use neptune_cash::api::export::KeyType;
 use neptune_cash::config_models::network::Network;
-use neptune_cash::models::state::wallet::address::BaseKeyType;
-use neptune_cash::models::state::wallet::address::BaseSpendingKey;
+use neptune_cash::models::state::wallet::address::SpendingKey;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
@@ -35,7 +35,7 @@ use unicode_width::UnicodeWidthStr;
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
-type AddressUpdate = BaseSpendingKey;
+type AddressUpdate = SpendingKey;
 type AddressUpdateArc = Arc<std::sync::Mutex<Vec<AddressUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
@@ -274,13 +274,10 @@ impl Widget for AddressScreen {
             .rev()
             .map(|key| {
                 vec![
-                    BaseKeyType::from(key).to_string(),
+                    KeyType::from(key).to_string(),
                     key.to_address()
-                        .map_or("(guessed nonce)".to_string(), |address| {
-                            address
-                                .to_display_bech32m_abbreviated(self.network)
-                                .unwrap()
-                        }),
+                        .to_display_bech32m_abbreviated(self.network)
+                        .unwrap(),
                 ]
             })
             .collect_vec();

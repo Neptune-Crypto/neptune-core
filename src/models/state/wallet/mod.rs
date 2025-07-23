@@ -447,7 +447,7 @@ mod tests {
         // This block throws away four UTXOs.
         let msa_tip_previous = next_block.mutator_set_accumulator_after().unwrap().clone();
         let output_utxo = Utxo::new_native_currency(
-            LockScript::anyone_can_spend(),
+            LockScript::anyone_can_spend().hash(),
             NativeCurrencyAmount::coins(200),
         );
         let tx_outputs: TxOutputList = vec![TxOutput::no_notification(
@@ -565,7 +565,7 @@ mod tests {
             .wallet_entropy
             .generate_sender_randomness(
                 genesis_block.kernel.header.height,
-                alice_address.privacy_digest(),
+                alice_address.receiver_postimage(),
             );
 
         let receiver_data_12_to_alice = TxOutput::offchain_native_currency(
@@ -912,7 +912,7 @@ mod tests {
                 ExpectedUtxo::new(
                     expected_utxo.utxo,
                     expected_utxo.sender_randomness,
-                    alice_key.privacy_preimage(),
+                    alice_key.receiver_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 )
             })
@@ -927,7 +927,7 @@ mod tests {
         let expected_utxo_for_alice = ExpectedUtxo::new(
             receiver_data_1_to_alice_new.utxo(),
             receiver_data_1_to_alice_new.sender_randomness(),
-            alice_key.privacy_preimage(),
+            alice_key.receiver_preimage(),
             UtxoNotifier::Cli,
         );
         alice
@@ -1069,7 +1069,7 @@ mod tests {
         .unwrap();
         let one_money: NativeCurrencyAmount = NativeCurrencyAmount::coins(1);
         let anyone_can_spend_utxo =
-            Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
+            Utxo::new_native_currency(LockScript::anyone_can_spend().hash(), one_money);
         let tx_output =
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletEntropy::devnet_wallet().nth_symmetric_key_for_tests(0);

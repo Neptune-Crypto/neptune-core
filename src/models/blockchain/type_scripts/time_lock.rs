@@ -850,7 +850,6 @@ pub mod neptune_arbitrary {
         .boxed()
     }
 
-    #[expect(unused_variables, reason = "under development")]
     fn arbitrary_primitive_witness_with_timelocks(
         num_inputs: usize,
         num_outputs: usize,
@@ -969,7 +968,6 @@ pub mod neptune_arbitrary {
                         *utxo = Utxo::from((utxo.lock_script_hash(), coins));
                         counter += 1;
                     }
-                    let release_dates = release_dates.clone();
 
                     let merge_bit = false;
                     PrimitiveWitness::arbitrary_primitive_witness_with_timestamp_and(

@@ -333,7 +333,6 @@ pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use strum::IntoEnumIterator;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::Program;
@@ -532,7 +531,7 @@ pub(crate) mod tests {
         let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
             tx.kernel,
             &genesis_block.mutator_set_accumulator_after().unwrap(),
-            &block1.mutator_set_update(network).unwrap(),
+            &block1.mutator_set_update().unwrap(),
             tx.proof.into_single_proof(),
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),

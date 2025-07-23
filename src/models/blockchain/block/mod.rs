@@ -8,6 +8,7 @@ pub mod block_selector;
 pub(crate) mod block_transaction;
 mod block_validation_error;
 pub mod difficulty_control;
+pub(crate) mod guesser_receiver_data;
 pub mod mock_block_generator;
 pub mod mutator_set_update;
 pub mod validity;
@@ -61,7 +62,6 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
@@ -297,8 +297,9 @@ impl Block {
     ///
     /// Note: this causes the block digest to change.
     #[inline]
-    pub(crate) fn set_header_guesser_digest(&mut self, guesser_after_image: Digest) {
-        self.kernel.header.guesser_digest = guesser_after_image;
+    pub(crate) fn set_header_guesser_address(&mut self, address: ReceivingAddress) {
+        self.kernel.header.guesser_receiver_data.receiver_digest = address.privacy_digest();
+        self.kernel.header.guesser_receiver_data.lock_script_hash = address.lock_script_hash();
         self.unset_digest();
     }
 
@@ -574,7 +575,7 @@ impl Block {
                 Coin::new_native_currency(amount),
                 TimeLock::until(network.launch_date() + six_months),
             ];
-            let utxo = Utxo::new(receiving_address.lock_script(), coins);
+            let utxo = Utxo::new(receiving_address.lock_script_hash(), coins);
             utxos.push(utxo);
         }
         utxos
@@ -1008,20 +1009,17 @@ impl Block {
             return Ok(vec![]);
         }
 
-        let lock = self.header().guesser_digest;
-        let lock_script = HashLockKey::lock_script_from_after_image(lock);
-
         let total_guesser_reward = self.total_guesser_reward()?;
-        let mut value_locked = total_guesser_reward;
-        value_locked.div_two();
-        let value_unlocked = total_guesser_reward.checked_sub(&value_locked).unwrap();
+        let mut value_timelocked = total_guesser_reward;
+        value_timelocked.div_two();
+        let value_unlocked = total_guesser_reward.checked_sub(&value_timelocked).unwrap();
 
-        let coins = vec![
-            Coin::new_native_currency(value_locked),
-            TimeLock::until(self.header().timestamp + MINER_REWARD_TIME_LOCK_PERIOD),
-        ];
-        let locked_utxo = Utxo::new(lock_script.clone(), coins);
-        let unlocked_utxo = Utxo::new_native_currency(lock_script, value_unlocked);
+        let coins_unlocked = value_unlocked.to_native_coins();
+        let coins_timelocked = value_timelocked.to_native_coins();
+        let lock_script_hash = self.header().guesser_receiver_data.lock_script_hash;
+        let unlocked_utxo = Utxo::from((lock_script_hash, coins_unlocked));
+        let locked_utxo = Utxo::from((lock_script_hash, coins_timelocked))
+            .with_time_lock(self.header().timestamp + MINER_REWARD_TIME_LOCK_PERIOD);
 
         Ok(vec![locked_utxo, unlocked_utxo])
     }
@@ -1044,8 +1042,10 @@ impl Block {
                 // production of future proofs is impossible as they depend on
                 // inputs hidden behind the veil of future PoW.
                 let sender_randomness = self.hash();
-                let receiver_digest = self.header().guesser_digest;
+                let receiver_digest = self.header().guesser_receiver_data.receiver_digest;
 
+                // let utxo_triple = UtxoTriple { ... };
+                // utxo_triple.addition_record()
                 commit(item, sender_randomness, receiver_digest)
             })
             .collect_vec())
@@ -1054,11 +1054,7 @@ impl Block {
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
-    pub(crate) fn mutator_set_update(
-        &self,
-        network: Network,
-    ) -> Result<MutatorSetUpdate, BlockValidationError> {
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+    pub(crate) fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
         let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
             .map_err(BlockValidationError::from)?;
 
@@ -1949,6 +1945,7 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use super::*;
         use crate::models::state::tx_creation_config::TxCreationConfig;
+        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
 
@@ -1961,7 +1958,7 @@ pub(crate) mod tests {
             let mut rng = rand::rng();
             let genesis_block = Block::genesis(network);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
-            let guesser_preimage = rng.random();
+            let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
             let (block1, _) = make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
                 vec![],
@@ -1969,7 +1966,7 @@ pub(crate) mod tests {
                 None,
                 a_key,
                 rng.random(),
-                (0.4, guesser_preimage),
+                (0.4, guesser_address.into()),
                 network,
             )
             .await;
@@ -1978,14 +1975,20 @@ pub(crate) mod tests {
                 .guesser_fee_utxos()
                 .unwrap()
                 .iter()
-                .map(|utxo| commit(Tip5::hash(utxo), block1.hash(), guesser_preimage.hash()))
+                .map(|utxo| {
+                    commit(
+                        Tip5::hash(utxo),
+                        block1.hash(),
+                        guesser_address.receiver_postimage(),
+                    )
+                })
                 .collect_vec();
             assert_eq!(ars, ars_from_wallet);
 
             let MutatorSetUpdate {
                 removals: _,
                 additions,
-            } = block1.mutator_set_update(network).unwrap();
+            } = block1.mutator_set_update().unwrap();
             assert!(
                 ars.iter().all(|ar| additions.contains(ar)),
                 "All addition records must be present in block's mutator set update"
@@ -2003,13 +2006,13 @@ pub(crate) mod tests {
 
             let mut block = invalid_block_with_transaction(&genesis_block, transaction);
 
-            let preimage = rand::rng().random::<Digest>();
-            block.set_header_guesser_digest(preimage.hash());
+            let guesser_key = GenerationSpendingKey::derive_from_seed(rand::rng().random());
+            let guesser_address = guesser_key.to_address();
+            block.set_header_guesser_address(guesser_address.into());
 
             let guesser_fee_utxos = block.guesser_fee_utxos().unwrap();
 
-            let lock_script_and_witness =
-                HashLockKey::from_preimage(preimage).lock_script_and_witness();
+            let lock_script_and_witness = guesser_key.lock_script_and_witness();
             assert!(guesser_fee_utxos
                 .iter()
                 .all(|guesser_fee_utxo| lock_script_and_witness.can_unlock(guesser_fee_utxo)));

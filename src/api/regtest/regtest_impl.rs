@@ -129,10 +129,7 @@ impl RegTestPrivate {
             fee_notification_policy,
         );
 
-        let guesser_key = gs
-            .wallet_state
-            .wallet_entropy
-            .guesser_spending_key(tip_block.hash());
+        let guesser_key = gs.wallet_state.wallet_entropy.guesser_fee_key();
 
         // retrieve selected tx from mempool for block inclusion.
         let txs_from_mempool = if include_mempool_txs {
@@ -149,7 +146,7 @@ impl RegTestPrivate {
         let (block, composer_tx_outputs) = MockBlockGenerator::mock_successor_with_pow(
             tip_block,
             composer_parameters.clone(),
-            guesser_key,
+            guesser_key.to_address().into(),
             timestamp,
             rand::random(), // seed.
             txs_from_mempool,

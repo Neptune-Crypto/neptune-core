@@ -325,7 +325,7 @@ impl ArchivalState {
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
         // abort early if mutator set update is invalid.
-        if new_block.mutator_set_update(self.network).is_err() {
+        if new_block.mutator_set_update().is_err() {
             bail!("invalid block: could not get mutator set update");
         }
 
@@ -417,7 +417,7 @@ impl ArchivalState {
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
-            .mutator_set_update(self.network)
+            .mutator_set_update()
             .expect("MS update for new block must exist")
             .additions
             .len()
@@ -975,7 +975,7 @@ impl ArchivalState {
                 removals,
                 additions,
             } = haystack
-                .mutator_set_update(self.network)
+                .mutator_set_update()
                 .expect("Block from state must have mutator set update");
             block_mutations.push((additions, removals));
 
@@ -1107,7 +1107,7 @@ impl ArchivalState {
         }
 
         // cannot get the mutator set update from new block, so abort early
-        if new_block.mutator_set_update(self.network).is_err() {
+        if new_block.mutator_set_update().is_err() {
             bail!("invalid block: could not get mutator set update");
         }
 
@@ -1148,7 +1148,7 @@ impl ArchivalState {
                 additions,
                 removals,
             } = rollback_block
-                .mutator_set_update(self.network)
+                .mutator_set_update()
                 .expect("Block from state must have mutator set update");
 
             // Roll back all removal records contained in block
@@ -1201,7 +1201,7 @@ impl ArchivalState {
                 mut additions,
                 mut removals,
             } = apply_forward_block
-                .mutator_set_update(self.network)
+                .mutator_set_update()
                 .expect("Block from state must have mutator set update");
             additions.reverse();
             removals.reverse();
@@ -1259,7 +1259,6 @@ impl ArchivalState {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
-    use std::ops::Deref;
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
@@ -1272,7 +1271,6 @@ pub(super) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
@@ -1469,7 +1467,7 @@ pub(super) mod tests {
         // Add an input to the next block's transaction. This will add a removal record
         // to the block, and this removal record will insert indices in the Bloom filter.
         let utxo = Utxo::new_native_currency(
-            LockScript::anyone_can_spend(),
+            LockScript::anyone_can_spend().hash(),
             NativeCurrencyAmount::coins(4),
         );
 

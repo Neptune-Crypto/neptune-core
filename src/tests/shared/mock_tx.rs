@@ -148,35 +148,6 @@ pub(super) async fn fake_create_transaction_from_details_for_tests(
     }
 }
 
-/// Merge two transactions for tests, into a regular transaction, without the
-/// hassle of proving but such that the result seems valid.
-pub(super) async fn fake_merge_transactions_for_tests(
-    lhs: Transaction,
-    rhs: Transaction,
-    shuffle_seed: [u8; 32],
-    consensus_rule_set: ConsensusRuleSet,
-) -> anyhow::Result<Transaction> {
-    assert!(
-        lhs.proof.is_single_proof(),
-        "argument must be bogus singleproof transaction"
-    );
-    assert!(
-        rhs.proof.is_single_proof(),
-        "argument must be bogus singleproof transaction"
-    );
-
-    let merge_witness = MergeWitness::from_transactions(lhs, rhs, shuffle_seed);
-    let new_kernel = merge_witness.new_kernel.clone();
-
-    let claim = single_proof_claim(new_kernel.mast_hash(), consensus_rule_set);
-    cache_true_claim(claim).await;
-
-    Ok(Transaction {
-        kernel: new_kernel,
-        proof: TransactionProof::SingleProof(Proof::invalid()),
-    })
-}
-
 /// Merge two transactions for tests, resulting in a [`BlockTrasnaction`],
 /// without the hassle of proving but such that the result seems valid.
 pub(super) async fn fake_merge_block_transactions_for_tests(

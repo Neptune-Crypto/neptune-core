@@ -754,7 +754,6 @@ impl ConsensusProgram for SingleProof {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
-    use std::collections::HashSet;
 
     use assert2::let_assert;
     use macro_rules_attr::apply;
@@ -854,16 +853,6 @@ pub(crate) mod tests {
                     witness.branch_source(own_program_digest, txk_digest)
                 }
             }
-        }
-    }
-
-    impl SingleProofWitness {
-        pub(crate) fn into_update(self) -> UpdateWitness {
-            let SingleProofWitness::Update(witness) = self else {
-                panic!("Expected update witness.");
-            };
-
-            witness
         }
     }
 

@@ -153,7 +153,9 @@ pub(crate) mod tests {
             .build();
 
         // generate proof
-        let consensus_rule_set = state.lock_guard().await.consensus_rule_set();
+        let block_height = state.lock_guard().await.chain.light_state().header().height;
+        let network = state.cli().network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
         let proof = TransactionProofBuilder::new()
             .consensus_rule_set(consensus_rule_set)
             .transaction_details(&tx_details)

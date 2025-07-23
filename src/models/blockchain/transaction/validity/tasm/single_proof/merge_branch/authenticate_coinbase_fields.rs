@@ -15,8 +15,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 
 const UNEQUAL_DISCRIMINANT_ERROR: i128 = 1_000_020;
 const UNEQUAL_VALUE_ERROR: i128 = 1_000_021;
-const BOTH_INPUT_COINBASES_ERROR: i128 = 1_000_022; // genesis
-const RIGHT_INPUT_COINBASE_ERROR: i128 = 1_000_022; // hard fork 2
+const RIGHT_INPUT_COINBASE_ERROR: i128 = 1_000_022;
 
 /// Authenticate coinbase fields of left, right, and new kernels. Verify that
 /// at most one from (left, right) is set. Verify that the one that is set (if

@@ -29,8 +29,6 @@ use tracing::warn;
 
 use super::address::generation_address;
 use super::address::symmetric_key;
-use super::address::BaseKeyType;
-use super::address::BaseSpendingKey;
 use super::address::KeyType;
 use super::address::SpendingKey;
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
@@ -66,7 +64,6 @@ use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::mempool_event::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::rusty_wallet_database::WalletDbConnectError;
 use crate::models::state::wallet::transaction_input::TxInput;
@@ -94,10 +91,6 @@ pub struct WalletState {
     known_generation_keys: Vec<SpendingKey>,
     known_symmetric_keys: Vec<SpendingKey>,
 
-    // Cached from the database to avoid async cascades.
-    // Contains guesser-preimages from miner PoW-guessing.
-    known_raw_hash_lock_keys: Vec<BaseSpendingKey>,
-
     /// Tunable options for configuring how the wallet state operates.
     pub(crate) configuration: WalletConfiguration,
 }
@@ -116,12 +109,6 @@ impl IncomingUtxoRecoveryData {
     pub(crate) fn addition_record(&self) -> AdditionRecord {
         let item = Tip5::hash(&self.utxo);
         commit(item, self.sender_randomness, self.receiver_preimage.hash())
-    }
-
-    /// Returns true iff this UTXO is a guesser reward.
-    pub(crate) fn is_guesser_fee(&self) -> bool {
-        self.utxo
-            .is_lockscript_with_preimage(self.receiver_preimage)
     }
 }
 
@@ -195,7 +182,7 @@ impl WalletState {
         fee_notification: FeeNotificationPolicy,
     ) -> ComposerParameters {
         let reward_address = self.wallet_entropy.prover_fee_address();
-        let receiver_preimage = self.wallet_entropy.prover_fee_key().privacy_preimage();
+        let receiver_preimage = self.wallet_entropy.composer_fee_key().receiver_preimage();
         let sender_randomness_for_composer = self
             .wallet_entropy
             .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
@@ -342,15 +329,6 @@ impl WalletState {
             .map(|idx| wallet_entropy.nth_symmetric_key(idx).into())
             .collect_vec();
 
-        let known_raw_hash_lock_keys = rusty_wallet_database
-            .guesser_preimages()
-            .get_all()
-            .await
-            .into_iter()
-            .map(HashLockKey::from_preimage)
-            .map(BaseSpendingKey::RawHashLock)
-            .collect_vec();
-
         let mut wallet_state = Self {
             wallet_db: rusty_wallet_database,
             wallet_entropy,
@@ -358,12 +336,11 @@ impl WalletState {
             mempool_unspent_utxos: Default::default(),
             known_generation_keys,
             known_symmetric_keys,
-            known_raw_hash_lock_keys,
             configuration: configuration.clone(),
         };
 
         // Generation and Symmetric keys with derivation index 0 are reserved
-        // for composing and proof-upgrading rewards. The
+        // for rewards for composing, upgrading, and guessing. The
         // next lines ensure that the key with derivation-index=0 key is known
         // to the wallet, so that claiming these rewards works.
         //
@@ -418,7 +395,7 @@ impl WalletState {
             for premine_key in premine_keys {
                 let own_receiving_address = premine_key.to_address();
                 for utxo in Block::premine_utxos(configuration.network()) {
-                    if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
+                    if utxo.lock_script_hash() == own_receiving_address.lock_script_hash() {
                         wallet_state
                             .add_expected_utxo(ExpectedUtxo::new(
                                 utxo,
@@ -745,20 +722,6 @@ impl WalletState {
         }
     }
 
-    /// Add a RawHashLock key to the wallet's state. If key is already stored,
-    /// this is a no-op.
-    ///
-    /// Assumes that the cache agrees with the database.
-    pub(crate) async fn add_raw_hash_key(&mut self, preimage: Digest) {
-        let as_key = BaseSpendingKey::RawHashLock(HashLockKey::from_preimage(preimage));
-        if self.known_raw_hash_lock_keys.contains(&as_key) {
-            return;
-        }
-
-        self.wallet_db.guesser_preimages_mut().push(preimage).await;
-        self.known_raw_hash_lock_keys.push(as_key)
-    }
-
     /// Return a list of UTXOs spent by this wallet in the transaction
     ///
     /// Returns a list of tuples (utxo, absolute-index-set, index-into-database).
@@ -878,11 +841,11 @@ impl WalletState {
         &'a self,
         block: &Block,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
-        let receiver_preimage = self
-            .wallet_entropy
-            .guesser_preimage(block.header().prev_block_digest);
-        let receiver_digest = receiver_preimage.hash();
-        let incoming_utxos = if block.header().guesser_digest == receiver_digest {
+        let own_guesser_key = self.wallet_entropy.guesser_fee_key();
+        let incoming_utxos = if block
+            .header()
+            .was_guessed_by(own_guesser_key.to_address().into())
+        {
             let sender_randomness = block.hash();
             block
                 .guesser_fee_utxos()
@@ -891,7 +854,8 @@ impl WalletState {
                 .map(|utxo| IncomingUtxo {
                     utxo,
                     sender_randomness,
-                    receiver_preimage,
+                    receiver_preimage: own_guesser_key.receiver_preimage(),
+                    is_guesser_fee: true,
                 })
                 .collect_vec()
         } else {
@@ -1010,7 +974,7 @@ impl WalletState {
     /// returns first base-spending-key that can unlock the utxo
     ///
     /// scans only known wallet keys.
-    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<BaseSpendingKey> {
+    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()
             .find(|k| k.lock_script_hash() == utxo.lock_script_hash())
     }
@@ -1034,8 +998,8 @@ impl WalletState {
     }
 
     /// returns all base-spending-keys with derivation index less than current counter
-    pub fn get_all_known_spending_keys(&self) -> impl Iterator<Item = BaseSpendingKey> + '_ {
-        BaseKeyType::all_types()
+    pub fn get_all_known_spending_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
+        KeyType::all_types()
             .into_iter()
             .flat_map(|key_type| self.get_known_spending_keys(key_type))
     }
@@ -1072,14 +1036,13 @@ impl WalletState {
     /// returns all spending keys of `key_type` with derivation index less than current counter
     pub fn get_known_spending_keys(
         &self,
-        key_type: BaseKeyType,
-    ) -> Box<dyn Iterator<Item = BaseSpendingKey> + '_> {
+        key_type: KeyType,
+    ) -> Box<dyn Iterator<Item = SpendingKey> + '_> {
         match key_type {
-            BaseKeyType::Generation => {
+            KeyType::Generation => {
                 Box::new(self.get_known_generation_spending_keys().map(|k| k.into()))
             }
-            BaseKeyType::Symmetric => Box::new(self.get_known_symmetric_keys().map(|k| k.into())),
-            BaseKeyType::RawHashLock => Box::new(self.get_known_raw_hash_lock_keys()),
+            KeyType::Symmetric => Box::new(self.get_known_symmetric_keys().map(|k| k.into())),
         }
     }
 
@@ -1092,12 +1055,6 @@ impl WalletState {
             KeyType::Generation => Box::new(self.get_known_generation_spending_keys()),
             KeyType::Symmetric => Box::new(self.get_known_symmetric_keys()),
         }
-    }
-
-    pub(crate) fn get_known_raw_hash_lock_keys(
-        &self,
-    ) -> impl Iterator<Item = BaseSpendingKey> + '_ {
-        self.known_raw_hash_lock_keys.iter().copied()
     }
 
     // TODO: These spending keys should probably be derived dynamically from some
@@ -1301,6 +1258,7 @@ impl WalletState {
                         utxo: composer_output.utxo(),
                         sender_randomness: composer_output.sender_randomness(),
                         receiver_preimage,
+                        is_guesser_fee: false,
                     };
                     let addition_record = incoming_utxo.addition_record();
 
@@ -1439,7 +1397,7 @@ impl WalletState {
             additions: addition_records,
             removals: removal_records,
         } = new_block
-            .mutator_set_update(self.configuration.network())
+            .mutator_set_update()
             .expect("Block received as argument must have mutator set update");
         let mut removal_records = removal_records;
         removal_records.reverse();
@@ -1477,7 +1435,6 @@ impl WalletState {
         // updates from this block
 
         let monitored_utxos = self.wallet_db.monitored_utxos_mut();
-        let mut guesser_preimage: Option<Digest> = None;
         let mut incoming_utxo_recovery_data_list = vec![];
 
         // return early if there are no monitored utxos and this
@@ -1544,8 +1501,8 @@ impl WalletState {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
+                    is_guesser_fee,
                 } = incoming_utxo.to_owned();
-                let is_guesser_fee = incoming_utxo.is_guesser_fee();
                 info!(
                     "Received UTXO in block {}, height {}\nvalue = {}\n\
                     is guesser fee: {is_guesser_fee}\ntime-lock: {}\n\n",
@@ -1596,11 +1553,6 @@ impl WalletState {
                         (new_own_membership_proof, mutxos_len, utxo_digest),
                     );
                     monitored_utxos.push(mutxo).await;
-
-                    // If this is a guesser-fee UTXO, store the guesser-preimage.
-                    if incoming_utxo.is_guesser_fee() {
-                        guesser_preimage = Some(receiver_preimage);
-                    }
 
                     // Add the data required to restore the UTXOs membership proof from public
                     // data to the secret's file.
@@ -1710,11 +1662,6 @@ impl WalletState {
         // write UTXO-recovery data to disk.
         for item in incoming_utxo_recovery_data_list {
             self.store_utxo_ms_recovery_data(item).await?;
-        }
-
-        // Write guesser-preimage for guesser fee UTXOs to DB, and cache.
-        if let Some(guesser_preimage) = guesser_preimage {
-            self.add_raw_hash_key(guesser_preimage).await;
         }
 
         // Mark all expected UTXOs that were received in this block as received
@@ -2025,13 +1972,6 @@ pub(crate) mod tests {
     use crate::triton_vm_job_queue::TritonVmJobQueue;
 
     impl WalletState {
-        /// Delete all guesser-preimage keys from database and cache.
-        pub(crate) async fn clear_raw_hash_keys(&mut self) {
-            self.known_raw_hash_lock_keys.clear();
-            self.wallet_db.guesser_preimages_mut().clear().await;
-        }
-
-        #[cfg(test)]
         pub(crate) async fn new_from_wallet_entropy(
             data_dir: &DataDirectory,
             wallet_entropy: WalletEntropy,
@@ -2635,10 +2575,7 @@ pub(crate) mod tests {
                 None,
                 bob_key,
                 mock_block_seed,
-                (
-                    guesser_fraction,
-                    bob_wallet_secret.guesser_preimage(genesis_block.hash()),
-                ),
+                (guesser_fraction, bob_key.to_address().into()),
                 network,
             )
             .await;
@@ -2665,6 +2602,7 @@ pub(crate) mod tests {
 
         // Add a new block to state as tip, which *only* differs in its PoW
         // solution. `bob` did *not* find the PoW-solution for this block.
+        let random_address = GenerationReceivingAddress::derive_from_seed(rng.random());
         let (block_1b, expected_utxos_block_1b) =
             make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
@@ -2673,7 +2611,7 @@ pub(crate) mod tests {
                 None,
                 bob_key,
                 mock_block_seed,
-                (guesser_fraction, rng.random()),
+                (guesser_fraction, random_address.into()),
                 network,
             )
             .await;
@@ -3080,13 +3018,12 @@ pub(crate) mod tests {
             )
             .await;
 
-            // Create the correct guesser key
             let guesser_key = bob
                 .lock_guard()
                 .await
                 .wallet_state
                 .wallet_entropy
-                .guesser_spending_key(genesis_block.hash());
+                .guesser_fee_key();
 
             // Mine it till it has a valid PoW digest
             // Add this block to the wallet through the same pipeline as the
@@ -3098,10 +3035,10 @@ pub(crate) mod tests {
                 block1_proposal,
                 *genesis_block.header(),
                 guesser_tx,
-                guesser_key,
                 GuessingConfiguration {
                     sleepy_guessing,
                     num_guesser_threads: Some(2),
+                    address: guesser_key.to_address().into(),
                 },
             )
             .await;
@@ -3150,56 +3087,10 @@ pub(crate) mod tests {
             }
 
             // Verify expected qualities of wallet, that:
-            // 1. guesser-preimage was added to list(s)
-            // 2. expected UTXO contains guesser-fee UTXOs
-            // 3. monitored UTXOs-list contains guesser-fee UTXOs.
+            // 1. expected UTXO contains guesser-fee UTXOs
+            // 2. monitored UTXOs-list contains guesser-fee UTXOs.
 
             // 1.
-            let cached_guesser_preimages = bob
-                .global_state_lock
-                .lock_guard()
-                .await
-                .wallet_state
-                .known_raw_hash_lock_keys
-                .clone();
-            assert_eq!(
-                1,
-                cached_guesser_preimages.len(),
-                "Cache must know exactly 1 guesser-preimage after adding block to wallet state"
-            );
-            let preimage =
-                if let BaseSpendingKey::RawHashLock(raw_hash_lock) = cached_guesser_preimages[0] {
-                    raw_hash_lock.preimage()
-                } else {
-                    panic!("Stored key must be raw hash lock");
-                };
-            assert_eq!(
-                block1.header().guesser_digest,
-                preimage.hash(),
-                "Cached guesser preimage must hash to guesser digest in block"
-            );
-
-            let guesser_preimages_from_db = bob
-                .global_state_lock
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_db
-                .guesser_preimages()
-                .get_all()
-                .await;
-            assert_eq!(
-                1,
-                guesser_preimages_from_db.len(),
-                "DB must know exactly 1 guesser-preimage after adding block to wallet state"
-            );
-            assert_eq!(
-                block1.header().guesser_digest,
-                guesser_preimages_from_db[0].hash(),
-                "Guesser preimage from DB must hash to guesser digest in block"
-            );
-
-            // 2.
             let eus = bob
                 .global_state_lock
                 .lock_guard()
@@ -3232,7 +3123,7 @@ pub(crate) mod tests {
                 )
             }
 
-            // 3.
+            // 2.
             let mutxos = bob
                 .global_state_lock
                 .lock_guard()
@@ -3309,7 +3200,7 @@ pub(crate) mod tests {
             let composer_parameters = ComposerParameters::new(
                 a_key.to_address().into(),
                 rng.random(),
-                Some(a_key.privacy_preimage()),
+                Some(a_key.receiver_preimage()),
                 0.5f64,
                 FeeNotificationPolicy::OffChain,
             );
@@ -3361,7 +3252,8 @@ pub(crate) mod tests {
                 make_mock_block(&genesis_block, None, composer_key, rng.random(), network).await;
 
             // other guesser -> no detection
-            incoming_block.set_header_guesser_digest(rng.random());
+            let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
+            incoming_block.set_header_guesser_address(rando.into());
             assert_eq!(
                 0,
                 wallet_state
@@ -3370,10 +3262,8 @@ pub(crate) mod tests {
             );
 
             // our lucky guess -> guesser fees detected
-            let guesser_preimage = wallet_state
-                .wallet_entropy
-                .guesser_preimage(genesis_block.hash());
-            incoming_block.set_header_guesser_digest(guesser_preimage.hash());
+            let own = wallet_state.wallet_entropy.guesser_fee_key().to_address();
+            incoming_block.set_header_guesser_address(own.into());
             assert_eq!(
                 2,
                 wallet_state
@@ -3569,7 +3459,7 @@ pub(crate) mod tests {
             .await;
 
             let genesis = Block::genesis(network);
-            let guesser_preimage = alice_wallet.guesser_preimage(genesis.hash());
+            let guesser_address = alice_wallet.guesser_fee_key().to_address();
             let change_key = alice_wallet.nth_generation_spending_key(0).into();
             let guesser_fraction = 0.5f64;
 
@@ -3582,7 +3472,7 @@ pub(crate) mod tests {
                     None,
                     alice_wallet.nth_generation_spending_key(0),
                     rng.random(),
-                    (guesser_fraction, guesser_preimage),
+                    (guesser_fraction, guesser_address.into()),
                     network,
                 )
                 .await;
@@ -3828,7 +3718,7 @@ pub(crate) mod tests {
             assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
 
             let mock_utxo = Utxo::new_native_currency(
-                LockScript::anyone_can_spend(),
+                LockScript::anyone_can_spend().hash(),
                 NativeCurrencyAmount::coins(10),
             );
 
@@ -3882,7 +3772,7 @@ pub(crate) mod tests {
                 mock_genesis_wallet_state(WalletEntropy::new_random(), &cli_args).await;
 
             let mock_utxo = Utxo::new_native_currency(
-                LockScript::anyone_can_spend(),
+                LockScript::anyone_can_spend().hash(),
                 NativeCurrencyAmount::coins(14),
             );
 
@@ -3987,7 +3877,7 @@ pub(crate) mod tests {
                 .await;
 
                 let mock_utxo = Utxo::new_native_currency(
-                    LockScript::anyone_can_spend(),
+                    LockScript::anyone_can_spend().hash(),
                     NativeCurrencyAmount::coins(14),
                 );
 
@@ -4185,7 +4075,7 @@ pub(crate) mod tests {
             )
             .await;
             let genesis = Block::genesis(network);
-            let guesser_preimage = alice_wallet.guesser_preimage(genesis.hash());
+            let guesser_address = alice_wallet.guesser_fee_key().to_address();
 
             let guesser_fraction = 0.6f64;
             let (block_1a, composer_expected_utxos_1a) =
@@ -4196,7 +4086,7 @@ pub(crate) mod tests {
                     None,
                     alice_wallet.nth_generation_spending_key(14),
                     rng.random(),
-                    (guesser_fraction, guesser_preimage),
+                    (guesser_fraction, guesser_address.into()),
                     network,
                 )
                 .await;
@@ -4552,6 +4442,7 @@ pub(crate) mod tests {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
+                    is_guesser_fee: false,
                 };
 
                 let addition_record = incoming_utxo.addition_record();
@@ -5016,7 +4907,7 @@ pub(crate) mod tests {
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
                 genesis_mutator_set,
-                block_one.mutator_set_update(network).unwrap(),
+                block_one.mutator_set_update().unwrap(),
                 upgrade_incentive,
                 consensus_rule_set,
             ));

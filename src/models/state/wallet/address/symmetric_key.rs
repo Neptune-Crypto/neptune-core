@@ -15,13 +15,13 @@ use bech32::FromBase32;
 use bech32::ToBase32;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use super::hash_lock_key::HashLockKey;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -113,14 +113,14 @@ impl SymmetricKey {
         .into()
     }
 
-    /// returns the privacy preimage
-    pub fn privacy_preimage(&self) -> Digest {
+    /// returns the receiver preimage
+    pub fn receiver_preimage(&self) -> Digest {
         Hash::hash_varlen(&[&self.seed.values(), [BFieldElement::new(0)].as_slice()].concat())
     }
 
-    /// returns the privacy digest which is a hash of the privacy_preimage
-    pub fn privacy_digest(&self) -> Digest {
-        self.privacy_preimage().hash()
+    /// returns the receiver postimage which is a hash of the receiver preimage
+    pub fn receiver_postimage(&self) -> Digest {
+        self.receiver_preimage().hash()
     }
 
     /// returns the receiver_identifier, a public fingerprint
@@ -199,11 +199,15 @@ impl SymmetricKey {
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
-        HashLockKey::lock_script_from_after_image(self.lock_after_image())
+        LockScript::standard_hash_lock_from_after_image(self.lock_after_image())
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
-        HashLockKey::from_preimage(self.unlock_key()).lock_script_and_witness()
+        let lock_script = self.lock_script();
+        LockScriptAndWitness::new_with_nondeterminism(
+            lock_script.program,
+            NonDeterminism::new(self.unlock_key().reversed().values()),
+        )
     }
 
     pub(crate) fn generate_public_announcement(
@@ -253,7 +257,7 @@ impl SymmetricKey {
     /// secret key.
     pub fn to_display_bech32m(&self, network: Network) -> Result<String> {
         let hrp = Self::get_hrp(network);
-        let payload = bincode::serialize(&self.privacy_preimage())?;
+        let payload = bincode::serialize(&self.receiver_preimage())?;
         let variant = bech32::Variant::Bech32m;
         match bech32::encode(&hrp, payload.to_base32(), variant) {
             Ok(enc) => Ok(enc),

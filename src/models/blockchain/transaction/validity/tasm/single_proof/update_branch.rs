@@ -687,7 +687,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionKernelModifier;

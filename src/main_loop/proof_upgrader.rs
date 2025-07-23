@@ -1229,7 +1229,7 @@ mod tests {
             let genesis_block = Block::genesis(network);
             let block1 =
                 invalid_empty_block_with_timestamp(&genesis_block, pwtx.kernel.timestamp, network);
-            let block1_msu = block1.mutator_set_update(network).unwrap();
+            let block1_msu = block1.mutator_set_update().unwrap();
             println!(
                 "block1_msu #addition records: {}; block1_msu #removal records: {}",
                 block1_msu.additions.len(),

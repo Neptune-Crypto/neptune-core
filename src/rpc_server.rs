@@ -99,10 +99,9 @@ use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::models::state::wallet::address::BaseKeyType;
-use crate::models::state::wallet::address::BaseSpendingKey;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -1056,7 +1055,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn known_keys(token: rpc_auth::Token) -> RpcResult<Vec<BaseSpendingKey>>;
+    async fn known_keys(token: rpc_auth::Token) -> RpcResult<Vec<SpendingKey>>;
 
     /// Return known keys for the provided [KeyType]
     ///
@@ -1095,8 +1094,8 @@ pub trait RPC {
     /// ```
     async fn known_keys_by_keytype(
         token: rpc_auth::Token,
-        key_type: BaseKeyType,
-    ) -> RpcResult<Vec<BaseSpendingKey>>;
+        key_type: KeyType,
+    ) -> RpcResult<Vec<SpendingKey>>;
 
     /// Return the number of transactions in the mempool
     ///
@@ -1425,7 +1424,7 @@ pub trait RPC {
     /// Returns `None` if no block proposal for the next block is known yet.
     async fn pow_puzzle_external_key(
         token: rpc_auth::Token,
-        guesser_digest: Digest,
+        guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>>;
 
     /******** BLOCKCHAIN STATISTICS ********/
@@ -2108,7 +2107,7 @@ impl NeptuneRPCServer {
                         .num_leafs()
                         - 1;
                     let num_outputs_in_block: u64 = block
-                        .mutator_set_update(network)
+                        .mutator_set_update()
                         .expect("Block from state must have mutator set update")
                         .additions
                         .len()
@@ -2192,12 +2191,12 @@ impl NeptuneRPCServer {
     /// Return a PoW puzzle with the provided guesser digest.
     async fn pow_puzzle_inner(
         mut self,
-        guesser_key_after_image: Digest,
+        guesser_address: ReceivingAddress,
         mut proposal: Block,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
         let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
 
-        proposal.set_header_guesser_digest(guesser_key_after_image);
+        proposal.set_header_guesser_address(guesser_address);
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
 
         // Record block proposal in case of guesser-success, for later
@@ -2726,7 +2725,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-    ) -> RpcResult<Vec<BaseSpendingKey>> {
+    ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2744,8 +2743,8 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-        key_type: BaseKeyType,
-    ) -> RpcResult<Vec<BaseSpendingKey>> {
+        key_type: KeyType,
+    ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -3408,16 +3407,15 @@ impl RPC for NeptuneRPCServer {
             return Ok(None);
         };
 
-        let guesser_key_after_image = self
+        let guesser_key = self
             .state
             .lock_guard()
             .await
             .wallet_state
             .wallet_entropy
-            .guesser_spending_key(proposal.header().prev_block_digest)
-            .after_image();
+            .guesser_fee_key();
 
-        self.pow_puzzle_inner(guesser_key_after_image, proposal)
+        self.pow_puzzle_inner(guesser_key.to_address().into(), proposal)
             .await
     }
 
@@ -3426,7 +3424,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-        guesser_digest: Digest,
+        guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3442,7 +3440,7 @@ impl RPC for NeptuneRPCServer {
             return Ok(None);
         };
 
-        self.pow_puzzle_inner(guesser_digest, proposal).await
+        self.pow_puzzle_inner(guesser_fee_address, proposal).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -3908,7 +3906,7 @@ mod tests {
         let _ = rpc_server.clone().pow_puzzle_internal_key(ctx, token).await;
         let _ = rpc_server
             .clone()
-            .pow_puzzle_external_key(ctx, token, rng.random())
+            .pow_puzzle_external_key(ctx, token, own_receiving_address.clone())
             .await;
         let _ = rpc_server
             .clone()
@@ -4725,12 +4723,12 @@ mod tests {
 
     mod pow_puzzle_tests {
         use rand::random;
-        use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
         use crate::mine_loop::fast_kernel_mast_hash;
         use crate::models::state::block_proposal::BlockProposal;
-        use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
@@ -4738,8 +4736,9 @@ mod tests {
             let network = Network::Main;
             let genesis = Block::genesis(network);
             let mut block1 = invalid_empty_block(&genesis, network);
-            let hash_lock_key = HashLockKey::from_preimage(random());
-            block1.set_header_guesser_digest(hash_lock_key.after_image());
+            let mut rng = StdRng::seed_from_u64(3409875378456);
+            let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+            block1.set_header_guesser_address(guesser_address.into());
 
             let guess_challenge = ProofOfWorkPuzzle::new(block1.clone(), *genesis.header());
             assert_eq!(guess_challenge.prev_block, genesis.hash());
@@ -4806,12 +4805,25 @@ mod tests {
             let bob_token = cookie_token(&bob).await;
 
             let num_exported_block_proposals = 6;
-            let guesser_digests = random_elements(6);
+
+            let mut addresses = vec![];
+            for _ in 0..num_exported_block_proposals {
+                let address = bob
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Generation)
+                    .await
+                    .to_address();
+                addresses.push(address);
+            }
+
             let mut pow_puzzle_ids = vec![];
-            for guesser_digest in guesser_digests.clone() {
+            for guesser_address in addresses.clone() {
                 let pow_puzzle = bob
                     .clone()
-                    .pow_puzzle_external_key(context::current(), bob_token, guesser_digest)
+                    .pow_puzzle_external_key(context::current(), bob_token, guesser_address)
                     .await
                     .unwrap()
                     .unwrap();
@@ -4830,9 +4842,9 @@ mod tests {
             );
 
             // Verify that the same exported puzzle is not added twice.
-            for guesser_digest in guesser_digests {
+            for guesser_address in addresses {
                 bob.clone()
-                    .pow_puzzle_external_key(context::current(), bob_token, guesser_digest)
+                    .pow_puzzle_external_key(context::current(), bob_token, guesser_address)
                     .await
                     .unwrap()
                     .unwrap();
@@ -4870,18 +4882,14 @@ mod tests {
                 })
                 .await;
 
-            let external_key = WalletEntropy::new_random();
-            let external_guesser_key = external_key.guesser_spending_key(genesis.hash());
-            let external_guesser_digest = external_guesser_key.after_image();
+            let entropy_for_external_key = WalletEntropy::new_random();
+            let external_guesser_key = entropy_for_external_key.guesser_fee_key();
+            let external_guesser_address = external_guesser_key.to_address();
             let internal_guesser_digest = bob
                 .state
-                .lock(|x| {
-                    x.wallet_state
-                        .wallet_entropy
-                        .guesser_spending_key(genesis.hash())
-                })
+                .lock(|x| x.wallet_state.wallet_entropy.guesser_fee_key())
                 .await
-                .after_image();
+                .to_address();
 
             for use_internal_key in [true, false] {
                 println!("use_internal_key: {use_internal_key}");
@@ -4896,17 +4904,17 @@ mod tests {
                         .pow_puzzle_external_key(
                             context::current(),
                             bob_token,
-                            external_guesser_digest,
+                            external_guesser_address.into(),
                         )
                         .await
                         .unwrap()
                         .unwrap()
                 };
 
-                let guesser_digest = if use_internal_key {
+                let guesser_address = if use_internal_key {
                     internal_guesser_digest
                 } else {
-                    external_guesser_digest
+                    external_guesser_address
                 };
 
                 assert!(
@@ -4927,7 +4935,7 @@ mod tests {
                 );
 
                 block1.set_header_nonce(mock_nonce);
-                block1.set_header_guesser_digest(guesser_digest);
+                block1.set_header_guesser_address(guesser_address.into());
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
                     block1.total_guesser_reward().unwrap(),

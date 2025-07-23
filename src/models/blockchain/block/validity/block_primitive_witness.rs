@@ -164,7 +164,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::BlockProof;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-    use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::utxo::Utxo;
@@ -174,7 +173,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -320,18 +318,13 @@ pub(crate) mod tests {
                         let lock_scripts_and_witnesses = hash_lock_keys
                             .iter()
                             .copied()
-                            .map(HashLockKey::from_preimage)
-                            .map(|hl| hl.lock_script_and_witness())
-                            .collect_vec();
-                        let lock_scripts = lock_scripts_and_witnesses
-                            .iter()
-                            .map(|lsaw| LockScript::from(lsaw))
+                            .map(LockScriptAndWitness::standard_hash_lock_from_preimage)
                             .collect_vec();
                         let input_utxos = input_amounts
                             .into_iter()
-                            .zip(lock_scripts)
-                            .map(|(amount, lock_script)| {
-                                Utxo::new(lock_script, amount.to_native_coins())
+                            .zip(lock_scripts_and_witnesses.iter())
+                            .map(|(amount, ls_and_w)| {
+                                Utxo::new(ls_and_w.program.hash(), amount.to_native_coins())
                             })
                             .collect_vec();
                         let own_items = input_utxos.iter().map(Tip5::hash).collect_vec();
@@ -359,8 +352,6 @@ pub(crate) mod tests {
                                 let parent_appendix = arb::<BlockAppendix>();
                                 let parent_body = BlockBody::arbitrary_with_mutator_set_accumulator(
                                     intermediate_mutator_set_accumulator.clone(),
-                                    parent_height,
-                                    network,
                                 );
                                 (parent_header, parent_body, parent_appendix).prop_flat_map(
                                     move |(header, body, appendix)| {

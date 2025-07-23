@@ -13,8 +13,6 @@ use zeroize::ZeroizeOnDrop;
 use super::address::ReceivingAddress;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::address::hash_lock_key;
-use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::symmetric_key;
 use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
 
@@ -45,34 +43,21 @@ impl WalletEntropy {
         Self::new(secret_seed)
     }
 
-    /// Return the guesser preimage for guessing on top of a given block (as
-    /// identified by the block's predecessor's hash).
-    pub(crate) fn guesser_preimage(&self, prev_block_digest: Digest) -> Digest {
-        Tip5::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![hash_lock_key::RAW_HASH_LOCK_KEY_FLAG],
-                prev_block_digest.encode(),
-            ]
-            .concat(),
-        )
-    }
-
-    /// Returns the spending key for guessing on top of the given block.
-    pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
-        HashLockKey::from_preimage(self.guesser_preimage(prev_block_digest))
+    /// Returns the spending key for guesser rewards.
+    pub(crate) fn guesser_fee_key(&self) -> generation_address::GenerationSpendingKey {
+        self.nth_generation_spending_key(0u64)
     }
 
     /// Returns the spending key for prover rewards, *i.e.*, composer fee or
     /// proof-upgrader (gobbling) fee.
-    pub(crate) fn prover_fee_key(&self) -> generation_address::GenerationSpendingKey {
+    pub(crate) fn composer_fee_key(&self) -> generation_address::GenerationSpendingKey {
         self.nth_generation_spending_key(0u64)
     }
 
     /// Returns the receiving address for prover rewards, *i.e.*, composer fee
     /// or proof-upgrader (gobbling) fee.
     pub(crate) fn prover_fee_address(&self) -> ReceivingAddress {
-        self.prover_fee_key().to_address().into()
+        self.composer_fee_key().to_address().into()
     }
 
     /// derives a generation spending key at `index`
@@ -228,7 +213,7 @@ mod tests {
         #[strategy(arb())] wallet_entropy: WalletEntropy,
     ) {
         prop_assert_eq!(
-            wallet_entropy.prover_fee_key().privacy_preimage().hash(),
+            wallet_entropy.composer_fee_key().receiver_preimage().hash(),
             wallet_entropy.prover_fee_address().privacy_digest(),
         );
     }
