@@ -4361,6 +4361,7 @@ mod tests {
             );
         }
 
+        #[ignore = "no real mainnet data available for current consensus programs"]
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn can_restore_from_real_mainnet_data_with_reorganizations() {
