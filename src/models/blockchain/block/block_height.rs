@@ -41,6 +41,7 @@ pub struct BlockHeight(BFieldElement);
 // Assuming a block time of 588 seconds, and a halving every three years,
 // the number of blocks per halving cycle is 160815.
 pub const BLOCKS_PER_GENERATION: u64 = 160815;
+pub const NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT: u64 = 21310;
 
 impl BlockHeight {
     pub const MAX: u64 = BFieldElement::MAX;
@@ -54,7 +55,10 @@ impl BlockHeight {
     }
 
     pub fn get_generation(&self) -> u64 {
-        self.0.value() / BLOCKS_PER_GENERATION
+        self.0
+            .value()
+            .saturating_add(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT)
+            / BLOCKS_PER_GENERATION
     }
 
     pub fn next(&self) -> Self {
@@ -197,33 +201,58 @@ mod tests {
 
         // Genesis block does not contain block subsidy so it must be subtracted
         // from total number.
+        let total_skipped_subsidies_generation_0 = generation_0_subsidy
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
         let mineable_amount = generation_0_subsidy
             .scalar_mul(BLOCKS_PER_GENERATION as u32)
             .scalar_mul(2)
             .checked_sub(&generation_0_subsidy)
+            .unwrap()
+            .checked_sub(&total_skipped_subsidies_generation_0)
             .unwrap();
 
         println!("mineable_amount: {mineable_amount}");
         let designated_premine = PREMINE_MAX_SIZE;
-        let asymptotic_limit = mineable_amount.checked_add(&designated_premine).unwrap();
+        let claims_pool = total_skipped_subsidies_generation_0;
+        let asymptotic_limit = mineable_amount
+            .checked_add(&designated_premine)
+            .unwrap()
+            .checked_add(&claims_pool)
+            .unwrap();
 
         let expected_limit = NativeCurrencyAmount::coins(42_000_000);
         assert_eq!(expected_limit, asymptotic_limit);
 
         // Premine is less than promise of 1.98 %
         let relative_premine = designated_premine.to_nau_f64() / expected_limit.to_nau_f64();
+        println!("asymptotic_limit: {asymptotic_limit}");
+        println!("claims pool: {claims_pool}");
         println!("relative_premine: {relative_premine}");
         println!("absolute premine: {designated_premine} coins");
         assert!(relative_premine < 0.0198, "Premine may not exceed promise");
 
-        // Designated premine is less than or equal to allocation
+        // Designated premine is less than or equal to allocation. Note that
+        // the allocation for reboot-claims is not considered part of the
+        // premine.
         let actual_premine = Block::premine_distribution()
             .iter()
             .map(|(_receiving_address, amount)| *amount)
+            .rev()
+            .skip(1)
             .sum::<NativeCurrencyAmount>();
+        println!("actual_premine: {actual_premine}");
         assert!(
             actual_premine <= designated_premine,
             "Distributed premine may not exceed designated value"
+        );
+
+        let premine_including_claims_pool = Block::premine_distribution()
+            .iter()
+            .map(|(_receiving_address, amount)| *amount)
+            .sum::<NativeCurrencyAmount>();
+        assert_eq!(
+            actual_premine + total_skipped_subsidies_generation_0,
+            premine_including_claims_pool
         );
     }
 }
