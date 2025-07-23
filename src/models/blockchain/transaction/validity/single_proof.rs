@@ -1254,7 +1254,7 @@ mod tests {
 
     test_program_snapshot!(
         SingleProof,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "c0f8cbc73a844ab6c3586d8891e29b677a3aa08f25f9aec0f854a72bf2e2f84c2a48c9dd1bbe0a66"
+        // snapshot taken from branch asz/build-public-announcements on 2025-07-23 ca7b3f51
+        "58e4a6407c48ab3fb2bb33d5630f7cd227c48c7b39bab776c353e2707a98a75820c93e9ec5d05a41"
     );
 }
