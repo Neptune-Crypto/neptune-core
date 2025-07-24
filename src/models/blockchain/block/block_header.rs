@@ -118,11 +118,13 @@ impl BlockHeader {
             prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
 
+            // Bitcoin block at height 906975
+            // TODO: Update me right before reboot
             nonce: Digest::new(bfe_array![
                 0x0000000000000000u64,
-                0x0001db42f3edf187u64,
-                0xf91d2dd95e6975deu64,
-                0x272fa07267136a84u64,
+                0x0001ff452761dd02u64,
+                0x9696bf75719bdc65u64,
+                0xa6b0088b8822e794u64,
                 0
             ]),
             cumulative_proof_of_work: ProofOfWork::zero(),
@@ -136,8 +138,20 @@ impl BlockHeader {
             difficulty: Difficulty::MINIMUM,
 
             guesser_receiver_data: GuesserReceiverData {
-                receiver_digest: Digest::default(),
-                lock_script_hash: Digest::default(),
+                receiver_digest: Digest::new(bfe_array![
+                    0x5472756D7020746Fu64,
+                    0x20546F7572204665u64,
+                    0x646572616C205265u64,
+                    0x73657276652C2052u64,
+                    0x616D70696E672055u64
+                ]),
+                lock_script_hash: Digest::new(bfe_array![
+                    0x7020507265737375u64,
+                    0x72652043616D7061u64,
+                    0x69676E206F6E2050u64,
+                    0x6F77656C6C000000u64,
+                    0x0A57534A00000000u64
+                ]),
             },
         }
     }
