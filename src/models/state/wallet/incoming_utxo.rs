@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use tasm_lib::prelude::Digest;
@@ -20,13 +22,38 @@ use crate::util_types::mutator_set::commit;
 ///    key coincides with the receiver preimage.)
 ///
 /// See [UtxoNotificationPayload], [ExpectedUtxo]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) struct IncomingUtxo {
     pub(crate) utxo: Utxo,
     pub(crate) sender_randomness: Digest,
     pub(crate) receiver_preimage: Digest,
+
+    /// Whether the UTXO is a guesser fee or not. Only to be used for log
+    /// messages and wallet info. Does not affect how the ability to claim the
+    /// UTXO.
     pub(crate) is_guesser_fee: bool,
+}
+
+impl PartialEq for IncomingUtxo {
+    fn eq(&self, other: &Self) -> bool {
+        // Exclude `is_guesser_fee` in equality as the other fields are
+        // sufficient to claim the UTXO.
+        self.utxo == other.utxo
+            && self.sender_randomness == other.sender_randomness
+            && self.receiver_preimage == other.receiver_preimage
+    }
+}
+
+impl Eq for IncomingUtxo {}
+
+impl Hash for IncomingUtxo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Exclude `is_guesser_fee` because the equality implementation does.
+        std::hash::Hash::hash(&self.utxo, state);
+        std::hash::Hash::hash(&self.sender_randomness, state);
+        std::hash::Hash::hash(&self.receiver_preimage, state);
+    }
 }
 
 impl From<&ExpectedUtxo> for IncomingUtxo {
@@ -35,6 +62,9 @@ impl From<&ExpectedUtxo> for IncomingUtxo {
             utxo: eu.utxo.clone(),
             sender_randomness: eu.sender_randomness,
             receiver_preimage: eu.receiver_preimage,
+
+            // An expected UTXO is always assumed to refer to something we're
+            // receiving, not to a successful PoW guess.
             is_guesser_fee: false,
         }
     }
@@ -92,6 +122,7 @@ mod tests {
         );
 
         let back_again: IncomingUtxo = (&as_expected_utxo).into();
+
         prop_assert_eq!(incoming_utxo, back_again);
     }
 }
