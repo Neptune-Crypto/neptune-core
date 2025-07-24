@@ -2526,7 +2526,9 @@ mod tests {
             #[strategy(0usize..20)] _num_inputs_own: usize,
             #[strategy(0usize..20)] _num_outputs_own: usize,
             #[strategy(0usize..20)] _num_public_announcements_own: usize,
-            #[strategy(0usize..20)] _num_inputs_mined: usize,
+            #[filter(#_num_inputs_mined+#_num_outputs_mined>0)]
+            #[strategy(0usize..20)]
+            _num_inputs_mined: usize,
             #[strategy(0usize..20)] _num_outputs_mined: usize,
             #[strategy(0usize..20)] _num_public_announcements_mined: usize,
             #[strategy(0usize..200_000)] size_old_proof: usize,
