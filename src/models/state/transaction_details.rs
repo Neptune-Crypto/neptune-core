@@ -46,7 +46,7 @@ pub struct TransactionDetails {
     pub tx_outputs: TxOutputList,
 
     /// announcements *excluding* encrypted UTXO notifications.
-    announcements: Vec<Announcement>,
+    extra_announcements: Vec<Announcement>,
     pub fee: NativeCurrencyAmount,
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
@@ -71,7 +71,7 @@ impl Display for TransactionDetails {
     change_outputs: {},
     owned_outputs: {},
     network: {},
-    announcements (excluding encrypted UTXO notifications):\n[{}],
+    extra announcements:\n[{}],
 "#,
             self.timestamp.standard_format(),
             self.spend_amount(),
@@ -99,7 +99,7 @@ impl Display for TransactionDetails {
                 .map(|o| o.native_currency_amount())
                 .join(", "),
             self.network,
-            self.announcements
+            self.extra_announcements
                 .iter()
                 .map(|pa| format!("{pa}"))
                 .join(",\n"),
@@ -263,7 +263,7 @@ impl TransactionDetails {
         Self {
             tx_inputs: tx_inputs.into(),
             tx_outputs: tx_outputs.into(),
-            announcements: vec![],
+            extra_announcements: vec![],
             fee,
             coinbase,
             timestamp,
@@ -287,8 +287,8 @@ impl TransactionDetails {
         mut self,
         announcements: Iter,
     ) -> Self {
-        self.announcements = self
-            .announcements
+        self.extra_announcements = self
+            .extra_announcements
             .into_iter()
             .chain(announcements)
             .collect_vec();
@@ -321,7 +321,11 @@ impl TransactionDetails {
     /// Produce the list of announcements, including the UTXO
     /// notifications.
     pub fn announcements(&self) -> Vec<Announcement> {
-        [self.announcements.clone(), self.tx_outputs.announcements()].concat()
+        [
+            self.extra_announcements.clone(),
+            self.tx_outputs.announcements(),
+        ]
+        .concat()
     }
 
     pub fn primitive_witness(&self) -> PrimitiveWitness {

@@ -10,7 +10,6 @@
 //! see [builder](super) for examples of using the builders together.
 use std::sync::Arc;
 
-use itertools::Itertools;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
@@ -91,12 +90,8 @@ impl TransactionDetailsBuilder {
     /// Use this method for announcements that are *not* encrypted UTXO
     /// notifications. The encrypted UTXO notifications are generated on the fly
     /// at a later stage.
-    pub fn custom_announcements<Iter: IntoIterator<Item = Announcement>>(
-        mut self,
-        announcements: Iter,
-    ) -> Self {
-        self.announcements
-            .append(&mut announcements.into_iter().collect_vec());
+    pub fn custom_announcements(mut self, mut announcements: Vec<Announcement>) -> Self {
+        self.announcements.append(&mut announcements);
         self
     }
 
@@ -277,7 +272,7 @@ impl TransactionDetailsBuilder {
             timestamp,
             tip_block
                 .mutator_set_accumulator_after()
-                .expect("Block from state must have mutator set after"),
+                .map_err(|_| CreateTxError::NoMutatorSetAccumulatorAfter)?,
             state_lock.cli().network,
         )
         .with_announcements(self.announcements);
