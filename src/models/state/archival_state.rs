@@ -13,7 +13,7 @@ use tokio::io::SeekFrom;
 use tracing::debug;
 use tracing::warn;
 
-pub(crate) mod bootstrap_from_block_files;
+pub(crate) mod import_blocks_from_files;
 
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;

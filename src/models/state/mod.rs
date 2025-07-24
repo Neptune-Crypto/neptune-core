@@ -1946,7 +1946,7 @@ impl GlobalState {
     /// where blocks are mined locally or received from peers.
     ///
     /// Returns the number of blocks read from the directory.
-    pub(crate) async fn bootstrap_from_directory(
+    pub(crate) async fn import_blocks_from_directory(
         &mut self,
         directory: &Path,
         flush_period: usize,
@@ -4229,7 +4229,7 @@ mod tests {
         }
     }
 
-    mod bootstrap_from_raw_block_files {
+    mod import_blocks_from_directory {
         use std::fs::File;
         use std::io::Write;
 
@@ -4284,7 +4284,7 @@ mod tests {
             let block_dir = old_state.chain.archival_state().block_dir_path();
             let validate_blocks = true;
             assert!(new_state
-                .bootstrap_from_directory(&block_dir, 0, validate_blocks)
+                .import_blocks_from_directory(&block_dir, 0, validate_blocks)
                 .await
                 .is_err());
         }
@@ -4312,7 +4312,7 @@ mod tests {
             let block_dir = old_state.chain.archival_state().block_dir_path();
             let validate_blocks = false;
             new_state
-                .bootstrap_from_directory(&block_dir, 0, validate_blocks)
+                .import_blocks_from_directory(&block_dir, 0, validate_blocks)
                 .await
                 .unwrap();
 
@@ -4385,7 +4385,7 @@ mod tests {
 
             let validate_blocks = true;
             state
-                .bootstrap_from_directory(&test_data_dir, 0, validate_blocks)
+                .import_blocks_from_directory(&test_data_dir, 0, validate_blocks)
                 .await
                 .unwrap();
             let restored_block_height = state.chain.light_state().header().height;

@@ -144,20 +144,22 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let (peer_task_to_main_tx, peer_task_to_main_rx) =
         mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
-    if let Some(bootstrap_directory) = global_state_lock.cli().bootstrap_from_directory.clone() {
+    if let Some(block_import_directory) =
+        global_state_lock.cli().import_blocks_from_directory.clone()
+    {
         info!(
-            "Bootstrapping from directory \"{}\"",
-            bootstrap_directory.to_string_lossy()
+            "Importing blocks from directory \"{}\"",
+            block_import_directory.to_string_lossy()
         );
 
-        let flush_period = global_state_lock.cli().bootstrap_flush_period;
-        let validate_blocks = !global_state_lock.cli().disable_bootstrap_block_validation;
+        let flush_period = global_state_lock.cli().import_block_flush_period;
+        let validate_blocks = !global_state_lock.cli().disable_validation_in_block_import;
         let num_blocks_read = global_state_lock
             .lock_guard_mut()
             .await
-            .bootstrap_from_directory(&bootstrap_directory, flush_period, validate_blocks)
+            .import_blocks_from_directory(&block_import_directory, flush_period, validate_blocks)
             .await?;
-        info!("Successfully bootstrapped {num_blocks_read} blocks.");
+        info!("Successfully imported {num_blocks_read} blocks.");
     }
 
     // Check if we need to restore the wallet database, and if so, do it.

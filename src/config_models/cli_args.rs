@@ -42,20 +42,21 @@ pub struct Args {
     /// A directory holding block data that can be used to bootstrap the state
     /// to speedup the initial block download.
     #[clap(long, value_name = "DIR")]
-    pub bootstrap_from_directory: Option<PathBuf>,
+    pub import_blocks_from_directory: Option<PathBuf>,
 
-    /// The number of blocks between each database flush during bootstrapping.
+    /// The number of blocks between each database flush during block-importing.
     ///
-    /// A value of 0 disables automatic flushing during bootstrapping.
-    /// Lower non-zero values flush more frequently, reducing memory usage but increasing I/O overhead.
-    /// Higher values reduce flush frequency and I/O, but increase memory usage.
-    /// If you run into memory issues, consider lowering this value.
+    /// A value of 0 disables automatic flushing during block-importing.
+    /// Lower non-zero values flush more frequently, reducing memory usage but
+    /// increasing I/O overhead. Higher values reduce flush frequency and I/O,
+    /// but increase memory usage. If you run into memory issues during block-
+    /// import, consider lowering this value.
     #[clap(long, default_value = "250")]
-    pub(crate) bootstrap_flush_period: usize,
+    pub(crate) import_block_flush_period: usize,
 
-    /// Set this to disable block validation for a faster bootstrapping.
+    /// Set this to disable block validation for a faster block-import.
     #[clap(long)]
-    pub disable_bootstrap_block_validation: bool,
+    pub disable_validation_in_block_import: bool,
 
     /// Ban connections to this node from IP address.
     ///
