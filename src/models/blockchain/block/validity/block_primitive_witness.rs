@@ -180,6 +180,7 @@ pub(crate) mod tests {
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     /// Returns transactions without packed inputs
+    #[cfg_attr(test, expect(clippy::too_many_arguments))]
     fn arbitrary_block_transaction_from_msa_and_records(
         num_outputs: usize,
         num_announcements: usize,

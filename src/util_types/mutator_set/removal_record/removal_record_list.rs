@@ -325,6 +325,10 @@ impl RemovalRecordList {
     ///
     ///  - If self is inconsistent.
     fn compressed_chunk_dictionary(&self) -> ChunkDictionary {
+        use itertools::EitherOrBoth::Both;
+        use itertools::EitherOrBoth::Left;
+        use itertools::EitherOrBoth::Right;
+
         let num_swbf_leafs = aocl_to_swbfi_leaf_counts(self.num_leafs_aocl);
         let tree_heights = get_peak_heights(num_swbf_leafs)
             .into_iter()
@@ -342,7 +346,6 @@ impl RemovalRecordList {
                 .map(MmrMembershipProof::new),
         );
 
-        use itertools::EitherOrBoth::{Both, Left, Right};
         let chunk_dictionary = tree_heights_and_authentication_structures
             .zip_longest(self.chunks.iter().map(Chunk::pack))
             .map(|x| match x {
@@ -1293,7 +1296,7 @@ mod tests {
 
     #[proptest]
     fn arbitrary_synchronized_set_of_removal_records_consistency_small_num_aocl_leafs(
-        #[strategy(1u64..(u8::MAX as u64))] num_leafs_aocl: u64,
+        #[strategy(1u64..(u64::from(u8::MAX)))] num_leafs_aocl: u64,
         #[strategy(0usize..10)] _num_records: usize,
         #[strategy(RemovalRecord::arbitrary_synchronized_set(#num_leafs_aocl, #_num_records))]
         removal_records: Vec<RemovalRecord>,
@@ -1617,7 +1620,7 @@ mod tests {
         #[strategy(arb())] sr: Digest,
         #[strategy(arb())] rp: Digest,
     ) {
-        for i in 0..BATCH_SIZE as u64 {
+        for i in 0..u64::from(BATCH_SIZE) {
             let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, i);
             let removal_record = RemovalRecord {
                 absolute_indices,
@@ -1799,7 +1802,7 @@ mod tests {
         #[strategy(arb())] rp: Digest,
     ) {
         for i in BATCH_SIZE..(BATCH_SIZE + BATCH_SIZE) {
-            let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, i as u64);
+            let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, u64::from(i));
             let removal_record = RemovalRecord {
                 absolute_indices,
                 target_chunks: ChunkDictionary::empty(),
@@ -1818,7 +1821,7 @@ mod tests {
         #[strategy(arb())] sr: Digest,
         #[strategy(arb())] rp: Digest,
     ) {
-        for i in 0..BATCH_SIZE as u64 {
+        for i in 0..u64::from(BATCH_SIZE) {
             let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, i);
             let removal_record = RemovalRecord {
                 absolute_indices,
@@ -1962,7 +1965,7 @@ mod tests {
             .new_tree(&mut runner)
             .unwrap()
             .current();
-        for ais in absolute_index_sets.iter_mut() {
+        for ais in &mut absolute_index_sets {
             // Ensure at least one index lives in 1st chunk
             ais.set_minimum(0);
         }
@@ -2060,7 +2063,7 @@ mod tests {
 
     #[proptest]
     fn pack_unpack_identity_from_msa_and_records_tie_down(
-        #[strategy((2u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy((2u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
         #[strategy(MsaAndRecords::arbitrary_with((vec![(Digest::default(), Digest::default(), Digest::default()); 2], #_num_leafs_aocl)))]
         msa_and_records: MsaAndRecords,
     ) {
@@ -2088,7 +2091,7 @@ mod tests {
     #[proptest]
     fn pack_unpack_identity_from_msa_and_records_small_aocl(
         #[strategy(0usize..30)] _num_removals: usize,
-        #[strategy((#_num_removals as u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy((#_num_removals as u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         _removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
@@ -2117,7 +2120,7 @@ mod tests {
     #[proptest(cases = 30)]
     fn pack_unpack_identity_from_msa_and_records_midi_aocl(
         #[strategy(0usize..30)] _num_removals: usize,
-        #[strategy((#_num_removals as u64)..=(u16::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy((#_num_removals as u64)..=(u64::from(u16::MAX)))] _num_leafs_aocl: u64,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         _removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
@@ -2146,7 +2149,7 @@ mod tests {
     #[proptest(cases = 30)]
     fn pack_unpack_identity_from_msa_and_records_medium_aocl(
         #[strategy(0usize..30)] _num_removals: usize,
-        #[strategy((#_num_removals as u64)..=(u32::MAX as u64))] _num_leafs_aocl: u64,
+        #[strategy((#_num_removals as u64)..=(u64::from(u32::MAX)))] _num_leafs_aocl: u64,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         _removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
@@ -2250,19 +2253,20 @@ mod tests {
             #[strategy(collection::vec(arb::<u16>(), #_num_chunk_dictionary_entries))]
             relative_indices: Vec<u16>,
         ) {
-            let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index_u16 as u64);
+            let absolute_indices =
+                AbsoluteIndexSet::compute(item, sr, rp, u64::from(leaf_index_u16));
             let chunk_dictionary = chunk_indices
                 .into_iter()
                 .map(|chk_idx| {
                     (
-                        chk_idx as u64,
+                        u64::from(chk_idx),
                         (
                             MmrMembershipProof::new(auth_path_nodes.clone()),
                             Chunk {
                                 relative_indices: relative_indices
                                     .clone()
                                     .into_iter()
-                                    .map(|x| x as u32)
+                                    .map(u32::from)
                                     .collect_vec(),
                             },
                         ),
@@ -2284,7 +2288,7 @@ mod tests {
         fn repeated_tree_height(
             #[strategy(1usize..10)] _num_removals: usize,
             #[strategy(0usize..#_num_removals)] insert_index: usize,
-            #[strategy((#_num_removals as u64)..=(u16::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy((#_num_removals as u64)..=(u64::from(u16::MAX)))] _num_leafs_aocl: u64,
             #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
             _removables: Vec<(Digest, Digest, Digest)>,
             #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
@@ -2306,7 +2310,7 @@ mod tests {
         fn missing_tree_height(
             #[strategy(2usize..10)] _num_removals: usize,
             #[strategy(0usize..#_num_removals)] remove_index: usize,
-            #[strategy((#_num_removals as u64)..=(u16::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy((#_num_removals as u64)..=(u64::from(u16::MAX)))] _num_leafs_aocl: u64,
             #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
             _removables: Vec<(Digest, Digest, Digest)>,
             #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
@@ -2345,10 +2349,10 @@ mod tests {
             #[strategy(1usize..20)] num_removal_records: usize,
         ) {
             for leaf_index in [
-                leaf_index_u8 as u64,
-                leaf_index_u16 as u64,
-                leaf_index_u32 as u64,
-                leaf_index_u64 as u64,
+                u64::from(leaf_index_u8),
+                u64::from(leaf_index_u16),
+                u64::from(leaf_index_u32),
+                leaf_index_u64,
             ] {
                 let absolute_indices = AbsoluteIndexSet::compute(item, sr, rp, leaf_index);
                 let removal_record = RemovalRecord {

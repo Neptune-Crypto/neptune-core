@@ -79,7 +79,7 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 /// this limit is enforced for inputs, outputs, and announcements. This
 /// restriction on the number of announcements also makes it feasible for
 /// wallets to scan through all.
-pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
+pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
 
 /// Duration of timelock for half of all mining rewards.
 ///
@@ -851,25 +851,18 @@ impl Block {
         }
 
         // 2.j)
-        if consensus_rule_set
-            .max_num_inputs()
-            .is_some_and(|max| inputs.len() > max)
-        {
+        if inputs.len() > consensus_rule_set.max_num_inputs() {
             return Err(BlockValidationError::TooManyInputs);
         }
 
         // 2.k)
-        if consensus_rule_set
-            .max_num_outputs()
-            .is_some_and(|max| self.body().transaction_kernel.outputs.len() > max)
-        {
+        if self.body().transaction_kernel.outputs.len() > consensus_rule_set.max_num_outputs() {
             return Err(BlockValidationError::TooManyOutputs);
         }
 
         // 2.l)
-        if consensus_rule_set
-            .max_num_announcements()
-            .is_some_and(|max| self.body().transaction_kernel.announcements.len() > max)
+        if self.body().transaction_kernel.announcements.len()
+            > consensus_rule_set.max_num_announcements()
         {
             return Err(BlockValidationError::TooManyAnnouncements);
         }

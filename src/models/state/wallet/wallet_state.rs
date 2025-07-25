@@ -1039,10 +1039,8 @@ impl WalletState {
         key_type: KeyType,
     ) -> Box<dyn Iterator<Item = SpendingKey> + '_> {
         match key_type {
-            KeyType::Generation => {
-                Box::new(self.get_known_generation_spending_keys().map(|k| k.into()))
-            }
-            KeyType::Symmetric => Box::new(self.get_known_symmetric_keys().map(|k| k.into())),
+            KeyType::Generation => Box::new(self.get_known_generation_spending_keys()),
+            KeyType::Symmetric => Box::new(self.get_known_symmetric_keys()),
         }
     }
 

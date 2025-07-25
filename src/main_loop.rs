@@ -1174,7 +1174,6 @@ impl MainLoopHandler {
             let global_state_lock = self.global_state_lock.clone();
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
             let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
-            let own_handshake_data = own_handshake_data.clone();
             let outgoing_connection_task = tokio::task::Builder::new()
                 .name("call_peer_wrapper_1")
                 .spawn(async move {
@@ -2789,27 +2788,27 @@ mod tests {
                 .unwrap();
 
             // simulate incoming connection
-            let (peer_handshake_data, peer_socket_address) =
+            let (peer_handshake, peer_socket_address) =
                 get_dummy_peer_connection_data_genesis(network, 1);
-            let own_handshake_data = main_loop_handler
+            let own_handshake = main_loop_handler
                 .global_state_lock
                 .lock_guard()
                 .await
                 .get_own_handshakedata();
-            assert_eq!(peer_handshake_data.network, own_handshake_data.network,);
-            assert_eq!(peer_handshake_data.version, own_handshake_data.version,);
+            assert_eq!(peer_handshake.network, own_handshake.network,);
+            assert_eq!(peer_handshake.version, own_handshake.version,);
             let mock_stream = tokio_test::io::Builder::new()
                 .read(
                     &to_bytes(&PeerMessage::Handshake {
                         magic_value: *crate::MAGIC_STRING_REQUEST,
-                        data: Box::new(peer_handshake_data.clone()),
+                        data: Box::new(peer_handshake),
                     })
                     .unwrap(),
                 )
                 .write(
                     &to_bytes(&PeerMessage::Handshake {
                         magic_value: *crate::MAGIC_STRING_RESPONSE,
-                        data: Box::new(own_handshake_data.clone()),
+                        data: Box::new(own_handshake),
                     })
                     .unwrap(),
                 )
@@ -2832,7 +2831,7 @@ mod tests {
                         peer_socket_address,
                         main_to_peer_rx_mock,
                         peer_to_main_tx_clone,
-                        own_handshake_data,
+                        own_handshake,
                     )
                     .await
                     {

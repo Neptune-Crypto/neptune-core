@@ -2410,7 +2410,7 @@ mod tests {
                 to_main_tx,
                 _to_main_rx1,
                 mut state_lock,
-                hsd,
+                handshake,
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
                 .unwrap();
@@ -2466,7 +2466,7 @@ mod tests {
                     to_main_tx.clone(),
                     state_lock.clone(),
                     peer_address,
-                    hsd.clone(),
+                    handshake,
                     false,
                     1,
                 );
@@ -2552,7 +2552,7 @@ mod tests {
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_address,
-                hsd.clone(),
+                hsd,
                 false,
                 1,
                 block_3_a.header().timestamp,
@@ -3617,7 +3617,7 @@ mod tests {
                 to_main_tx,
                 state_lock.clone(),
                 get_dummy_socket_address(0),
-                hsd_1.clone(),
+                hsd_1,
                 true,
                 1,
                 now,
@@ -3691,7 +3691,7 @@ mod tests {
                 to_main_tx,
                 state_lock.clone(),
                 get_dummy_socket_address(0),
-                hsd_1.clone(),
+                hsd_1,
                 true,
                 1,
             );
@@ -3832,7 +3832,7 @@ mod tests {
                     to_main_tx,
                     state_lock.clone(),
                     get_dummy_socket_address(0),
-                    hsd_1.clone(),
+                    hsd_1,
                     true,
                     1,
                     now,
@@ -3877,7 +3877,7 @@ mod tests {
                 to_main_tx.clone(),
                 alice.clone(),
                 get_dummy_socket_address(0),
-                peer_hsd.clone(),
+                peer_hsd,
                 true,
                 1,
             );
@@ -4048,7 +4048,7 @@ mod tests {
                     to_main_tx,
                     mut to_main_rx1,
                     mut alice,
-                    handshake_data,
+                    handshake,
                 ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
                     .await
                     .unwrap();
@@ -4092,12 +4092,12 @@ mod tests {
                     to_main_tx,
                     alice.clone(),
                     get_dummy_socket_address(0),
-                    handshake_data.clone(),
+                    handshake,
                     true,
                     1,
                     now,
                 );
-                let mut peer_state = MutablePeerState::new(handshake_data.tip_header.height);
+                let mut peer_state = MutablePeerState::new(handshake.tip_header.height);
 
                 peer_loop_handler
                     .run(mock, from_main_rx_clone, &mut peer_state)

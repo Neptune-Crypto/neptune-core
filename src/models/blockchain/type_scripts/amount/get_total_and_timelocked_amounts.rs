@@ -190,7 +190,7 @@ mod test {
                         type_script_hash,
                         state: NativeCurrencyAmount::coins(rng.random_range(0..100)).encode(),
                     });
-                    if i == bit || (i != bit && rng.random_bool(0.5)) {
+                    if i == bit || rng.random_bool(0.5) {
                         coins.push(TimeLock::until(rng.random()));
                     }
                     Utxo::from((rng.random(), coins))

@@ -1133,10 +1133,10 @@ pub mod tests {
         let mut test_runner = TestRunner::deterministic();
         let fee = NativeCurrencyAmount::zero();
         let witness = PrimitiveWitness::arbitrary_primitive_witness_with(
-            &vec![],
-            &vec![],
-            &vec![],
-            &vec![],
+            &[],
+            &[],
+            &[],
+            &[],
             fee,
             Some(-NativeCurrencyAmount::coins(1)),
         )

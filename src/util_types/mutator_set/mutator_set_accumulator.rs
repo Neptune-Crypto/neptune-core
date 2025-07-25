@@ -561,7 +561,7 @@ mod tests {
 
         #[proptest]
         fn missing_chunk_dictionary_entry_small(
-            #[strategy((1u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy((1u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
             #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 1usize))]
             _removables: Vec<(Digest, Digest, Digest)>,
             #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
@@ -587,7 +587,7 @@ mod tests {
         #[proptest]
         fn missing_chunk_dictionary_entry(
             #[strategy(0usize..30)] _num_removals: usize,
-            #[strategy((#_num_removals as u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy((#_num_removals as u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
             #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
             _removables: Vec<(Digest, Digest, Digest)>,
             #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
@@ -643,7 +643,7 @@ mod tests {
         #[proptest]
         fn can_remove_agrees_with_update_result(
             #[strategy(0usize..30)] _num_removals: usize,
-            #[strategy((#_num_removals as u64)..=(u8::MAX as u64))] _num_leafs_aocl: u64,
+            #[strategy((#_num_removals as u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
             #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
             _removables: Vec<(Digest, Digest, Digest)>,
             #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]

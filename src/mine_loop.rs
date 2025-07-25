@@ -154,7 +154,6 @@ pub(crate) async fn guess_nonce(
             sender,
             guessing_configuration,
             Timestamp::now(),
-            #[cfg(test)]
             None,
         )
     })
@@ -206,7 +205,6 @@ pub(crate) fn precalculate_block_auth_paths(
 }
 
 /// Guess the nonce in parallel until success.
-#[cfg_attr(test, expect(clippy::too_many_arguments))]
 fn guess_worker(
     network: Network,
     mut block: Block,
@@ -214,12 +212,10 @@ fn guess_worker(
     sender: oneshot::Sender<NewBlockFound>,
     guessing_configuration: GuessingConfiguration,
     now: Timestamp,
-    #[cfg(test)] target_block_interval: Option<Timestamp>,
+    override_target_block_interval: Option<Timestamp>,
 ) {
-    #[cfg(test)]
-    let target_block_interval = target_block_interval.unwrap_or(network.target_block_interval());
-    #[cfg(not(test))]
-    let target_block_interval = network.target_block_interval();
+    let target_block_interval =
+        override_target_block_interval.unwrap_or(network.target_block_interval());
 
     let GuessingConfiguration {
         sleepy_guessing,

@@ -1269,7 +1269,7 @@ mod tests {
                                 let min_timelocked_cb: NativeCurrencyAmount =
                                     if coinbase(i).is_some() {
                                         let mut min_timelocked_cb: NativeCurrencyAmount =
-                                            amounts.iter().cloned().sum();
+                                            amounts.iter().copied().sum();
                                         min_timelocked_cb.div_two();
                                         min_timelocked_cb
                                     } else {

@@ -2,7 +2,7 @@ use strum_macros::EnumIter;
 
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
-use crate::models::blockchain::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1;
+use crate::models::blockchain::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -41,19 +41,19 @@ impl ConsensusRuleSet {
         Self::Reboot
     }
 
-    pub(crate) fn max_num_inputs(&self) -> Option<usize> {
+    pub(crate) fn max_num_inputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1),
+            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
-    pub(crate) fn max_num_outputs(&self) -> Option<usize> {
+    pub(crate) fn max_num_outputs(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1),
+            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
-    pub(crate) fn max_num_announcements(&self) -> Option<usize> {
+    pub(crate) fn max_num_announcements(&self) -> usize {
         match self {
-            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1),
+            ConsensusRuleSet::Reboot => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 }
@@ -260,7 +260,7 @@ pub(crate) mod tests {
         let blocks_to_mine = 5;
         let mut predecessor = block_10_000;
         for _ in 0..blocks_to_mine {
-            now = now + Timestamp::hours(1);
+            now += Timestamp::hours(1);
             let (next_block, expected_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
             assert!(next_block.is_valid(&predecessor, now, network).await);
             bob.set_new_self_composed_tip(next_block.clone(), expected_composer_utxos)
@@ -291,7 +291,7 @@ pub(crate) mod tests {
         //    membership proofs/removal records are updated correctly.
         let num_blocks_with_many_outputs = 4;
         for _ in 0..num_blocks_with_many_outputs {
-            now = now + Timestamp::hours(1);
+            now += Timestamp::hours(1);
             let next_block = block_with_n_outputs(bob.clone(), 24, now).await;
             assert!(next_block.is_valid(&predecessor, now, network).await);
             bob.set_new_tip(next_block.clone()).await.unwrap();

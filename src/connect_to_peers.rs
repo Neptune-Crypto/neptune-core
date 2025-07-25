@@ -280,7 +280,7 @@ where
 
     let handshake_response = PeerMessage::Handshake {
         magic_value: *MAGIC_STRING_RESPONSE,
-        data: Box::new(own_handshake_data.clone()),
+        data: Box::new(own_handshake_data),
     };
     peer.send(handshake_response).await?;
 
@@ -602,7 +602,7 @@ mod tests {
         let mock = Builder::new()
             .write(&to_bytes(&PeerMessage::Handshake {
                 magic_value: *MAGIC_STRING_REQUEST,
-                data: Box::new(own_handshake.clone()),
+                data: Box::new(own_handshake),
             })?)
             .read(&to_bytes(&PeerMessage::Handshake {
                 magic_value: *MAGIC_STRING_RESPONSE,
@@ -720,7 +720,7 @@ mod tests {
         let connected_peer: PeerInfo = state_lock
             .lock(|s| s.net.peer_map.values().collect::<Vec<_>>()[0].clone())
             .await;
-        let mut mutated_other_handshake = other_handshake.clone();
+        let mut mutated_other_handshake = other_handshake;
         mutated_other_handshake.instance_id = connected_peer.instance_id();
         status = check_if_connection_is_allowed(
             state_lock.clone(),
@@ -814,20 +814,20 @@ mod tests {
 
         // fake a graceful disconnect
         let node_0_address = get_dummy_socket_address(0);
-        let node_0_handshake_data = get_dummy_handshake_data_for_genesis(network);
+        let node_0_handshake = get_dummy_handshake_data_for_genesis(network);
         state_lock
             .lock_guard_mut()
             .await
             .net
-            .register_peer_disconnection(node_0_handshake_data.instance_id, SystemTime::now());
+            .register_peer_disconnection(node_0_handshake.instance_id, SystemTime::now());
 
         let handshake_request = PeerMessage::Handshake {
             magic_value: *MAGIC_STRING_REQUEST,
-            data: Box::new(node_0_handshake_data.clone()),
+            data: Box::new(node_0_handshake),
         };
         let handshake_response = PeerMessage::Handshake {
             magic_value: *MAGIC_STRING_RESPONSE,
-            data: Box::new(handshake.clone()),
+            data: Box::new(handshake),
         };
         let rejected_connection = Builder::new()
             .read(&to_bytes(&handshake_request)?)
@@ -842,7 +842,7 @@ mod tests {
             node_0_address,
             broadcast_tx.subscribe(),
             to_main_tx.clone(),
-            handshake.clone(),
+            handshake,
         )
         .await
         .unwrap_err();
@@ -892,7 +892,7 @@ mod tests {
             })?)
             .write(&to_bytes(&PeerMessage::Handshake {
                 magic_value: *MAGIC_STRING_RESPONSE,
-                data: Box::new(own_handshake.clone()),
+                data: Box::new(own_handshake),
             })?)
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
                 TransferConnectionStatus::Accepted,
@@ -1028,7 +1028,7 @@ mod tests {
             .write(
                 &to_bytes(&PeerMessage::Handshake {
                     magic_value: *MAGIC_STRING_RESPONSE,
-                    data: Box::new(own_handshake.clone()),
+                    data: Box::new(own_handshake),
                 })
                 .unwrap(),
             )
@@ -1068,7 +1068,7 @@ mod tests {
             .write(
                 &to_bytes(&PeerMessage::Handshake {
                     magic_value: *MAGIC_STRING_RESPONSE,
-                    data: Box::new(own_handshake.clone()),
+                    data: Box::new(own_handshake),
                 })
                 .unwrap(),
             )
@@ -1200,7 +1200,7 @@ mod tests {
             .write(
                 &to_bytes(&PeerMessage::Handshake {
                     magic_value: *MAGIC_STRING_RESPONSE,
-                    data: Box::new(own_handshake.clone()),
+                    data: Box::new(own_handshake),
                 })
                 .unwrap(),
             )

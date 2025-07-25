@@ -196,7 +196,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();
         let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
-        let own_handshake_data_clone = own_handshake_data.clone();
         let peer_join_handle = tokio::task::Builder::new()
             .name("call_peer_wrapper_3")
             .spawn(async move {
@@ -205,7 +204,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
                     peer_state_var.clone(),
                     main_to_peer_broadcast_rx_clone,
                     peer_task_to_main_tx_clone,
-                    own_handshake_data_clone,
+                    own_handshake_data,
                     1, // All outgoing connections have distance 1
                 )
                 .await;

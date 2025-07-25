@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::Result;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -114,7 +113,7 @@ impl MockBlockGenerator {
         shuffle_seed: [u8; 32],
         #[expect(unused_variables, reason = "anticipate future fork")]
         consensus_rule_set: ConsensusRuleSet,
-    ) -> Result<BlockTransaction> {
+    ) -> BlockTransaction {
         assert!(
             lhs.proof().is_single_proof(),
             "Argument2 must be single-proof-backed transaction"
@@ -127,10 +126,10 @@ impl MockBlockGenerator {
         let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed);
         let new_kernel = merge_witness.new_kernel.clone();
 
-        Ok(BlockTransaction {
+        BlockTransaction {
             kernel: new_kernel.try_into().unwrap(),
             proof: TransactionProof::SingleProof(Proof::invalid()),
-        })
+        }
     }
 
     /// Create a block-transaction with a bogus proof but such that `verify` passes.
@@ -142,7 +141,7 @@ impl MockBlockGenerator {
         timestamp: Timestamp,
         shuffle_seed: [u8; 32],
         mut selected_mempool_txs: Vec<Transaction>,
-    ) -> Result<(BlockTransaction, TxOutputList)> {
+    ) -> (BlockTransaction, TxOutputList) {
         let consensus_rule_set =
             ConsensusRuleSet::infer_from(network, predecessor_block.header().height.next());
         let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
@@ -177,16 +176,16 @@ impl MockBlockGenerator {
                 tx_to_include,
                 rng.random(),
                 consensus_rule_set,
-            )?
+            )
             .into();
         }
 
-        Ok((
+        (
             block_transaction
                 .try_into()
                 .expect("Merged should be done at least once"),
             composer_txos,
-        ))
+        )
     }
 
     /// Create a mock block with coinbase going to self.
@@ -206,7 +205,7 @@ impl MockBlockGenerator {
         seed: [u8; 32],
         mempool_tx: Vec<Transaction>,
         network: Network,
-    ) -> Result<(Block, TxOutputList)> {
+    ) -> (Block, TxOutputList) {
         let with_valid_pow = true;
         let mut rng = StdRng::from_seed(seed);
 
@@ -217,7 +216,7 @@ impl MockBlockGenerator {
             timestamp,
             rng.random(),
             mempool_tx,
-        )?;
+        );
 
         let prev = predecessor.clone();
 
@@ -246,6 +245,6 @@ impl MockBlockGenerator {
 
         assert_eq!(block.header().height, prev.header().height + 1);
 
-        Ok((block, composer_tx_outputs))
+        (block, composer_tx_outputs)
     }
 }

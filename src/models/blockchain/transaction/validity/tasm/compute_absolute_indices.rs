@@ -294,7 +294,7 @@ mod tests {
             encode_to_memory(memory, struct_pointer, &absolute_index_set);
 
             // Unused artifact left on memory address immediately below struct
-            encode_to_memory(memory, free_page, &u32::try_from(NUM_TRIALS).unwrap());
+            encode_to_memory(memory, free_page, &NUM_TRIALS);
 
             stack.push(struct_pointer)
         }
