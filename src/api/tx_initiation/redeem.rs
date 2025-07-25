@@ -78,7 +78,7 @@ fn absolute_index_set_to_aocl_leaf_index_lower_bound(ais: AbsoluteIndexSet) -> u
         .max()
         .unwrap()
         .next_multiple_of(u128::from(CHUNK_SIZE))
-        - u128::from(WINDOW_SIZE);
+        .saturating_sub(u128::from(WINDOW_SIZE));
     let chunk_index_lower_bound = window_start_lower_bound / u128::from(CHUNK_SIZE);
     let aocl_leaf_index_lower_bound = chunk_index_lower_bound * u128::from(BATCH_SIZE) + 1;
     aocl_leaf_index_lower_bound
@@ -601,6 +601,7 @@ mod tests {
     use crate::tests::shared::blocks::{invalid_block_with_transaction, make_mock_block};
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::mutator_set::get_swbf_indices;
     use macro_rules_attr::apply;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -763,5 +764,38 @@ mod tests {
             NUM_UTXOS_IN_PREMINE,
             Block::premine_utxos(Network::Main).len()
         );
+    }
+
+    #[ignore = "informative statistics"]
+    #[test]
+    fn estimate_probability_that_early_honest_utxos_are_unclaimable() {
+        let mut rng = rng();
+        let first_honest_aocl_leaf_index = NUM_UTXOS_IN_PREMINE as u64;
+        for i in 0..60 {
+            let true_aocl_leaf_index = first_honest_aocl_leaf_index + i * u64::from(BATCH_SIZE);
+            let mut successes = 0;
+            let num_trials = 10000;
+            for _ in 0..num_trials {
+                let absolute_index_set = AbsoluteIndexSet::new(&get_swbf_indices(
+                    rng.random(),
+                    rng.random(),
+                    rng.random(),
+                    true_aocl_leaf_index,
+                ));
+                let aocl_leaf_index_lower_bound =
+                    absolute_index_set_to_aocl_leaf_index_lower_bound(absolute_index_set);
+                if aocl_leaf_index_lower_bound < ALLOWABLE_AOCL_INDEX_LOWER_BOUND {
+                    successes += 1;
+                }
+            }
+
+            println!(
+                "UTXO {}-{}: {}",
+                true_aocl_leaf_index.next_multiple_of(u64::from(BATCH_SIZE)) + 1
+                    - u64::from(BATCH_SIZE),
+                true_aocl_leaf_index.next_multiple_of(u64::from(BATCH_SIZE)),
+                f64::from(successes) / f64::from(num_trials)
+            );
+        }
     }
 }

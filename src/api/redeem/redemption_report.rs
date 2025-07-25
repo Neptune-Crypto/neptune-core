@@ -144,7 +144,7 @@ impl Distribution<RedemptionReportEntry> for StandardUniform {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RedemptionReport {
     table: Vec<RedemptionReportEntry>,
 }
@@ -232,7 +232,7 @@ impl RedemptionReport {
     }
 
     pub fn render(&self, format: RedemptionReportDisplayFormat) -> String {
-        format!("# Table\n\n{}\n", self.render_table(format))
+        format!("{}\n", self.render_table(format))
     }
 }
 
