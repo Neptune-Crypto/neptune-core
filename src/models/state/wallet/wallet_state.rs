@@ -394,7 +394,7 @@ impl WalletState {
             // Check if we are premine recipients, and add expected UTXOs if so.
             for premine_key in premine_keys {
                 let own_receiving_address = premine_key.to_address();
-                for utxo in Block::premine_utxos(configuration.network()) {
+                for utxo in Block::premine_utxos() {
                     if utxo.lock_script_hash() == own_receiving_address.lock_script_hash() {
                         wallet_state
                             .add_expected_utxo(ExpectedUtxo::new(
@@ -2035,7 +2035,7 @@ pub(crate) mod tests {
 
         let premine_utxo = {
             let wallet = &alice_global_lock.lock_guard().await.wallet_state;
-            Block::premine_utxos(network)
+            Block::premine_utxos()
                 .into_iter()
                 .find(|premine_utxo| wallet.can_unlock(premine_utxo))
                 .or_else(|| panic!())

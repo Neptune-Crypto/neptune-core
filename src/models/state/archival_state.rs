@@ -1588,7 +1588,7 @@ pub(super) mod tests {
         let mut alice = mock_genesis_global_state(42, alice_wallet, cli_args).await;
         let genesis_block = Block::genesis(network);
 
-        let num_premine_utxos = Block::premine_utxos(network).len();
+        let num_premine_utxos = Block::premine_utxos().len();
 
         let outputs = (0..20)
             .map(|_| {
@@ -1690,7 +1690,7 @@ pub(super) mod tests {
         let cli_args = cli_args::Args::default_with_network(network);
         let mut alice = mock_genesis_global_state(42, alice_wallet, cli_args).await;
 
-        let mut expected_num_utxos = Block::premine_utxos(network).len();
+        let mut expected_num_utxos = Block::premine_utxos().len();
         let mut previous_block = genesis_block.clone();
 
         let outputs = (0..20)
@@ -2720,7 +2720,7 @@ pub(super) mod tests {
         for network in Network::iter() {
             let archival_state = make_test_archival_state(network).await;
             let genesis_block_digest = archival_state.genesis_block().hash();
-            let num_premine_outputs = Block::premine_utxos(network).len() as u64;
+            let num_premine_outputs = Block::premine_utxos().len() as u64;
 
             // Verify correct result for all premine outputs
             for aocl_leaf_index in 0..num_premine_outputs {

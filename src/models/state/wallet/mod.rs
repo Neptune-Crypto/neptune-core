@@ -96,7 +96,7 @@ mod tests {
                 "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
             );
 
-            let expected_utxo = Block::premine_utxos(network)[0].clone();
+            let expected_utxo = Block::premine_utxos()[0].clone();
             assert_eq!(
                 expected_utxo, alice_wallet[0].utxo,
                 "Devnet wallet's monitored UTXO must match that from genesis block at initialization"

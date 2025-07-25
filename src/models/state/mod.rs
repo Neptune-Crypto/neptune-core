@@ -2193,17 +2193,6 @@ mod tests {
             cli_args::Args::default_with_network(network),
         )
         .await;
-        assert!(
-            !bob.lock_guard()
-                .await
-                .wallet_state
-                .wallet_db
-                .monitored_utxos()
-                .get_all()
-                .await
-                .is_empty(),
-            "Bob must be premine recipient"
-        );
 
         let bob_spending_key = bob
             .lock_guard()
@@ -2212,7 +2201,6 @@ mod tests {
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
 
-        let genesis_block = Block::genesis(network);
         let alice_address = alice.nth_generation_spending_key_for_tests(0).to_address();
         let nine_money_output = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(9),
@@ -2222,10 +2210,10 @@ mod tests {
         );
         let tx_outputs: TxOutputList = vec![nine_money_output].into();
 
-        // one month before release date, we should not be able to create the transaction
-        let launch = genesis_block.kernel.header.timestamp;
-        let six_months = Timestamp::months(6);
-        let one_month = Timestamp::months(1);
+        // two days before release date, we should not be able to create the transaction.
+        // August 11, 2025, noon UTC.
+        let premine_release_data = Timestamp(bfe!(1754913600000u64));
+        let two_days = Timestamp::days(2);
         let config = TxCreationConfig::default()
             .recover_change_off_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection);
@@ -2237,21 +2225,21 @@ mod tests {
             .create_transaction(
                 tx_outputs.clone(),
                 NativeCurrencyAmount::coins(1),
-                launch + six_months - one_month,
+                premine_release_data - two_days,
                 config.clone(),
                 consensus_rule_set,
             )
             .await
             .is_err());
 
-        // one month after though, we should be
+        // two days though, we should be
         let tx = bob
             .api()
             .tx_initiator_internal()
             .create_transaction(
                 tx_outputs,
                 NativeCurrencyAmount::coins(1),
-                launch + six_months + one_month,
+                premine_release_data + two_days,
                 config.clone(),
                 consensus_rule_set,
             )
@@ -2290,7 +2278,7 @@ mod tests {
             .create_transaction(
                 output_utxos.into(),
                 NativeCurrencyAmount::coins(1),
-                launch + six_months + one_month,
+                premine_release_data + two_days,
                 config,
                 consensus_rule_set,
             )
