@@ -175,7 +175,7 @@ mod tests {
                     rng.random_range(0..10),
                 ),
             };
-            let (num_inputs, num_outputs, num_public_announcements) = arb_params;
+            let (num_inputs, num_outputs, num_announcements) = arb_params;
 
             let seedd: [u8; 32] = rng.random();
             let mut test_runner = TestRunner::new_with_rng(
@@ -187,7 +187,7 @@ mod tests {
                 let removal_record = PrimitiveWitness::arbitrary_with_size_numbers(
                     Some(num_inputs),
                     num_outputs,
-                    num_public_announcements,
+                    num_announcements,
                 )
                 .new_tree(&mut test_runner)
                 .unwrap()

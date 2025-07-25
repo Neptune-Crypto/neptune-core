@@ -12,8 +12,11 @@ use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_input::TxInputList;
@@ -41,6 +44,9 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 pub struct TransactionDetails {
     pub tx_inputs: TxInputList,
     pub tx_outputs: TxOutputList,
+
+    /// announcements *excluding* encrypted UTXO notifications.
+    extra_announcements: Vec<Announcement>,
     pub fee: NativeCurrencyAmount,
     pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
@@ -65,13 +71,17 @@ impl Display for TransactionDetails {
     change_outputs: {},
     owned_outputs: {},
     network: {},
+    extra announcements:\n[{}],
 "#,
             self.timestamp.standard_format(),
             self.spend_amount(),
             self.tx_inputs.total_native_coins(),
             self.tx_outputs.total_native_coins(),
             self.fee,
-            self.coinbase.unwrap_or_else(NativeCurrencyAmount::zero),
+            // render Some(0) and None differently
+            self.coinbase
+                .map(|nca| format!("{nca}"))
+                .unwrap_or("-".to_string()),
             self.tx_inputs
                 .iter()
                 .map(|o| o.native_currency_amount())
@@ -89,6 +99,10 @@ impl Display for TransactionDetails {
                 .map(|o| o.native_currency_amount())
                 .join(", "),
             self.network,
+            self.extra_announcements
+                .iter()
+                .map(|pa| format!("{pa}"))
+                .join(",\n"),
         )
     }
 }
@@ -249,12 +263,36 @@ impl TransactionDetails {
         Self {
             tx_inputs: tx_inputs.into(),
             tx_outputs: tx_outputs.into(),
+            extra_announcements: vec![],
             fee,
             coinbase,
             timestamp,
             mutator_set_accumulator,
             network,
         }
+    }
+
+    /// Extend the [`TransactionDetails`] object with announcements.
+    ///
+    /// Use this method for announcements that are *not* encrypted UTXO
+    /// notifications.
+    ///
+    /// Announcements are not part of the main constructor [`Self::new`]
+    /// because in the common case they are not necessary. If there are
+    /// encrypted UTXO notifications, these are computed on the fly from the
+    /// transaction outputs. This function should only be used for
+    /// announcements that are not encrypted UTXO notifications, which is an
+    /// exceptional case.
+    pub(crate) fn with_announcements<Iter: IntoIterator<Item = Announcement>>(
+        mut self,
+        announcements: Iter,
+    ) -> Self {
+        self.extra_announcements = self
+            .extra_announcements
+            .into_iter()
+            .chain(announcements)
+            .collect_vec();
+        self
     }
 
     /// amount spent (excludes change and fee)
@@ -280,8 +318,39 @@ impl TransactionDetails {
             .await
     }
 
+    /// Produce the list of announcements, including the UTXO
+    /// notifications.
+    pub fn announcements(&self) -> Vec<Announcement> {
+        [
+            self.extra_announcements.clone(),
+            self.tx_outputs.announcements(),
+        ]
+        .concat()
+    }
+
     pub fn primitive_witness(&self) -> PrimitiveWitness {
         self.into()
+    }
+
+    /// Assemble the transaction kernel corresponding to this
+    /// [`TransactionDetails`] object.
+    pub fn transaction_kernel(&self) -> TransactionKernel {
+        let removal_records = self
+            .tx_inputs
+            .iter()
+            .map(|txi| txi.removal_record(&self.mutator_set_accumulator))
+            .collect_vec();
+        TransactionKernelProxy {
+            inputs: removal_records,
+            outputs: self.tx_outputs.addition_records(),
+            announcements: self.announcements(),
+            fee: self.fee,
+            coinbase: self.coinbase,
+            timestamp: self.timestamp,
+            mutator_set_hash: self.mutator_set_accumulator.hash(),
+            merge_bit: false,
+        }
+        .into_kernel()
     }
 }
 

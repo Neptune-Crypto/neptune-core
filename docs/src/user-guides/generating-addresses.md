@@ -24,11 +24,11 @@ Even when repeated payments are made to the same generation address, in the gene
 
 Users who want to avoid incoming payments from being linked should either a) generate a new generation address for every incoming payment; or b) use off-chain UTXO notifications.
 
-### Public Announcements
+### Announcements
 
-By default, a transaction that sends funds to a generation address includes a public announcement which contains a ciphertext that only the recipient of the transferred funds can decrypt. This ciphertext contains UTXO info such as the amount but also the sender randomness, which is a key piece of information required by the mutator set. Besides the ciphertext, the public announcement also contains the recipient identifier.
+By default, a transaction that sends funds to a generation address includes a announcement which contains a ciphertext that only the recipient of the transferred funds can decrypt. This ciphertext contains UTXO info such as the amount but also the sender randomness, which is a key piece of information required by the mutator set. Besides the ciphertext, the announcement also contains the recipient identifier.
 
-The benefit of using public announcements to transmit this information is that the blockchain acts as a robust back-up solution: all funds can be recovered from the user's secret seed phrase *and* historical block data. The drawback is a) the (marginal) loss of privacy when generation addresses are reused; and b) the larger size of transactions, which under reasonable economic assumptions means more fees are required. Using off-chain UTXO notifications instead addresses both drawbacks.
+The benefit of using announcements to transmit this information is that the blockchain acts as a robust back-up solution: all funds can be recovered from the user's secret seed phrase *and* historical block data. The drawback is a) the (marginal) loss of privacy when generation addresses are reused; and b) the larger size of transactions, which under reasonable economic assumptions means more fees are required. Using off-chain UTXO notifications instead addresses both drawbacks.
 
 ### Determinism
 

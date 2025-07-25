@@ -12,7 +12,7 @@ use super::generation_address;
 use super::symmetric_key;
 use crate::api::export::KeyType;
 use crate::config_models::network::Network;
-use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 
@@ -21,7 +21,7 @@ use crate::BFieldElement;
 // nice since they are (presently) defined in separate files.
 //
 // anyway it is a desirable property that KeyType variants match the values
-// actually stored in PublicAnnouncement.
+// actually stored in Announcement.
 
 /// Represents any type of Neptune receiving Address.
 ///
@@ -83,26 +83,25 @@ impl ReceivingAddress {
         }
     }
 
-    /// generates a [PublicAnnouncement] for an output Utxo
+    /// generates a [Announcement] for an output Utxo
     ///
-    /// The public announcement contains a [`Vec<BFieldElement>`] with fields:
+    /// The announcement contains a [`Vec<BFieldElement>`] with fields:
     ///   0    --> type flag.  (flag of key type)
     ///   1    --> receiver_identifier  (fingerprint derived from seed)
     ///   2..n --> ciphertext (encrypted utxo + sender_randomness)
     ///
     /// Fields |0,1| enable the receiver to determine the ciphertext
     /// is intended for them and decryption should be attempted.
-    pub(crate) fn generate_public_announcement(
+    pub(crate) fn generate_announcement(
         &self,
         utxo_notification_payload: UtxoNotificationPayload,
-    ) -> PublicAnnouncement {
+    ) -> Announcement {
         match self {
             ReceivingAddress::Generation(generation_receiving_address) => {
-                generation_receiving_address
-                    .generate_public_announcement(&utxo_notification_payload)
+                generation_receiving_address.generate_announcement(&utxo_notification_payload)
             }
             ReceivingAddress::Symmetric(symmetric_key) => {
-                symmetric_key.generate_public_announcement(&utxo_notification_payload)
+                symmetric_key.generate_announcement(&utxo_notification_payload)
             }
         }
     }
@@ -268,8 +267,8 @@ impl ReceivingAddress {
         }
     }
 
-    /// returns true if the [PublicAnnouncement] has a type-flag that matches the type of this address.
-    pub fn matches_public_announcement_key_type(&self, pa: &PublicAnnouncement) -> bool {
+    /// returns true if the [Announcement] has a type-flag that matches the type of this address.
+    pub fn matches_announcement_key_type(&self, pa: &Announcement) -> bool {
         matches!(KeyType::try_from(pa), Ok(kt) if kt == KeyType::from(self))
     }
 }

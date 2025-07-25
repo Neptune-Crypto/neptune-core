@@ -73,13 +73,13 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 
 /// With removal records only represented by their absolute index set, the block
 /// size limit of 1.000.000 `BFieldElement`s allows for a "balanced" block
-/// (equal number of inputs and outputs, no public announcements) of ~10.000
+/// (equal number of inputs and outputs, no announcements) of ~10.000
 /// input and outputs. To prevent an attacker from making it costly to run an
 /// archival node, the number of outputs is restricted. For simplicity though
-/// this limit is enforced for inputs, outputs, and public announcements. This
-/// restriction on the number of public announcements also makes it feasible for
+/// this limit is enforced for inputs, outputs, and announcements. This
+/// restriction on the number of announcements also makes it feasible for
 /// wallets to scan through all.
-pub(crate) const MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
+pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1: usize = 1 << 14;
 
 /// Duration of timelock for half of all mining rewards.
 ///
@@ -426,7 +426,7 @@ impl Block {
             outputs: genesis_tx_outputs,
             fee: NativeCurrencyAmount::coins(0),
             timestamp: network.launch_date(),
-            public_announcements: vec![],
+            announcements: vec![],
             coinbase: Some(total_premine_amount),
             mutator_set_hash: MutatorSetAccumulator::default().hash(),
             merge_bit: false,
@@ -868,10 +868,10 @@ impl Block {
 
         // 2.l)
         if consensus_rule_set
-            .max_num_public_announcements()
-            .is_some_and(|max| self.body().transaction_kernel.public_announcements.len() > max)
+            .max_num_announcements()
+            .is_some_and(|max| self.body().transaction_kernel.announcements.len() > max)
         {
-            return Err(BlockValidationError::TooManyPublicAnnouncements);
+            return Err(BlockValidationError::TooManyAnnouncements);
         }
 
         Ok(())
@@ -1950,6 +1950,7 @@ pub(crate) mod tests {
 
     mod guesser_fee_utxos {
         use super::*;
+        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
         use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
@@ -1982,11 +1983,12 @@ pub(crate) mod tests {
                 .unwrap()
                 .iter()
                 .map(|utxo| {
-                    commit(
-                        Tip5::hash(utxo),
-                        block1.hash(),
-                        guesser_address.receiver_postimage(),
-                    )
+                    UtxoTriple {
+                        utxo: utxo.clone(),
+                        sender_randomness: block1.hash(),
+                        receiver_digest: guesser_address.receiver_postimage(),
+                    }
+                    .addition_record()
                 })
                 .collect_vec();
             assert_eq!(ars, ars_from_wallet);

@@ -79,9 +79,9 @@ use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -614,16 +614,16 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockKernel>>;
 
-    /// Return the public announements contained in a specified block.
+    /// Return the announements contained in a specified block.
     ///
     /// Returns `None` if the selected block could not be found, otherwise
-    /// returns `Some(public_announcements)`.
+    /// returns `Some(announcements)`.
     ///
-    /// Does not attempt to decode the public announcements.
-    async fn public_announcements_in_block(
+    /// Does not attempt to decode the announcements.
+    async fn announcements_in_block(
         token: rpc_auth::Token,
         block_selector: BlockSelector,
-    ) -> RpcResult<Option<Vec<PublicAnnouncement>>>;
+    ) -> RpcResult<Option<Vec<Announcement>>>;
 
     /// Return the digests of known blocks with specified height.
     ///
@@ -2435,12 +2435,12 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn public_announcements_in_block(
+    async fn announcements_in_block(
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
         block_selector: BlockSelector,
-    ) -> RpcResult<Option<Vec<PublicAnnouncement>>> {
+    ) -> RpcResult<Option<Vec<Announcement>>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2453,9 +2453,7 @@ impl RPC for NeptuneRPCServer {
             return Ok(None);
         };
 
-        Ok(Some(
-            block.body().transaction_kernel.public_announcements.clone(),
-        ))
+        Ok(Some(block.body().transaction_kernel.announcements.clone()))
     }
 
     // documented in trait. do not add doc-comment.
@@ -3775,7 +3773,7 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::Block;
 
-    const NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1: usize = 7;
+    const NUM_ANNOUNCEMENTS_BLOCK1: usize = 7;
 
     async fn test_rpc_server(
         wallet_entropy: WalletEntropy,
@@ -3874,7 +3872,7 @@ mod tests {
             .await;
         let _ = rpc_server
             .clone()
-            .public_announcements_in_block(ctx, token, BlockSelector::Digest(Digest::default()))
+            .announcements_in_block(ctx, token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server
             .clone()
@@ -4436,8 +4434,8 @@ mod tests {
         );
 
         assert!(
-            genesis_block_info.num_public_announcements.is_zero(),
-            "Genesis block contains no public announcements. Block info must reflect that."
+            genesis_block_info.num_announcements.is_zero(),
+            "Genesis block contains no announcements. Block info must reflect that."
         );
 
         let tip_block_info = BlockInfo::new(
@@ -4519,8 +4517,8 @@ mod tests {
 
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
-    async fn public_announcements_in_block_test(
-        #[strategy(txkernel_with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1))]
+    async fn announcements_in_block_test(
+        #[strategy(txkernel_with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;
@@ -4542,9 +4540,9 @@ mod tests {
         let token = cookie_token(&rpc_server).await;
         let ctx = context::current();
 
-        let Some(block1_public_announcements) = rpc_server
+        let Some(block1_announcements) = rpc_server
             .clone()
-            .public_announcements_in_block(ctx, token, BlockSelector::Height(1u64.into()))
+            .announcements_in_block(ctx, token, BlockSelector::Height(1u64.into()))
             .await
             .unwrap()
         else {
@@ -4557,34 +4555,34 @@ mod tests {
         };
 
         assert_eq!(
-            block1.body().transaction_kernel.public_announcements,
-            block1_public_announcements,
-            "Must return expected public announcements"
+            block1.body().transaction_kernel.announcements,
+            block1_announcements,
+            "Must return expected announcements"
         );
         assert_eq!(
-            NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1,
-            block1_public_announcements.len(),
-            "Must return expected number of public announcements"
+            NUM_ANNOUNCEMENTS_BLOCK1,
+            block1_announcements.len(),
+            "Must return expected number of announcements"
         );
 
-        let genesis_block_public_announcements = rpc_server
+        let genesis_block_announcements = rpc_server
             .clone()
-            .public_announcements_in_block(ctx, token, BlockSelector::Height(0u64.into()))
+            .announcements_in_block(ctx, token, BlockSelector::Height(0u64.into()))
             .await
             .unwrap()
             .unwrap();
         assert!(
-            genesis_block_public_announcements.is_empty(),
-            "Genesis block has no public announements"
+            genesis_block_announcements.is_empty(),
+            "Genesis block has no announements"
         );
 
         assert!(
             rpc_server
-                .public_announcements_in_block(ctx, token, BlockSelector::Height(2u64.into()))
+                .announcements_in_block(ctx, token, BlockSelector::Height(2u64.into()))
                 .await
                 .unwrap()
                 .is_none(),
-            "Public announcements in unknown block must return None"
+            "announcements in unknown block must return None"
         );
     }
 

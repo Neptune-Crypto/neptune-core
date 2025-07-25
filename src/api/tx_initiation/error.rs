@@ -42,6 +42,9 @@ pub enum CreateTxError {
 
     #[error("cannot generate change key for immutable wallet.")]
     CantGenChangeKeyForImmutableWallet,
+
+    #[error("tip does not have mutator-set-after")]
+    NoMutatorSetAccumulatorAfter,
 }
 
 #[derive(Debug, Clone, thiserror::Error, strum::Display)]

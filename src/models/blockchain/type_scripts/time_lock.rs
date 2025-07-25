@@ -694,30 +694,29 @@ pub mod neptune_arbitrary {
 
     use super::super::native_currency_amount::NativeCurrencyAmount;
     use super::*;
+    use crate::models::blockchain::transaction::announcement::Announcement;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::models::blockchain::transaction::PublicAnnouncement;
 
     impl Arbitrary for TimeLockWitness {
         /// Parameters are:
         ///  - release_dates : `Vec<u64>` One release date per input UTXO. 0 if the time lock
         ///    coin is absent.
         ///  - num_outputs : usize Number of outputs.
-        ///  - num_public_announcements : usize Number of public announcements.
+        ///  - num_announcements : usize Number of announcements.
         ///  - transaction_timestamp: Timestamp determining when the transaction takes place.
         type Parameters = (Vec<Timestamp>, usize, usize, Timestamp);
 
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
-            let (release_dates, num_outputs, num_public_announcements, transaction_timestamp) =
-                parameters;
+            let (release_dates, num_outputs, num_announcements, transaction_timestamp) = parameters;
             let num_inputs = release_dates.len();
             (
                 vec(arb::<Digest>(), num_inputs),
                 vec(NativeCurrencyAmount::arbitrary_non_negative(), num_inputs),
                 vec(arb::<Digest>(), num_outputs),
                 vec(NativeCurrencyAmount::arbitrary_non_negative(), num_outputs),
-                vec(arb::<PublicAnnouncement>(), num_public_announcements),
+                vec(arb::<Announcement>(), num_announcements),
                 NativeCurrencyAmount::arbitrary_coinbase(),
                 NativeCurrencyAmount::arbitrary_non_negative(),
             )
@@ -727,7 +726,7 @@ pub mod neptune_arbitrary {
                         input_amounts,
                         output_address_seeds,
                         mut output_amounts,
-                        public_announcements,
+                        announcements,
                         maybe_coinbase,
                         mut fee,
                     )| {
@@ -771,7 +770,7 @@ pub mod neptune_arbitrary {
                             &input_utxos,
                             &input_lock_scripts_and_witnesses,
                             &output_utxos,
-                            &public_announcements,
+                            &announcements,
                             NativeCurrencyAmount::zero(),
                             maybe_coinbase,
                         )
@@ -791,7 +790,7 @@ pub mod neptune_arbitrary {
     }
 
     /// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
-    /// inputs, outputs, and public announcements, with active timelocks.
+    /// inputs, outputs, and announcements, with active timelocks.
     ///
     /// The UTXOs are timelocked with a release date set between `now` and six
     /// months from `now`.
@@ -821,7 +820,7 @@ pub mod neptune_arbitrary {
     }
 
     /// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
-    /// inputs, outputs, and public announcements, with expired timelocks.
+    /// inputs, outputs, and announcements, with expired timelocks.
     ///
     /// The UTXOs are timelocked with a release date set between six months in the
     /// past relative to `now` and `now`.
@@ -863,7 +862,7 @@ pub mod neptune_arbitrary {
             vec(arb::<u64>(), num_inputs),
             vec(arb::<Digest>(), num_outputs),
             vec(arb::<u64>(), num_outputs),
-            vec(arb::<PublicAnnouncement>(), num_announcements),
+            vec(arb::<Announcement>(), num_announcements),
             arb::<u64>(),
             arb::<Option<u64>>(),
         )
@@ -874,7 +873,7 @@ pub mod neptune_arbitrary {
                     input_dist,
                     output_address_seeds,
                     output_dist,
-                    public_announcements,
+                    announcements,
                     fee_dist,
                     maybe_coinbase_dist,
                 )| {
@@ -974,7 +973,7 @@ pub mod neptune_arbitrary {
                         &input_utxos,
                         &input_lock_scripts_and_witnesses,
                         &output_utxos,
-                        &public_announcements,
+                        &announcements,
                         fee,
                         maybe_coinbase,
                         now,
@@ -1090,7 +1089,7 @@ mod tests {
     fn test_unlocked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(1usize..=3)] _num_announcements: usize,
         #[strategy(vec(Just(Timestamp::zero()), #_num_inputs))] _release_dates: Vec<Timestamp>,
         #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().min().unwrap()))]
         _transaction_timestamp: Timestamp,
@@ -1098,7 +1097,7 @@ mod tests {
             TimeLockWitness::arbitrary_with((
                 #_release_dates,
                 #_num_outputs,
-                #_num_public_announcements,
+                #_num_announcements,
                 #_transaction_timestamp,
             ))
         )]
@@ -1157,7 +1156,7 @@ mod tests {
     fn test_locked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(1usize..=3)] _num_announcements: usize,
         #[strategy(
             vec(
                 Timestamp::arbitrary_between(
@@ -1174,7 +1173,7 @@ mod tests {
             TimeLockWitness::arbitrary_with((
                 #_release_dates,
                 #_num_outputs,
-                #_num_public_announcements,
+                #_num_announcements,
                 #_tx_timestamp,
             ))
         )]
@@ -1205,7 +1204,7 @@ mod tests {
     fn test_released(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
-        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(1usize..=3)] _num_announcements: usize,
         #[strategy(
             vec(
                 Timestamp::arbitrary_between(
@@ -1222,7 +1221,7 @@ mod tests {
             TimeLockWitness::arbitrary_with((
                 #_release_dates,
                 #_num_outputs,
-                #_num_public_announcements,
+                #_num_announcements,
                 #_tx_timestamp + Timestamp::days(1),
             ))
         )]

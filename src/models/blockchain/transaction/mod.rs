@@ -10,25 +10,23 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 
+pub mod announcement;
 pub mod lock_script;
 pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod transaction_proof;
 pub mod utxo;
+pub(crate) mod utxo_triple;
 pub mod validity;
 
 use anyhow::ensure;
 use anyhow::Result;
-#[cfg(any(test, feature = "arbitrary-impls"))]
-use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::prelude::TasmObject;
-use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tracing::info;
@@ -45,26 +43,6 @@ use super::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::triton_vm::proof::Claim;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-
-/// represents arbitrary data that can be stored in a transaction on the public blockchain
-///
-/// initially these are used for transmitting encrypted secrets necessary
-/// for a utxo recipient to identify and claim it.
-///
-/// See [Transaction]
-#[derive(
-    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, TasmObject,
-)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
-pub struct PublicAnnouncement {
-    pub message: Vec<BFieldElement>,
-}
-
-impl PublicAnnouncement {
-    pub fn new(message: Vec<BFieldElement>) -> Self {
-        Self { message }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
@@ -265,7 +243,6 @@ pub(crate) mod tests {
     use tasm_lib::prelude::Digest;
     use tasm_lib::triton_vm::error::InstructionError;
     use tasm_lib::triton_vm::isa::error::AssertionError;
-    use tasm_lib::triton_vm::prelude::Tip5;
     use tests::primitive_witness::SaltedUtxos;
     use tests::utxo::Utxo;
     use tracing_test::traced_test;
@@ -275,6 +252,7 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::error::CreateProofError;
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -284,7 +262,6 @@ pub(crate) mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl Transaction {
@@ -325,7 +302,7 @@ pub(crate) mod tests {
         let empty_kernel = TransactionKernelProxy {
             inputs: vec![],
             outputs: vec![],
-            public_announcements: vec![],
+            announcements: vec![],
             fee: NativeCurrencyAmount::coins(0),
             coinbase: None,
             timestamp: Default::default(),
@@ -357,7 +334,12 @@ pub(crate) mod tests {
             LockScript::anyone_can_spend().hash(),
             NativeCurrencyAmount::coins(42),
         );
-        let ar = commit(Tip5::hash(&output_1), random(), random());
+        let ar = UtxoTriple {
+            utxo: output_1.clone(),
+            sender_randomness: random(),
+            receiver_digest: random(),
+        }
+        .addition_record();
 
         // Verify that a sane timestamp is returned. `make_mock_transaction` must follow
         // the correct time convention for this test to work.
@@ -516,8 +498,8 @@ pub(crate) mod tests {
             updated_with_block.kernel.outputs
         );
         assert_eq!(
-            to_be_updated.kernel.public_announcements,
-            updated_with_block.kernel.public_announcements
+            to_be_updated.kernel.announcements,
+            updated_with_block.kernel.announcements
         );
         assert_eq!(
             to_be_updated.kernel.inputs.len(),

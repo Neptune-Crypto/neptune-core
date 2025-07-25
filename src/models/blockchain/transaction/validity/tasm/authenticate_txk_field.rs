@@ -93,8 +93,8 @@ mod tests {
     use tasm_lib::twenty_first::prelude::*;
 
     use super::*;
+    use crate::models::blockchain::transaction::announcement::Announcement;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -155,12 +155,12 @@ mod tests {
                 unreachable!("fee should have static length 4");
             }
 
-            // pub public_announcements: Vec<PublicAnnouncement>,
-            if let Some(_static_length) = Vec::<PublicAnnouncement>::static_length() {
-                unreachable!("public announcements should not have static length");
+            // pub announcements: Vec<Announcement>,
+            if let Some(_static_length) = Vec::<Announcement>::static_length() {
+                unreachable!("announcements should not have static length");
             } else {
                 offset += 1;
-                let encoding = kernel.public_announcements.encode();
+                let encoding = kernel.announcements.encode();
                 let dynamic_length = encoding.len();
                 field_offsets_and_sizes.push((offset, dynamic_length));
                 offset += dynamic_length;

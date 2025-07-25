@@ -2567,17 +2567,18 @@ mod tests {
         async fn ms_updated_transaction_always_replaces_progenitor(
             #[strategy(0usize..20)] _num_inputs_own: usize,
             #[strategy(0usize..20)] _num_outputs_own: usize,
-            #[strategy(0usize..20)] _num_public_announcements_own: usize,
-            #[strategy(0usize..20)] _num_inputs_mined: usize,
+            #[strategy(0usize..20)] _num_announcements_own: usize,
+            #[filter(#_num_inputs_mined+#_num_outputs_mined>0)]
+            #[strategy(0usize..20)]
+            _num_inputs_mined: usize,
             #[strategy(0usize..20)] _num_outputs_mined: usize,
-            #[strategy(0usize..20)] _num_public_announcements_mined: usize,
+            #[strategy(0usize..20)] _num_announcements_mined: usize,
             #[strategy(0usize..200_000)] size_old_proof: usize,
             #[strategy(0usize..200_000)] size_new_proof: usize,
             #[strategy(arb())] upgrade_priority: UpgradePriority,
             #[strategy(PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets(
-            [(#_num_inputs_own, #_num_outputs_own, #_num_public_announcements_own),
-            (#_num_inputs_mined, #_num_outputs_mined, #_num_public_announcements_mined),],
-
+            [(#_num_inputs_own, #_num_outputs_own, #_num_announcements_own),
+            (#_num_inputs_mined, #_num_outputs_mined, #_num_announcements_mined),],
     ))]
             pws: [PrimitiveWitness; 2],
         ) {

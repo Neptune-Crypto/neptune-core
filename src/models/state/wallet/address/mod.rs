@@ -91,13 +91,12 @@ mod tests {
     mod worker {
         use super::*;
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-        use crate::prelude::twenty_first::prelude::Tip5;
-        use crate::util_types::mutator_set::commit;
+        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 
-        /// this tests the generate_public_announcement() and
+        /// this tests the generate_announcement() and
         /// scan_for_announced_utxos() methods with a [SpendingKey]
         ///
-        /// a PublicAnnouncement is created with generate_public_announcement() and
+        /// a Announcement is created with generate_announcement() and
         /// added to a Tx.  It is then found by scanning for announced_utoxs.  Then
         /// we verify that the data matches the original/expected values.
         pub fn scan_for_announced_utxos(key: SpendingKey) {
@@ -111,11 +110,12 @@ mod tests {
             let sender_randomness: Digest = random();
 
             // 3. create an addition record to verify against later.
-            let expected_addition_record = commit(
-                Tip5::hash(&utxo),
+            let utxo_triple = UtxoTriple {
+                utxo: utxo.clone(),
                 sender_randomness,
-                key.to_address().privacy_digest(),
-            );
+                receiver_digest: key.to_address().privacy_digest(),
+            };
+            let expected_addition_record = utxo_triple.addition_record();
 
             // 4. create a mock tx with no inputs or outputs
             let mut mock_tx = make_mock_transaction(vec![], vec![]);
@@ -123,25 +123,25 @@ mod tests {
             // 5. verify that no announced utxos exist for this key
             assert!(key.scan_for_announced_utxos(&mock_tx.kernel).is_empty());
 
-            // 6. generate a public announcement for this address
+            // 6. generate a announcement for this address
             let utxo_notification_payload =
                 UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
-            let public_announcement = key
+            let announcement = key
                 .to_address()
-                .generate_public_announcement(utxo_notification_payload);
+                .generate_announcement(utxo_notification_payload);
 
-            // 7. verify that the public_announcement is marked as our key type.
-            assert!(key.matches_public_announcement_key_type(&public_announcement));
+            // 7. verify that the announcement is marked as our key type.
+            assert!(key.matches_announcement_key_type(&announcement));
 
-            // 8. add the public announcement to the mock tx.
-            let mut new_public_announcements = mock_tx.kernel.public_announcements.clone();
-            new_public_announcements.push(public_announcement);
+            // 8. add the announcement to the mock tx.
+            let mut new_announcements = mock_tx.kernel.announcements.clone();
+            new_announcements.push(announcement);
 
             mock_tx.kernel = TransactionKernelModifier::default()
-                .public_announcements(new_public_announcements)
+                .announcements(new_announcements)
                 .modify(mock_tx.kernel);
 
-            // 9. scan tx public announcements for announced utxos
+            // 9. scan tx announcements for announced utxos
             let announced_utxos = key.scan_for_announced_utxos(&mock_tx.kernel);
 
             // 10. verify there is exactly 1 announced_utxo and obtain it.

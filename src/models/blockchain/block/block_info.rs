@@ -27,7 +27,7 @@ pub struct BlockInfo {
     pub difficulty: Difficulty,
     pub num_inputs: usize,
     pub num_outputs: usize,
-    pub num_public_announcements: usize,
+    pub num_announcements: usize,
     pub coinbase_amount: NativeCurrencyAmount,
     pub fee: NativeCurrencyAmount,
     pub is_genesis: bool,
@@ -52,10 +52,7 @@ impl std::fmt::Display for BlockInfo {
             + &format!("difficulty: {}\n", self.difficulty)
             + &format!("num_inputs: {}\n", self.num_inputs)
             + &format!("num_outputs: {}\n", self.num_outputs)
-            + &format!(
-                "num_public_announcements: {}\n",
-                self.num_public_announcements
-            )
+            + &format!("num_announcements: {}\n", self.num_announcements)
             + &format!("coinbase_amount: {}\n", self.coinbase_amount)
             + &format!("fee: {}\n", self.fee)
             + &format!("is_genesis: {}\n", self.is_genesis)
@@ -91,7 +88,7 @@ impl BlockInfo {
             cumulative_proof_of_work: header.cumulative_proof_of_work,
             num_inputs: body.transaction_kernel.inputs.len(),
             num_outputs: body.transaction_kernel.outputs.len(),
-            num_public_announcements: body.transaction_kernel.public_announcements.len(),
+            num_announcements: body.transaction_kernel.announcements.len(),
             fee: body.transaction_kernel.fee,
             coinbase_amount: block.coinbase_amount(),
             is_genesis: digest == genesis_digest,

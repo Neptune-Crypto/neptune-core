@@ -1,8 +1,8 @@
 use strum_macros::EnumIter;
 
-use super::block::MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1;
 use crate::api::export::BlockHeight;
 use crate::api::export::Network;
+use crate::models::blockchain::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1;
 
 /// Enumerates all possible sets of consensus rules.
 ///
@@ -43,17 +43,17 @@ impl ConsensusRuleSet {
 
     pub(crate) fn max_num_inputs(&self) -> Option<usize> {
         match self {
-            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1),
+            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1),
         }
     }
     pub(crate) fn max_num_outputs(&self) -> Option<usize> {
         match self {
-            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1),
+            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1),
         }
     }
-    pub(crate) fn max_num_public_announcements(&self) -> Option<usize> {
+    pub(crate) fn max_num_announcements(&self) -> Option<usize> {
         match self {
-            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1),
+            ConsensusRuleSet::Reboot => Some(MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS_AFTER_HF_1),
         }
     }
 }

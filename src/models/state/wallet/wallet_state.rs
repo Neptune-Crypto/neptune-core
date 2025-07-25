@@ -514,11 +514,11 @@ impl WalletState {
                 let own_utxos_from_expected_utxos =
                     self.scan_for_expected_utxos(&tx.kernel.outputs).await;
 
-                // scan tx for utxo with public-announcements we can claim
-                let announced_utxos_from_public_announcements =
+                // scan tx for utxo with announcements we can claim
+                let announced_utxos_from_announcements =
                     self.scan_for_utxos_announced_to_known_keys(&tx.kernel);
 
-                let own_utxos = announced_utxos_from_public_announcements
+                let own_utxos = announced_utxos_from_announcements
                     .chain(own_utxos_from_expected_utxos)
                     .collect_vec();
 
@@ -1955,6 +1955,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
+    use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -2393,11 +2394,8 @@ pub(crate) mod tests {
             .wallet_state
             .add_expected_utxos(expected_bad_utxos)
             .await;
-        let bad_addition_record = commit(
-            Tip5::hash(&bad_txo.utxo()),
-            txo.sender_randomness(),
-            txo.receiver_digest(),
-        );
+        let bad_utxo_triple = UtxoTriple::from(bad_txo);
+        let bad_addition_record = bad_utxo_triple.addition_record();
         let bad_kernel = TransactionKernelModifier::default()
             .outputs(vec![bad_addition_record])
             .modify(tx_block2.kernel.clone());
@@ -2501,11 +2499,7 @@ pub(crate) mod tests {
             .wallet_state
             .add_expected_utxos(expected_bad_utxos)
             .await;
-        let bad_addition_record = commit(
-            Tip5::hash(&bad_txo.utxo()),
-            txo.sender_randomness(),
-            txo.receiver_digest(),
-        );
+        let bad_addition_record = UtxoTriple::from(bad_txo).addition_record();
         let bad_kernel = TransactionKernelModifier::default()
             .outputs(vec![bad_addition_record])
             .modify(tx_block2.kernel.clone());
@@ -3704,7 +3698,6 @@ pub(crate) mod tests {
         use super::*;
         use crate::models::blockchain::transaction::lock_script::LockScript;
         use crate::tests::shared::mock_tx::make_mock_transaction;
-        use crate::util_types::mutator_set::commit;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -3724,11 +3717,12 @@ pub(crate) mod tests {
 
             let sender_randomness: Digest = rand::random();
             let receiver_preimage: Digest = rand::random();
-            let expected_addition_record = commit(
-                Hash::hash(&mock_utxo),
+            let mock_triple = UtxoTriple {
+                utxo: mock_utxo.clone(),
                 sender_randomness,
-                receiver_preimage.hash(),
-            );
+                receiver_digest: receiver_preimage.hash(),
+            };
+            let expected_addition_record = mock_triple.addition_record();
             wallet
                 .add_expected_utxo(ExpectedUtxo::new(
                     mock_utxo.clone(),
@@ -3750,11 +3744,12 @@ pub(crate) mod tests {
             assert_eq!(1, ret_with_tx_containing_utxo.len());
 
             // Call scan but with another input. Verify that it returns the empty list
-            let another_addition_record = commit(
-                Hash::hash(&mock_utxo),
-                rand::random(),
-                receiver_preimage.hash(),
-            );
+            let bad_triple = UtxoTriple {
+                utxo: mock_utxo.clone(),
+                sender_randomness: rand::random(),
+                receiver_digest: receiver_preimage.hash(),
+            };
+            let another_addition_record = bad_triple.addition_record();
             let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
             let ret_with_tx_without_utxo = wallet
                 .scan_for_expected_utxos(&tx_without_utxo.kernel.outputs)
@@ -4336,7 +4331,7 @@ pub(crate) mod tests {
         ///    offsets.
         ///  - Generate UTXOs with all necessary supplementary information, one
         ///    for each key.
-        ///  - Generate public announcements for all UTXOs and put them into the
+        ///  - Generate announcements for all UTXOs and put them into the
         ///    transaction kernel.
         ///  - For a subset of UTXOs, put the corresponding addition record into
         ///    the transaction kernel.
@@ -4420,7 +4415,7 @@ pub(crate) mod tests {
                 absolute_index: u64,
                 incoming_utxo: IncomingUtxo,
             }
-            let mut public_announcements = kernel.public_announcements.clone();
+            let mut announcements = kernel.announcements.clone();
             let mut addition_records = kernel.outputs.clone();
             let mut all_utxos = vec![];
             for (key_type, relative_index, absolute_index, key) in future_generation_keys
@@ -4433,10 +4428,10 @@ pub(crate) mod tests {
                 let receiver_preimage = key.privacy_preimage();
                 let utxo_notification_payload =
                     UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
-                let public_announcement = key
+                let announcement = key
                     .to_address()
-                    .generate_public_announcement(utxo_notification_payload);
-                public_announcements.push(public_announcement);
+                    .generate_announcement(utxo_notification_payload);
+                announcements.push(announcement);
 
                 let incoming_utxo = IncomingUtxo {
                     utxo,
@@ -4463,7 +4458,7 @@ pub(crate) mod tests {
             }
 
             let new_kernel = TransactionKernelModifier::default()
-                .public_announcements(public_announcements)
+                .announcements(announcements)
                 .outputs(addition_records)
                 .modify(kernel);
 
@@ -4539,11 +4534,7 @@ pub(crate) mod tests {
 
             let new_block = invalid_block_with_transaction(&previous_block, transaction);
             assert!(
-                new_block
-                    .body()
-                    .transaction_kernel
-                    .public_announcements
-                    .is_empty(),
+                new_block.body().transaction_kernel.announcements.is_empty(),
                 "Test assumption: composer reward not announced."
             );
             assert!(
@@ -4691,11 +4682,7 @@ pub(crate) mod tests {
             };
             assert_eq!(
                 num_expected_pub_announcements,
-                new_block
-                    .body()
-                    .transaction_kernel
-                    .public_announcements
-                    .len()
+                new_block.body().transaction_kernel.announcements.len()
             );
             let num_expected_expected_utxos = 2 - num_expected_pub_announcements;
             assert_eq!(num_expected_expected_utxos, expected_utxos.len());
@@ -4826,10 +4813,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .transaction;
-            let old_num_public_announcements = proof_collection_transaction
-                .kernel
-                .public_announcements
-                .len();
+            let old_num_announcements = proof_collection_transaction.kernel.announcements.len();
 
             // let Rando upgrade that transaction
             // from proof collection to single proof
@@ -4926,12 +4910,11 @@ pub(crate) mod tests {
                 .get_transactions_for_block_composition(10_000_000, None);
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
-            let new_num_public_announcements =
-                upgraded_transaction.kernel.public_announcements.len();
+            let new_num_announcements = upgraded_transaction.kernel.announcements.len();
             if upgrade_fee_notification_policy == FeeNotificationPolicy::OffChain {
-                assert_eq!(old_num_public_announcements, new_num_public_announcements);
+                assert_eq!(old_num_announcements, new_num_announcements);
             } else {
-                assert_ne!(old_num_public_announcements, new_num_public_announcements);
+                assert_ne!(old_num_announcements, new_num_announcements);
             }
 
             // merge with some other transaction to set merge bit, Alice gets

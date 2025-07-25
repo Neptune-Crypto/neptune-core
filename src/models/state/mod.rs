@@ -1225,10 +1225,6 @@ impl GlobalState {
         trace!("monitored_utxos.len() = {num_mutxos}");
         for i in 0..num_mutxos {
             let mut monitored_utxo = monitored_utxos.get(i).await;
-            if monitored_utxo.spent_in_block.is_some() {
-                trace!("Not restoring because UTXO is marked as spent");
-                continue;
-            }
 
             if monitored_utxo.is_synced_to(tip_hash) {
                 trace!("Not restoring because UTXO is marked as synced");
@@ -1265,7 +1261,21 @@ impl GlobalState {
             };
 
             if !ams_ref.ams().verify(ms_item, &restored_msmp).await {
-                warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain? Or maybe it was spent?", aocl_leaf_index);
+                // If the UTXO was spent *and* its membership proof is invalid
+                // after attempting to resync, then that expenditure must still
+                // be canonical.
+                // On the contrary, if the UTXO was spent and resync succeeded,
+                // then the expenditure was reverted. This is the reason why
+                // we do not filter out UTXOs that were marked as spent before
+                // attempting to resync the membership proof. However, if we
+                // get here, then we know that the resulting membership proof is
+                // invalid.
+                // So instead, we use the information that the UTXO was spent
+                // only for suppressing the following log message, which would
+                // be rather noisy otherwise.
+                if monitored_utxo.spent_in_block.is_none() {
+                    warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", aocl_leaf_index);
+                }
                 continue;
             }
 
@@ -2078,7 +2088,6 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -2302,6 +2311,8 @@ mod tests {
     }
 
     mod restore_monitored_utxo_data {
+        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
+
         use super::*;
 
         #[traced_test]
@@ -2759,11 +2770,12 @@ mod tests {
                             let sender_randomness: Digest = rng.random();
                             let receiver_preimage: Digest = rng.random();
 
-                            let addition_record = commit(
-                                Tip5::hash(&utxo),
+                            let utxo_triple = UtxoTriple {
+                                utxo: utxo.clone(),
                                 sender_randomness,
-                                receiver_preimage.hash(),
-                            );
+                                receiver_digest: receiver_preimage.hash(),
+                            };
+                            let addition_record = utxo_triple.addition_record();
                             outputs.push(addition_record);
 
                             new_spendable_utxos.push((utxo, sender_randomness, receiver_preimage));
@@ -2811,11 +2823,12 @@ mod tests {
                             if let Some((utxo, sender_randomness, receiver_preimage)) =
                                 new_spendable_utxos.iter().find(
                                     |(utxo, sender_randomness, receiver_preimage)| {
-                                        commit(
-                                            Tip5::hash(utxo),
-                                            *sender_randomness,
-                                            receiver_preimage.hash(),
-                                        ) == addition_record
+                                        let utxo_triple = UtxoTriple {
+                                            utxo: utxo.clone(),
+                                            sender_randomness: *sender_randomness,
+                                            receiver_digest: receiver_preimage.hash(),
+                                        };
+                                        utxo_triple.addition_record() == addition_record
                                     },
                                 )
                             {

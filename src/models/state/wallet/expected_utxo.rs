@@ -5,11 +5,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
 
 /// represents utxo and secrets necessary for recipient to claim it.
 ///
@@ -64,11 +63,12 @@ impl ExpectedUtxo {
         received_from: UtxoNotifier,
     ) -> Self {
         Self {
-            addition_record: commit(
-                Hash::hash(&utxo),
+            addition_record: UtxoTriple {
+                utxo: utxo.clone(),
                 sender_randomness,
-                receiver_preimage.hash(),
-            ),
+                receiver_digest: receiver_preimage.hash(),
+            }
+            .addition_record(),
             utxo,
             sender_randomness,
             receiver_preimage,

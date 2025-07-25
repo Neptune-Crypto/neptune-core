@@ -24,10 +24,10 @@ use super::common::deterministically_derive_seed_and_nonce;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 /// represents a symmetric key decryption error
@@ -92,10 +92,10 @@ pub struct SymmetricKey {
 // have any methods with outside types as parameters or return types.  for
 // example:
 //
-// pub(crate) fn generate_public_announcement(
+// pub(crate) fn generate_announcement(
 //     &self,
 //     utxo_notification_payload: &UtxoNotificationPayload,
-// ) -> PublicAnnouncement;
+// ) -> Announcement;
 //
 // this method is dealing with types far outside the concern of
 // a key, which means the method belongs elsewhere.
@@ -210,17 +210,17 @@ impl SymmetricKey {
         )
     }
 
-    pub(crate) fn generate_public_announcement(
+    pub(crate) fn generate_announcement(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
-    ) -> PublicAnnouncement {
+    ) -> Announcement {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
             flag: SYMMETRIC_KEY_FLAG_U8.into(),
             receiver_identifier: self.receiver_identifier(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
 
-        encrypted_utxo_notification.into_public_announcement()
+        encrypted_utxo_notification.into_announcement()
     }
 
     pub(crate) fn private_utxo_notification(

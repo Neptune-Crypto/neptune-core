@@ -7,10 +7,9 @@ use tasm_lib::prelude::Digest;
 use super::expected_utxo::UtxoNotifier;
 use super::utxo_notification::UtxoNotificationPayload;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 use crate::models::state::ExpectedUtxo;
-use crate::models::state::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
 
 /// A [`Utxo`] along with associated data necessary for a recipient to claim it.
 ///
@@ -71,12 +70,15 @@ impl From<&ExpectedUtxo> for IncomingUtxo {
 }
 
 impl IncomingUtxo {
+    pub(crate) fn utxo_triple(&self) -> UtxoTriple {
+        UtxoTriple {
+            utxo: self.utxo.clone(),
+            sender_randomness: self.sender_randomness,
+            receiver_digest: self.receiver_preimage.hash(),
+        }
+    }
     pub(crate) fn addition_record(&self) -> AdditionRecord {
-        commit(
-            Tip5::hash(&self.utxo),
-            self.sender_randomness,
-            self.receiver_preimage.hash(),
-        )
+        self.utxo_triple().addition_record()
     }
 
     pub(crate) fn from_utxo_notification_payload(

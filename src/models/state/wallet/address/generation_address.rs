@@ -38,10 +38,10 @@ use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
@@ -240,7 +240,7 @@ impl GenerationSpendingKey {
         self.receiver_preimage
     }
 
-    /// returns the receiver_identifier, a public fingerprint
+    /// returns the receiver_identifier, a fingerprint
     pub fn receiver_identifier(&self) -> BFieldElement {
         self.receiver_identifier
     }
@@ -250,10 +250,10 @@ impl GenerationSpendingKey {
 // should not have any methods with
 // outside types as parameters or return types.  for example:
 //
-// pub(crate) fn generate_public_announcement(
+// pub(crate) fn generate_announcement(
 //     &self,
 //     utxo_notification_payload: &UtxoNotificationPayload,
-// ) -> PublicAnnouncement;
+// ) -> Announcement;
 //
 // this method is dealing with types far outside the concern of
 // a key, which means the method belongs elsewhere.
@@ -380,17 +380,17 @@ impl GenerationReceivingAddress {
         LockScript::standard_hash_lock_from_after_image(self.lock_postimage)
     }
 
-    pub(crate) fn generate_public_announcement(
+    pub(crate) fn generate_announcement(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
-    ) -> PublicAnnouncement {
+    ) -> Announcement {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
             flag: GENERATION_FLAG_U8.into(),
             receiver_identifier: self.receiver_identifier(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
 
-        encrypted_utxo_notification.into_public_announcement()
+        encrypted_utxo_notification.into_announcement()
     }
 
     pub(crate) fn private_utxo_notification(

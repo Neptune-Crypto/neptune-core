@@ -939,7 +939,7 @@ pub mod neptune_arbitrary {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
             let num_inputs = u.int_in_range(1..=3usize)?;
             let _num_outputs = u.int_in_range(1..=3usize)?;
-            let _num_public_announcements = u.int_in_range(0..=2usize)?;
+            let _num_announcements = u.int_in_range(0..=2usize)?;
 
             let input_utxos: Vec<Utxo> = (0..num_inputs)
                 .map(|_| u.arbitrary().unwrap())

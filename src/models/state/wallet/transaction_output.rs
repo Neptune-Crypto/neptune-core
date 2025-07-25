@@ -8,9 +8,9 @@ use serde::Serialize;
 
 use super::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
-use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;
@@ -22,7 +22,6 @@ use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::prelude::Digest;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
 
 /// represents a transaction output, as used by
 /// [TransactionDetailsBuilder](crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder)
@@ -92,14 +91,9 @@ mod fix_552 {
 }
 */
 
-impl From<&TxOutput> for AdditionRecord {
-    /// retrieves public announcements from possible sub-set of the list
-    fn from(txo: &TxOutput) -> Self {
-        commit(
-            Hash::hash(&txo.utxo),
-            txo.sender_randomness,
-            txo.receiver_digest,
-        )
+impl TxOutput {
+    fn addition_record(&self) -> AdditionRecord {
+        UtxoTriple::from(self.clone()).addition_record()
     }
 }
 
@@ -407,14 +401,14 @@ impl TxOutput {
         self.receiver_digest
     }
 
-    /// retrieve public announcement, if any
-    pub fn public_announcement(&self) -> Option<PublicAnnouncement> {
+    /// retrieve announcement, if any
+    pub fn announcement(&self) -> Option<Announcement> {
         match &self.notification_method {
             UtxoNotifyMethod::None => None,
             UtxoNotifyMethod::OffChain(_) => None,
             UtxoNotifyMethod::OnChain(receiving_address) => {
                 let notification_payload = self.notification_payload();
-                Some(receiving_address.generate_public_announcement(notification_payload))
+                Some(receiving_address.generate_announcement(notification_payload))
             }
         }
     }
@@ -544,7 +538,7 @@ impl TxOutputList {
 
     /// retrieves addition_records
     pub fn addition_records_iter(&self) -> impl IntoIterator<Item = AdditionRecord> + '_ {
-        self.0.iter().map(|u| u.into())
+        self.0.iter().map(|u| u.addition_record())
     }
 
     /// retrieves addition_records
@@ -552,16 +546,16 @@ impl TxOutputList {
         self.addition_records_iter().into_iter().collect()
     }
 
-    /// Returns all public announcement for this TxOutputList
-    pub(crate) fn public_announcements(&self) -> Vec<PublicAnnouncement> {
-        let mut public_announcements = vec![];
+    /// Returns all announcement for this TxOutputList
+    pub(crate) fn announcements(&self) -> Vec<Announcement> {
+        let mut announcements = vec![];
         for tx_output in &self.0 {
-            if let Some(pa) = tx_output.public_announcement() {
-                public_announcements.push(pa);
+            if let Some(pa) = tx_output.announcement() {
+                announcements.push(pa);
             }
         }
 
-        public_announcements
+        announcements
     }
 
     pub fn offchain_notifications(

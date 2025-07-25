@@ -16,6 +16,7 @@ use tasm_lib::prelude::Digest;
 
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -40,6 +41,7 @@ use crate::WalletState;
 pub struct TransactionDetailsBuilder {
     tx_inputs: TxInputList,
     tx_outputs: TxOutputList,
+    announcements: Vec<Announcement>,
     fee: NativeCurrencyAmount,
     coinbase: Option<NativeCurrencyAmount>,
     change_policy: ChangePolicy,
@@ -79,6 +81,17 @@ impl TransactionDetailsBuilder {
     /// adds a list of outputs.  See [TxOutputListBuilder](super::tx_output_list_builder::TxOutputListBuilder)
     pub fn outputs(mut self, mut tx_output_list: TxOutputList) -> Self {
         self.tx_outputs.append(&mut tx_output_list);
+        self
+    }
+
+    /// Add many custom announcements.
+    ///
+    ///
+    /// Use this method for announcements that are *not* encrypted UTXO
+    /// notifications. The encrypted UTXO notifications are generated on the fly
+    /// at a later stage.
+    pub fn custom_announcements(mut self, mut announcements: Vec<Announcement>) -> Self {
+        self.announcements.append(&mut announcements);
         self
     }
 
@@ -251,7 +264,7 @@ impl TransactionDetailsBuilder {
             state_lock.tip().await
         };
 
-        Ok(TransactionDetails::new(
+        let transaction_details = TransactionDetails::new(
             tx_inputs,
             tx_outputs,
             fee,
@@ -259,9 +272,12 @@ impl TransactionDetailsBuilder {
             timestamp,
             tip_block
                 .mutator_set_accumulator_after()
-                .expect("Block from state must have mutator set after"),
+                .map_err(|_| CreateTxError::NoMutatorSetAccumulatorAfter)?,
             state_lock.cli().network,
-        ))
+        )
+        .with_announcements(self.announcements);
+
+        Ok(transaction_details)
     }
 
     // ##multicoin## : should probably accept a Coin and CoinAmount arg?

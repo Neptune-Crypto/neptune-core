@@ -85,9 +85,9 @@ pub enum BlockValidationError {
     ///   2.k) restrict number of outputs.
     #[error("number of outputs may not be too large")]
     TooManyOutputs,
-    ///   2.l) restrict number of public announcements.
-    #[error("number of public announcements may not be too large")]
-    TooManyPublicAnnouncements,
+    ///   2.l) restrict number of announcements.
+    #[error("number of announcements may not be too large")]
+    TooManyAnnouncements,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

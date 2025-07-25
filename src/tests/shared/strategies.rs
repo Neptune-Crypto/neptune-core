@@ -38,12 +38,12 @@ prop_compose! {
     pub fn txkernel_with_lengths(
         num_inputs: usize,
         num_outputs: usize,
-        num_public_announcements: usize,
+        num_announcements: usize,
     ) (
         inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict(), num_inputs),
         outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
-        public_announcements in collection::vec(collection::vec(arb::<tasm_lib::triton_vm::prelude::BFieldElement>(), 10..59), num_public_announcements).prop_map(
-            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message|crate::models::blockchain::transaction::PublicAnnouncement{message}))
+        announcements in collection::vec(collection::vec(arb::<tasm_lib::triton_vm::prelude::BFieldElement>(), 10..59), num_announcements).prop_map(
+            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message|crate::models::blockchain::transaction::announcement::Announcement{message}))
         ),
         fee in arb::<NativeCurrencyAmount>(),
         coinbase in arb::<Option<NativeCurrencyAmount>>(),
@@ -53,7 +53,7 @@ prop_compose! {
     ) -> TransactionKernel {TransactionKernelProxy {
         inputs,
         outputs,
-        public_announcements,
+        announcements,
         fee,
         coinbase,
         timestamp,
@@ -73,7 +73,7 @@ prop_compose! {
         TransactionKernelProxy {
             inputs: inputs.clone(),
             outputs: outputs.clone(),
-            public_announcements: vec![],
+            announcements: vec![],
             fee,
             timestamp,
             coinbase: None,
@@ -86,8 +86,8 @@ prop_compose! {
 
 // TODO ditch this by rewriting the underlying `Strategy` with `IntoRange`
 prop_compose! {
-    pub fn txkernel() (num_inputs in 1usize..=5, num_outputs in 1usize..=6, num_public_announcements in 0usize..5)
-    (r in txkernel_with_lengths(num_inputs, num_outputs, num_public_announcements)) -> TransactionKernel {
+    pub fn txkernel() (num_inputs in 1usize..=5, num_outputs in 1usize..=6, num_announcements in 0usize..5)
+    (r in txkernel_with_lengths(num_inputs, num_outputs, num_announcements)) -> TransactionKernel {
         r
     }
 }
