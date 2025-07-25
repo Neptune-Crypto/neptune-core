@@ -206,11 +206,11 @@ mod tests {
         /// tests bech32m serialize, deserialize for [ReceivingAddress]
         pub fn test_bech32m_conversion(receiving_address: ReceivingAddress) {
             // 1. serialize address to bech32m
-            let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();
+            let encoded = receiving_address.to_bech32m(Network::Testnet(0)).unwrap();
 
             // 2. deserialize bech32m back into an address
             let receiving_address_again =
-                ReceivingAddress::from_bech32m(&encoded, Network::Testnet).unwrap();
+                ReceivingAddress::from_bech32m(&encoded, Network::Testnet(0)).unwrap();
 
             // 3. verify both addresses match
             assert_eq!(receiving_address, receiving_address_again);

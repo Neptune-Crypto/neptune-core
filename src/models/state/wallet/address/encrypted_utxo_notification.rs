@@ -180,10 +180,10 @@ mod tests {
     ) -> bool {
         let encoded = encrypted_utxo_notification
             .clone()
-            .into_bech32m(Network::Testnet);
+            .into_bech32m(Network::Testnet(0));
 
         let encrypted_utxo_notification_again =
-            EncryptedUtxoNotification::from_bech32m(&encoded, Network::Testnet).unwrap();
+            EncryptedUtxoNotification::from_bech32m(&encoded, Network::Testnet(0)).unwrap();
 
         encrypted_utxo_notification == encrypted_utxo_notification_again
     }

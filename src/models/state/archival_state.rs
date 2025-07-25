@@ -1267,7 +1267,6 @@ pub(super) mod tests {
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
-    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1391,7 +1390,7 @@ pub(super) mod tests {
     async fn archival_state_restore_test() -> Result<()> {
         let mut rng = rand::rng();
         // Verify that a restored archival mutator set is populated with the right `sync_label`
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
         let cli_args = cli_args::Args::default_with_network(network);
         let genesis_wallet_state =
@@ -1431,7 +1430,7 @@ pub(super) mod tests {
         // Verify that `update_mutator_set` writes the active window back to disk.
         // Creates blocks and transaction with invalid proofs.
 
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(107221549301u64);
         let cli_args = cli_args::Args::default_with_network(network);
         let alice_wallet =
@@ -1522,7 +1521,7 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let mut rng = rand::rng();
-        let network = Network::Beta;
+        let network = Network::Main;
         let (mut archival_state, _peer_db_lock, _data_dir) =
             mock_genesis_archival_state(network).await;
         let own_wallet = WalletEntropy::new_random();
@@ -2387,11 +2386,11 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn get_tip_block_test() -> Result<()> {
         for network in [
-            Network::Beta,
-            Network::Beta,
             Network::Main,
             Network::RegTest,
-            Network::Testnet,
+            Network::TestnetMock,
+            Network::Testnet(0),
+            Network::Testnet(1),
         ] {
             let mut archival_state: ArchivalState = make_test_archival_state(network).await;
 
@@ -2477,7 +2476,7 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn get_block_test() -> Result<()> {
         let mut rng = rand::rng();
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
 
         let genesis = *archival_state.genesis_block.clone();
@@ -2717,7 +2716,13 @@ pub(super) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn find_canonical_block_with_aocl_index_genesis() {
-        for network in Network::iter() {
+        for network in [
+            Network::Main,
+            Network::TestnetMock,
+            Network::RegTest,
+            Network::Testnet(0),
+            Network::Testnet(1),
+        ] {
             let archival_state = make_test_archival_state(network).await;
             let genesis_block_digest = archival_state.genesis_block().hash();
             let num_premine_outputs = Block::premine_utxos().len() as u64;
@@ -2931,7 +2936,7 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn find_path_simple_test() -> Result<()> {
         let mut rng = rand::rng();
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
         let genesis = *archival_state.genesis_block.clone();
 
@@ -3083,7 +3088,7 @@ pub(super) mod tests {
             assert_eq!(forwards_expected, forwards, "\n\nforwards digests must match expected value. Got:\n {forwards:?}\n\n, Expected from helper function:\n{forwards_expected:?}\n");
         }
 
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
 
         let genesis = *archival_state.genesis_block.clone();
@@ -3430,7 +3435,7 @@ pub(super) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn digest_of_ancestors_panic_test() {
-        let archival_state = make_test_archival_state(Network::Beta).await;
+        let archival_state = make_test_archival_state(Network::Main).await;
 
         let genesis = archival_state.genesis_block.clone();
         archival_state
@@ -3442,7 +3447,7 @@ pub(super) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn digest_of_ancestors_test() {
         let mut rng = rand::rng();
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
         let genesis = *archival_state.genesis_block.clone();
         let wallet = WalletEntropy::new_random();
@@ -3542,7 +3547,7 @@ pub(super) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn write_block_db_test() -> Result<()> {
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut rng = rand::rng();
         let mut archival_state = make_test_archival_state(network).await;
         let genesis = *archival_state.genesis_block.clone();

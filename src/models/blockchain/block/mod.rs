@@ -451,7 +451,7 @@ impl Block {
     /// kernels. The net result is that broadcasting transaction on other
     /// networks invalidates the lock script proofs.
     pub(crate) fn premine_sender_randomness(network: Network) -> Digest {
-        Digest::new(bfe_array![network as u64, 0, 0, 0, 0])
+        Digest::new(bfe_array![u64::from(network.id()), 0, 0, 0, 0])
     }
 
     fn premine_distribution() -> Vec<(ReceivingAddress, NativeCurrencyAmount)> {
@@ -1078,7 +1078,6 @@ pub(crate) mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use strum::IntoEnumIterator;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
     use test_strategy::proptest;
     use tracing_test::traced_test;
@@ -1175,6 +1174,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn all_genesis_blocks_have_unique_sender_randomnesses() {
+        assert!(
+            Network::all_networks()
+                .map(Block::premine_sender_randomness)
+                .all_unique(),
+            "All genesis blocks must have unique sender randomness for the premine UTXOs",
+        );
+    }
+
+    #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {
         let mutator_set_hash = |network| {
             Block::genesis(network)
@@ -1184,7 +1193,7 @@ pub(crate) mod tests {
         };
 
         assert!(
-            Network::iter().map(mutator_set_hash).all_unique(),
+            Network::all_networks().map(mutator_set_hash).all_unique(),
             "All genesis blocks must have unique MSA digests, else replay attacks are possible",
         );
     }
@@ -1219,11 +1228,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn genesis_block_hasnt_changed_test_net() {
+    fn genesis_block_hasnt_changed_test_net_0() {
         // Insert the real difficulty such that the block's hash can be
         // compared to the one found in block explorers and other real
         // instances, otherwise the hash would only be valid for test code.
-        let network = Network::Testnet;
+        let network = Network::Testnet(0);
         let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
         assert_eq!(
             "380df1ec5895553d056acb7a35a6eb9967c893ccc1e7c6e86995459e4d20e4f99800f04c86711d53",

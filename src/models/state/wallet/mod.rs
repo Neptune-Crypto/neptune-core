@@ -32,7 +32,6 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::XFieldElement;
@@ -82,10 +81,17 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn wallet_state_constructor_with_genesis_block_test() {
         // This test is designed to verify that the genesis block is applied
-        // to the wallet state at initialization. For all networks.
+        // to the wallet state at initialization. For (practically) all networks.
 
         let mut rng = rand::rng();
-        for network in Network::iter() {
+        for network in [
+            Network::Main,
+            Network::TestnetMock,
+            Network::RegTest,
+            Network::Testnet(0),
+            Network::Testnet(1),
+            Network::Testnet(17),
+        ] {
             let cli_args = cli_args::Args::default_with_network(network);
             let mut alice =
                 mock_genesis_wallet_state(WalletEntropy::devnet_wallet(), &cli_args).await;
@@ -1163,7 +1169,7 @@ mod tests {
         let address = spending_key.to_address();
         println!(
             "_authority_wallet address: {}",
-            address.to_bech32m(Network::Beta).unwrap()
+            address.to_bech32m(Network::Main).unwrap()
         );
         println!(
             "_authority_wallet spending_lock: {}",

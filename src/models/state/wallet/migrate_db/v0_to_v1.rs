@@ -266,7 +266,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn migrate_real_v0_db() -> anyhow::Result<()> {
         // basics
-        let network = Network::Testnet;
+        let network = Network::Testnet(0);
         let data_dir = unit_test_data_directory(network)?;
 
         // obtain source db path and target path

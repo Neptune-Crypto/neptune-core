@@ -2028,7 +2028,7 @@ pub(crate) mod tests {
     #[apply(shared_tokio_runtime)]
     #[traced_test]
     async fn find_monitored_utxo_test() {
-        let network = Network::Testnet;
+        let network = Network::Testnet(0);
         let cli_args = cli_args::Args::default_with_network(network);
         let alice_global_lock =
             mock_genesis_global_state(0, WalletEntropy::devnet_wallet(), cli_args).await;

@@ -16,8 +16,8 @@ use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 /// returns human-readable-prefix for the given network
 pub(crate) fn network_hrp_char(network: Network) -> char {
     match network {
-        Network::Beta | Network::Main => 'm',
-        Network::Testnet => 't',
+        Network::Main => 'm',
+        Network::Testnet(_) => 't',
         Network::TestnetMock => 'z',
         Network::RegTest => 'r',
     }
