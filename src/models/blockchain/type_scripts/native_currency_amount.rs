@@ -126,6 +126,10 @@ impl NativeCurrencyAmount {
         self.0 /= 2;
     }
 
+    pub fn half(self) -> Self {
+        Self(self.0 / 2)
+    }
+
     /// Create a `coins` object for use in a UTXO
     pub fn to_native_coins(&self) -> Vec<Coin> {
         let dictionary = vec![Coin {
@@ -586,6 +590,27 @@ pub(crate) mod tests {
         ((NativeCurrencyAmount::MAX_NAU + 1)..=i128_max)
             .prop_map(NativeCurrencyAmount)
             .boxed()
+    }
+
+    #[test]
+    fn half_of_zero_and_one_nau() {
+        assert_eq!(
+            NativeCurrencyAmount::zero(),
+            NativeCurrencyAmount::from_nau(1).half()
+        );
+        assert_eq!(
+            NativeCurrencyAmount::zero(),
+            NativeCurrencyAmount::from_nau(0).half()
+        );
+    }
+
+    #[proptest]
+    fn two_times_half_value_is_value_up_to_rounding_error(value: i128) {
+        let is_odd = NativeCurrencyAmount::from_nau(value % 2);
+        let value = NativeCurrencyAmount::from_nau(value);
+        let half = value.half();
+        prop_assert_eq!(value, half + half + is_odd);
+        prop_assert_eq!(value, half.scalar_mul(2) + is_odd);
     }
 
     proptest::proptest! {

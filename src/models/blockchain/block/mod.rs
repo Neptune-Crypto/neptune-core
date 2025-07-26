@@ -1240,6 +1240,53 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn halving_happens_when_expected() {
+        // 1st halving should happen at block height `BLOCKS_PER_GENERATION` =
+        // 160.815, minus `NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT` = 21310. So at
+        // block height 139505, with that block being the first to have half the
+        // block subsidy of the initial block subsidy. The first block to have a
+        // quarter of the initial block subsidy should be of height 300320 =
+        // `2 * BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT`.
+        assert_eq!(INITIAL_BLOCK_SUBSIDY, Block::block_subsidy(bfe!(2).into()));
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY,
+            Block::block_subsidy(bfe!(100_000).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY,
+            Block::block_subsidy(bfe!(130_000).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY,
+            Block::block_subsidy(bfe!(139_503).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY,
+            Block::block_subsidy(bfe!(139_504).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY.half(),
+            Block::block_subsidy(bfe!(139_505).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY.half(),
+            Block::block_subsidy(bfe!(139_506).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY.half(),
+            Block::block_subsidy(bfe!(300_319).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY.half().half(),
+            Block::block_subsidy(bfe!(300_320).into())
+        );
+        assert_eq!(
+            INITIAL_BLOCK_SUBSIDY.half().half(),
+            Block::block_subsidy(bfe!(300_321).into())
+        );
+    }
+
     proptest::proptest! {
         #[test]
         fn block_subsidy_calculation_terminates(height_arb in arb::<BFieldElement>()) {
