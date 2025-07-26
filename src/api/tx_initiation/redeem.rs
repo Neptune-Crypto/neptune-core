@@ -166,6 +166,7 @@ impl Redeemer {
         address: Option<GenerationReceivingAddress>,
         timestamp: Timestamp,
     ) {
+        tracing::info!("Started producing UTXO redemption claim ...");
         let tx_details = match self.assemble_data(address, timestamp).await {
             Ok(txd) => txd,
             Err(e) => {
@@ -174,6 +175,7 @@ impl Redeemer {
             }
         };
 
+        tracing::info!("Obtained TX details for UTXO redemption claim; proceeding to assembling proof collection ...");
         let job_options = self.global_state_lock.cli().as_proof_job_options();
 
         Self::worker(directory, tx_details, job_options).await;

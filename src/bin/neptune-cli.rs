@@ -992,20 +992,21 @@ async fn main() -> Result<()> {
                     .map(|gra| gra.to_bech32m(Network::Main).unwrap())
                     .unwrap_or("None".to_string())
             );
+
+            client
+                .redeem_utxos(ctx, token, directory, address)
+                .await??;
         }
 
         Command::VerifyRedemption { directory, format } => {
             let default_directory: PathBuf = "redemption-claims/".into();
-            let directory = match ensure_readable_dir(directory.clone(), default_directory.clone())
-            {
-                Some(d) => d,
-                None => {
-                    println!(
-                        "Directory \"{}\" does not exist or is not readable.",
-                        directory.unwrap_or(default_directory).to_string_lossy()
-                    );
-                    return Ok(());
-                }
+            let Some(directory) = ensure_readable_dir(directory.clone(), default_directory.clone())
+            else {
+                println!(
+                    "Directory \"{}\" does not exist or is not readable.",
+                    directory.unwrap_or(default_directory).to_string_lossy()
+                );
+                return Ok(());
             };
 
             let report = client.verify_redemption(ctx, token, directory).await??;
@@ -1579,7 +1580,7 @@ impl FromStr for HexDigest {
 /// Credit to [https://www.perplexity.ai].
 pub fn ensure_writable_dir(path_opt: Option<PathBuf>, default: PathBuf) -> io::Result<PathBuf> {
     // Use default directory if Option is None
-    let dir = path_opt.unwrap_or_else(|| default);
+    let dir = path_opt.unwrap_or(default);
 
     // Create the directory if it doesn't exist
     if !dir.exists() {
@@ -1593,10 +1594,10 @@ pub fn ensure_writable_dir(path_opt: Option<PathBuf>, default: PathBuf) -> io::R
 
     // Check that it's a directory
     if !dir.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("Path {:?} is not a directory", dir),
-        ));
+        return Err(io::Error::other(format!(
+            "Path {:?} is not a directory",
+            dir
+        )));
     }
 
     // Check that it is writable by attempting to create a zero-byte file
@@ -1624,7 +1625,7 @@ pub fn ensure_writable_dir(path_opt: Option<PathBuf>, default: PathBuf) -> io::R
 /// Attempts to ensure the given directory (or the given default) exists and is
 /// readable.
 pub fn ensure_readable_dir(path: Option<PathBuf>, default: PathBuf) -> Option<PathBuf> {
-    let dir = path.unwrap_or_else(|| default);
+    let dir = path.unwrap_or(default);
 
     // Check if the directory exists
     if !dir.exists() || !dir.is_dir() {

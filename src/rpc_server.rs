@@ -3737,6 +3737,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        tracing::info!("Received redeem_utxos RPC call.");
         // delta-time to expire time-locks
         let four_years = Timestamp::years(4);
         Ok(self.state.api().redeemer().start_redeeming_utxos(
