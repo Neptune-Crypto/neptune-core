@@ -993,9 +993,26 @@ async fn main() -> Result<()> {
                     .unwrap_or("None".to_string())
             );
 
+            let absolute_path = match std::path::absolute(directory.clone()) {
+                Ok(p) => p,
+                Err(e) => {
+                    println!(
+                        "Could not complete relative path '{}': {e}",
+                        directory.to_string_lossy()
+                    );
+                    return Ok(());
+                }
+            };
+
             client
-                .redeem_utxos(ctx, token, directory, address)
+                .redeem_utxos(ctx, token, absolute_path, address)
                 .await??;
+
+            println!(
+                "Process started. Monitor '{}' as the claims will appear there \
+                when the node is finished producing them.",
+                directory.to_string_lossy()
+            );
         }
 
         Command::VerifyRedemption { directory, format } => {
