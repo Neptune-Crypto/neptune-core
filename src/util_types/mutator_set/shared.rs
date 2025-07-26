@@ -3,12 +3,11 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use super::chunk_dictionary::ChunkDictionary;
+use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
 
 pub const WINDOW_SIZE: u32 = 1 << 20;
 pub const CHUNK_SIZE: u32 = 1 << 12;

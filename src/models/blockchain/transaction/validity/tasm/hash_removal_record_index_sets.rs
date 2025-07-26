@@ -82,11 +82,13 @@ mod tests {
 
     use itertools::Itertools;
     use num_traits::ConstZero;
-    use proptest::prelude::Rng;
     use proptest::prelude::Strategy;
     use proptest::test_runner::RngAlgorithm;
     use proptest::test_runner::TestRng;
     use proptest::test_runner::TestRunner;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -115,7 +117,7 @@ mod tests {
             FunctionInitialState { stack, memory }
         }
 
-        fn pseudorandom_rrs_pointers(rng: &mut TestRng) -> [BFieldElement; N] {
+        fn pseudorandom_rrs_pointers(rng: &mut StdRng) -> [BFieldElement; N] {
             const ESTIMATED_MAX_NUMBER_OF_REMOVAL_RECORDS: u64 = 20;
             const ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORD: u64 = 10_000;
             const ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORDS_LIST: u64 =
@@ -124,7 +126,7 @@ mod tests {
             let mut previous_ptr = BFieldElement::ZERO;
             for ptr in &mut rrs_ptrs {
                 *ptr = previous_ptr
-                    + bfe!(rng.gen_range(ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORDS_LIST..(1 << 26)));
+                    + bfe!(rng.random_range(ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORDS_LIST..(1 << 26)));
                 previous_ptr = *ptr;
             }
 
@@ -160,7 +162,7 @@ mod tests {
             seed: [u8; 32],
             bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
-            let mut rng: TestRng = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
 
             let rrs_ptrs = Self::pseudorandom_rrs_pointers(&mut rng);
 
@@ -168,14 +170,18 @@ mod tests {
                 Some(BenchmarkCase::CommonCase) => (2, 0, 0),
                 Some(BenchmarkCase::WorstCase) => (20, 0, 0),
                 None => (
-                    rng.gen_range(0..10),
-                    rng.gen_range(0..10),
-                    rng.gen_range(0..10),
+                    rng.random_range(0..10),
+                    rng.random_range(0..10),
+                    rng.random_range(0..10),
                 ),
             };
             let (num_inputs, num_outputs, num_announcements) = arb_params;
 
-            let mut test_runner = TestRunner::new_with_rng(Default::default(), rng);
+            let seedd: [u8; 32] = rng.random();
+            let mut test_runner = TestRunner::new_with_rng(
+                Default::default(),
+                TestRng::from_seed(RngAlgorithm::ChaCha, &seedd),
+            );
             let mut removal_records = vec![];
             for _ in 0..N {
                 let removal_record = PrimitiveWitness::arbitrary_with_size_numbers(
@@ -197,7 +203,7 @@ mod tests {
         }
 
         fn corner_case_initial_states(&self) -> Vec<FunctionInitialState> {
-            let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
+            let mut rng: StdRng = SeedableRng::seed_from_u64(5550001);
             let rrs_ptrs = Self::pseudorandom_rrs_pointers(&mut rng);
             let rrss = vec![vec![]; N].try_into().unwrap();
             let no_inputs = self.init_state(rrs_ptrs, rrss);

@@ -29,7 +29,7 @@ pub(crate) async fn mock_genesis_archival_state(
     let data_dir = super::files::unit_test_data_directory(network).unwrap();
 
     let genesis = Block::genesis(network);
-    let archival_state = ArchivalState::new(data_dir.clone(), genesis).await;
+    let archival_state = ArchivalState::new(data_dir.clone(), genesis, network).await;
     let peer_db =
         crate::models::state::networking_state::NetworkingState::initialize_peer_databases(
             &data_dir,

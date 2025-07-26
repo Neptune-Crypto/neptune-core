@@ -69,11 +69,15 @@ mod tests {
 
     use itertools::Itertools;
     use num_traits::ConstZero;
-    use prop::test_runner::RngAlgorithm;
-    use prop::test_runner::TestRng;
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::RngAlgorithm;
+    use proptest::test_runner::TestRng;
     use rand::random;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use strum::EnumCount;
     use strum::VariantArray;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
@@ -262,11 +266,15 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> ReadOnlyAlgorithmInitialState {
-            let mut rng: TestRng = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
-            let inputs_ptr: BFieldElement = bfe!(rng.gen_range(0..(1 << 30)));
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
+            let inputs_ptr: BFieldElement = bfe!(rng.random_range(0..(1 << 30)));
 
             let primitive_witness: PrimitiveWitness = {
-                let mut test_runner = TestRunner::new_with_rng(Default::default(), rng);
+                let seedd: [u8; 32] = rng.random();
+                let mut test_runner = TestRunner::new_with_rng(
+                    Default::default(),
+                    TestRng::from_seed(RngAlgorithm::ChaCha, &seedd),
+                );
                 PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
                     .new_tree(&mut test_runner)
                     .unwrap()

@@ -34,6 +34,7 @@ use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
@@ -1215,7 +1216,7 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::Handshake(_) => {
+            PeerMessage::Handshake { .. } => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Handshake");
 
                 // The handshake should have been sent during connection
@@ -1246,11 +1247,25 @@ impl PeerLoopHandler {
 
                 let transaction: Transaction = (*transaction).into();
 
+                let (tip, mutator_set_accumulator_after, current_block_height) = {
+                    let state = self.global_state_lock.lock_guard().await;
+
+                    (
+                        state.chain.light_state().hash(),
+                        state
+                            .chain
+                            .light_state()
+                            .mutator_set_accumulator_after()
+                            .expect("Block from state must have mutator set after"),
+                        state.chain.light_state().header().height,
+                    )
+                };
+
                 // 1. If transaction is invalid, punish.
-                if !transaction
-                    .is_valid(self.global_state_lock.cli().network)
-                    .await
-                {
+                let network = self.global_state_lock.cli().network;
+                let consensus_rule_set =
+                    ConsensusRuleSet::infer_from(network, current_block_height);
+                if !transaction.is_valid(network, consensus_rule_set).await {
                     warn!("Received invalid tx");
                     self.punish(NegativePeerSanction::InvalidTransaction)
                         .await?;
@@ -1295,18 +1310,6 @@ impl PeerLoopHandler {
                 }
 
                 // 5. if transaction is not confirmable, punish.
-                let (tip, mutator_set_accumulator_after) = {
-                    let state = self.global_state_lock.lock_guard().await;
-
-                    (
-                        state.chain.light_state().hash(),
-                        state
-                            .chain
-                            .light_state()
-                            .mutator_set_accumulator_after()
-                            .expect("Block from state must have mutator set after"),
-                    )
-                };
                 if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
                     warn!(
                         "Received unconfirmable transaction with TXID {}. Unconfirmable because:",
@@ -1354,12 +1357,20 @@ impl PeerLoopHandler {
                                 .await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
+                        Err(TransactionConfirmabilityError::RemovalRecordUnpackFailure) => {
+                            warn!("Failed to unpack removal records");
+                            self.punish(NegativePeerSanction::InvalidTransaction)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
                     };
                 }
 
                 // If transaction cannot be applied to mutator set, punish.
                 // I don't think this can happen when above checks pass but we include
                 // the check to ensure that transaction can be applied.
+
+                // TODO: Try unpacking tx-inputs
                 let ms_update = MutatorSetUpdate::new(
                     transaction.kernel.inputs.clone(),
                     transaction.kernel.outputs.clone(),
@@ -1719,9 +1730,15 @@ impl PeerLoopHandler {
                     let peer_message = match peer_message {
                         Ok(message) => message,
                         Err(err) => {
+                            // Don't disconnect if message type is unknown, as
+                            // this allows the adding of new message types in
+                            // the future. Consider only keeping connection open
+                            // if this is a deserialization error, and close
+                            // otherwise.
                             let msg = format!("Error when receiving from peer: {peer_address}");
-                            error!("{msg}. Error: {err}");
-                            bail!("{msg}. Closing connection.");
+                            warn!("{msg}. Error: {err}");
+                            self.punish(NegativePeerSanction::InvalidMessage).await?;
+                            continue;
                         }
                     };
                     let Some(peer_message) = peer_message else {
@@ -1955,6 +1972,7 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
+    use crate::models::peer::Sanction;
     use crate::models::state::mempool::upgrade_priority::UpgradePriority;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -1972,11 +1990,51 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
+    async fn no_disconnect_on_invalid_message() {
+        // This test is intended to simulate a deserialization error, which
+        // would occur if the node is connected to a newer version of the
+        // software which has new variants of `PeerMessage`. The intended
+        // behavior is that a small punishment is applied but that the
+        // connection stays open.
+        let mock = Mock::new(vec![Action::ReadError, Action::Read(PeerMessage::Bye)]);
+
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
+            get_test_genesis_setup(Network::Main, 1, cli_args::Args::default())
+                .await
+                .unwrap();
+
+        let peer_address = get_dummy_socket_address(2);
+        let from_main_rx_clone = peer_broadcast_tx.subscribe();
+        let mut peer_loop_handler =
+            PeerLoopHandler::new(to_main_tx, state_lock.clone(), peer_address, hsd, true, 1);
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await
+            .unwrap();
+
+        let peer_standing = state_lock
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(peer_address.ip())
+            .await;
+        assert_eq!(
+            NegativePeerSanction::InvalidMessage.severity(),
+            peer_standing.unwrap().standing
+        );
+        assert_eq!(
+            NegativePeerSanction::InvalidMessage,
+            peer_standing.unwrap().latest_punishment.unwrap().0
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_bye() -> Result<()> {
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(Network::Beta, 2, cli_args::Args::default()).await?;
+            get_test_genesis_setup(Network::Main, 2, cli_args::Args::default()).await?;
 
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
@@ -1998,8 +2056,9 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_peer_list() {
+        let network = Network::Main;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Beta, 2, cli_args::Args::default())
+            get_test_genesis_setup(network, 2, cli_args::Args::default())
                 .await
                 .unwrap();
 
@@ -2021,7 +2080,7 @@ mod tests {
             peer_infos[1].instance_id(),
         );
 
-        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Beta, 2);
+        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(network, 2);
         let expected_response = vec![
             (peer_address0, instance_id0),
             (peer_address1, instance_id1),
@@ -2352,7 +2411,7 @@ mod tests {
                 to_main_tx,
                 _to_main_rx1,
                 mut state_lock,
-                hsd,
+                handshake,
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
                 .unwrap();
@@ -2408,7 +2467,7 @@ mod tests {
                     to_main_tx.clone(),
                     state_lock.clone(),
                     peer_address,
-                    hsd.clone(),
+                    handshake,
                     false,
                     1,
                 );
@@ -2494,7 +2553,7 @@ mod tests {
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_address,
-                hsd.clone(),
+                hsd,
                 false,
                 1,
                 block_3_a.header().timestamp,
@@ -3006,7 +3065,7 @@ mod tests {
             cli.sync_mode_threshold = 2;
             state_lock.set_cli(cli).await;
 
-            let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Beta, 1);
+            let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(network, 1);
             let [block_1, _block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
@@ -3525,6 +3584,7 @@ mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(spending_key.into())
                 .with_prover_capability(TxProvingCapability::ProofCollection);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let transaction_1: Transaction = state_lock
                 .api()
                 .tx_initiator_internal()
@@ -3533,6 +3593,7 @@ mod tests {
                     NativeCurrencyAmount::coins(0),
                     now,
                     config,
+                    consensus_rule_set,
                 )
                 .await
                 .unwrap()
@@ -3557,7 +3618,7 @@ mod tests {
                 to_main_tx,
                 state_lock.clone(),
                 get_dummy_socket_address(0),
-                hsd_1.clone(),
+                hsd_1,
                 true,
                 1,
                 now,
@@ -3610,6 +3671,7 @@ mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(spending_key.into())
                 .with_prover_capability(TxProvingCapability::ProofCollection);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
             let transaction_1: Transaction = state_lock
                 .api()
                 .tx_initiator_internal()
@@ -3618,6 +3680,7 @@ mod tests {
                     NativeCurrencyAmount::coins(0),
                     now,
                     config,
+                    consensus_rule_set,
                 )
                 .await
                 .unwrap()
@@ -3629,7 +3692,7 @@ mod tests {
                 to_main_tx,
                 state_lock.clone(),
                 get_dummy_socket_address(0),
-                hsd_1.clone(),
+                hsd_1,
                 true,
                 1,
             );
@@ -3691,18 +3754,24 @@ mod tests {
 
             for proof_type in [ProofType::ProofCollection, ProofType::SingleProof] {
                 let proof_job_options = TritonVmProofJobOptions::default();
-                let upgrade = async |primitive_witness: PrimitiveWitness| match proof_type {
-                    ProofType::ProofCollection => {
-                        PrimitiveWitnessToProofCollection { primitive_witness }
-                            .upgrade(vm_job_queue(), &proof_job_options)
-                            .await
-                            .unwrap()
-                    }
-                    ProofType::SingleProof => PrimitiveWitnessToSingleProof { primitive_witness }
-                        .upgrade(vm_job_queue(), &proof_job_options)
-                        .await
-                        .unwrap(),
-                };
+                let upgrade =
+                    async |primitive_witness: PrimitiveWitness,
+                           consensus_rule_set: ConsensusRuleSet| {
+                        match proof_type {
+                            ProofType::ProofCollection => {
+                                PrimitiveWitnessToProofCollection { primitive_witness }
+                                    .upgrade(vm_job_queue(), &proof_job_options)
+                                    .await
+                                    .unwrap()
+                            }
+                            ProofType::SingleProof => {
+                                PrimitiveWitnessToSingleProof { primitive_witness }
+                                    .upgrade(vm_job_queue(), &proof_job_options, consensus_rule_set)
+                                    .await
+                                    .unwrap()
+                            }
+                        }
+                    };
 
                 let (
                     _peer_broadcast_tx,
@@ -3714,6 +3783,8 @@ mod tests {
                 ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
                     .await
                     .unwrap();
+                let consensus_rule_set =
+                    ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
                 let fee = NativeCurrencyAmount::from_nau(500);
                 let pw_genesis =
                     genesis_tx_with_proof_type(TxProvingCapability::PrimitiveWitness, network, fee)
@@ -3722,7 +3793,7 @@ mod tests {
                         .clone()
                         .into_primitive_witness();
 
-                let tx_synced_to_genesis = upgrade(pw_genesis.clone()).await;
+                let tx_synced_to_genesis = upgrade(pw_genesis.clone(), consensus_rule_set).await;
 
                 let genesis_block = Block::genesis(network);
                 let block1 = fake_deterministic_successor(&genesis_block, network).await;
@@ -3742,7 +3813,7 @@ mod tests {
                 // Mempool should now contain the unsynced transaction. Tip is block 1.
                 let pw_block1 =
                     pw_genesis.update_with_new_ms_data(block1.mutator_set_update().unwrap());
-                let tx_synced_to_block1 = upgrade(pw_block1).await;
+                let tx_synced_to_block1 = upgrade(pw_block1, consensus_rule_set).await;
 
                 let tx_notification: TransactionNotification =
                     (&tx_synced_to_block1).try_into().unwrap();
@@ -3762,7 +3833,7 @@ mod tests {
                     to_main_tx,
                     state_lock.clone(),
                     get_dummy_socket_address(0),
-                    hsd_1.clone(),
+                    hsd_1,
                     true,
                     1,
                     now,
@@ -3807,7 +3878,7 @@ mod tests {
                 to_main_tx.clone(),
                 alice.clone(),
                 get_dummy_socket_address(0),
-                peer_hsd.clone(),
+                peer_hsd,
                 true,
                 1,
             );
@@ -3936,6 +4007,8 @@ mod tests {
             let config = TxCreationConfig::default()
                 .recover_change_off_chain(alice_key.into())
                 .with_prover_capability(prover_capability);
+            let block_height = genesis_block.header().height;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
             alice_gsl
                 .api()
                 .tx_initiator_internal()
@@ -3944,6 +4017,7 @@ mod tests {
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,
                     config,
+                    consensus_rule_set,
                 )
                 .await
                 .unwrap()
@@ -3975,7 +4049,7 @@ mod tests {
                     to_main_tx,
                     mut to_main_rx1,
                     mut alice,
-                    handshake_data,
+                    handshake,
                 ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
                     .await
                     .unwrap();
@@ -4019,12 +4093,12 @@ mod tests {
                     to_main_tx,
                     alice.clone(),
                     get_dummy_socket_address(0),
-                    handshake_data.clone(),
+                    handshake,
                     true,
                     1,
                     now,
                 );
-                let mut peer_state = MutablePeerState::new(handshake_data.tip_header.height);
+                let mut peer_state = MutablePeerState::new(handshake.tip_header.height);
 
                 peer_loop_handler
                     .run(mock, from_main_rx_clone, &mut peer_state)

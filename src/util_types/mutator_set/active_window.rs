@@ -7,12 +7,12 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
-use twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
-use super::chunk::Chunk;
+use super::removal_record::chunk::Chunk;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
-use crate::prelude::twenty_first;
+
 #[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct ActiveWindow {
@@ -109,6 +109,9 @@ impl ActiveWindow {
         self.sbf.sort();
     }
 
+    /// # Panics
+    ///
+    /// - if the index is not less than window size
     pub fn insert(&mut self, index: u32) {
         assert!(
             index < WINDOW_SIZE,

@@ -1,165 +1,42 @@
+pub(crate) mod absolute_index_set;
+pub(crate) mod chunk;
+pub(crate) mod chunk_dictionary;
+pub(crate) mod removal_record_list;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::marker::PhantomData;
 use std::ops::IndexMut;
 
+use absolute_index_set::AbsoluteIndexSet;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use arbitrary::Result;
+// #[cfg(any(test, feature = "arbitrary-impls"))]
 use get_size2::GetSize;
 use itertools::Itertools;
-use serde::de::SeqAccess;
-use serde::de::Visitor;
-use serde::ser::SerializeTuple;
 use serde::Deserialize;
 use serde_derive::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::util_types::mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 #[cfg(test)]
 pub use tests::propcompose_absindset;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
-use twenty_first::util_types::mmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use super::chunk_dictionary::ChunkDictionary;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
+use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::shared::get_batch_mutation_argument_for_removal_record;
 use super::shared::indices_to_hash_map;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-use super::shared::NUM_TRIALS;
 use super::MutatorSetError;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Hash)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
-pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
-
-impl GetSize for AbsoluteIndexSet {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
-
-    fn get_heap_size(&self) -> usize {
-        self.0.get_heap_size()
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
-}
-
-impl AbsoluteIndexSet {
-    pub fn new(indices: &[u128; NUM_TRIALS as usize]) -> Self {
-        Self(*indices)
-    }
-
-    pub fn sort_unstable(&mut self) {
-        self.0.sort_unstable();
-    }
-
-    pub fn to_vec(&self) -> Vec<u128> {
-        self.0.to_vec()
-    }
-
-    pub fn to_array(&self) -> [u128; NUM_TRIALS as usize] {
-        self.0
-    }
-
-    pub fn to_array_mut(&mut self) -> &mut [u128; NUM_TRIALS as usize] {
-        &mut self.0
-    }
-
-    /// Split the [`AbsoluteIndexSet`] into two parts, one for chunks in the
-    /// inactive part of the Bloom filter and another one for chunks in the
-    /// active part of the Bloom filter.
-    ///
-    /// Returns an error if a removal index is a future value, i.e. one that's
-    /// not yet covered by the active window.
-    #[expect(clippy::type_complexity)]
-    pub fn split_by_activity(
-        &self,
-        mutator_set: &MutatorSetAccumulator,
-    ) -> Result<(HashMap<u64, Vec<u128>>, Vec<u128>), MutatorSetError> {
-        let (aw_chunk_index_min, aw_chunk_index_max) = mutator_set.active_window_chunk_interval();
-        let (inactive, active): (HashMap<_, _>, HashMap<_, _>) = indices_to_hash_map(&self.0)
-            .into_iter()
-            .partition(|&(chunk_index, _)| chunk_index < aw_chunk_index_min);
-
-        if let Some(chunk_index) = active.keys().find(|&&k| k > aw_chunk_index_max) {
-            return Err(MutatorSetError::AbsoluteRemovalIndexIsFutureIndex {
-                current_max_chunk_index: aw_chunk_index_max,
-                saw_chunk_index: *chunk_index,
-            });
-        }
-
-        let active = active.into_values().flatten().collect_vec();
-
-        Ok((inactive, active))
-    }
-}
-
-impl serde::Serialize for AbsoluteIndexSet {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut seq = serializer.serialize_tuple(NUM_TRIALS as usize)?;
-        for b in self.0 {
-            seq.serialize_element(&b)?;
-        }
-        seq.end()
-    }
-}
-
-/// ArrayVisitor
-/// Used for deserializing large arrays, with size known at compile time.
-/// Credit: MikailBag <https://github.com/serde-rs/serde/issues/1937>
-struct ArrayVisitor<T, const N: usize>(PhantomData<T>);
-
-impl<'de, T, const N: usize> Visitor<'de> for ArrayVisitor<T, N>
-where
-    T: Deserialize<'de>,
-{
-    type Value = [T; N];
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str(&format!("an array of length {}", N))
-    }
-
-    #[inline]
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        // can be optimized using MaybeUninit
-        let mut data = Vec::with_capacity(N);
-        for _ in 0..N {
-            match (seq.next_element())? {
-                Some(val) => data.push(val),
-                None => return Err(serde::de::Error::invalid_length(N, &self)),
-            }
-        }
-        match data.try_into() {
-            Ok(arr) => Ok(arr),
-            Err(_) => unreachable!(),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for AbsoluteIndexSet {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(AbsoluteIndexSet::new(&deserializer.deserialize_tuple(
-            NUM_TRIALS as usize,
-            ArrayVisitor::<u128, { NUM_TRIALS as usize }>(PhantomData),
-        )?))
-    }
-}
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct RemovalRecord {
@@ -185,6 +62,14 @@ impl RemovalRecord {
         // window does slide
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
+
+        let next_batch_index = new_item_index / u64::from(BATCH_SIZE);
+        let current_batch_index = next_batch_index - 1;
+        assert_eq!(
+            current_batch_index,
+            mutator_set.swbf_inactive.num_leafs(),
+            "Number of SWBF MMR leafs must match current batch index"
+        );
 
         // Insert the new chunk digest into the accumulator-version of the
         // SWBF MMR to get its authentication path. It's important to convert the MMR
@@ -333,7 +218,9 @@ impl RemovalRecord {
         required_chunk_indices == proven_chunk_indices
     }
 
-    /// Validates that a removal record is synchronized against the inactive part of the SWBF
+    /// Validates that a removal record is synchronized against the inactive
+    /// part of the SWBF, and that all required chunk/MMR membership proofs are
+    /// present.
     pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
         self.validate_inner(mutator_set).is_ok()
     }
@@ -380,38 +267,29 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use arbitrary::Unstructured;
     use itertools::Itertools;
+    use proptest::collection::vec;
     use proptest::prelude::*;
-    use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
+    use tasm_lib::triton_vm::prelude::BFieldCodec;
 
     use super::*;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
+    use arbitrary::Arbitrary;
 
-    impl AbsoluteIndexSet {
-        /// Test-function used for negative tests of removal records
-        pub(crate) fn increment_bloom_filter_index(&mut self, index: usize) {
-            self.0[index] = self.0[index].wrapping_add(1);
-        }
-
-        /// Test-function used for negative tests of removal records
-        pub(crate) fn decrement_bloom_filter_index(&mut self, index: usize) {
-            self.0[index] = self.0[index].wrapping_sub(1);
-        }
-    }
-
-    prop_compose! {
-        pub fn propcompose_absindset() (inner in [proptest::prelude::any::<u128>(); NUM_TRIALS as usize]) -> AbsoluteIndexSet {
-            AbsoluteIndexSet::new(&inner)
-        }
+    pub fn propcompose_absindset() -> impl Strategy<Value = AbsoluteIndexSet> {
+        vec(arb::<u8>(), 16_usize + (NUM_TRIALS as usize) * 4)
+            .prop_map(|bytes| AbsoluteIndexSet::arbitrary(&mut Unstructured::new(&bytes)).unwrap())
     }
 
     #[test]
@@ -470,9 +348,9 @@ mod tests {
     fn verify_that_removal_records_and_mp_indices_agree() {
         let (item, mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
-        let mut mp_indices = mp.compute_indices(item).0;
+        let mut mp_indices = mp.compute_indices(item).to_array();
         mp_indices.sort_unstable();
-        let mut removal_rec_indices = removal_record.absolute_indices.0;
+        let mut removal_rec_indices = removal_record.absolute_indices.to_array();
         removal_rec_indices.sort_unstable();
 
         assert_eq!(
@@ -493,7 +371,9 @@ mod tests {
         );
 
         // Verify that changing the absolute indices, changes the hash value
-        removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS as usize / 4] += 1;
+        removal_record_alt
+            .absolute_indices
+            .increment_bloom_filter_index(NUM_TRIALS as usize / 4);
         assert_ne!(
             Hash::hash(&removal_record),
             Hash::hash(&removal_record_alt),
@@ -510,7 +390,7 @@ mod tests {
         // Verify that indices from membership proof and remove records agree
         let mut rr_indices: Vec<u128> = chunks2indices.clone().into_values().concat();
         rr_indices.sort_unstable();
-        let mut mp_indices = mp.compute_indices(item).0;
+        let mut mp_indices = mp.compute_indices(item).to_array();
         mp_indices.sort_unstable();
         assert_eq!(mp_indices.to_vec(), rr_indices);
         assert_eq!(NUM_TRIALS as usize, rr_indices.len());
@@ -740,7 +620,7 @@ mod tests {
         let mut removal_records: Vec<(usize, RemovalRecord)> = vec![];
         let mut items = vec![];
         let mut mps = vec![];
-        for i in 0..12 * BATCH_SIZE + 4 {
+        for i in 0..16 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
@@ -783,14 +663,29 @@ mod tests {
                     i
                 );
             }
+            let just_removal_records = removal_records
+                .iter()
+                .map(|(_, rr)| rr.clone())
+                .collect_vec();
+            assert_eq!(
+                just_removal_records.clone(),
+                RemovalRecordList::try_unpack(RemovalRecordList::pack(
+                    just_removal_records.clone(),
+                ),)
+                .unwrap_or_else(|err| panic!(
+                    "i: {i};\n\n just_removal_records: {just_removal_records:#?}\n. Error:\n{err}"
+                )),
+                "i: {i};\n\n just_removal_records: {just_removal_records:#?}\n"
+            );
 
             let rr = accumulator.drop(item, &mp);
 
             removal_records.push((i as usize, rr));
         }
 
-        // Now apply all removal records one at a time and batch update the remaining removal records
-        for i in 0..12 * BATCH_SIZE + 4 {
+        // Now apply all removal records one at a time and batch update the
+        // remaining removal records to keep them valid.
+        for i in 0..16 * BATCH_SIZE + 4 {
             let remove_idx = rand::rng().random_range(0..removal_records.len());
             let random_removal_record = removal_records.remove(remove_idx).1;
             RemovalRecord::batch_update_from_remove(
@@ -813,6 +708,16 @@ mod tests {
                 );
                 assert!(accumulator.can_remove(removal_record));
             }
+
+            let just_removal_records = removal_records
+                .iter()
+                .map(|(_, rr)| rr.clone())
+                .collect_vec();
+            assert_eq!(
+                just_removal_records.clone(),
+                RemovalRecordList::try_unpack(RemovalRecordList::pack(just_removal_records),)
+                    .unwrap()
+            );
         }
     }
 

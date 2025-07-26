@@ -105,7 +105,7 @@ impl NativeCurrencyAmount {
 
     /// Return the element that corresponds to 1 nau. Use in tests only.
     #[cfg(test)]
-    pub fn one() -> NativeCurrencyAmount {
+    pub fn one_nau() -> NativeCurrencyAmount {
         NativeCurrencyAmount(1i128)
     }
 
@@ -124,6 +124,10 @@ impl NativeCurrencyAmount {
 
     pub fn div_two(&mut self) {
         self.0 /= 2;
+    }
+
+    pub fn half(self) -> Self {
+        Self(self.0 / 2)
     }
 
     /// Create a `coins` object for use in a UTXO
@@ -239,7 +243,7 @@ impl NativeCurrencyAmount {
         }
     }
 
-    /// Generate tasm code for pushing this amount to the stack.
+    /// Return tasm code for pushing this amount to the stack.
     pub(crate) fn push_to_stack(&self) -> Vec<LabelledInstruction> {
         self.encode()
             .into_iter()
@@ -570,6 +574,7 @@ pub(crate) mod tests {
     use proptest::prop_assert_eq;
     use proptest::prop_assume;
     use proptest_arbitrary_interop::arb;
+    use tasm_lib::triton_vm::isa::instruction::AnInstruction;
     use test_strategy::proptest;
 
     use super::*;
@@ -585,6 +590,27 @@ pub(crate) mod tests {
         ((NativeCurrencyAmount::MAX_NAU + 1)..=i128_max)
             .prop_map(NativeCurrencyAmount)
             .boxed()
+    }
+
+    #[test]
+    fn half_of_zero_and_one_nau() {
+        assert_eq!(
+            NativeCurrencyAmount::zero(),
+            NativeCurrencyAmount::from_nau(1).half()
+        );
+        assert_eq!(
+            NativeCurrencyAmount::zero(),
+            NativeCurrencyAmount::from_nau(0).half()
+        );
+    }
+
+    #[proptest]
+    fn two_times_half_value_is_value_up_to_rounding_error(value: i128) {
+        let is_odd = NativeCurrencyAmount::from_nau(value % 2);
+        let value = NativeCurrencyAmount::from_nau(value);
+        let half = value.half();
+        prop_assert_eq!(value, half + half + is_odd);
+        prop_assert_eq!(value, half.scalar_mul(2) + is_odd);
     }
 
     proptest::proptest! {
@@ -723,6 +749,34 @@ pub(crate) mod tests {
         let two = BigInt::from_i8(2).unwrap();
         assert!(conversion_factor.clone() * two * forty_two_million.clone() >= two_pow_127);
         assert!(conversion_factor * five * forty_two_million >= two_pow_127);
+    }
+
+    #[test]
+    fn sign_bit_of_max_amount_is_zero() {
+        let first_instruction = NativeCurrencyAmount::max().push_to_stack()[0].clone();
+        let LabelledInstruction::Instruction(AnInstruction::Push(push_value)) = first_instruction
+        else {
+            panic!("Expected a push instruction");
+        };
+        let push_value: u32 = push_value
+            .value()
+            .try_into()
+            .expect("Expected a valid u32 value");
+        assert!((push_value & 0x80_00_00_00).is_zero());
+    }
+
+    #[test]
+    fn sign_bit_of_min_amount_is_one() {
+        let first_instruction = NativeCurrencyAmount::min().push_to_stack()[0].clone();
+        let LabelledInstruction::Instruction(AnInstruction::Push(push_value)) = first_instruction
+        else {
+            panic!("Expected a push instruction");
+        };
+        let push_value: u32 = push_value
+            .value()
+            .try_into()
+            .expect("Expected a valid u32 value");
+        assert!(!(push_value & 0x80_00_00_00).is_zero());
     }
 
     #[test]

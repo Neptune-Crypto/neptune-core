@@ -16,9 +16,9 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
-use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -27,7 +27,6 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm;
-use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct CollectLockScriptsWitness {

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::expected_utxo::ExpectedUtxo;
 use super::migrate_db;
@@ -14,7 +14,6 @@ use crate::database::storage::storage_schema::RustyKey;
 use crate::database::storage::storage_schema::RustyValue;
 use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
-use crate::prelude::twenty_first;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {
@@ -130,14 +129,6 @@ impl RustyWalletDatabase {
     /// get mutable sent transactions
     pub fn sent_transactions_mut(&mut self) -> &mut DbtVec<SentTransaction> {
         &mut self.tables.sent_transactions
-    }
-
-    pub fn guesser_preimages(&self) -> &DbtVec<Digest> {
-        &self.tables.guesser_preimages
-    }
-
-    pub fn guesser_preimages_mut(&mut self) -> &mut DbtVec<Digest> {
-        &mut self.tables.guesser_preimages
     }
 
     /// Get the hash of the block to which this database is synced.

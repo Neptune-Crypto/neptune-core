@@ -24,10 +24,6 @@ impl UtxoTriple {
             self.receiver_digest,
         )
     }
-
-    pub(crate) fn utxo(&self) -> Utxo {
-        self.utxo.clone()
-    }
 }
 
 impl From<TxOutput> for UtxoTriple {

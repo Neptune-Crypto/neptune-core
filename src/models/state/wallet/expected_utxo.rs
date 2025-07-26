@@ -3,12 +3,11 @@ use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 /// represents utxo and secrets necessary for recipient to claim it.

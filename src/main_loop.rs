@@ -40,6 +40,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
@@ -534,26 +535,34 @@ impl MainLoopHandler {
                     old_kernel,
                     old_single_proof,
                 } => {
-                    let msa_lookup_result = global_state_lock
-                        .lock_guard_mut()
-                        .await
-                        .chain
-                        .archival_state_mut()
-                        .old_mutator_set_and_mutator_set_update_to_tip(
-                            old_kernel.mutator_set_hash,
-                            SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
-                        )
-                        .await;
+                    let (msa_lookup_result, tip_height) = {
+                        let mut state = global_state_lock.lock_guard_mut().await;
+                        let msa_lookup_result = state
+                            .chain
+                            .archival_state_mut()
+                            .old_mutator_set_and_mutator_set_update_to_tip(
+                                old_kernel.mutator_set_hash,
+                                SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+                            )
+                            .await;
+                        let tip_height = state.chain.light_state().header().height;
+
+                        (msa_lookup_result, tip_height)
+                    };
                     let Some((old_mutator_set, mutator_set_update)) = msa_lookup_result else {
                         result.push(MempoolUpdateJobResult::Failure(txid));
                         continue;
                     };
+                    let network = global_state_lock.cli().network;
+                    // let block_height = global_state_lock.
+                    let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip_height);
                     let update_job = UpdateMutatorSetDataJob::new(
                         old_kernel.to_owned(),
                         old_single_proof.to_owned(),
                         old_mutator_set,
                         mutator_set_update,
                         UpgradeIncentive::Critical,
+                        consensus_rule_set,
                     );
 
                     // No locks may be held here!
@@ -1165,7 +1174,6 @@ impl MainLoopHandler {
             let global_state_lock = self.global_state_lock.clone();
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
             let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
-            let own_handshake_data = own_handshake_data.clone();
             let outgoing_connection_task = tokio::task::Builder::new()
                 .name("call_peer_wrapper_1")
                 .spawn(async move {
@@ -2077,7 +2085,7 @@ mod tests {
         let network = main_loop_handler.global_state_lock.cli().network;
         let mut mutable_main_loop_state = main_loop_handler.mutable();
 
-        let block1 = invalid_empty_block(network, &Block::genesis(network));
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
 
         assert!(
             main_loop_handler
@@ -2373,6 +2381,7 @@ mod tests {
 
     mod proof_upgrader {
         use super::*;
+        use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -2385,6 +2394,7 @@ mod tests {
             global_state_lock: &mut GlobalStateLock,
             tx_proof_type: TxProvingCapability,
             fee: NativeCurrencyAmount,
+            consensus_rule_set: ConsensusRuleSet,
         ) -> Arc<Transaction> {
             let change_key = global_state_lock
                 .lock_guard()
@@ -2407,7 +2417,13 @@ mod tests {
             global_state_lock
                 .api()
                 .tx_initiator_internal()
-                .create_transaction(Vec::<TxOutput>::new().into(), fee, in_seven_months, config)
+                .create_transaction(
+                    Vec::<TxOutput>::new().into(),
+                    fee,
+                    in_seven_months,
+                    config,
+                    consensus_rule_set,
+                )
                 .await
                 .unwrap()
                 .transaction
@@ -2440,7 +2456,7 @@ mod tests {
 
             main_loop_handler
                 .global_state_lock
-                .set_cli(mocked_cli)
+                .set_cli(mocked_cli.clone())
                 .await;
             let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
             let mut mutable_main_loop_state = main_loop_handler.mutable();
@@ -2453,11 +2469,14 @@ mod tests {
                 "Scheduled task returns OK when run on empty mempool"
             );
 
+            let consensus_rule_set =
+                ConsensusRuleSet::infer_from(mocked_cli.network, BlockHeight::genesis());
             let fee = NativeCurrencyAmount::coins(1);
             let proof_collection_tx = tx_no_outputs(
                 &mut main_loop_handler.global_state_lock,
                 TxProvingCapability::ProofCollection,
                 fee,
+                consensus_rule_set,
             )
             .await;
 
@@ -2769,28 +2788,28 @@ mod tests {
                 .unwrap();
 
             // simulate incoming connection
-            let (peer_handshake_data, peer_socket_address) =
+            let (peer_handshake, peer_socket_address) =
                 get_dummy_peer_connection_data_genesis(network, 1);
-            let own_handshake_data = main_loop_handler
+            let own_handshake = main_loop_handler
                 .global_state_lock
                 .lock_guard()
                 .await
                 .get_own_handshakedata();
-            assert_eq!(peer_handshake_data.network, own_handshake_data.network,);
-            assert_eq!(peer_handshake_data.version, own_handshake_data.version,);
+            assert_eq!(peer_handshake.network, own_handshake.network,);
+            assert_eq!(peer_handshake.version, own_handshake.version,);
             let mock_stream = tokio_test::io::Builder::new()
                 .read(
-                    &to_bytes(&PeerMessage::Handshake(Box::new((
-                        crate::MAGIC_STRING_REQUEST.to_vec(),
-                        peer_handshake_data.clone(),
-                    ))))
+                    &to_bytes(&PeerMessage::Handshake {
+                        magic_value: *crate::MAGIC_STRING_REQUEST,
+                        data: Box::new(peer_handshake),
+                    })
                     .unwrap(),
                 )
                 .write(
-                    &to_bytes(&PeerMessage::Handshake(Box::new((
-                        crate::MAGIC_STRING_RESPONSE.to_vec(),
-                        own_handshake_data.clone(),
-                    ))))
+                    &to_bytes(&PeerMessage::Handshake {
+                        magic_value: *crate::MAGIC_STRING_RESPONSE,
+                        data: Box::new(own_handshake),
+                    })
                     .unwrap(),
                 )
                 .write(
@@ -2812,7 +2831,7 @@ mod tests {
                         peer_socket_address,
                         main_to_peer_rx_mock,
                         peer_to_main_tx_clone,
-                        own_handshake_data,
+                        own_handshake,
                     )
                     .await
                     {

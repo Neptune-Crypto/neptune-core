@@ -188,6 +188,7 @@ pub mod tests {
     use tracing::debug;
 
     use super::*;
+    use crate::api::export::Network;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
@@ -209,6 +210,19 @@ pub mod tests {
                 job_priority,
                 job_settings,
                 cancel_job_rx: None,
+            }
+        }
+    }
+
+    impl TritonVmProofJobOptions {
+        pub(crate) fn default_with_network(network: Network) -> Self {
+            let job_settings = ProverJobSettings {
+                network,
+                ..Default::default()
+            };
+            Self {
+                job_settings,
+                ..Default::default()
             }
         }
     }

@@ -27,16 +27,15 @@ use bech32::ToBase32;
 use bech32::Variant;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::lattice;
-use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::lattice;
+use tasm_lib::twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use super::hash_lock_key::HashLockKey;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::announcement::Announcement;
@@ -44,7 +43,6 @@ use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
-use crate::prelude::twenty_first;
 
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
@@ -62,7 +60,7 @@ pub struct GenerationSpendingKey {
     decryption_key: lattice::kem::SecretKey,
 
     #[serde(skip)]
-    privacy_preimage: Digest,
+    receiver_preimage: Digest,
 
     #[serde(skip)]
     unlock_key_preimage: Digest,
@@ -137,8 +135,11 @@ pub struct GenerationReceivingAddress {
     receiver_identifier: BFieldElement,
     encryption_key: lattice::kem::PublicKey,
 
-    privacy_digest: Digest,
-    lock_after_image: Digest,
+    /// Post-image of the receiver preimage
+    receiver_postimage: Digest,
+
+    /// Post-image of the hashlock key
+    lock_postimage: Digest,
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
@@ -153,17 +154,17 @@ impl GenerationSpendingKey {
     pub fn to_address(&self) -> GenerationReceivingAddress {
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&self.seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = self.privacy_preimage.hash();
+        let privacy_digest = self.receiver_preimage.hash();
         GenerationReceivingAddress {
             receiver_identifier: self.receiver_identifier(),
             encryption_key: pk,
-            privacy_digest,
-            lock_after_image: self.generate_spending_lock(),
+            receiver_postimage: privacy_digest,
+            lock_postimage: self.generate_spending_lock(),
         }
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
-        HashLockKey::from_preimage(self.unlock_key_preimage).lock_script_and_witness()
+        LockScriptAndWitness::standard_hash_lock_from_preimage(self.unlock_key_preimage)
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
@@ -178,17 +179,18 @@ impl GenerationSpendingKey {
         let spending_key = Self {
             receiver_identifier,
             decryption_key: sk,
-            privacy_preimage,
+            receiver_preimage: privacy_preimage,
             unlock_key_preimage: unlock_key,
             seed: seed.to_owned(),
         };
 
         // Sanity check that spending key's receiver address can be encoded to
         // bech32m without loss of information.
+        let network = Network::Main;
         let receiving_address = spending_key.to_address();
-        let encoded_address = receiving_address.to_bech32m(Network::Beta).unwrap();
+        let encoded_address = receiving_address.to_bech32m(network).unwrap();
         let decoded_address =
-            GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Beta).unwrap();
+            GenerationReceivingAddress::from_bech32m(&encoded_address, network).unwrap();
         assert_eq!(
             receiving_address, decoded_address,
             "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
@@ -232,12 +234,11 @@ impl GenerationSpendingKey {
         self.unlock_key_preimage.hash()
     }
 
-    /// returns the privacy preimage.
+    /// returns the receiver preimage.
     ///
-    /// note: The hash of the preimage is available in the receiving address
-    /// as the privacy_digest
-    pub fn privacy_preimage(&self) -> Digest {
-        self.privacy_preimage
+    /// note: The hash of the preimage is available in the receiving address.
+    pub fn receiver_preimage(&self) -> Digest {
+        self.receiver_preimage
     }
 
     /// returns the receiver_identifier, a fingerprint
@@ -263,12 +264,12 @@ impl GenerationReceivingAddress {
         let receiver_identifier = common::derive_receiver_id(seed);
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = spending_key.privacy_preimage.hash();
+        let privacy_digest = spending_key.receiver_preimage.hash();
         Self {
             receiver_identifier,
             encryption_key: pk,
-            privacy_digest,
-            lock_after_image: spending_key.generate_spending_lock(),
+            receiver_postimage: privacy_digest,
+            lock_postimage: spending_key.generate_spending_lock(),
         }
     }
 
@@ -281,7 +282,7 @@ impl GenerationReceivingAddress {
     /// address.
     pub fn can_unlock_with(&self, witness: &[BFieldElement]) -> bool {
         match witness.try_into() {
-            Ok(witness_array) => Digest::new(witness_array).hash() == self.lock_after_image,
+            Ok(witness_array) => Digest::new(witness_array).hash() == self.lock_postimage,
             Err(_) => false,
         }
     }
@@ -377,7 +378,7 @@ impl GenerationReceivingAddress {
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
-        HashLockKey::lock_script_from_after_image(self.lock_after_image)
+        LockScript::standard_hash_lock_from_after_image(self.lock_postimage)
     }
 
     pub(crate) fn generate_announcement(
@@ -412,15 +413,15 @@ impl GenerationReceivingAddress {
         self.receiver_identifier
     }
 
-    /// returns a privacy digest which corresponds to the.privacy_preimage(),
-    /// of the matching [GenerationSpendingKey]
-    pub fn privacy_digest(&self) -> Digest {
-        self.privacy_digest
+    /// returns a digest which is the hash of receiver preimage of the matching
+    /// [GenerationSpendingKey]
+    pub fn receiver_postimage(&self) -> Digest {
+        self.receiver_postimage
     }
 
     /// returns the `spending_lock`
     pub fn spending_lock(&self) -> Digest {
-        self.lock_after_image
+        self.lock_postimage
     }
 }
 

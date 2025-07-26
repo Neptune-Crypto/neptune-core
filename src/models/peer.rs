@@ -23,13 +23,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
-use twenty_first::prelude::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
@@ -43,16 +43,16 @@ use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
 use crate::models::peer::transfer_block::TransferBlock;
-use crate::prelude::twenty_first;
 
 pub(crate) type InstanceId = u128;
 
 pub(crate) const SYNC_CHALLENGE_POW_WITNESS_LENGTH: usize = 10;
 pub(crate) const SYNC_CHALLENGE_NUM_BLOCK_PAIRS: usize = 10;
 
-trait Sanction {
+pub(crate) trait Sanction {
     fn severity(self) -> i32;
 }
+
 /// The reason for degrading a peer's standing
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum NegativePeerSanction {
@@ -70,7 +70,8 @@ pub enum NegativePeerSanction {
 
     FloodPeerListResponse,
     BlockRequestUnknownHeight,
-    // Be careful about using this too much as it's bad for log opportunities
+
+    // Be careful about using this too much as it's bad for log opportunities.
     InvalidMessage,
     NonMinedTransactionHasCoinbase,
     TooShortBlockBatch,
@@ -383,6 +384,9 @@ pub enum ConnectionRefusedReason {
     IncompatibleVersion,
     MaxPeerNumberExceeded,
     SelfConnect,
+
+    /// Use for any other reasons, when adding new reasons in the future.
+    Other(u8),
 }
 
 impl From<InternalConnectionStatus> for TransferConnectionStatus {
@@ -430,9 +434,13 @@ impl BlockProposalRequest {
     }
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum PeerMessage {
-    Handshake(Box<(Vec<u8>, HandshakeData)>),
+    Handshake {
+        magic_value: [u8; 15],
+        data: Box<HandshakeData>,
+    },
     Block(Box<TransferBlock>),
     BlockNotificationRequest,
     BlockNotification(PeerBlockNotification),
@@ -467,12 +475,13 @@ pub(crate) enum PeerMessage {
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),
+    // New variants must be added here at the bottom to be backwards compatible.
 }
 
 impl PeerMessage {
     pub fn get_type(&self) -> String {
         match self {
-            PeerMessage::Handshake(_) => "handshake",
+            PeerMessage::Handshake { .. } => "handshake",
             PeerMessage::Block(_) => "block",
             PeerMessage::BlockNotificationRequest => "block notification request",
             PeerMessage::BlockNotification(_) => "block notification",
@@ -499,7 +508,7 @@ impl PeerMessage {
 
     pub fn ignore_when_not_sync(&self) -> bool {
         match self {
-            PeerMessage::Handshake(_) => false,
+            PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
@@ -526,7 +535,7 @@ impl PeerMessage {
     /// Function to filter out messages that should not be handled while the client is syncing
     pub fn ignore_during_sync(&self) -> bool {
         match self {
-            PeerMessage::Handshake(_) => false,
+            PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => true,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,

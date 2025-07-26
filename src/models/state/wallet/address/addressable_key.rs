@@ -1,12 +1,3 @@
-//! provides an abstraction over addressable spending keys.
-//!
-//! The types in this module can be considered sub-types of
-//! the types in [super::base_key].
-//!
-//! In particular these enums only abstract over spending key
-//! types that have a corresponding address.  This specialization
-//! enables the type system to enforce correct-by-construction
-//! semantics wherever the type is used.
 use anyhow::bail;
 use anyhow::Result;
 use serde::Deserialize;
@@ -14,8 +5,6 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
 
-use super::base_key::BaseKeyType;
-use super::base_key::BaseSpendingKey;
 use super::common;
 use super::generation_address;
 use super::receiving_address::ReceivingAddress;
@@ -28,20 +17,9 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
-// note: assigning the flags to `AddressableKeyType` variants as discriminants has bonus
-// that we get a compiler verification that values do not conflict.  which is
-// nice since they are (presently) defined in separate files.
-//
-// anyway it is a desirable property that AddressableKeyType variants match the values
-// actually stored in Announcement.
-
-/// Enumerates key types with corresponding addresses
-///
-/// `AddressableKey` enumerates the sub-set of [BaseKeyType]
-/// variants that are represented in [ReceivingAddress].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum AddressableKeyType {
+pub enum KeyType {
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
     ///
     /// wraps a symmetric key built on aes-256-gcm
@@ -51,16 +29,7 @@ pub enum AddressableKeyType {
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 }
 
-impl From<AddressableKeyType> for BaseKeyType {
-    fn from(t: AddressableKeyType) -> Self {
-        match t {
-            AddressableKeyType::Generation => Self::Generation,
-            AddressableKeyType::Symmetric => Self::Symmetric,
-        }
-    }
-}
-
-impl std::fmt::Display for AddressableKeyType {
+impl std::fmt::Display for KeyType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Generation => write!(f, "Generation"),
@@ -69,7 +38,7 @@ impl std::fmt::Display for AddressableKeyType {
     }
 }
 
-impl From<&ReceivingAddress> for AddressableKeyType {
+impl From<&ReceivingAddress> for KeyType {
     fn from(addr: &ReceivingAddress) -> Self {
         match addr {
             ReceivingAddress::Generation(_) => Self::Generation,
@@ -78,22 +47,22 @@ impl From<&ReceivingAddress> for AddressableKeyType {
     }
 }
 
-impl From<&AddressableKey> for AddressableKeyType {
-    fn from(addr: &AddressableKey) -> Self {
+impl From<&SpendingKey> for KeyType {
+    fn from(addr: &SpendingKey) -> Self {
         match addr {
-            AddressableKey::Generation(_) => Self::Generation,
-            AddressableKey::Symmetric(_) => Self::Symmetric,
+            SpendingKey::Generation(_) => Self::Generation,
+            SpendingKey::Symmetric(_) => Self::Symmetric,
         }
     }
 }
 
-impl From<AddressableKeyType> for BFieldElement {
-    fn from(key_type: AddressableKeyType) -> Self {
+impl From<KeyType> for BFieldElement {
+    fn from(key_type: KeyType) -> Self {
         (key_type as u8).into()
     }
 }
 
-impl TryFrom<&Announcement> for AddressableKeyType {
+impl TryFrom<&Announcement> for KeyType {
     type Error = anyhow::Error;
 
     fn try_from(pa: &Announcement) -> Result<Self> {
@@ -105,24 +74,17 @@ impl TryFrom<&Announcement> for AddressableKeyType {
     }
 }
 
-impl AddressableKeyType {
+impl KeyType {
     /// returns all available `AddressableKeyType`
-    pub fn all_types() -> Vec<AddressableKeyType> {
+    pub fn all_types() -> Vec<KeyType> {
         vec![Self::Generation, Self::Symmetric]
     }
 }
 
 /// Represents cryptographic data necessary for spending funds (or, more
 /// specifically, for unlocking UTXOs).
-///
-/// This enum provides an abstraction API for spending key types, so that a
-/// method or struct may simply accept a `AddressableKey` and be
-/// forward-compatible with new types of spending key as they are implemented.
-///
-/// `AddressableKey` enumerates the sub-set of [BaseSpendingKey]
-/// variants that are represented in [ReceivingAddress].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AddressableKey {
+pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
 
@@ -130,28 +92,19 @@ pub enum AddressableKey {
     Symmetric(symmetric_key::SymmetricKey),
 }
 
-impl From<AddressableKey> for BaseSpendingKey {
-    fn from(t: AddressableKey) -> Self {
-        match t {
-            AddressableKey::Generation(k) => Self::Generation(k),
-            AddressableKey::Symmetric(k) => Self::Symmetric(k),
-        }
-    }
-}
-
-impl std::hash::Hash for AddressableKey {
+impl std::hash::Hash for SpendingKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::hash::Hash::hash(&self.privacy_preimage(), state)
     }
 }
 
-impl From<generation_address::GenerationSpendingKey> for AddressableKey {
+impl From<generation_address::GenerationSpendingKey> for SpendingKey {
     fn from(key: generation_address::GenerationSpendingKey) -> Self {
         Self::Generation(key)
     }
 }
 
-impl From<symmetric_key::SymmetricKey> for AddressableKey {
+impl From<symmetric_key::SymmetricKey> for SpendingKey {
     fn from(key: symmetric_key::SymmetricKey) -> Self {
         Self::Symmetric(key)
     }
@@ -168,7 +121,7 @@ impl From<symmetric_key::SymmetricKey> for AddressableKey {
 //
 // this method is dealing with types far outside the concern of
 // a key, which means this method belongs elsewhere.
-impl AddressableKey {
+impl SpendingKey {
     /// returns the address that corresponds to this spending key.
     pub fn to_address(self) -> ReceivingAddress {
         match self {
@@ -180,10 +133,10 @@ impl AddressableKey {
     /// Return the lock script and its witness
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
         match self {
-            AddressableKey::Generation(generation_spending_key) => {
+            SpendingKey::Generation(generation_spending_key) => {
                 generation_spending_key.lock_script_and_witness()
             }
-            AddressableKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
+            SpendingKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
         }
     }
 
@@ -204,8 +157,8 @@ impl AddressableKey {
     /// as the privacy_digest
     pub fn privacy_preimage(&self) -> Digest {
         match self {
-            Self::Generation(k) => k.privacy_preimage(),
-            Self::Symmetric(k) => k.privacy_preimage(),
+            Self::Generation(k) => k.receiver_preimage(),
+            Self::Symmetric(k) => k.receiver_preimage(),
         }
     }
 
@@ -289,6 +242,7 @@ impl AddressableKey {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
+                    is_guesser_fee: true,
                 }
             }).collect()
     }
@@ -298,7 +252,7 @@ impl AddressableKey {
         match result {
             Ok(v) => Some(v),
             Err(e) => {
-                warn!("possible loss of funds! skipping announcement for {:?} key with receiver_identifier: {}.  error: {}", AddressableKeyType::from(self), self.receiver_identifier(), e.to_string());
+                warn!("possible loss of funds! skipping announcement for {:?} key with receiver_identifier: {}.  error: {}", KeyType::from(self), self.receiver_identifier(), e.to_string());
                 None
             }
         }
@@ -306,6 +260,6 @@ impl AddressableKey {
 
     /// returns true if the [Announcement] has a type-flag that matches the type of this key
     pub(super) fn matches_announcement_key_type(&self, pa: &Announcement) -> bool {
-        matches!(AddressableKeyType::try_from(pa), Ok(kt) if kt == AddressableKeyType::from(self))
+        matches!(KeyType::try_from(pa), Ok(kt) if kt == KeyType::from(self))
     }
 }

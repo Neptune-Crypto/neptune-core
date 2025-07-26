@@ -7,9 +7,9 @@ use serde::Serialize;
 use strum::EnumCount;
 use strum::VariantArray;
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::announcement::Announcement;
 use super::primitive_witness::PrimitiveWitness;
@@ -17,9 +17,9 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// TransactionKernel is immutable and its hash never changes.
@@ -89,6 +89,7 @@ impl PartialEq for TransactionKernel {
             && self.coinbase == o.coinbase
             && self.timestamp == o.timestamp
             && self.mutator_set_hash == o.mutator_set_hash
+            && self.merge_bit == o.merge_bit
 
         // mast_sequences intentionally skipped.
     }
@@ -107,18 +108,28 @@ pub(crate) enum TransactionConfirmabilityError {
     InvalidRemovalRecord(usize),
     DuplicateInputs,
     AlreadySpentInput(usize),
+    RemovalRecordUnpackFailure,
+}
+
+impl From<RemovalRecordListUnpackError> for TransactionConfirmabilityError {
+    fn from(_: RemovalRecordListUnpackError) -> Self {
+        Self::RemovalRecordUnpackFailure
+    }
 }
 
 impl TransactionKernel {
+    /// Check if transaction is confirmable. Inputs must be unpacked before this
+    /// check is performed.
     pub(crate) fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> Result<(), TransactionConfirmabilityError> {
         // check validity of removal records
         //       ^^^^^^^^
+
         // meaning: a) all required membership proofs exist; and b) are valid.
-        let maybe_invalid_removal_record = self
-            .inputs
+        let inputs = &self.inputs;
+        let maybe_invalid_removal_record = inputs
             .iter()
             .enumerate()
             .find(|(_, rr)| !rr.validate(mutator_set_accumulator));
@@ -127,19 +138,14 @@ impl TransactionKernel {
         }
 
         // check for duplicates
-        let has_unique_inputs = self
-            .inputs
-            .iter()
-            .unique_by(|rr| rr.absolute_indices)
-            .count()
-            == self.inputs.len();
+        let has_unique_inputs =
+            inputs.iter().unique_by(|rr| rr.absolute_indices).count() == inputs.len();
         if !has_unique_inputs {
             return Err(TransactionConfirmabilityError::DuplicateInputs);
         }
 
         // check for already-spent inputs
-        let already_spent_removal_record = self
-            .inputs
+        let already_spent_removal_record = inputs
             .iter()
             .enumerate()
             .find(|(_, rr)| !mutator_set_accumulator.can_remove(rr));
@@ -211,25 +217,60 @@ impl MastHash for TransactionKernel {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
     use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
     use itertools::Itertools;
+    use proptest::prelude::Strategy;
+    use proptest::prelude::*;
+    use proptest::strategy::BoxedStrategy;
 
     use super::*;
 
-    impl<'a> Arbitrary<'a> for TransactionKernel {
-        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+    impl TransactionKernel {
+        /// Lifts `Self::arbitrary_with_fee` into a `Strategy`.
+        pub(crate) fn strategy_with_fee(fee: NativeCurrencyAmount) -> BoxedStrategy<Self> {
+            // Choose an upper bound for how many bytes you want to feed into
+            // `Unstructured`.
+            const MAX_BYTES: usize = 262144;
+
+            proptest::collection::vec(any::<u8>(), 0..=MAX_BYTES)
+                .prop_filter_map("could not construct from bytes", move |bytes| {
+                    let mut u = Unstructured::new(&bytes);
+                    Self::arbitrary_with_fee(&mut u, fee).ok()
+                })
+                .boxed()
+        }
+
+        fn arbitrary_with_fee<'a>(
+            u: &mut ::arbitrary::Unstructured<'a>,
+            fee: NativeCurrencyAmount,
+        ) -> ::arbitrary::Result<Self> {
             let num_inputs = u.int_in_range(0..=4)?;
             let num_outputs = u.int_in_range(0..=4)?;
             let num_announcements = u.int_in_range(0..=2)?;
-            let inputs: Vec<RemovalRecord> = (0..num_inputs)
-                .map(|_| u.arbitrary().unwrap())
-                .collect_vec();
+            let num_aocl_leafs = u.int_in_range(0u64..=(1u64 << 63))?;
+
+            // Get some seed bytes from the unstructured input
+            let seed = u.bytes(32)?; // choose an appropriate length
+
+            // Create a proptest RNG from the seed
+            let rng = proptest::test_runner::TestRng::from_seed(
+                proptest::test_runner::RngAlgorithm::ChaCha,
+                &seed.try_into().unwrap_or([0u8; 32]), // handle length mismatch
+            );
+
+            let config = proptest::test_runner::Config::default();
+            let mut runner = proptest::test_runner::TestRunner::new_with_rng(config, rng);
+
+            let inputs = RemovalRecord::arbitrary_synchronized_set(num_aocl_leafs, num_inputs)
+                .new_tree(&mut runner)
+                .unwrap()
+                .current();
             let outputs: Vec<AdditionRecord> = (0..num_outputs)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
             let announcements: Vec<Announcement> = (0..num_announcements)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
-            let fee: NativeCurrencyAmount = u.arbitrary()?;
             let coinbase: Option<NativeCurrencyAmount> = u.arbitrary()?;
             let timestamp: Timestamp = u.arbitrary()?;
             let mutator_set_hash: Digest = u.arbitrary()?;
@@ -248,6 +289,14 @@ pub mod neptune_arbitrary {
             .into_kernel();
 
             Ok(transaction_kernel)
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for TransactionKernel {
+        /// Produces unpacked inputs.
+        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+            let fee: NativeCurrencyAmount = u.arbitrary()?;
+            Self::arbitrary_with_fee(u, fee)
         }
     }
 }
@@ -446,12 +495,21 @@ pub mod tests {
             .unwrap()
             .current();
 
+        assert_eq!(a.outputs, b.outputs);
+        assert_eq!(a.fee, b.fee);
+        assert_eq!(a.coinbase, b.coinbase);
+        assert_eq!(a.mutator_set_hash, b.mutator_set_hash);
+        assert_eq!(a.merge_bit, b.merge_bit);
+        assert_eq!(a.announcements, b.announcements);
+        assert_eq!(a.timestamp, b.timestamp);
+        assert_eq!(a.inputs, b.inputs);
         assert_eq!(a, b);
     }
 
     #[test]
     fn can_identify_double_spends() {
         let mut test_runner = TestRunner::deterministic();
+
         let pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
@@ -538,7 +596,7 @@ pub mod tests {
                     canonical_commitment
                 }],
                 announcements: Default::default(),
-                fee: NativeCurrencyAmount::one(),
+                fee: NativeCurrencyAmount::one_nau(),
                 coinbase: None,
                 timestamp: Default::default(),
                 mutator_set_hash,

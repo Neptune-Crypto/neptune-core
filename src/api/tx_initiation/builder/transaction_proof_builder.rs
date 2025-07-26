@@ -27,13 +27,18 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use super::proof_builder::ProofBuilder;
+use crate::api::export::NeptuneProof;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::api::tx_initiation::error::ProofRequirement;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
+use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof_mock;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
+use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::UpdateWitness;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -54,12 +59,18 @@ pub struct TransactionProofBuilder<'a> {
     primitive_witness: Option<PrimitiveWitness>,
     primitive_witness_ref: Option<&'a PrimitiveWitness>,
 
-    // these 3 types apply only to SingleProof
+    // these 4 types apply only to SingleProof
     proof_collection: Option<ProofCollection>,
-    single_proof_witness: Option<&'a SingleProofWitness>,
+    update_witness: Option<&'a UpdateWitness>,
     claim_and_nondeterminism: Option<(Claim, NonDeterminism)>,
 
+    /// Determines which set of consensus rules apply. Typically inferred from
+    /// network and block height.
+    consensus_rule_set: Option<ConsensusRuleSet>,
+
     job_queue: Option<Arc<TritonVmJobQueue>>,
+
+    // Required
     proof_job_options: Option<TritonVmProofJobOptions>,
     valid_mock: Option<bool>,
 }
@@ -67,7 +78,9 @@ pub struct TransactionProofBuilder<'a> {
 impl<'a> TransactionProofBuilder<'a> {
     /// instantiate
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            ..Default::default()
+        }
     }
 
     /// add transaction details (optional)
@@ -108,11 +121,11 @@ impl<'a> TransactionProofBuilder<'a> {
         self
     }
 
-    /// add single proof witness (optional)
+    /// add update witness (optional)
     ///
     /// only used for building single-proof
-    pub fn single_proof_witness(mut self, single_proof_witness: &'a SingleProofWitness) -> Self {
-        self.single_proof_witness = Some(single_proof_witness);
+    pub fn update_witness(mut self, update_witness: &'a UpdateWitness) -> Self {
+        self.update_witness = Some(update_witness);
         self
     }
 
@@ -124,6 +137,12 @@ impl<'a> TransactionProofBuilder<'a> {
         claim_and_nondeterminism: (Claim, NonDeterminism),
     ) -> Self {
         self.claim_and_nondeterminism = Some(claim_and_nondeterminism);
+        self
+    }
+
+    /// Add a [`ConsensusRuleSet`] (optional)
+    pub fn consensus_rule_set(mut self, consensus_rule_set: ConsensusRuleSet) -> Self {
+        self.consensus_rule_set = Some(consensus_rule_set);
         self
     }
 
@@ -149,7 +168,7 @@ impl<'a> TransactionProofBuilder<'a> {
     ///
     /// valid mock proofs pass proof verification; invalid mock proofs do not.
     ///
-    /// see [NeptuneProof](crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof)
+    /// see [NeptuneProof]
     ///
     /// default = true
     ///
@@ -172,7 +191,7 @@ impl<'a> TransactionProofBuilder<'a> {
     /// * primitive_witness()
     /// * primitive_witness_ref()
     /// * proof_collection()
-    /// * single_proof_witness()
+    /// * update_witness()
     /// * claim_and_nondeterminism()
     ///
     /// ## Evaluation
@@ -186,14 +205,17 @@ impl<'a> TransactionProofBuilder<'a> {
     ///
     /// The provided inputs are evaluated in the following order, which
     /// generally is in order of most to least efficient. Evaluation ends at the
-    /// first match in this list:
+    /// first match in these lists:
     ///
     /// if target proof_type is SingleProof:
     /// * claim_and_nondeterminism()
-    /// * single_proof_witness()
+    /// * update_witness()
     /// * proof_collection()
+    /// * primitive_witness()
+    /// * primitive_witness_ref()
+    /// * transaction_details()
     ///
-    /// for any proof-type:
+    /// for any other proof type:
     /// * primitive_witness()
     /// * primitive_witness_ref()
     /// * transaction_details()
@@ -236,8 +258,9 @@ impl<'a> TransactionProofBuilder<'a> {
             primitive_witness,
             primitive_witness_ref,
             claim_and_nondeterminism,
-            single_proof_witness,
+            update_witness,
             proof_collection,
+            consensus_rule_set,
             job_queue,
             proof_job_options,
             valid_mock,
@@ -251,52 +274,74 @@ impl<'a> TransactionProofBuilder<'a> {
         // note: evaluation order must match order stated in the method doc-comment.
 
         if proof_job_options.job_settings.proof_type.is_single_proof() {
+            #[expect(unused_variables, reason = "anticipate future fork")]
+            let consensus_rule_set =
+                consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
+
             // claim, nondeterminism --> single proof
             if let Some((c, nd)) = claim_and_nondeterminism {
                 return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
             }
-            // single-proof-witness --> single proof
-            else if let Some(w) = single_proof_witness {
-                let c = w.claim();
-                return gen_single(
-                    c,
-                    || w.nondeterminism(),
-                    job_queue,
-                    proof_job_options,
-                    valid_mock,
-                )
-                .await;
+            // update-witness --> single proof
+            else if let Some(w) = update_witness {
+                let spw = SingleProofWitness::from_update(w.clone());
+                let c = spw.claim();
+                let nd = spw.nondeterminism();
+                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
             }
             // proof-collection --> single proof
             else if let Some(pc) = proof_collection {
-                let w = SingleProofWitness::from_collection(pc);
-                let c = w.claim();
-                return gen_single(
-                    c,
-                    || w.nondeterminism(),
+                let spw = SingleProofWitness::from_collection(pc);
+                let c = spw.claim();
+                let nd = spw.nondeterminism();
+                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
+            }
+        }
+
+        // In this case, we **have** to be able to construct a primitive
+        // witness, otherwise we're missing witness data.
+        // Collapse {PrimitiveWitness (reference or not), TransactionDetails}
+        // into PrimitiveWitness.
+        let primitive_witness = if let Some(pw) = primitive_witness {
+            Cow::Owned(pw)
+        } else if let Some(pw_ref) = primitive_witness_ref {
+            Cow::Borrowed(pw_ref)
+        } else {
+            // must have transaction details if no primitive witness.
+            let transaction_details =
+                transaction_details.ok_or(ProofRequirement::TransactionProofInput)?;
+            Cow::Owned(transaction_details.primitive_witness())
+        };
+
+        // PrimitiveWitness -> single proof
+        match proof_job_options.job_settings.proof_type {
+            TransactionProofType::PrimitiveWitness => {
+                Ok(TransactionProof::Witness(primitive_witness.into_owned()))
+            }
+            TransactionProofType::ProofCollection => {
+                let pc = proof_collection_from_witness(
+                    primitive_witness,
                     job_queue,
                     proof_job_options,
                     valid_mock,
                 )
-                .await;
+                .await?;
+                Ok(TransactionProof::ProofCollection(pc))
+            }
+            TransactionProofType::SingleProof => {
+                let consensus_rule_set =
+                    consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
+                let sp = single_proof_from_witness(
+                    primitive_witness,
+                    job_queue,
+                    proof_job_options,
+                    valid_mock,
+                    consensus_rule_set,
+                )
+                .await?;
+                Ok(TransactionProof::SingleProof(sp))
             }
         }
-
-        // owned primitive witness --> proof_type
-        if let Some(w) = primitive_witness {
-            return from_witness(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
-        }
-        // primitive witness reference --> proof_type
-        else if let Some(w) = primitive_witness_ref {
-            return from_witness(Cow::Borrowed(w), job_queue, proof_job_options, valid_mock).await;
-        }
-        // transaction_details --> proof_type
-        else if let Some(d) = transaction_details {
-            let w = d.primitive_witness();
-            return from_witness(Cow::Owned(w), job_queue, proof_job_options, valid_mock).await;
-        }
-
-        Err(ProofRequirement::TransactionProofInput.into())
     }
 }
 
@@ -326,37 +371,31 @@ where
     ))
 }
 
-// builds TransactionProof from Cow<PrimitiveWitness>
-//
-// will generate a mock proof if Network::use_mock_proof() is true.
-async fn from_witness(
+/// Builds a [`TransactionProof::ProofCollection`] from `Cow<PrimitiveWitness>`
+///
+/// will generate a mock proof if Network::use_mock_proof() is true.
+///
+/// # Panics
+///
+///  - If `proof_job_options.job_settings.proof_type
+///           != TransactionProofType::ProofCollection`
+async fn proof_collection_from_witness(
     witness_cow: Cow<'_, PrimitiveWitness>,
     job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
     valid_mock: bool,
-) -> Result<TransactionProof, CreateProofError> {
-    let capability = proof_job_options.job_settings.tx_proving_capability;
-    let proof_type = proof_job_options.job_settings.proof_type;
+) -> Result<ProofCollection, CreateProofError> {
+    let proof_type = TransactionProofType::ProofCollection;
+    assert_eq!(proof_type, proof_job_options.job_settings.proof_type);
 
     // generate mock proof, if network uses mock proofs.
     if proof_job_options.job_settings.network.use_mock_proof() {
-        let proof = match proof_type {
-            TransactionProofType::PrimitiveWitness => {
-                TransactionProof::Witness(witness_cow.into_owned())
-            }
-            TransactionProofType::ProofCollection => {
-                let pc = ProofCollection::produce_mock(witness_cow.borrow(), valid_mock);
-                TransactionProof::ProofCollection(pc)
-            }
-            TransactionProofType::SingleProof => {
-                let sp = SingleProof::produce_mock(valid_mock);
-                TransactionProof::SingleProof(sp)
-            }
-        };
-        return Ok(proof);
+        let pc = ProofCollection::produce_mock(witness_cow.borrow(), valid_mock);
+        return Ok(pc);
     }
 
     // abort early if machine is too weak
+    let capability = proof_job_options.job_settings.tx_proving_capability;
     if !capability.can_prove(proof_type) {
         return Err(CreateProofError::TooWeak {
             proof_type,
@@ -364,18 +403,52 @@ async fn from_witness(
         });
     }
 
-    // produce proof of requested type
-    let transaction_proof = match proof_type {
-        TransactionProofType::PrimitiveWitness => {
-            TransactionProof::Witness(witness_cow.into_owned())
-        }
-        TransactionProofType::ProofCollection => TransactionProof::ProofCollection(
-            ProofCollection::produce(witness_cow.borrow(), job_queue, proof_job_options).await?,
-        ),
-        TransactionProofType::SingleProof => TransactionProof::SingleProof(
-            SingleProof::produce(witness_cow.borrow(), job_queue, proof_job_options).await?,
-        ),
-    };
+    let pc = ProofCollection::produce(witness_cow.borrow(), job_queue, proof_job_options).await?;
 
-    Ok(transaction_proof)
+    Ok(pc)
+}
+
+/// builds [`TransactionProof::SingleProof`] from `Cow<PrimitiveWitness>`
+///
+/// will generate a mock proof if Network::use_mock_proof() is true.
+///
+/// # Panics
+///
+///  - If `proof_job_options.job_settings.proof_type
+///           != TransactionProofType::SingleProof`
+async fn single_proof_from_witness(
+    witness_cow: Cow<'_, PrimitiveWitness>,
+    job_queue: Arc<TritonVmJobQueue>,
+    proof_job_options: TritonVmProofJobOptions,
+    valid_mock: bool,
+    consensus_rule_set: ConsensusRuleSet,
+) -> Result<NeptuneProof, CreateProofError> {
+    let single_proof_type = TransactionProofType::SingleProof;
+    assert_eq!(single_proof_type, proof_job_options.job_settings.proof_type);
+
+    // generate mock proof, if network uses mock proofs.
+    if proof_job_options.job_settings.network.use_mock_proof() {
+        let sp = produce_single_proof_mock(valid_mock);
+        return Ok(sp);
+    }
+
+    // abort early if machine is too weak
+    let capability = proof_job_options.job_settings.tx_proving_capability;
+    if !capability.can_prove(single_proof_type) {
+        return Err(CreateProofError::TooWeak {
+            proof_type: single_proof_type,
+            capability,
+        });
+    }
+
+    // produce proof of requested type
+    let sp = produce_single_proof(
+        witness_cow.borrow(),
+        job_queue,
+        proof_job_options,
+        consensus_rule_set,
+    )
+    .await?;
+
+    Ok(sp)
 }

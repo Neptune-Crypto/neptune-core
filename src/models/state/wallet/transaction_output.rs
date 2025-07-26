@@ -137,7 +137,7 @@ impl TxOutput {
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
     ) -> Self {
-        let utxo = Utxo::new_native_currency(address.lock_script(), amount);
+        let utxo = Utxo::new_native_currency(address.lock_script_hash(), amount);
         Self::auto_utxo_maybe_change(
             wallet_state,
             utxo,
@@ -292,7 +292,7 @@ impl TxOutput {
         receiving_address: ReceivingAddress,
         owned: bool,
     ) -> Self {
-        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script_hash(), amount);
         Self {
             utxo,
             sender_randomness,
@@ -310,7 +310,7 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
     ) -> Self {
-        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script_hash(), amount);
         Self {
             utxo,
             sender_randomness,
@@ -347,7 +347,7 @@ impl TxOutput {
         owned: bool,
     ) -> Self {
         let receiver_digest = receiving_address.privacy_digest();
-        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script_hash(), amount);
         let notify_method = UtxoNotifyMethod::new(notification_medium, receiving_address);
         Self {
             utxo,
@@ -366,7 +366,7 @@ impl TxOutput {
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
     ) -> Self {
-        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script_hash(), amount);
         Self {
             utxo,
             sender_randomness,
@@ -718,13 +718,13 @@ mod tests {
         let seed: Digest = rng.random();
         let address = GenerationReceivingAddress::derive_from_seed(seed);
 
-        let amount = NativeCurrencyAmount::one();
-        let utxo = Utxo::new_native_currency(address.lock_script(), amount);
+        let amount = NativeCurrencyAmount::one_nau();
+        let utxo = Utxo::new_native_currency(address.lock_script().hash(), amount);
 
         let sender_randomness = state
             .wallet_state
             .wallet_entropy
-            .generate_sender_randomness(block_height, address.privacy_digest());
+            .generate_sender_randomness(block_height, address.receiver_postimage());
 
         for owned_utxo_notification_medium in [
             UtxoNotificationMedium::OffChain,
@@ -744,7 +744,7 @@ mod tests {
                 "Not owned UTXOs are, currently, always transmitted on-chain"
             );
             assert_eq!(tx_output.sender_randomness(), sender_randomness);
-            assert_eq!(tx_output.receiver_digest(), address.privacy_digest());
+            assert_eq!(tx_output.receiver_digest(), address.receiver_postimage());
             assert_eq!(tx_output.utxo(), utxo);
         }
     }
@@ -780,13 +780,13 @@ mod tests {
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
 
-        let amount = NativeCurrencyAmount::one();
+        let amount = NativeCurrencyAmount::one_nau();
 
         for (owned_utxo_notification_medium, address) in [
             (UtxoNotificationMedium::OffChain, address_gen.clone()),
             (UtxoNotificationMedium::OnChain, address_sym.clone()),
         ] {
-            let utxo = Utxo::new_native_currency(address.lock_script(), amount);
+            let utxo = Utxo::new_native_currency(address.lock_script_hash(), amount);
             let sender_randomness = state
                 .wallet_state
                 .wallet_entropy
@@ -814,7 +814,7 @@ mod tests {
 
             assert_eq!(sender_randomness, tx_output.sender_randomness());
             assert_eq!(
-                address.lock_script().hash(),
+                address.lock_script_hash(),
                 tx_output.utxo().lock_script_hash()
             );
 

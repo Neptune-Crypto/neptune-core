@@ -141,10 +141,12 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
 mod tests {
     use std::collections::HashMap;
 
-    use proptest::prelude::Rng;
-    use proptest::prelude::RngCore;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -183,15 +185,13 @@ mod tests {
 
         fn pseudorandom_initial_state(
             &self,
-            _seed: [u8; 32],
+            seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
+
             let mut test_runner = TestRunner::deterministic();
-
-            // Use test-runner's rng to avoid having to build too many proofs
-            let mut rng = test_runner.new_rng();
-
-            let num_inputs = rng.gen_range(0usize..4);
+            let num_inputs = rng.random_range(0usize..4);
             let primitive_witness =
                 PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)
                     .new_tree(&mut test_runner)

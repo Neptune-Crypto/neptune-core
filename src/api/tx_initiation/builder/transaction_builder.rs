@@ -77,7 +77,7 @@ impl<'a> TransactionBuilder<'a> {
     /// expensive.
     ///
     /// note: the builder does not validate the resulting artifacts.
-    /// That can be done with [Transaction::verify_proof()]
+    /// That can be done with [Transaction::is_valid()]
     pub fn build(self) -> Result<Transaction, CreateTxError> {
         // prefer kernel, else tx_details.
         let Some(kernel) = self.kernel.or_else(|| {

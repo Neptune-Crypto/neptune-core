@@ -96,7 +96,7 @@ mod tests {
             tblock_genesis.is_err(),
             "Transferring genesis block is disallowed"
         );
-        let invalid_block_1 = invalid_empty_block(network, &genesis);
+        let invalid_block_1 = invalid_empty_block(&genesis, network);
         let tblock_1 = TransferBlock::try_from(invalid_block_1);
         assert!(
             tblock_1.is_err(),

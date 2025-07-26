@@ -18,7 +18,6 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::single_proof::DISCRIMINANT_FOR_UPDATE;
 use crate::models::blockchain::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
@@ -28,7 +27,6 @@ use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
@@ -100,9 +98,13 @@ impl UpdateWitness {
         }
     }
 
-    pub fn populate_nd_streams(&self, nondeterminism: &mut NonDeterminism) {
+    pub fn populate_nd_streams(
+        &self,
+        nondeterminism: &mut NonDeterminism,
+        single_proof_program_hash: Digest,
+    ) {
         // update nondeterminism to account for verifying one STARK proof
-        let claim = Claim::new(SingleProof.program().hash())
+        let claim = Claim::new(single_proof_program_hash)
             .with_input(self.old_kernel_mast_hash.reversed().values().to_vec());
 
         // this check is needed for regtest mode, to prevent a panic
@@ -682,6 +684,8 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+    use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionKernelModifier;
@@ -889,10 +893,14 @@ pub(crate) mod tests {
 
     /// Return an update witness where the mutator set has had both elements
     /// added and removed.
+    ///
+    /// The provided number of inputs/outputs/public announcements refer to the
+    /// transaction being updated.
     pub(crate) async fn deterministic_update_witness_additions_and_removals(
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> UpdateWitness {
         let mut test_runner = TestRunner::deterministic();
         let num_new_records = (1usize..=10).new_tree(&mut test_runner).unwrap().current();
@@ -927,10 +935,11 @@ pub(crate) mod tests {
         MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone())
             .apply_to_accumulator(&mut new_mutator_set_accumulator)
             .unwrap();
-        let old_proof = SingleProof::produce(
+        let old_proof = produce_single_proof(
             &old_pw,
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
+            consensus_rule_set,
         )
         .await
         .unwrap();
@@ -956,6 +965,7 @@ pub(crate) mod tests {
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> UpdateWitness {
         // TODO: Currently only tests a new mutator set with more AOCL leafs.
         // Should also test for removed records in the new mutator set
@@ -993,10 +1003,11 @@ pub(crate) mod tests {
             &primitive_witness.mutator_set_accumulator.aocl,
             &newly_confirmed_records,
         );
-        let old_proof = SingleProof::produce(
+        let old_proof = produce_single_proof(
             &primitive_witness,
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
+            consensus_rule_set,
         )
         .await
         .unwrap();
@@ -1015,8 +1026,10 @@ pub(crate) mod tests {
     /// untouched, or at most permuted.
     #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_only_additions() {
+        let consensus_rule_set = ConsensusRuleSet::Reboot;
         let update_witness =
-            deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await;
+            deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4, consensus_rule_set)
+                .await;
         assert_eq!(
             update_witness.old_kernel.txid(),
             update_witness.new_kernel.txid(),
@@ -1024,11 +1037,11 @@ pub(crate) mod tests {
         );
     }
 
-    /// A test of the simple test generator, that it leaves the expected fields
-    /// untouched, or at most permuted.
     #[apply(shared_tokio_runtime)]
     async fn txid_is_constant_under_tx_updates_additions_and_removals() {
-        let update_witness = deterministic_update_witness_additions_and_removals(4, 4, 4).await;
+        let consensus_rule_set = ConsensusRuleSet::Reboot;
+        let update_witness =
+            deterministic_update_witness_additions_and_removals(4, 4, 4, consensus_rule_set).await;
         assert_eq!(
             update_witness.old_kernel.txid(),
             update_witness.new_kernel.txid(),

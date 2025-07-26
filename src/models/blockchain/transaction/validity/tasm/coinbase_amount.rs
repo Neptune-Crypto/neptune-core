@@ -7,10 +7,14 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 
 pub(crate) struct CoinbaseAmount;
 
-const ILLEGAL_COINBASE_AMOUNT_ERROR: i128 = 1_000_200;
+impl CoinbaseAmount {
+    pub(crate) const ILLEGAL_COINBASE_AMOUNT_ERROR: i128 = 1_000_200;
+}
 
 /// Map a pointer to a coinbase object to its amount (if some) or (if none)
 /// zero.
+///
+/// Panics if coinbase amount is negative.
 impl BasicSnippet for CoinbaseAmount {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "*coinbase".to_owned())]
@@ -59,7 +63,7 @@ impl BasicSnippet for CoinbaseAmount {
                 push 0 eq
                 // _ [coinbase_amount] (coinbase_amount <= max)
 
-                assert error_id {ILLEGAL_COINBASE_AMOUNT_ERROR}
+                assert error_id {Self::ILLEGAL_COINBASE_AMOUNT_ERROR}
                 // _ [coinbase_amount]
 
                 push 0

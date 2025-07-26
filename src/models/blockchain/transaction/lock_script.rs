@@ -4,20 +4,20 @@ use std::sync::Arc;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
+use itertools::Itertools;
 use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::utxo::Utxo;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::prelude::twenty_first;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -59,6 +59,32 @@ impl LockScript {
 
     pub fn hash(&self) -> Digest {
         self.program.hash()
+    }
+
+    /// Generate a lock script that verifies knowledge of a hash preimage, given
+    /// the after-image. This type of lock script is called "standard hash
+    /// lock".
+    ///
+    /// Satisfaction of this lock script establishes the UTXO owner's assent to
+    /// the transaction.
+    pub fn standard_hash_lock_from_after_image(after_image: Digest) -> LockScript {
+        let push_spending_lock_digest_to_stack = after_image
+            .values()
+            .iter()
+            .rev()
+            .map(|elem| triton_instr!(push elem.value()))
+            .collect_vec();
+
+        let instructions = triton_asm!(
+            divine 5
+            hash
+            {&push_spending_lock_digest_to_stack}
+            assert_vector
+            read_io 5
+            halt
+        );
+
+        instructions.into()
     }
 
     /// A lock script that is guaranteed to fail
@@ -111,6 +137,17 @@ impl LockScriptAndWitness {
             nd_tokens: witness.individual_tokens,
             nd_digests: witness.digests,
         }
+    }
+
+    /// Create a [`LockScriptAndWitness`] whose lock script is a standard hash
+    /// lock, from the preimage.
+    pub(crate) fn standard_hash_lock_from_preimage(preimage: Digest) -> LockScriptAndWitness {
+        let after_image = preimage.hash();
+        let lock_script = LockScript::standard_hash_lock_from_after_image(after_image);
+        LockScriptAndWitness::new_with_nondeterminism(
+            lock_script.program,
+            NonDeterminism::new(preimage.reversed().values()),
+        )
     }
 
     #[cfg(test)]

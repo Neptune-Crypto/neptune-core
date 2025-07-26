@@ -8,9 +8,9 @@ use strum::EnumCount;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
@@ -63,7 +63,9 @@ impl HasDiscriminant for BlockBodyField {
 #[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize, TasmObject)]
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
-    /// broadcasted transactions that the miner decided to confirm.
+    /// broadcasted transactions that the miner decided to confirm. The inputs
+    /// to this transaction kernel must be packed if the consensus rule dictate
+    /// that.
     pub(crate) transaction_kernel: TransactionKernel,
 
     /// The mutator set accumulator represents the UTXO set. It is simultaneously an
@@ -100,6 +102,7 @@ impl PartialEq for BlockBody {
 impl Eq for BlockBody {}
 
 impl BlockBody {
+    /// Caller must pack the removal records if required.
     pub(crate) fn new(
         transaction_kernel: TransactionKernel,
         mutator_set_accumulator: MutatorSetAccumulator,
@@ -160,35 +163,48 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
 
+    use crate::api::export::NativeCurrencyAmount;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
+
     use super::*;
 
     impl BlockBody {
         pub(crate) fn arbitrary_with_mutator_set_accumulator(
             mutator_set_accumulator: MutatorSetAccumulator,
         ) -> BoxedStrategy<BlockBody> {
-            let transaction_kernel_strategy = arb::<TransactionKernel>();
-            let lock_free_mmr_accumulator_strategy = arb::<MmrAccumulator>();
-            let block_mmr_accumulator_strategy = arb::<MmrAccumulator>();
-            (
-                transaction_kernel_strategy,
-                lock_free_mmr_accumulator_strategy,
-                block_mmr_accumulator_strategy,
-            )
-                .prop_map(
-                    move |(
-                        transaction_kernel,
-                        lock_free_mmr_accumulator,
-                        block_mmr_accumulator,
-                    )| {
-                        BlockBody {
-                            transaction_kernel,
-                            mutator_set_accumulator: mutator_set_accumulator.clone(),
-                            lock_free_mmr_accumulator,
-                            block_mmr_accumulator,
-                            merkle_tree: OnceLock::default(),
-                        }
-                    },
-                )
+            (NativeCurrencyAmount::arbitrary_non_negative())
+                .prop_flat_map(move |fee| {
+                    let transaction_kernel_strategy = TransactionKernel::strategy_with_fee(fee);
+                    let lock_free_mmr_accumulator_strategy = arb::<MmrAccumulator>();
+                    let block_mmr_accumulator_strategy = arb::<MmrAccumulator>();
+                    let mutator_set_accumulator = mutator_set_accumulator.clone();
+                    (
+                        transaction_kernel_strategy,
+                        lock_free_mmr_accumulator_strategy,
+                        block_mmr_accumulator_strategy,
+                    )
+                        .prop_map(
+                            move |(
+                                transaction_kernel,
+                                lock_free_mmr_accumulator,
+                                block_mmr_accumulator,
+                            )| {
+                                let inputs =
+                                    RemovalRecordList::pack(transaction_kernel.inputs.clone());
+                                let transaction_kernel = TransactionKernelModifier::default()
+                                    .inputs(inputs)
+                                    .modify(transaction_kernel);
+                                BlockBody {
+                                    transaction_kernel,
+                                    mutator_set_accumulator: mutator_set_accumulator.clone(),
+                                    lock_free_mmr_accumulator,
+                                    block_mmr_accumulator,
+                                    merkle_tree: OnceLock::default(),
+                                }
+                            },
+                        )
+                })
                 .boxed()
         }
     }

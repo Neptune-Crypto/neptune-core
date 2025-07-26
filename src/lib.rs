@@ -97,8 +97,8 @@ pub const SUCCESS_EXIT_CODE: i32 = 0;
 pub const COMPOSITION_FAILED_EXIT_CODE: i32 = 159;
 
 /// Magic string to ensure other program is Neptune Core
-pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
-pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
+pub const MAGIC_STRING_REQUEST: &[u8; 15] = b"7B8AB7FC438F411";
+pub const MAGIC_STRING_RESPONSE: &[u8; 15] = b"Hello Neptune!\n";
 const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
@@ -144,20 +144,22 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
     let (peer_task_to_main_tx, peer_task_to_main_rx) =
         mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
-    if let Some(bootstrap_directory) = global_state_lock.cli().bootstrap_from_directory.clone() {
+    if let Some(block_import_directory) =
+        global_state_lock.cli().import_blocks_from_directory.clone()
+    {
         info!(
-            "Bootstrapping from directory \"{}\"",
-            bootstrap_directory.to_string_lossy()
+            "Importing blocks from directory \"{}\"",
+            block_import_directory.to_string_lossy()
         );
 
-        let flush_period = global_state_lock.cli().bootstrap_flush_period;
-        let validate_blocks = !global_state_lock.cli().disable_bootstrap_block_validation;
+        let flush_period = global_state_lock.cli().import_block_flush_period;
+        let validate_blocks = !global_state_lock.cli().disable_validation_in_block_import;
         let num_blocks_read = global_state_lock
             .lock_guard_mut()
             .await
-            .bootstrap_from_directory(&bootstrap_directory, flush_period, validate_blocks)
+            .import_blocks_from_directory(&block_import_directory, flush_period, validate_blocks)
             .await?;
-        info!("Successfully bootstrapped {num_blocks_read} blocks.");
+        info!("Successfully imported {num_blocks_read} blocks.");
     }
 
     // Check if we need to restore the wallet database, and if so, do it.
@@ -194,7 +196,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();
         let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
-        let own_handshake_data_clone = own_handshake_data.clone();
         let peer_join_handle = tokio::task::Builder::new()
             .name("call_peer_wrapper_3")
             .spawn(async move {
@@ -203,7 +204,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
                     peer_state_var.clone(),
                     main_to_peer_broadcast_rx_clone,
                     peer_task_to_main_tx_clone,
-                    own_handshake_data_clone,
+                    own_handshake_data,
                     1, // All outgoing connections have distance 1
                 )
                 .await;

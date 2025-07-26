@@ -5,8 +5,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::library::Library;
 use tasm_lib::triton_vm::prelude::*;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;

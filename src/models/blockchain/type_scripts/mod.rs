@@ -1,3 +1,4 @@
+pub mod amount;
 pub mod known_type_scripts;
 pub mod native_currency;
 pub mod native_currency_amount;

@@ -17,6 +17,7 @@ use crate::config_models::network::Network;
 use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
@@ -71,6 +72,7 @@ pub enum UpgradeJob {
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
 }
 
+/// Task
 #[derive(Clone, Debug)]
 pub struct PrimitiveWitnessToSingleProof {
     pub primitive_witness: PrimitiveWitness,
@@ -85,6 +87,7 @@ impl PrimitiveWitnessToSingleProof {
         self,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: &TritonVmProofJobOptions,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<Transaction> {
         let options = TritonVmProofJobOptionsBuilder::new()
             .template(proof_job_options)
@@ -93,6 +96,7 @@ impl PrimitiveWitnessToSingleProof {
 
         info!("Proof-upgrader: Start producing single proof");
         let single_proof = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
             .primitive_witness_ref(&self.primitive_witness)
             .job_queue(triton_vm_job_queue.clone())
             .proof_job_options(options)
@@ -147,6 +151,9 @@ pub struct UpdateMutatorSetDataJob {
     old_mutator_set: MutatorSetAccumulator,
     mutator_set_update: MutatorSetUpdate,
     upgrade_incentive: UpgradeIncentive,
+
+    /// Consensus rules that apply *after* the transaction has been updated.
+    consensus_rule_set: ConsensusRuleSet,
 }
 
 impl UpdateMutatorSetDataJob {
@@ -156,6 +163,7 @@ impl UpdateMutatorSetDataJob {
         old_mutator_set: MutatorSetAccumulator,
         mutator_set_update: MutatorSetUpdate,
         upgrade_incentive: UpgradeIncentive,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Self {
         Self {
             old_kernel,
@@ -163,6 +171,7 @@ impl UpdateMutatorSetDataJob {
             old_mutator_set,
             mutator_set_update,
             upgrade_incentive,
+            consensus_rule_set,
         }
     }
 
@@ -176,6 +185,7 @@ impl UpdateMutatorSetDataJob {
             old_single_proof,
             old_mutator_set,
             mutator_set_update,
+            consensus_rule_set,
             ..
         } = self;
         info!("Proof-upgrader: Start update proof");
@@ -187,6 +197,7 @@ impl UpdateMutatorSetDataJob {
             triton_vm_job_queue,
             proof_job_options,
             None,
+            consensus_rule_set,
         )
         .await?;
         info!("Proof-upgrader, update: Done");
@@ -459,11 +470,14 @@ impl UpgradeJob {
                 let transaction_is_up_to_date =
                     upgraded.kernel.mutator_set_hash == tip_mutator_set.hash();
 
+                let network = global_state.cli().network;
+                let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
                 if transaction_is_up_to_date {
                     // Did the transaction get mined while the proof upgrade
                     // job was running? If so, don't share it or insert it into
                     // the mempool. Notice that this double-spend check can
                     // only be made if the mutator set is up to date.
+
                     if !upgraded.is_confirmable_relative_to(&tip_mutator_set) {
                         let verbose_log_msg = upgrade_job.double_spend_warn_msg();
                         warn!("Upgraded transaction is no longer confirmable. {verbose_log_msg}");
@@ -529,6 +543,7 @@ impl UpgradeJob {
                         old_mutator_set: mutator_set_for_tx,
                         mutator_set_update: ms_update,
                         upgrade_incentive,
+                        consensus_rule_set,
                     };
                     UpgradeJob::UpdateMutatorSetData(ms_update_job)
                 } else {
@@ -636,7 +651,12 @@ impl UpgradeJob {
             .proof_type(TransactionProofType::SingleProof)
             .build();
 
+        let consensus_rule_set = ConsensusRuleSet::infer_from(
+            proof_job_options.job_settings.network,
+            current_block_height,
+        );
         let proof = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
             .primitive_witness_ref(&gobbler_witness)
             .job_queue(triton_vm_job_queue.clone())
             .proof_job_options(options)
@@ -671,6 +691,8 @@ impl UpgradeJob {
         let gobbling_fee = self.gobbling_fee();
         let mutator_set = self.mutator_set();
         let old_tx_timestamp = self.old_tx_timestamp();
+        let network = proof_job_options.job_settings.network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, current_block_height);
 
         let (maybe_gobbler, expected_utxos) = if gobbling_fee.is_positive() {
             let (gobbler, eutxos) = Self::build_gobbler(
@@ -697,6 +719,7 @@ impl UpgradeJob {
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
                 let single_proof = TransactionProofBuilder::new()
+                    .consensus_rule_set(consensus_rule_set)
                     .proof_collection(proof)
                     .job_queue(triton_vm_job_queue.clone())
                     .proof_job_options(proof_job_options.clone())
@@ -720,6 +743,7 @@ impl UpgradeJob {
                             gobble_shuffle_seed,
                             triton_vm_job_queue.clone(),
                             proof_job_options,
+                            consensus_rule_set,
                         )
                         .await?;
                     info!("Proof-upgrader merging with gobbler: Done");
@@ -753,6 +777,7 @@ impl UpgradeJob {
                     shuffle_seed.to_owned(),
                     triton_vm_job_queue.clone(),
                     proof_job_options.clone(),
+                    consensus_rule_set,
                 )
                 .await?;
                 info!("Proof-upgrader, merge: Done");
@@ -765,6 +790,7 @@ impl UpgradeJob {
                             gobble_shuffle_seed,
                             triton_vm_job_queue,
                             proof_job_options,
+                            consensus_rule_set,
                         )
                         .await?;
                     info!("Proof-upgrader merging with gobbler: Done");
@@ -780,7 +806,11 @@ impl UpgradeJob {
             )),
             UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => Ok((
                 pw_to_sp
-                    .upgrade(triton_vm_job_queue.clone(), &proof_job_options)
+                    .upgrade(
+                        triton_vm_job_queue.clone(),
+                        &proof_job_options,
+                        consensus_rule_set,
+                    )
                     .await?,
                 expected_utxos,
             )),
@@ -806,9 +836,12 @@ pub(super) async fn get_upgrade_task_from_mempool(
         .light_state()
         .mutator_set_accumulator_after()
         .expect("Block from state must have mutator set after");
+    let tip_height = global_state.chain.light_state().header().height;
+    let network = global_state.cli().network;
     let gobbling_fraction = global_state.gobbling_fraction();
     let min_gobbling_fee = global_state.min_gobbling_fee();
     let num_proofs_threshold = global_state.max_num_proofs();
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip_height);
 
     // Do we have any `ProofCollection`s?
     let proof_collection_job = if let Some((kernel, proof, upgrade_priority)) = global_state
@@ -874,6 +907,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
                 old_mutator_set,
                 mutator_set_update,
                 upgrade_incentive,
+                consensus_rule_set,
             });
             Some(job)
         } else {
@@ -977,19 +1011,24 @@ mod tests {
             true,
         )]
         .into();
-        let mut gsm = state.lock_guard_mut().await;
-        let change_key = gsm.wallet_state.next_unused_symmetric_key().await;
-        drop(gsm);
+
+        let (change_key, block_height) = {
+            let mut gsm = state.lock_guard_mut().await;
+            let change_key = gsm.wallet_state.next_unused_symmetric_key().await;
+            let block_height = gsm.chain.light_state().header().height;
+            (change_key, block_height)
+        };
         let dummy = TritonVmJobQueue::get_instance();
         let timestamp = Network::Main.launch_date() + Timestamp::months(7);
         let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key.into())
             .with_prover_capability(proof_quality)
             .use_job_queue(dummy);
+        let consensus_rule_set = ConsensusRuleSet::infer_from(state.cli().network, block_height);
         let tx = state
             .api()
             .tx_initiator_internal()
-            .create_transaction(tx_outputs, fee, timestamp, config)
+            .create_transaction(tx_outputs, fee, timestamp, config, consensus_rule_set)
             .await
             .unwrap();
 
@@ -1084,7 +1123,7 @@ mod tests {
             alice
                 .lock_guard_mut()
                 .await
-                .mempool_insert((*pwtx).clone(), UpgradePriority::Irrelevant)
+                .mempool_insert((*pwtx).clone(), UpgradePriority::Critical)
                 .await;
             let TransactionProof::Witness(pw) = &pwtx.proof else {
                 panic!("Expected PW-backed tx");
@@ -1131,7 +1170,15 @@ mod tests {
                 ),
             }
 
-            assert!(mempool_tx.is_valid(network).await);
+            let block_height = alice
+                .lock_guard_mut()
+                .await
+                .chain
+                .light_state()
+                .header()
+                .height;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+            assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
         }
     }
 
@@ -1139,11 +1186,11 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn race_condition_with_one_new_block() {
         let network = Network::Main;
-
-        for proving_capability in [
+        let proving_capabilities = [
             TxProvingCapability::ProofCollection,
             TxProvingCapability::SingleProof,
-        ] {
+        ];
+        for proving_capability in proving_capabilities {
             let mut cli = cli_args::Args::default_with_network(network);
             cli.tx_proving_capability = Some(proving_capability);
 
@@ -1158,6 +1205,13 @@ mod tests {
                 NativeCurrencyAmount::from_nau(100),
             )
             .await;
+            assert!(
+                pwtx.is_valid(
+                    network,
+                    ConsensusRuleSet::infer_from(network, BlockHeight::genesis())
+                )
+                .await
+            );
             alice
                 .lock_guard_mut()
                 .await
@@ -1174,8 +1228,14 @@ mod tests {
             // method have to do more work.
             let genesis_block = Block::genesis(network);
             let block1 =
-                invalid_empty_block_with_timestamp(network, &genesis_block, pwtx.kernel.timestamp);
-            alice.set_new_tip(block1).await.unwrap();
+                invalid_empty_block_with_timestamp(&genesis_block, pwtx.kernel.timestamp, network);
+            let block1_msu = block1.mutator_set_update().unwrap();
+            println!(
+                "block1_msu #addition records: {}; block1_msu #removal records: {}",
+                block1_msu.additions.len(),
+                block1_msu.removals.len()
+            );
+            alice.set_new_tip(block1.clone()).await.unwrap();
 
             upgrade_job
                 .handle_upgrade(
@@ -1217,7 +1277,8 @@ mod tests {
                 ),
             }
 
-            assert!(mempool_tx.is_valid(network).await);
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
+            assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
 
             // Ensure tx was updated to latest mutator set
             let mutator_set_accumulator_after = alice

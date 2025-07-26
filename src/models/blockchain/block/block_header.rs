@@ -7,23 +7,25 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe_array;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MerkleTree;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::block_height::BlockHeight;
 use super::difficulty_control::difficulty_control;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use super::Block;
+use crate::api::export::ReceivingAddress;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
 
 /// Controls how long to wait before the difficulty for the *next* block is
 /// reduced.
@@ -57,7 +59,9 @@ pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
 
 pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
+)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct BlockHeader {
     pub version: BFieldElement,
@@ -75,8 +79,8 @@ pub struct BlockHeader {
     /// The difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: Difficulty,
 
-    /// The lock after-image for the guesser fee UTXOs
-    pub(crate) guesser_digest: Digest,
+    /// Information for the guesser to take custody of the guesser UTXOs.
+    pub guesser_receiver_data: GuesserReceiverData,
 }
 
 impl Display for BlockHeader {
@@ -88,7 +92,8 @@ impl Display for BlockHeader {
             Cumulative Proof-of-Work: {}\n\
             Difficulty: {}\n\
             Version: {}\n\
-            Guesser digest: {}\n\
+            Guesser receiver digest: {}\n\
+            Guesser lock script hash: {}\n\
             nonce: {}\n",
             self.height,
             self.timestamp.standard_format(),
@@ -96,7 +101,8 @@ impl Display for BlockHeader {
             self.cumulative_proof_of_work,
             self.difficulty,
             self.version,
-            self.guesser_digest.to_hex(),
+            self.guesser_receiver_data.receiver_digest.to_hex(),
+            self.guesser_receiver_data.lock_script_hash.to_hex(),
             self.nonce.to_hex()
         );
 
@@ -112,11 +118,13 @@ impl BlockHeader {
             prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
 
+            // Bitcoin block at height 906975
+            // TODO: Update me right before reboot
             nonce: Digest::new(bfe_array![
                 0x0000000000000000u64,
-                0x0001db42f3edf187u64,
-                0xf91d2dd95e6975deu64,
-                0x272fa07267136a84u64,
+                0x0001ff452761dd02u64,
+                0x9696bf75719bdc65u64,
+                0xa6b0088b8822e794u64,
                 0
             ]),
             cumulative_proof_of_work: ProofOfWork::zero(),
@@ -129,13 +137,22 @@ impl BlockHeader {
             #[cfg(test)]
             difficulty: Difficulty::MINIMUM,
 
-            guesser_digest: Digest::new(bfe_array![
-                0x49742773206E6F6Fu64,
-                0x6E20736F6D657768u64,
-                0x6572652E0Au64,
-                0,
-                0
-            ]),
+            guesser_receiver_data: GuesserReceiverData {
+                receiver_digest: Digest::new(bfe_array![
+                    0x5472756D7020746Fu64,
+                    0x20546F7572204665u64,
+                    0x646572616C205265u64,
+                    0x73657276652C2052u64,
+                    0x616D70696E672055u64
+                ]),
+                lock_script_hash: Digest::new(bfe_array![
+                    0x7020507265737375u64,
+                    0x72652043616D7061u64,
+                    0x69676E206F6E2050u64,
+                    0x6F77656C6C000000u64,
+                    0x0A57534A00000000u64
+                ]),
+            },
         }
     }
 
@@ -163,8 +180,18 @@ impl BlockHeader {
             nonce: Digest::default(),
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
-            guesser_digest: Digest::default(),
+            guesser_receiver_data: GuesserReceiverData {
+                receiver_digest: Digest::default(),
+                lock_script_hash: Digest::default(),
+            },
         }
+    }
+
+    pub(crate) fn was_guessed_by(&self, address: ReceivingAddress) -> bool {
+        let address_receiver_digest = address.privacy_digest();
+        let address_lock_script_hash = address.lock_script_hash();
+        self.guesser_receiver_data.receiver_digest == address_receiver_digest
+            && self.guesser_receiver_data.lock_script_hash == address_lock_script_hash
     }
 }
 
@@ -198,7 +225,7 @@ impl MastHash for BlockHeader {
             self.nonce.encode(),
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
-            self.guesser_digest.encode(),
+            self.guesser_receiver_data.encode(),
         ]
     }
 }
@@ -251,6 +278,57 @@ impl BlockHeaderWithBlockHashWitness {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl BlockHeader {
+    pub(crate) fn arbitrary_with_height(
+        block_height: BlockHeight,
+    ) -> proptest::prelude::BoxedStrategy<Self> {
+        use proptest::prelude::Strategy;
+        use proptest_arbitrary_interop::arb;
+
+        let version = arb::<BFieldElement>();
+        let prev_block_digest = arb::<Digest>();
+        let timestamp = arb::<Timestamp>();
+        let nonce = arb::<Digest>();
+        let cumulative_proof_of_work = arb::<ProofOfWork>();
+        let difficulty = arb::<Difficulty>();
+        let guesser_receiver_data = arb::<GuesserReceiverData>();
+
+        (
+            version,
+            prev_block_digest,
+            timestamp,
+            nonce,
+            cumulative_proof_of_work,
+            difficulty,
+            guesser_receiver_data,
+        )
+            .prop_map(
+                move |(
+                    version,
+                    prev_block_digest,
+                    timestamp,
+                    nonce,
+                    cumulative_proof_of_work,
+                    difficulty,
+                    guesser_receiver_data,
+                )| {
+                    BlockHeader {
+                        version,
+                        height: block_height,
+                        prev_block_digest,
+                        timestamp,
+                        nonce,
+                        cumulative_proof_of_work,
+                        difficulty,
+                        guesser_receiver_data,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
@@ -259,7 +337,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
 
-    pub fn random_block_header() -> BlockHeader {
+    pub(crate) fn random_block_header() -> BlockHeader {
         let mut rng = rand::rng();
         BlockHeader {
             version: rng.random(),
@@ -271,7 +349,10 @@ pub(crate) mod tests {
                 rng.random::<[u32; ProofOfWork::NUM_LIMBS]>(),
             ),
             difficulty: Difficulty::new(rng.random::<[u32; Difficulty::NUM_LIMBS]>()),
-            guesser_digest: rng.random(),
+            guesser_receiver_data: GuesserReceiverData {
+                receiver_digest: rng.random(),
+                lock_script_hash: rng.random(),
+            },
         }
     }
 

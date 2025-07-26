@@ -4,7 +4,7 @@
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
@@ -12,14 +12,14 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
 
 /// Provides summary information about a Block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockInfo {
     pub height: BlockHeight,
 
-    /// Block size in number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s
+    /// Block size in number of
+    /// [`BFieldElement`](tasm_lib::twenty_first::math::b_field_element::BFieldElement)s.
     pub size: usize,
     pub digest: Digest,
     pub prev_block_digest: Digest,

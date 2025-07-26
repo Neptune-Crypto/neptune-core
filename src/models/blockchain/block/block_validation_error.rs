@@ -1,3 +1,5 @@
+use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
+
 /// The reasons why a [`Block`](crate::models::blockchain::block::Block) can be
 /// invalid.
 ///
@@ -46,40 +48,50 @@ pub enum BlockValidationError {
     MaxSize,
 
     // 2. The transaction is valid.
-    ///   2.a) Verify that MS removal records are valid, done against previous
+    ///   2.a) Unpack the transaction's inputs (removal records). This operation
+    ///        is fallible but must succeed.
+    #[error("cannot unpack removal records")]
+    RemovalRecordsUnpackFailure,
+    ///   2.b) Verify that MS removal records are valid, done against previous
     ///      `mutator_set_accumulator`,
     #[error("all removal records must be valid relative to predecessor block's mutator set")]
     RemovalRecordsValid,
-    ///   2.b) Verify that all removal records have unique index sets
+    ///   2.c) Verify that all removal records have unique index sets
     #[error("all removal records must be unique")]
     RemovalRecordsUnique,
-    ///   2.c) Verify that the mutator set update induced by the block
+    ///   2.d) Verify that the mutator set update induced by the block
     ///        is possible
     #[error("mutator set update must be possible")]
     MutatorSetUpdatePossible,
-    ///   2.d) Verify that the mutator set update induced by the block sends
+    ///   2.e) Verify that the mutator set update induced by the block sends
     ///      the old mutator set accumulator to the new one.
     #[error("mutator set must evolve in accordance with transaction")]
     MutatorSetUpdateIntegral,
-    ///   2.e) transaction timestamp <= block timestamp
+    ///   2.f) transaction timestamp <= block timestamp
     #[error("transaction timestamp must not exceed block timestamp")]
     TransactionTimestamp,
-    ///   2.f) transaction coinbase <= block subsidy, and not negative.
+    ///   2.g) transaction coinbase <= block subsidy, and not negative.
     #[error("coinbase cannot exceed block subsidy")]
     CoinbaseTooBig,
-    ///   2.g) transaction coinbase <= block subsidy, and not negative.
+    ///   2.h) transaction coinbase <= block subsidy, and not negative.
     #[error("coinbase cannot be negative")]
     CoinbaseTooSmall,
-    ///   2.h) 0 <= transaction fee (also checked in block program).
+    ///   2.i) 0 <= transaction fee (also checked in block program).
     #[error("fee must be non-negative")]
     NegativeFee,
-    ///   2.i) restrict number of inputs.
+    ///   2.j) restrict number of inputs.
     #[error("number of inputs may not be too large")]
     TooManyInputs,
-    ///   2.j) restrict number of outputs.
+    ///   2.k) restrict number of outputs.
     #[error("number of outputs may not be too large")]
     TooManyOutputs,
-    ///   2.k) restrict number of announcements.
+    ///   2.l) restrict number of announcements.
     #[error("number of announcements may not be too large")]
     TooManyAnnouncements,
+}
+
+impl From<RemovalRecordListUnpackError> for BlockValidationError {
+    fn from(_: RemovalRecordListUnpackError) -> Self {
+        Self::RemovalRecordsUnpackFailure
+    }
 }

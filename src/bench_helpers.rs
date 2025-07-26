@@ -21,11 +21,13 @@ use crate::api::export::TransactionProof;
 use crate::api::export::TxInput;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::channel::RPCServerToMain;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::wallet_configuration::WalletConfiguration;
@@ -133,17 +135,21 @@ pub async fn next_block_incoming_utxos(
         fee,
         timestamp,
         msa,
-        Network::Main,
+        network,
     );
 
     let kernel = PrimitiveWitness::from_transaction_details(&tx_details).kernel;
+    let kernel = TransactionKernelModifier::default()
+        .merge_bit(true)
+        .modify(kernel);
 
     let tx = Transaction {
         kernel,
         proof: TransactionProof::SingleProof(NeptuneProof::invalid()),
     };
+    let tx: BlockTransaction = tx.try_into().unwrap();
 
-    let block_primitive_witness = BlockPrimitiveWitness::new(parent.to_owned(), tx);
+    let block_primitive_witness = BlockPrimitiveWitness::new(parent.to_owned(), tx, network);
     let body = block_primitive_witness.body().to_owned();
     let header = block_primitive_witness.header(timestamp, network.target_block_interval());
     let (appendix, proof) = {

@@ -2,7 +2,7 @@ use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::mmr::bag_peaks::BagPeaks;
 use tasm_lib::prelude::*;
-use twenty_first::prelude::Digest;
+use tasm_lib::twenty_first::prelude::Digest;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::TransactionKernel;
@@ -154,6 +154,9 @@ mod tests {
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
     use rand::random;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use strum::EnumCount;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use tasm_lib::memory::encode_to_memory;
@@ -163,10 +166,10 @@ mod tests {
     use tasm_lib::traits::mem_preserver::MemPreserverInitialState;
     use tasm_lib::traits::mem_preserver::ShadowedMemPreserver;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
+    use tasm_lib::twenty_first::prelude::Mmr;
+    use tasm_lib::twenty_first::prelude::Sponge;
     use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-    use twenty_first::prelude::MerkleTreeInclusionProof;
-    use twenty_first::prelude::Mmr;
-    use twenty_first::prelude::Sponge;
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -231,15 +234,19 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> MemPreserverInitialState {
-            let mut rng: TestRng = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
-            let swbfi_digest_ptr = rng.gen_range(0..(1 << 30));
-            let swbfa_digest_ptr = swbfi_digest_ptr + rng.gen_range(5..(1 << 25));
-            let aocl_mmr_address: u32 = rng.gen_range(0..(1 << 30));
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
+            let swbfi_digest_ptr = rng.random_range(0..(1 << 30));
+            let swbfa_digest_ptr = swbfi_digest_ptr + rng.random_range(5..(1 << 25));
+            let aocl_mmr_address: u32 = rng.random_range(0..(1 << 30));
             let swbfi_digest_ptr = bfe!(swbfi_digest_ptr as u64);
             let swbfa_digest_ptr = bfe!(swbfa_digest_ptr as u64);
 
             let primitive_witness: PrimitiveWitness = {
-                let mut test_runner = TestRunner::new_with_rng(Default::default(), rng);
+                let seedd: [u8; 32] = rng.random();
+                let mut test_runner = TestRunner::new_with_rng(
+                    Default::default(),
+                    TestRng::from_seed(RngAlgorithm::ChaCha, &seedd),
+                );
                 PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
                     .new_tree(&mut test_runner)
                     .unwrap()

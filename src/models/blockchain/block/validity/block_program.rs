@@ -345,9 +345,11 @@ pub(crate) mod tests {
     use crate::config_models::network::Network;
     use crate::mine_loop::create_block_transaction_from;
     use crate::mine_loop::TxMergeOrigin;
+    use crate::models::blockchain::block::block_validation_error::BlockValidationError;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TritonVmProofJobOptions;
+    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::builtins::verify_stark;
@@ -465,14 +467,10 @@ pub(crate) mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn disallow_double_spends_across_blocks() {
-        async fn mine_tx(
-            state: &GlobalStateLock,
-            tx: Transaction,
-            predecessor: &Block,
-            timestamp: Timestamp,
-        ) -> Block {
+        async fn mine_tx(state: &GlobalStateLock, tx: Transaction, timestamp: Timestamp) -> Block {
+            let predecessor = state.lock_guard().await.chain.light_state().to_owned();
             let (block_tx, _) = create_block_transaction_from(
-                predecessor,
+                &predecessor,
                 state,
                 timestamp,
                 TritonVmProofJobOptions::default(),
@@ -482,7 +480,7 @@ pub(crate) mod tests {
             .unwrap();
 
             Block::compose(
-                predecessor,
+                &predecessor,
                 block_tx,
                 timestamp,
                 TritonVmJobQueue::get_instance(),
@@ -495,12 +493,9 @@ pub(crate) mod tests {
         let network = Network::Main;
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
         let alice_wallet = WalletEntropy::devnet_wallet();
-        let alice = mock_genesis_global_state(
-            3,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args::default_with_network(network),
-        )
-        .await;
+        let mut alice =
+            mock_genesis_global_state(3, WalletEntropy::devnet_wallet(), cli_args::Args::default())
+                .await;
 
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let fee = NativeCurrencyAmount::coins(1);
@@ -516,15 +511,19 @@ pub(crate) mod tests {
         let config = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
+
+        let consensus_rule_set =
+            ConsensusRuleSet::infer_from(network, genesis_block.header().height.next());
         let tx: Transaction = alice
             .api()
             .tx_initiator_internal()
-            .create_transaction(vec![tx_output].into(), fee, now, config)
+            .create_transaction(vec![tx_output].into(), fee, now, config, consensus_rule_set)
             .await
             .unwrap()
             .transaction
             .into();
-        let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
+        let block1 = mine_tx(&alice, tx.clone(), now).await;
+        alice.set_new_tip(block1.clone()).await.unwrap();
 
         // Update transaction, stick it into block 2, and verify that block 2
         // is invalid.
@@ -537,13 +536,15 @@ pub(crate) mod tests {
             TritonVmJobQueue::get_instance(),
             TritonVmJobPriority::default().into(),
             Some(later),
+            consensus_rule_set,
         )
         .await
         .unwrap();
 
-        let block2 = mine_tx(&alice, tx, &block1, later).await;
-        assert!(
-            !block2.is_valid(&block1, later, network).await,
+        let block2 = mine_tx(&alice, tx, later).await;
+        assert_eq!(
+            BlockValidationError::RemovalRecordsValid,
+            block2.validate(&block1, later, network).await.unwrap_err(),
             "Block doing a double-spend must be invalid."
         );
     }

@@ -1,30 +1,32 @@
 use std::sync::Arc;
 
-use anyhow::bail;
-use anyhow::Result;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 
+use crate::api::export::ReceivingAddress;
 use crate::config_models::network::Network;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+
+use super::block_transaction::BlockOrRegularTransaction;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MockBlockGenerator;
@@ -34,17 +36,20 @@ impl MockBlockGenerator {
     /// be a valid block except for proof and PoW.
     pub fn mock_block_from_tx_without_pow(
         predecessor: Block,
-        tx: Transaction,
-        guesser_key: HashLockKey,
+        block_tx: BlockTransaction,
+        guesser_address: ReceivingAddress,
+        network: Network,
     ) -> Block {
-        let timestamp = tx.kernel.timestamp;
+        let timestamp = block_tx.kernel.timestamp;
 
-        let primitive_witness = BlockPrimitiveWitness::new(predecessor, tx);
+        let primitive_witness = BlockPrimitiveWitness::new(predecessor, block_tx, network);
 
         let body = primitive_witness.body().to_owned();
         let mut header =
             primitive_witness.header(timestamp, Network::RegTest.target_block_interval());
-        header.guesser_digest = guesser_key.after_image();
+        header.guesser_receiver_data.receiver_digest = guesser_address.privacy_digest();
+        header.guesser_receiver_data.lock_script_hash = guesser_address.lock_script_hash();
+
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness);
             let appendix = block_proof_witness.appendix();
@@ -57,15 +62,19 @@ impl MockBlockGenerator {
 
     /// Create a block from a transaction without the hassle of proving but such
     /// that it appears valid.
-    pub fn mock_block_from_tx(
-        network: Network,
+    fn mock_block_from_tx(
         predecessor: Arc<Block>,
-        tx: Transaction,
-        guesser_key: HashLockKey,
+        block_tx: BlockTransaction,
+        guesser_address: ReceivingAddress,
         seed: [u8; 32],
+        network: Network,
     ) -> Block {
-        let mut block =
-            Self::mock_block_from_tx_without_pow((*predecessor).clone(), tx, guesser_key);
+        let mut block = Self::mock_block_from_tx_without_pow(
+            (*predecessor).clone(),
+            block_tx,
+            guesser_address,
+            network,
+        );
 
         let mut rng = StdRng::from_seed(seed);
 
@@ -82,10 +91,13 @@ impl MockBlockGenerator {
     /// seems to pass but without the hassle of producing a proof for it. Behind the
     /// scenes, this method updates the true claims cache, such that the call to
     /// `triton_vm::verify` will be by-passed.
-    fn mock_transaction_from_details(transaction_details: &TransactionDetails) -> Transaction {
+    fn mock_transaction_from_details(
+        transaction_details: &TransactionDetails,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Transaction {
         let kernel = PrimitiveWitness::from_transaction_details(transaction_details).kernel;
 
-        let claim = SingleProof::claim(kernel.mast_hash());
+        let claim = single_proof_claim(kernel.mast_hash(), consensus_rule_set);
 
         Transaction {
             kernel,
@@ -93,33 +105,31 @@ impl MockBlockGenerator {
         }
     }
 
-    /// Merge two transactions for tests, without the hassle of proving but such
-    /// that the result seems valid.
-    fn merge_mock_transactions(
-        lhs: Transaction,
+    /// Merge two transactions for tests, without proving but such that the
+    /// result seems valid.
+    fn fake_merge_block_transactions_for_tests(
+        lhs: BlockOrRegularTransaction,
         rhs: Transaction,
         shuffle_seed: [u8; 32],
-    ) -> Result<Transaction> {
-        let TransactionProof::SingleProof(lhs_proof) = lhs.proof else {
-            bail!("merge error: arguments must be singleproof transactions")
-        };
-        let TransactionProof::SingleProof(rhs_proof) = rhs.proof else {
-            bail!("merge error: arguments must be singleproof transactions")
-        };
-        let merge_witness = MergeWitness::from_transactions(
-            lhs.kernel,
-            lhs_proof,
-            rhs.kernel,
-            rhs_proof,
-            shuffle_seed,
+        #[expect(unused_variables, reason = "anticipate future fork")]
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> BlockTransaction {
+        assert!(
+            lhs.proof().is_single_proof(),
+            "Argument2 must be single-proof-backed transaction"
         );
-        let new_kernel = merge_witness.new_kernel.clone();
-        let claim = SingleProof::claim(new_kernel.mast_hash());
+        assert!(
+            rhs.proof.is_single_proof(),
+            "Argument2 must be single-proof-backed transaction"
+        );
 
-        Ok(Transaction {
-            kernel: new_kernel,
-            proof: TransactionProof::SingleProof(Proof::valid_mock(claim)),
-        })
+        let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed);
+        let new_kernel = merge_witness.new_kernel.clone();
+
+        BlockTransaction {
+            kernel: new_kernel.try_into().unwrap(),
+            proof: TransactionProof::SingleProof(Proof::invalid()),
+        }
     }
 
     /// Create a block-transaction with a bogus proof but such that `verify` passes.
@@ -131,7 +141,9 @@ impl MockBlockGenerator {
         timestamp: Timestamp,
         shuffle_seed: [u8; 32],
         mut selected_mempool_txs: Vec<Transaction>,
-    ) -> Result<(Transaction, TxOutputList)> {
+    ) -> (BlockTransaction, TxOutputList) {
+        let consensus_rule_set =
+            ConsensusRuleSet::infer_from(network, predecessor_block.header().height.next());
         let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
             predecessor_block,
             composer_parameters,
@@ -139,9 +151,9 @@ impl MockBlockGenerator {
             network,
         );
 
-        let coinbase_transaction = Self::mock_transaction_from_details(&transaction_details);
+        let coinbase_transaction =
+            Self::mock_transaction_from_details(&transaction_details, consensus_rule_set);
 
-        let mut block_transaction = coinbase_transaction;
         if selected_mempool_txs.is_empty() {
             // create the nop-tx and merge into the coinbase transaction to set the
             // merge bit to allow the tx to be included in a block.
@@ -150,18 +162,30 @@ impl MockBlockGenerator {
                 timestamp,
                 network,
             );
-            let nop_transaction = Self::mock_transaction_from_details(&nop_details);
+            let nop_transaction =
+                Self::mock_transaction_from_details(&nop_details, consensus_rule_set);
 
             selected_mempool_txs = vec![nop_transaction];
         }
 
+        let mut block_transaction = coinbase_transaction.into();
         let mut rng = StdRng::from_seed(shuffle_seed);
         for tx_to_include in selected_mempool_txs {
-            block_transaction =
-                Self::merge_mock_transactions(block_transaction, tx_to_include, rng.random())?;
+            block_transaction = Self::fake_merge_block_transactions_for_tests(
+                block_transaction,
+                tx_to_include,
+                rng.random(),
+                consensus_rule_set,
+            )
+            .into();
         }
 
-        Ok((block_transaction, composer_txos))
+        (
+            block_transaction
+                .try_into()
+                .expect("Merged should be done at least once"),
+            composer_txos,
+        )
     }
 
     /// Create a mock block with coinbase going to self.
@@ -176,12 +200,12 @@ impl MockBlockGenerator {
     pub fn mock_successor_with_pow(
         predecessor: Arc<Block>,
         composer_parameters: ComposerParameters,
-        guesser_key: HashLockKey,
+        guesser_address: ReceivingAddress,
         timestamp: Timestamp,
         seed: [u8; 32],
         mempool_tx: Vec<Transaction>,
         network: Network,
-    ) -> Result<(Block, TxOutputList)> {
+    ) -> (Block, TxOutputList) {
         let with_valid_pow = true;
         let mut rng = StdRng::from_seed(seed);
 
@@ -192,14 +216,25 @@ impl MockBlockGenerator {
             timestamp,
             rng.random(),
             mempool_tx,
-        )?;
+        );
 
         let prev = predecessor.clone();
 
         let block = if with_valid_pow {
-            Self::mock_block_from_tx(network, predecessor, block_tx, guesser_key, rng.random())
+            Self::mock_block_from_tx(
+                predecessor,
+                block_tx,
+                guesser_address,
+                rng.random(),
+                network,
+            )
         } else {
-            Self::mock_block_from_tx_without_pow((*predecessor).clone(), block_tx, guesser_key)
+            Self::mock_block_from_tx_without_pow(
+                (*predecessor).clone(),
+                block_tx,
+                guesser_address,
+                network,
+            )
         };
 
         tracing::debug!(
@@ -210,6 +245,6 @@ impl MockBlockGenerator {
 
         assert_eq!(block.header().height, prev.header().height + 1);
 
-        Ok((block, composer_tx_outputs))
+        (block, composer_tx_outputs)
     }
 }

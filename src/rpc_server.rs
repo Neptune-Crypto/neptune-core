@@ -59,10 +59,10 @@ use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
 use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
-use twenty_first::prelude::Digest;
 
 use crate::api;
 use crate::api::tx_initiation;
@@ -99,10 +99,9 @@ use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::models::state::wallet::address::BaseKeyType;
-use crate::models::state::wallet::address::BaseSpendingKey;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -113,7 +112,6 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
-use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -1057,13 +1055,13 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn known_keys(token: rpc_auth::Token) -> RpcResult<Vec<BaseSpendingKey>>;
+    async fn known_keys(token: rpc_auth::Token) -> RpcResult<Vec<SpendingKey>>;
 
     /// Return known keys for the provided [KeyType]
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::state::wallet::address::BaseKeyType;
+    /// use neptune_cash::models::state::wallet::address::KeyType;
     /// # use neptune_cash::rpc_server::RPCClient;
     /// # use neptune_cash::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1087,7 +1085,7 @@ pub trait RPC {
     /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set a key type
-    /// let key_type = BaseKeyType::Symmetric;
+    /// let key_type = KeyType::Symmetric;
     ///
     /// // query neptune-core server to get all known keys by [KeyType]
     /// let known_keys_by_keytype = client.known_keys_by_keytype(context::current(), token, key_type ).await??;
@@ -1096,8 +1094,8 @@ pub trait RPC {
     /// ```
     async fn known_keys_by_keytype(
         token: rpc_auth::Token,
-        key_type: BaseKeyType,
-    ) -> RpcResult<Vec<BaseSpendingKey>>;
+        key_type: KeyType,
+    ) -> RpcResult<Vec<SpendingKey>>;
 
     /// Return the number of transactions in the mempool
     ///
@@ -1426,7 +1424,7 @@ pub trait RPC {
     /// Returns `None` if no block proposal for the next block is known yet.
     async fn pow_puzzle_external_key(
         token: rpc_auth::Token,
-        guesser_digest: Digest,
+        guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>>;
 
     /******** BLOCKCHAIN STATISTICS ********/
@@ -2044,10 +2042,9 @@ impl NeptuneRPCServer {
         let _enter = span.enter();
 
         // deserialize UtxoTransferEncrypted from bech32m string.
-        let utxo_transfer_encrypted = EncryptedUtxoNotification::from_bech32m(
-            &encrypted_utxo_notification,
-            self.state.cli().network,
-        )?;
+        let network = self.state.cli().network;
+        let utxo_transfer_encrypted =
+            EncryptedUtxoNotification::from_bech32m(&encrypted_utxo_notification, network)?;
 
         // // acquire global state read lock
         let state = self.state.lock_guard().await;
@@ -2194,12 +2191,12 @@ impl NeptuneRPCServer {
     /// Return a PoW puzzle with the provided guesser digest.
     async fn pow_puzzle_inner(
         mut self,
-        guesser_key_after_image: Digest,
+        guesser_address: ReceivingAddress,
         mut proposal: Block,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
         let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
 
-        proposal.set_header_guesser_digest(guesser_key_after_image);
+        proposal.set_header_guesser_address(guesser_address);
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
 
         // Record block proposal in case of guesser-success, for later
@@ -2726,7 +2723,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-    ) -> RpcResult<Vec<BaseSpendingKey>> {
+    ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2744,8 +2741,8 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-        key_type: BaseKeyType,
-    ) -> RpcResult<Vec<BaseSpendingKey>> {
+        key_type: KeyType,
+    ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -3408,16 +3405,15 @@ impl RPC for NeptuneRPCServer {
             return Ok(None);
         };
 
-        let guesser_key_after_image = self
+        let guesser_key = self
             .state
             .lock_guard()
             .await
             .wallet_state
             .wallet_entropy
-            .guesser_spending_key(proposal.header().prev_block_digest)
-            .after_image();
+            .guesser_fee_key();
 
-        self.pow_puzzle_inner(guesser_key_after_image, proposal)
+        self.pow_puzzle_inner(guesser_key.to_address().into(), proposal)
             .await
     }
 
@@ -3426,7 +3422,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-        guesser_digest: Digest,
+        guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3442,7 +3438,7 @@ impl RPC for NeptuneRPCServer {
             return Ok(None);
         };
 
-        self.pow_puzzle_inner(guesser_digest, proposal).await
+        self.pow_puzzle_inner(guesser_fee_address, proposal).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -3756,7 +3752,6 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
     use super::*;
@@ -3813,8 +3808,7 @@ mod tests {
 
     #[apply(shared_tokio_runtime)]
     async fn network_response_is_consistent() -> Result<()> {
-        // Verify that a wallet not receiving a premine is empty at startup
-        for network in Network::iter() {
+        for network in [Network::Main, Network::Testnet(0)] {
             let rpc_server = test_rpc_server(
                 WalletEntropy::new_random(),
                 2,
@@ -3902,13 +3896,13 @@ mod tests {
                 ctx,
                 token,
                 "Not a valid address".to_owned(),
-                Network::Testnet,
+                Network::Testnet(0),
             )
             .await;
         let _ = rpc_server.clone().pow_puzzle_internal_key(ctx, token).await;
         let _ = rpc_server
             .clone()
-            .pow_puzzle_external_key(ctx, token, rng.random())
+            .pow_puzzle_external_key(ctx, token, own_receiving_address.clone())
             .await;
         let _ = rpc_server
             .clone()
@@ -3936,8 +3930,11 @@ mod tests {
             .clone()
             .clear_standing_by_ip(ctx, token, "127.0.0.1".parse().unwrap())
             .await;
-        let output: OutputFormat =
-            (own_receiving_address.clone(), NativeCurrencyAmount::one()).into();
+        let output: OutputFormat = (
+            own_receiving_address.clone(),
+            NativeCurrencyAmount::one_nau(),
+        )
+            .into();
         let _ = rpc_server
             .clone()
             .send(
@@ -3945,13 +3942,14 @@ mod tests {
                 token,
                 vec![output],
                 ChangePolicy::ExactChange,
-                NativeCurrencyAmount::one(),
+                NativeCurrencyAmount::one_nau(),
             )
             .await;
 
         // let transaction_timestamp = network.launch_date();
         // let proving_capability = rpc_server.state.cli().proving_capability();
-        let my_output: OutputFormat = (own_receiving_address, NativeCurrencyAmount::one()).into();
+        let my_output: OutputFormat =
+            (own_receiving_address, NativeCurrencyAmount::one_nau()).into();
         let _ = rpc_server
             .clone()
             .send(
@@ -3959,7 +3957,7 @@ mod tests {
                 token,
                 vec![my_output],
                 ChangePolicy::ExactChange,
-                NativeCurrencyAmount::one(),
+                NativeCurrencyAmount::one_nau(),
             )
             .await;
 
@@ -3993,7 +3991,7 @@ mod tests {
         let rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default_with_network(Network::Beta),
+            cli_args::Args::default_with_network(Network::Main),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4012,7 +4010,7 @@ mod tests {
         let mut rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default_with_network(Network::Beta),
+            cli_args::Args::default_with_network(Network::Main),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4170,7 +4168,7 @@ mod tests {
         let mut rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default_with_network(Network::Beta),
+            cli_args::Args::default_with_network(Network::Main),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4298,7 +4296,7 @@ mod tests {
         let rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default_with_network(Network::Beta),
+            cli_args::Args::default_with_network(Network::Main),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4338,7 +4336,7 @@ mod tests {
     ) {
         prop_assume!(!transaction_kernel.fee.is_negative());
 
-        let network = Network::Beta;
+        let network = Network::Main;
         let mut rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
             2,
@@ -4676,7 +4674,7 @@ mod tests {
         let rpc_server = test_rpc_server(
             WalletEntropy::new_random(),
             2,
-            cli_args::Args::default_with_network(Network::Beta),
+            cli_args::Args::default_with_network(Network::Main),
         )
         .await;
         let token = cookie_token(&rpc_server).await;
@@ -4721,21 +4719,22 @@ mod tests {
 
     mod pow_puzzle_tests {
         use rand::random;
-        use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
         use crate::mine_loop::fast_kernel_mast_hash;
         use crate::models::state::block_proposal::BlockProposal;
-        use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
         fn pow_puzzle_is_consistent_with_block_hash() {
             let network = Network::Main;
             let genesis = Block::genesis(network);
-            let mut block1 = invalid_empty_block(network, &genesis);
-            let hash_lock_key = HashLockKey::from_preimage(random());
-            block1.set_header_guesser_digest(hash_lock_key.after_image());
+            let mut block1 = invalid_empty_block(&genesis, network);
+            let mut rng = StdRng::seed_from_u64(3409875378456);
+            let guesser_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+            block1.set_header_guesser_address(guesser_address.into());
 
             let guess_challenge = ProofOfWorkPuzzle::new(block1.clone(), *genesis.header());
             assert_eq!(guess_challenge.prev_block, genesis.hash());
@@ -4792,7 +4791,7 @@ mod tests {
             .await;
 
             let genesis = Block::genesis(network);
-            let block1 = invalid_empty_block(network, &genesis);
+            let block1 = invalid_empty_block(&genesis, network);
             bob.state
                 .lock_mut(|x| {
                     x.mining_state.block_proposal =
@@ -4802,12 +4801,25 @@ mod tests {
             let bob_token = cookie_token(&bob).await;
 
             let num_exported_block_proposals = 6;
-            let guesser_digests = random_elements(6);
+
+            let mut addresses = vec![];
+            for _ in 0..num_exported_block_proposals {
+                let address = bob
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Generation)
+                    .await
+                    .to_address();
+                addresses.push(address);
+            }
+
             let mut pow_puzzle_ids = vec![];
-            for guesser_digest in guesser_digests.clone() {
+            for guesser_address in addresses.clone() {
                 let pow_puzzle = bob
                     .clone()
-                    .pow_puzzle_external_key(context::current(), bob_token, guesser_digest)
+                    .pow_puzzle_external_key(context::current(), bob_token, guesser_address)
                     .await
                     .unwrap()
                     .unwrap();
@@ -4826,9 +4838,9 @@ mod tests {
             );
 
             // Verify that the same exported puzzle is not added twice.
-            for guesser_digest in guesser_digests {
+            for guesser_address in addresses {
                 bob.clone()
-                    .pow_puzzle_external_key(context::current(), bob_token, guesser_digest)
+                    .pow_puzzle_external_key(context::current(), bob_token, guesser_address)
                     .await
                     .unwrap()
                     .unwrap();
@@ -4858,7 +4870,7 @@ mod tests {
             let bob_token = cookie_token(&bob).await;
 
             let genesis = Block::genesis(network);
-            let mut block1 = invalid_empty_block(network, &genesis);
+            let mut block1 = invalid_empty_block(&genesis, network);
             bob.state
                 .lock_mut(|x| {
                     x.mining_state.block_proposal =
@@ -4866,18 +4878,14 @@ mod tests {
                 })
                 .await;
 
-            let external_key = WalletEntropy::new_random();
-            let external_guesser_key = external_key.guesser_spending_key(genesis.hash());
-            let external_guesser_digest = external_guesser_key.after_image();
+            let entropy_for_external_key = WalletEntropy::new_random();
+            let external_guesser_key = entropy_for_external_key.guesser_fee_key();
+            let external_guesser_address = external_guesser_key.to_address();
             let internal_guesser_digest = bob
                 .state
-                .lock(|x| {
-                    x.wallet_state
-                        .wallet_entropy
-                        .guesser_spending_key(genesis.hash())
-                })
+                .lock(|x| x.wallet_state.wallet_entropy.guesser_fee_key())
                 .await
-                .after_image();
+                .to_address();
 
             for use_internal_key in [true, false] {
                 println!("use_internal_key: {use_internal_key}");
@@ -4892,17 +4900,17 @@ mod tests {
                         .pow_puzzle_external_key(
                             context::current(),
                             bob_token,
-                            external_guesser_digest,
+                            external_guesser_address.into(),
                         )
                         .await
                         .unwrap()
                         .unwrap()
                 };
 
-                let guesser_digest = if use_internal_key {
+                let guesser_address = if use_internal_key {
                     internal_guesser_digest
                 } else {
-                    external_guesser_digest
+                    external_guesser_address
                 };
 
                 assert!(
@@ -4923,7 +4931,7 @@ mod tests {
                 );
 
                 block1.set_header_nonce(mock_nonce);
-                block1.set_header_guesser_digest(guesser_digest);
+                block1.set_header_guesser_address(guesser_address.into());
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
                     block1.total_guesser_reward().unwrap(),
@@ -5087,7 +5095,7 @@ mod tests {
 
                     let cb_key = wallet_entropy.nth_generation_spending_key(0);
                     let (block1, composer_expected_utxos) =
-                        make_mock_block(network, &genesis_block, None, cb_key, Default::default())
+                        make_mock_block(&genesis_block, None, cb_key, Default::default(), network)
                             .await;
                     blocks.push(block1.clone());
 
@@ -5116,7 +5124,7 @@ mod tests {
                         &block1,
                         tx_artifacts.transaction.clone().into(),
                     );
-                    let block3 = invalid_empty_block(network, &block2);
+                    let block3 = invalid_empty_block(&block2, network);
 
                     // mine two blocks, the first will include the transaction
                     blocks.push(block2);
@@ -5234,7 +5242,7 @@ mod tests {
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
                 let genesis_block = Block::genesis(network);
                 let (block1, composer_expected_utxos) =
-                    make_mock_block(network, &genesis_block, None, bob_key, Default::default())
+                    make_mock_block(&genesis_block, None, bob_key, Default::default(), network)
                         .await;
 
                 bob.state
@@ -5288,7 +5296,7 @@ mod tests {
                     &block1,
                     tx_artifacts.transaction.clone().into(),
                 );
-                let block3 = invalid_empty_block(network, &block2);
+                let block3 = invalid_empty_block(&block2, network);
 
                 if claim_after_mined {
                     // bob applies the blocks before claiming utxos.
@@ -5577,7 +5585,7 @@ mod tests {
                 // wallet ---
                 let timestamp = network.launch_date() + Timestamp::days(1);
                 let (block_1, composer_utxos) =
-                    make_mock_block(network, &genesis_block, Some(timestamp), key, rng.random())
+                    make_mock_block(&genesis_block, Some(timestamp), key, rng.random(), network)
                         .await;
 
                 {

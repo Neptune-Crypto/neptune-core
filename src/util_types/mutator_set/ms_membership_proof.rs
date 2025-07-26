@@ -11,27 +11,26 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tasm_lib::twenty_first::util_types::mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::prelude::Digest;
-use twenty_first::util_types::mmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-use super::chunk_dictionary::ChunkDictionary;
 use super::commit;
-use super::get_swbf_indices;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
-use super::removal_record::AbsoluteIndexSet;
+use super::removal_record::absolute_index_set::AbsoluteIndexSet;
+use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::get_batch_mutation_argument_for_removal_record;
 use super::shared::prepare_authenticated_batch_modification_for_removal_record_reversion;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
+
 impl Error for MembershipProofError {}
 
 impl fmt::Display for MembershipProofError {
@@ -64,12 +63,12 @@ impl MsMembershipProof {
 
     /// Compute the indices that will be added to the SWBF if this item is removed.
     pub fn compute_indices(&self, item: Digest) -> AbsoluteIndexSet {
-        AbsoluteIndexSet::new(&get_swbf_indices(
+        AbsoluteIndexSet::compute(
             item,
             self.sender_randomness,
             self.receiver_preimage,
             self.aocl_leaf_index,
-        ))
+        )
     }
 
     /// Update a list of membership proofs in anticipation of an addition. If successful,
@@ -132,8 +131,13 @@ impl MsMembershipProof {
         let new_item_index2 = mutator_set.aocl.num_leafs();
 
         // window does slide
-        let batch_index = new_item_index2 / u64::from(BATCH_SIZE);
-        let old_window_start_batch_index = batch_index - 1;
+        let next_batch_index = new_item_index2 / u64::from(BATCH_SIZE);
+        let current_batch_index = next_batch_index - 1;
+        assert_eq!(
+            current_batch_index,
+            mutator_set.swbf_inactive.num_leafs(),
+            "Number of SWBF MMR leafs must match current batch index"
+        );
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
@@ -155,12 +159,12 @@ impl MsMembershipProof {
             .zip(own_items.iter())
             .enumerate()
             .for_each(|(i, (mp, &item))| {
-                let absolute_indices = AbsoluteIndexSet::new(&get_swbf_indices(
+                let absolute_indices = AbsoluteIndexSet::compute(
                     item,
                     mp.sender_randomness,
                     mp.receiver_preimage,
                     mp.aocl_leaf_index,
-                ));
+                );
                 for chunk_index in absolute_indices
                     .to_array()
                     .iter()
@@ -177,7 +181,7 @@ impl MsMembershipProof {
         // Find the indices of the mutator set membership proofs whose
         // `target_chunks` field needs a new dictionary entry for the slid chunk.
         let indices_for_mps_with_new_chunk_dictionary_entry: Vec<usize> =
-            match chunk_index_to_mp_index.get(&old_window_start_batch_index) {
+            match chunk_index_to_mp_index.get(&current_batch_index) {
                 Some(vals) => vals.clone(),
                 None => vec![],
             };
@@ -186,7 +190,7 @@ impl MsMembershipProof {
         // to be updated because of the window sliding. We just
         let mut mps_for_batch_append: HashSet<usize> = HashSet::new();
         for (chunk_index, mp_indices) in chunk_index_to_mp_index {
-            if chunk_index < old_window_start_batch_index {
+            if chunk_index < current_batch_index {
                 for mp_index in mp_indices {
                     mps_for_batch_append.insert(mp_index);
                 }
@@ -199,7 +203,7 @@ impl MsMembershipProof {
         // proofs that need it.
         for i in &indices_for_mps_with_new_chunk_dictionary_entry {
             membership_proofs.index_mut(*i).target_chunks.insert(
-                old_window_start_batch_index,
+                current_batch_index,
                 (new_chunk_auth_path.clone(), new_chunk.clone()),
             );
         }
@@ -227,7 +231,7 @@ impl MsMembershipProof {
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
                 for (chunk_index, (mmr_mp, _chunk)) in mp.target_chunks.iter_mut() {
-                    if *chunk_index != old_window_start_batch_index {
+                    if *chunk_index != current_batch_index {
                         mmr_membership_proofs_for_append.push(mmr_mp);
                         mmr_membership_indices.push(*chunk_index);
                         mmr_mp_index_to_ms_mp_index.push(i as u64);
@@ -294,15 +298,16 @@ impl MsMembershipProof {
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
         // Get Bloom filter indices by recalculating them.
-        let all_indices = get_swbf_indices(
+        let all_indices = AbsoluteIndexSet::compute(
             own_item,
             self.sender_randomness,
             self.receiver_preimage,
             self.aocl_leaf_index,
-        );
+        )
+        .to_array();
         let chunk_indices_set: HashSet<u64> = all_indices
-            .into_iter()
             .map(|bi| (bi / u128::from(CHUNK_SIZE)) as u64)
+            .into_iter()
             .collect::<HashSet<u64>>();
 
         // Insert the new SWBF leaf into a duplicate of the SWBFI MMRA to get
@@ -566,17 +571,18 @@ pub mod tests {
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
+    use rand::seq::IndexedRandom;
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
-    use twenty_first::math::other::random_elements;
-    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+    use tasm_lib::twenty_first::math::other::random_elements;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::active_window::ActiveWindow;
-    use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::commit;
+    use crate::util_types::mutator_set::removal_record::chunk::Chunk;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
     use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
 
@@ -588,7 +594,7 @@ pub mod tests {
             sender_randomness in arb::<Digest>(),
             receiver_preimage in arb::<Digest>(),
             (auth_path_aocl, aocl_leaf_index) in propcompose_mmrmembershipproof_with_index(),
-            target_chunks in crate::util_types::mutator_set::chunk_dictionary::tests::propcompose_chunkdict(),
+            target_chunks in crate::util_types::mutator_set::removal_record::chunk_dictionary::tests::propcompose_chunkdict(),
         ) -> MsMembershipProof {
             MsMembershipProof {
                 sender_randomness,
@@ -1404,6 +1410,66 @@ pub mod tests {
             let encoded = msmp.encode();
             let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
             assert_eq!(msmp, decoded);
+        }
+    }
+
+    #[test]
+    fn batch_updates_on_small_mmr() {
+        let mut rng = rand::rng();
+
+        for remove_share in [0.01, 0.1, 0.4, 0.7, 0.99, 1.0] {
+            let mut msa = MutatorSetAccumulator::default();
+            let mut msmps = vec![];
+            let mut items = vec![];
+            let mut removed = vec![];
+            for j in 0usize..usize::try_from(25 * BATCH_SIZE).unwrap() {
+                println!("{j}");
+                let item: Digest = rng.random();
+                let sender_randomness: Digest = rng.random();
+                let receiver_preimage: Digest = rng.random();
+                let msmp = msa.prove(item, sender_randomness, receiver_preimage);
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+                MsMembershipProof::batch_update_from_addition(
+                    &mut msmps.iter_mut().collect_vec(),
+                    &items,
+                    &msa,
+                    &addition_record,
+                )
+                .unwrap();
+                msa.add(&addition_record);
+                msmps.push(msmp);
+                items.push(item);
+
+                if rng.random_bool(remove_share) {
+                    let not_removed = (0..=j).filter(|i| !removed.contains(i)).collect_vec();
+                    let remove = *not_removed.choose(&mut rng).unwrap();
+                    let remove_item = items[remove];
+                    let remove_msmp = &msmps[remove];
+                    let removal_record = msa.drop(remove_item, remove_msmp);
+                    MsMembershipProof::batch_update_from_remove(
+                        &mut msmps.iter_mut().collect_vec(),
+                        &removal_record,
+                    )
+                    .unwrap();
+                    assert!(msa.can_remove(&removal_record));
+                    msa.remove(&removal_record);
+                    removed.push(remove);
+                }
+            }
+
+            for ((j, msmp), item) in msmps.into_iter().enumerate().zip(items) {
+                if removed.contains(&j) {
+                    assert!(
+                        !msa.verify(item, &msmp),
+                        "index {j} must fail to verify since it was removed."
+                    );
+                } else {
+                    assert!(
+                        msa.verify(item, &msmp),
+                        "index {j} must verify since it was never removed."
+                    );
+                }
+            }
         }
     }
 

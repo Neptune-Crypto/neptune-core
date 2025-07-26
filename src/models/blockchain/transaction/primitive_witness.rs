@@ -23,6 +23,7 @@ use super::utxo::Utxo;
 use super::TransactionDetails;
 use crate::api::export::TxInputList;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::type_scripts::known_type_scripts;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -198,12 +199,8 @@ impl PrimitiveWitness {
         let salted_output_utxos = SaltedUtxos::new_with_rng(output_utxos.to_vec(), &mut rng);
         let salted_input_utxos = SaltedUtxos::new_with_rng(input_utxos.clone(), &mut rng);
 
-        let type_script_hashes = input_utxos
-            .iter()
-            .chain(output_utxos.iter())
-            .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash))
-            .unique()
-            .collect_vec();
+        let type_script_hashes =
+            Utxo::type_script_hashes(input_utxos.iter().chain(output_utxos.iter()));
         let type_scripts_and_witnesses = type_script_hashes
             .into_iter()
             .map(|type_script_hash| {
@@ -266,27 +263,8 @@ impl PrimitiveWitness {
 
     /// Verify the transaction directly from primitive witness
     ///
-    /// this is a wrapper for `validate()` that just returns bool.
-    pub async fn is_valid(&self) -> bool {
-        self.validate().await.is_ok()
-    }
-
-    /// Verify the transaction directly from primitive witness
-    ///
     /// (without proofs or decomposing into subclaims).
-    ///
-    /// This method is an important part of the transaction initiation process
-    /// as it is the "final say" with regards to whether most new transactions
-    /// gets accepted into the mempool or not.  As such, it returns a detailed
-    /// error type for the caller.
     pub async fn validate(&self) -> Result<(), WitnessValidationError> {
-        // note: This method used to just return `bool` but callers need more
-        // detail than that when initiating a transaction if something goes
-        // wrong.
-        //
-        // We should consider adding detailed validation errors for the other
-        // proof types as well (if possible).
-
         for lock_script_and_witness in &self.lock_scripts_and_witnesses {
             let lock_script = lock_script_and_witness.program.clone();
             let secret_input = lock_script_and_witness.nondeterminism();
@@ -319,8 +297,7 @@ impl PrimitiveWitness {
 
         // Verify correct computation of removal records. Also, collect the removal
         // records' hashes in order to validate them against those provided in the
-        // transaction kernel later. We only check internal consistency not removability
-        // relative to a given mutator set accumulator.
+        // transaction kernel later.
         let mut witnessed_removal_records = vec![];
         for (input_utxo, membership_proof) in self
             .input_utxos
@@ -342,35 +319,48 @@ impl PrimitiveWitness {
             witnessed_removal_records.push(removal_record);
         }
 
-        // verify that all type script hashes are represented by the witness's type script list
-        let type_script_hashes = self
-            .output_utxos
-            .utxos
-            .iter()
-            .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash))
-            .unique()
-            .collect_vec();
-
+        // verify that all type required scripts are present.
+        let required_type_script_hashes = Utxo::type_script_hashes(
+            self.output_utxos
+                .utxos
+                .iter()
+                .chain(&self.input_utxos.utxos),
+        );
         let type_script_dictionary = self
             .type_scripts_and_witnesses
             .iter()
             .map(|tsaw| (tsaw.program.hash(), tsaw.program.to_owned()))
             .collect::<HashMap<_, _>>();
 
+        // Verify we don't have too many type script witnesses.
+        if type_script_dictionary.len() > required_type_script_hashes.len() {
+            let error = WitnessValidationError::TooManyTypeScriptWitnesses {
+                expected: required_type_script_hashes.len(),
+                got: type_script_dictionary.len(),
+            };
+            warn!("{}", error);
+            return Err(error);
+        }
+
         // all must be in dictionary.  so if we find first that is not then it
         // is already an error.  note that the error only informs caller of the
         // first unknown, not all.
-        if let Some(first) = type_script_hashes
+        if let Some(first_missing_type_script_hash) = required_type_script_hashes
             .iter()
             .find(|tsh| !type_script_dictionary.contains_key(tsh))
         {
-            let error = WitnessValidationError::UnknownTypeScript(*first);
+            let typescript_name =
+                known_type_scripts::typescript_name(*first_missing_type_script_hash);
+            let error = WitnessValidationError::MissingTypeScriptWitness {
+                type_script_hash: *first_missing_type_script_hash,
+                type_script_name: typescript_name.to_owned(),
+            };
             warn!("{}", error);
             return Err(error);
         }
 
         // verify type scripts
-        for (j, type_script_hash) in type_script_hashes.iter().enumerate() {
+        for (j, type_script_hash) in required_type_script_hashes.iter().enumerate() {
             let type_script = type_script_dictionary[type_script_hash].clone();
             let nondeterminism = self.type_scripts_and_witnesses[j].nondeterminism();
             let public_input = [
@@ -397,30 +387,23 @@ impl PrimitiveWitness {
                 return Err(error);
             };
 
-            if let Err(_e) = run_res {
+            if let Err(vm_error) = run_res {
                 // tbd: should we include the VMError in InvalidTypeScript error?
-                let error = WitnessValidationError::InvalidTypeScript(*type_script_hash);
+                let typescript_name = known_type_scripts::typescript_name(*type_script_hash);
+                let error = WitnessValidationError::InvalidTypeScript {
+                    type_script_hash: *type_script_hash,
+                    type_script_name: typescript_name.to_owned(),
+                    vm_error: vm_error.to_string(),
+                };
                 warn!("{}", error);
                 return Err(error);
             }
         }
 
-        let witnessed_removal_record_hashes = witnessed_removal_records
-            .iter()
-            .map(|rr| Hash::hash_varlen(&rr.encode()))
-            .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-            .collect_vec();
-        let kernel_removal_record_hashes = self
-            .kernel
-            .inputs
-            .iter()
-            .map(|rr| Hash::hash_varlen(&rr.encode()))
-            .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-            .collect_vec();
-        if witnessed_removal_record_hashes != kernel_removal_record_hashes {
+        if witnessed_removal_records != self.kernel.inputs {
             let error = WitnessValidationError::RemovalRecordsMismatch {
-                witnessed_removal_record_hashes,
-                kernel_removal_record_hashes,
+                witnessed_removal_records,
+                kernel_removal_records: self.kernel.inputs.clone(),
             };
             warn!("{} - {:#?}", error, error);
             return Err(error);
@@ -431,6 +414,12 @@ impl PrimitiveWitness {
                 witness_mutator_set_hash: self.mutator_set_accumulator.hash(),
                 transaction_mutator_set_hash: self.kernel.mutator_set_hash,
             };
+            warn!("{} - {:#?}", error, error);
+            return Err(error);
+        }
+
+        if self.kernel.merge_bit {
+            let error = WitnessValidationError::MergeBitSet;
             warn!("{} - {:#?}", error, error);
             return Err(error);
         }
@@ -529,16 +518,28 @@ pub enum WitnessValidationError {
         kernel_mutator_set_hash: Digest,
     },
 
-    #[error("unknown typescript: {0}")]
-    UnknownTypeScript(Digest),
+    #[error(
+        "missing typescript witness for: {type_script_name},\n with hash:\n {type_script_hash}"
+    )]
+    MissingTypeScriptWitness {
+        type_script_hash: Digest,
+        type_script_name: String,
+    },
 
-    #[error("invalid type script: {0}")]
-    InvalidTypeScript(Digest),
+    #[error("Too many typescript witnesses. Expected {expected}, got {got}")]
+    TooManyTypeScriptWitnesses { expected: usize, got: usize },
+
+    #[error("invalid type script: {type_script_hash}; ({type_script_name}). Error:\n{vm_error}")]
+    InvalidTypeScript {
+        type_script_hash: Digest,
+        type_script_name: String,
+        vm_error: String,
+    },
 
     #[error("removal records generated from witness do not match transaction kernel inputs")]
     RemovalRecordsMismatch {
-        witnessed_removal_record_hashes: Vec<Digest>,
-        kernel_removal_record_hashes: Vec<Digest>,
+        witnessed_removal_records: Vec<RemovalRecord>,
+        kernel_removal_records: Vec<RemovalRecord>,
     },
 
     #[error("transaction mutator set does not match witness mutator set")]
@@ -546,6 +547,9 @@ pub enum WitnessValidationError {
         witness_mutator_set_hash: Digest,
         transaction_mutator_set_hash: Digest,
     },
+
+    #[error("Primitive-witness backed transaction cannot have a set merge bit")]
+    MergeBitSet,
 
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]
@@ -564,7 +568,6 @@ pub mod neptune_arbitrary {
     use proptest_arbitrary_interop::arb;
 
     use super::super::announcement::Announcement;
-    use super::super::lock_script::LockScript;
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
@@ -605,9 +608,7 @@ pub mod neptune_arbitrary {
             merge_bit: bool,
         ) -> BoxedStrategy<Self> {
             // Primitive witnesses may not simultaneously have inputs and set a
-            // coinbase. In combination with a rule in `Block::is_valid` that
-            // requires that block transactions have at least one input, this
-            // limitation forces miners to pick up at least one transaction.
+            // coinbase.
             let (num_inputs, set_coinbase) = match num_inputs {
                 Some(number) => (number, false),
                 None => (0, true),
@@ -864,11 +865,6 @@ pub mod neptune_arbitrary {
             outputs_salt: [BFieldElement; 3],
             merge_bit: bool,
         ) -> Self {
-            let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
-            let input_membership_proofs = msa_and_records.membership_proofs;
-            let input_removal_records = msa_and_records.removal_records;
-            assert_eq!(input_membership_proofs.len(), input_removal_records.len());
-
             let output_commitments = output_utxos
                 .iter()
                 .zip(output_sender_randomnesses.clone())
@@ -882,6 +878,11 @@ pub mod neptune_arbitrary {
                     .addition_record()
                 })
                 .collect_vec();
+
+            // Removal records are only packed in blocks, never in transactions.
+            let input_removal_records = msa_and_records.unpacked_removal_records();
+            let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
+            let input_membership_proofs = msa_and_records.membership_proofs;
 
             let kernel = TransactionKernelProxy {
                 inputs: input_removal_records.clone(),
@@ -904,32 +905,26 @@ pub mod neptune_arbitrary {
                 salt: outputs_salt,
             };
 
-            let num_inputs = input_utxos.len();
-            let num_outputs = output_utxos.len();
-            let mut type_scripts_and_witnesses = vec![];
-            if num_inputs + num_outputs > 0 {
-                let all_utxos = salted_input_utxos
-                    .utxos
-                    .iter()
-                    .chain(salted_output_utxos.utxos.iter());
-                if all_utxos.clone().any(|utxo| utxo.has_native_currency()) {
-                    let native_currency_type_script_witness = NativeCurrencyWitness {
-                        salted_input_utxos: salted_input_utxos.clone(),
-                        salted_output_utxos: salted_output_utxos.clone(),
-                        kernel: kernel.clone(),
-                    };
-                    type_scripts_and_witnesses
-                        .push(native_currency_type_script_witness.type_script_and_witness());
-                }
+            let native_currency_type_script_witness = NativeCurrencyWitness {
+                salted_input_utxos: salted_input_utxos.clone(),
+                salted_output_utxos: salted_output_utxos.clone(),
+                kernel: kernel.clone(),
+            };
+            let mut type_scripts_and_witnesses =
+                vec![native_currency_type_script_witness.type_script_and_witness()];
 
-                if all_utxos.clone().any(|utxo| utxo.release_date().is_some()) {
-                    let time_lock_witness = TimeLockWitness::new(
-                        kernel.clone(),
-                        salted_input_utxos.clone(),
-                        salted_output_utxos.clone(),
-                    );
-                    type_scripts_and_witnesses.push(time_lock_witness.type_script_and_witness());
-                }
+            let all_utxos = salted_input_utxos
+                .utxos
+                .iter()
+                .chain(salted_output_utxos.utxos.iter());
+
+            if all_utxos.clone().any(|utxo| utxo.release_date().is_some()) {
+                let time_lock_witness = TimeLockWitness::new(
+                    kernel.clone(),
+                    salted_input_utxos.clone(),
+                    salted_output_utxos.clone(),
+                );
+                type_scripts_and_witnesses.push(time_lock_witness.type_script_and_witness());
             }
 
             PrimitiveWitness {
@@ -967,7 +962,7 @@ pub mod neptune_arbitrary {
                 .zip(input_amounts)
                 .map(|(lock_script_and_witness, amount)| {
                     Utxo::new(
-                        LockScript::from(lock_script_and_witness),
+                        lock_script_and_witness.program.hash(),
                         amount.to_native_coins(),
                     )
                 })
@@ -1051,15 +1046,18 @@ pub mod neptune_arbitrary {
                     let liquid_utxo = Utxo::new(
                         generation_address::GenerationSpendingKey::derive_from_seed(*seed)
                             .to_address()
-                            .lock_script(),
+                            .lock_script()
+                            .hash(),
                         amount.to_native_coins(),
                     );
                     let mut utxos = vec![liquid_utxo];
                     if let Some(release_date) = timelock_until {
-                        let timelocked_utxo = Utxo::new(
+                        let lock_script =
                             generation_address::GenerationSpendingKey::derive_from_seed(*seed)
                                 .to_address()
-                                .lock_script(),
+                                .lock_script();
+                        let timelocked_utxo = Utxo::new(
+                            lock_script.hash(),
                             [
                                 amount.to_native_coins(),
                                 vec![TimeLock::until(release_date)],
@@ -1089,6 +1087,7 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::BoxedStrategy;
     use proptest::prop_assert;
+    use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
@@ -1096,20 +1095,22 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::network::Network;
+    use crate::api::export::Network;
+    use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::transaction::announcement::Announcement;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-    use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+    use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -1263,14 +1264,19 @@ mod tests {
                             .zip(output_utxo_amounts_per_tx)
                             .enumerate()
                             .for_each(|(i, (utxos, amounts))| {
-                                // half_of_coinbase <= total_timelocked_output + half_of_fee =>
-                                // half_of_coinbase - half_of_fee <= total_timelocked_output
+                                // If coinbase transaction, then timelock at least half of total
+                                // output value.
+                                let min_timelocked_cb: NativeCurrencyAmount =
+                                    if coinbase(i).is_some() {
+                                        let mut min_timelocked_cb: NativeCurrencyAmount =
+                                            amounts.iter().copied().sum();
+                                        min_timelocked_cb.div_two();
+                                        min_timelocked_cb
+                                    } else {
+                                        NativeCurrencyAmount::zero()
+                                    };
+
                                 let mut timelocked_cb_acc = NativeCurrencyAmount::zero();
-                                let mut min_timelocked_cb = coinbase(i)
-                                    .unwrap_or(NativeCurrencyAmount::zero())
-                                    .checked_sub(&fees[i])
-                                    .unwrap_or(NativeCurrencyAmount::zero());
-                                min_timelocked_cb.div_two();
                                 for (utxo, amount) in utxos.iter_mut().zip_eq(amounts) {
                                     *utxo = utxo.new_with_native_currency_amount(amount);
                                     if timelocked_cb_acc < min_timelocked_cb {
@@ -1380,7 +1386,7 @@ mod tests {
                 .boxed()
         }
 
-        pub(crate) fn arbitrary_pair_with_inputs_and_coinbase_respectively(
+        pub(crate) fn arbitrary_pair_with_coinbase_and_inputs_respectively(
             num_inputs: usize,
             total_num_outputs: usize,
             total_num_announcements: usize,
@@ -1392,23 +1398,23 @@ mod tests {
             )
                 .prop_flat_map(move |(num_outputs, num_announcements, coinbase_amount)| {
                     let parameter_sets = [
-                        (num_inputs, num_outputs, num_announcements),
                         (
                             0,
                             total_num_outputs - num_outputs,
                             total_num_announcements - num_announcements,
                         ),
+                        (num_inputs, num_outputs, num_announcements),
                     ];
                     Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
                         parameter_sets,
-                        Some((coinbase_amount, 1)),
+                        Some((coinbase_amount, 0)),
                     )
                     .prop_map(|primwit| (primwit[0].clone(), primwit[1].clone()))
                 })
                 .boxed()
         }
 
-        pub(crate) fn arbitrary_pair_with_inputs_and_coinbase_respectively_from_msa_and_records(
+        pub(crate) fn arbitrary_pair_with_coinbase_and_inputs_respectively_from_msa_and_records(
             total_num_outputs: usize,
             total_num_announcements: usize,
             msa_and_records: MsaAndRecords,
@@ -1417,23 +1423,14 @@ mod tests {
             coinbase_amount: NativeCurrencyAmount,
             timestamp: Timestamp,
         ) -> BoxedStrategy<(Self, Self)> {
-            let input_removal_records = msa_and_records.removal_records;
+            // Always unpacked in tx-context
+            let input_removal_records = msa_and_records.unpacked_removal_records();
+
             let input_membership_proofs = msa_and_records.membership_proofs;
             let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
             ((0..total_num_outputs), (0..total_num_announcements))
                 .prop_flat_map(move |(num_outputs, num_announcements)| {
                     (
-                        Self::arbitrary_given_mutator_set_accumulator_and_inputs(
-                            num_outputs,
-                            num_announcements,
-                            None,
-                            input_utxos.clone(),
-                            input_removal_records.clone(),
-                            input_membership_proofs.clone(),
-                            lock_scripts_and_witnesses.clone(),
-                            mutator_set_accumulator.clone(),
-                            timestamp,
-                        ),
                         Self::arbitrary_given_mutator_set_accumulator_and_inputs(
                             total_num_outputs - num_outputs,
                             total_num_announcements - num_announcements,
@@ -1442,6 +1439,17 @@ mod tests {
                             vec![],
                             vec![],
                             vec![],
+                            mutator_set_accumulator.clone(),
+                            timestamp,
+                        ),
+                        Self::arbitrary_given_mutator_set_accumulator_and_inputs(
+                            num_outputs,
+                            num_announcements,
+                            None,
+                            input_utxos.clone(),
+                            input_removal_records.clone(),
+                            input_membership_proofs.clone(),
+                            lock_scripts_and_witnesses.clone(),
                             mutator_set_accumulator.clone(),
                             timestamp,
                         ),
@@ -1483,25 +1491,47 @@ mod tests {
                         output_salt,
                         announcements,
                     )| {
-                        let total_input_amount = input_utxos
+                        let input_amount = input_utxos
                             .iter()
                             .map(|utxo| utxo.get_native_currency_amount())
-                            .sum::<NativeCurrencyAmount>()
-                            + coinbase.unwrap_or(NativeCurrencyAmount::zero());
+                            .sum::<NativeCurrencyAmount>();
                         PrimitiveWitness::find_balanced_output_amounts_and_fee(
-                            total_input_amount,
+                            input_amount,
                             coinbase,
                             &mut output_amounts,
                             &mut fee,
                         );
 
-                        let output_utxos = output_amounts
+                        assert_eq!(
+                            input_amount + coinbase.unwrap_or(NativeCurrencyAmount::from_nau(0)),
+                            output_amounts.iter().copied().sum::<NativeCurrencyAmount>() + fee
+                        );
+                        assert!(!fee.is_negative());
+
+                        let mut output_utxos: Vec<_> = output_amounts
                             .into_iter()
                             .zip(lock_script_hashes)
                             .map(|(amount, lock_script_hash)| {
-                                (lock_script_hash, amount.to_native_coins()).into()
+                                Utxo::from((lock_script_hash, amount.to_native_coins()))
                             })
                             .collect_vec();
+
+                        // If coinbase is set, add timelock type script, with
+                        // sufficiently long timelock to output UTXOs for at
+                        // least half the value.
+                        if let Some(coinbase) = coinbase {
+                            let release_date = timestamp + MINING_REWARD_TIME_LOCK_PERIOD;
+                            let mut timelocked = NativeCurrencyAmount::zero();
+                            let mut required_timelocked = coinbase;
+                            required_timelocked.div_two();
+                            let mut i = 0;
+                            while timelocked < required_timelocked {
+                                output_utxos[i] =
+                                    output_utxos[i].clone().with_time_lock(release_date);
+                                timelocked += output_utxos[i].get_native_currency_amount();
+                                i += 1;
+                            }
+                        };
 
                         let salted_input_utxos = SaltedUtxos {
                             utxos: input_utxos.clone(),
@@ -1539,12 +1569,28 @@ mod tests {
                         }
                         .into_kernel();
 
-                        let type_scripts_and_witnesses = vec![NativeCurrencyWitness {
+                        let mut type_scripts_and_witnesses = vec![NativeCurrencyWitness {
                             salted_input_utxos: salted_input_utxos.clone(),
                             salted_output_utxos: salted_output_utxos.clone(),
                             kernel: kernel.clone(),
                         }
                         .type_script_and_witness()];
+                        let type_script_hashes = Utxo::type_script_hashes(
+                            salted_input_utxos
+                                .utxos
+                                .iter()
+                                .chain(&salted_output_utxos.utxos),
+                        );
+                        if type_script_hashes.contains(&TimeLock.hash()) {
+                            type_scripts_and_witnesses.push(
+                                TimeLockWitness::new(
+                                    kernel.clone(),
+                                    salted_input_utxos.clone(),
+                                    salted_output_utxos.clone(),
+                                )
+                                .type_script_and_witness(),
+                            );
+                        }
 
                         Self {
                             input_utxos: salted_input_utxos,
@@ -1644,7 +1690,8 @@ mod tests {
                             timelocked_amount.div_two();
                             assert!(total_amount >= timelocked_amount);
                             let timelocked_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[0]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[0])
+                                    .hash(),
                                 timelocked_amount,
                             )
                             .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
@@ -1653,7 +1700,8 @@ mod tests {
                                 total_amount.checked_sub(&timelocked_amount).unwrap();
                             liquid_amount = liquid_amount.checked_add(&(-fee)).unwrap();
                             let liquid_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[0]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[0])
+                                    .hash(),
                                 liquid_amount,
                             );
 
@@ -1672,7 +1720,8 @@ mod tests {
                                 first_amount.div_two();
                             }
                             let first_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[0]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[0])
+                                    .hash(),
                                 first_amount,
                             )
                             .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
@@ -1683,7 +1732,8 @@ mod tests {
                                 .checked_sub(&fee)
                                 .unwrap();
                             let second_output = Utxo::new_native_currency(
-                                HashLockKey::lock_script_from_after_image(output_seeds[1]),
+                                LockScript::standard_hash_lock_from_after_image(output_seeds[1])
+                                    .hash(),
                                 second_amount,
                             );
 
@@ -1707,6 +1757,45 @@ mod tests {
         }
     }
 
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn arbitrary_primitive_witness_tuple_is_valid_deterministic() {
+        for num_inputs_a in 0..=2 {
+            for num_outputs_a in 0..=2 {
+                for num_inputs_b in 0..=2 {
+                    for num_outputs_b in 0..=2 {
+                        let mut test_runner = TestRunner::deterministic();
+                        let [pw1, pw2] =
+                            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                                (num_inputs_a, num_outputs_a, 0),
+                                (num_inputs_b, num_outputs_b, 0),
+                            ])
+                            .new_tree(&mut test_runner)
+                            .unwrap()
+                            .current();
+                        assert!(pw1.validate().await.is_ok());
+                        assert!(pw2.validate().await.is_ok());
+                    }
+                }
+            }
+        }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn nop_pw_is_valid() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let nop = TransactionDetails::nop(
+            genesis.mutator_set_accumulator_after().unwrap(),
+            Timestamp::now(),
+            network,
+        );
+        let nop = PrimitiveWitness::from_transaction_details(&nop);
+        assert!(nop.validate().await.is_ok(), "nop PW must be valid");
+    }
+
+    #[traced_test]
     #[proptest(cases = 10, async = "tokio")]
     async fn updating_primitive_witness_with_ms_data_works(
         // Notice only SingleProof-backed txs need inputs to allow updating, not PW-backed ones.
@@ -1722,15 +1811,10 @@ mod tests {
     ))]
         pws: [PrimitiveWitness; 2],
     ) {
-        let network = Network::Main;
         let [own_pw, mined_pw] = pws;
 
-        let kernel_hash = own_pw.kernel.mast_hash();
-        prop_assert!(
-            TransactionProof::Witness(own_pw.clone())
-                .verify(kernel_hash, network)
-                .await
-        );
+        prop_assert!(own_pw.validate().await.is_ok());
+        prop_assert!(mined_pw.validate().await.is_ok());
 
         let ms_update = MutatorSetUpdate::new(
             mined_pw.kernel.inputs.clone(),
@@ -1738,18 +1822,12 @@ mod tests {
         );
         let updated_pw = PrimitiveWitness::update_with_new_ms_data(own_pw, ms_update);
 
-        let new_kernel_hash = updated_pw.kernel.mast_hash();
-        prop_assert!(
-            TransactionProof::Witness(updated_pw)
-                .verify(new_kernel_hash, network)
-                .await
-        );
+        prop_assert!(updated_pw.validate().await.is_ok());
     }
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn arb_is_valid_unit_test_small() {
-        let network = Network::Main;
         for num_inputs in 0..=2 {
             for num_outputs in 0..=2 {
                 for num_announcements in 0..=2 {
@@ -1762,12 +1840,7 @@ mod tests {
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();
-                    let kernel_hash = primitive_witness.kernel.mast_hash();
-                    assert!(
-                        TransactionProof::Witness(primitive_witness)
-                            .verify(kernel_hash, network)
-                            .await
-                    );
+                    assert!(primitive_witness.validate().await.is_ok());
                 }
             }
         }
@@ -1784,17 +1857,11 @@ mod tests {
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
-        let network = Network::Main;
         // Assumes that the witness for lock scripts live in `nd_tokens`
         transaction_primitive_witness.lock_scripts_and_witnesses[mutated_lockscript_witness]
             .set_nd_tokens(bad_preimage.values().to_vec());
 
-        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
-        prop_assert!(
-            !TransactionProof::Witness(transaction_primitive_witness)
-                .verify(kernel_hash, network)
-                .await
-        );
+        prop_assert!(transaction_primitive_witness.validate().await.is_err());
     }
 
     #[proptest(cases = 5, async = "tokio")]
@@ -1807,18 +1874,12 @@ mod tests {
         ))]
         mut transaction_primitive_witness: PrimitiveWitness,
     ) {
-        let network = Network::Main;
         // Mess up witness data for one of the type scripts, assumed to be the
         // native currency type script. But actually doesn't matter which one it
         // is as the goal is simply to get one of the type scripts to fail.
         transaction_primitive_witness.type_scripts_and_witnesses[0]
             .scramble_non_determinism(rng_seed);
-        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
-        prop_assert!(
-            !TransactionProof::Witness(transaction_primitive_witness)
-                .verify(kernel_hash, network)
-                .await
-        );
+        prop_assert!(transaction_primitive_witness.validate().await.is_err());
     }
 
     #[proptest(cases = 5, async = "tokio")]
@@ -1830,12 +1891,55 @@ mod tests {
         ))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {
-        let network = Network::Main;
-        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
+        prop_assert!(transaction_primitive_witness.validate().await.is_ok());
+    }
+
+    #[proptest(cases = 3, async = "tokio")]
+    async fn not_valid_with_active_timelocks(
+        #[strategy(1usize..10)] _num_inputs: usize,
+        #[strategy(1usize..10)] _num_outputs: usize,
+        #[strategy(1usize..10)] _num_public_announcements: usize,
+        #[strategy(arb())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_active_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now
+        ))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let Err(err) = primitive_witness.validate().await else {
+            panic!("Must fail when timelocks are active");
+        };
+
+        let WitnessValidationError::InvalidTypeScript {
+            type_script_hash, ..
+        } = err
+        else {
+            panic!("Must fail during type script validation");
+        };
+
+        prop_assert_eq!(
+            TimeLock.hash(),
+            type_script_hash,
+            "Must fail in time lock type script"
+        );
+    }
+
+    #[proptest(cases = 3, async = "tokio")]
+    async fn timelock_witness_present_with_timelock_typescript_in_inputs(
+        #[strategy(3usize..10)] _num_inputs: usize,
+        #[strategy(3usize..10)] _num_outputs: usize,
+        #[strategy(3usize..10)] _num_public_announcements: usize,
+        #[strategy(arb())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_expired_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now
+        ))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        prop_assert!(primitive_witness.validate().await.is_ok());
         prop_assert!(
-            TransactionProof::Witness(transaction_primitive_witness)
-                .verify(kernel_hash, network)
-                .await
+            primitive_witness
+                .type_scripts_and_witnesses
+                .iter()
+                .map(|ts_and_witness| ts_and_witness.program.hash())
+                .any(|ts_digest| ts_digest == TimeLock.hash()),
+            "Type scripts witness must contain timelock"
         );
     }
 
@@ -1892,7 +1996,7 @@ mod tests {
 
     #[proptest(cases = 5)]
     fn total_amount_is_valid(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2,))]
         primitive_witness: PrimitiveWitness,
     ) {
         let mut total = if let Some(amount) = primitive_witness.kernel.coinbase {

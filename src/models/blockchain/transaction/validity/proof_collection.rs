@@ -475,18 +475,90 @@ impl ProofCollection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
+    use macro_rules_attr::apply;
+    use proptest::prelude::Strategy;
+    use proptest::prelude::TestCaseError;
     use proptest::prop_assert;
+    use proptest::test_runner::TestRunner;
     use test_strategy::proptest;
+    use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::NativeCurrencyAmount;
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
+    use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::vm_job_queue;
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_produce_valid_collection_from_arbitrary_with_fee_deterministic() {
+        // Test proof-collection generation with both positive and negative
+        // fees.
+        for fee in [
+            NativeCurrencyAmount::from_nau(1),
+            NativeCurrencyAmount::from_nau(800_000_000),
+            NativeCurrencyAmount::coins(2),
+            NativeCurrencyAmount::coins(50),
+            NativeCurrencyAmount::coins(100),
+        ] {
+            for fee_inner in [-fee, fee] {
+                let mut test_runner = TestRunner::deterministic();
+                let primitive_witness = PrimitiveWitness::arbitrary_with_fee(fee_inner)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+                prop(primitive_witness).await.unwrap();
+            }
+        }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_produce_valid_collection_small_deterministic() {
+        for num_inputs in 0..=2 {
+            for num_outputs in 0..=2 {
+                for num_public_announcements in 0..=1 {
+                    let mut test_runner = TestRunner::deterministic();
+                    let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
+                        Some(num_inputs),
+                        num_outputs,
+                        num_public_announcements,
+                    )
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+                    prop(primitive_witness).await.unwrap();
+                }
+            }
+        }
+    }
 
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+        #[strategy(0usize..7)] _num_inputs_own: usize,
+        #[strategy(0usize..7)] _num_outputs_own: usize,
+        #[strategy(0usize..7)] _num_public_announcements_own: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs_own), #_num_outputs_own, #_num_public_announcements_own))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));
+    }
+
+    async fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
+        prop_assert!(ProofCollection::can_produce(&primitive_witness));
+        let pc = ProofCollection::produce(
+            &primitive_witness,
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+        )
+        .await
+        .unwrap();
+        prop_assert!(
+            pc.verify(primitive_witness.kernel.mast_hash(), Network::Main)
+                .await
+        );
+
+        Ok(())
     }
 
     impl ProofCollection {

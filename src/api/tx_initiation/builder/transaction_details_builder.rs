@@ -251,7 +251,7 @@ impl TransactionDetailsBuilder {
 
                 ChangePolicy::Burn => (
                     TxOutput::no_notification_as_change(
-                        Utxo::new_native_currency(LockScript::burn(), change_amount),
+                        Utxo::new_native_currency(LockScript::burn().hash(), change_amount),
                         Digest::default(),
                         Digest::default(),
                     ),

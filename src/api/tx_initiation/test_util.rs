@@ -14,6 +14,7 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::StateLock;
 use crate::GlobalStateLock;
@@ -44,6 +45,7 @@ impl TransactionInitiatorInternal {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         tx_creation_config: TxCreationConfig,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<TxCreationArtifacts> {
         // acquire lock.  write-lock is only needed if we must generate a
         // new change receiving address.  However, that is also the most common
@@ -84,7 +86,9 @@ impl TransactionInitiatorInternal {
         let kernel = witness.kernel.clone();
 
         // generate proof
+
         let proof = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
             .transaction_details(&tx_details)
             .primitive_witness(witness)
             .job_queue(tx_creation_config.job_queue())

@@ -15,7 +15,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 
 const UNEQUAL_DISCRIMINANT_ERROR: i128 = 1_000_020;
 const UNEQUAL_VALUE_ERROR: i128 = 1_000_021;
-const BOTH_INPUT_COINBASES_ERROR: i128 = 1_000_022;
+const RIGHT_INPUT_COINBASE_ERROR: i128 = 1_000_022;
 
 /// Authenticate coinbase fields of left, right, and new kernels. Verify that
 /// at most one from (left, right) is set. Verify that the one that is set (if
@@ -131,12 +131,28 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
                 return
         );
 
+        let assert_coinbases_right_not_set = triton_asm! {
+                // _ *new_txk *left_coinbase *right_coinbase
+                dup 0
+                read_mem 1
+                pop 1
+                // _ *new_txk *left_coinbase *right_coinbase right_coinbase_discriminant
+
+                push 0
+                eq
+                // _ *new_txk *left_coinbase *right_coinbase right_coinbase.is_none()
+
+                assert error_id {RIGHT_INPUT_COINBASE_ERROR}
+                // _ *new_txk *left_coinbase *right_coinbase
+        };
+
         triton_asm!(
             {entrypoint}:
                 /*
                     1. Get left coinbase field and authenticate
                     2. Get right coinbase field and authenticate
-                    3. Assert that not both coinbase fields are set
+                    3. Assert that not both coinbase fields are set (Genesis)
+                    3. Assert that right coinbase is not set (HardFork2)
                     4. Verify that the one set (if set) matches new
                     5. Authenticate calculated new against new_txkmh
                  */
@@ -183,51 +199,16 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
 
 
                 /* 3. */
-                dup 1
-                read_mem 1
-                pop 1
-                // _ *new_txk *left_coinbase *right_coinbase left_coinbase_discriminant
-
-                dup 1
-                read_mem 1
-                pop 1
-                // _ *new_txk *left_coinbase *right_coinbase left_coinbase_discriminant right_coinbase_discriminant
-
-                push 1
-                eq
-                swap 1
-                push 1
-                eq
-                // _ *new_txk *left_coinbase *right_coinbase (right_coinbase_discriminant == 1) (left_coinbase_discriminant == 1)
-                // _ *new_txk *left_coinbase *right_coinbase (right_coinbase.is_some()) (left_coinbase.is_some())
-
-                mul
-                push 0
-                eq
-                // _ *new_txk *left_coinbase *right_coinbase !(right_coinbase.is_some() && left_coinbase.is_some())
-
-                assert error_id {BOTH_INPUT_COINBASES_ERROR}
+                {&assert_coinbases_right_not_set}
                 // _ *new_txk *left_coinbase *right_coinbase
 
 
                 /*  Goal: Put the `maybe` coinbase on top */
-                read_mem 1
-                addi 1
-                swap 1
-                // _ *new_txk *left_coinbase *right_coinbase right_coinbase_discriminant
-
-                push 0
-                eq
-                // _ *new_txk *left_coinbase *right_coinbase (right_coinbase.is_none())
-
-                skiz
-                    swap 1
-                // _ *new_txk *not_coinbase *maybe_coinbase
-
+                pop 1
+                // _ *new_txk *maybe_coinbase
 
                 /* maybe_coinbase must match that in `new_txk` */
-                place 2
-                pop 1
+                swap 1
                 // _ *maybe_coinbase *new_txk
 
                 {&kernel_field_coinbase_and_size}
@@ -343,12 +324,10 @@ mod tests {
     ) {
         let new_cb_is_legal = match (left_cb, right_cb, new_cb) {
             (None, None, None) => Ok(()),
-            (Some(o), None, Some(n)) | (None, Some(o), Some(n)) if o == n => Ok(()),
-            (Some(_), None, Some(_)) | (None, Some(_), Some(_)) => Err(UNEQUAL_VALUE_ERROR),
-            (Some(_), Some(_), _) => Err(BOTH_INPUT_COINBASES_ERROR),
-            (Some(_), None, None) | (None, Some(_), None) | (None, None, Some(_)) => {
-                Err(UNEQUAL_DISCRIMINANT_ERROR)
-            }
+            (Some(o), None, Some(n)) if o == n => Ok(()),
+            (_, Some(_), _) => Err(RIGHT_INPUT_COINBASE_ERROR),
+            (Some(_), None, Some(_)) => Err(UNEQUAL_VALUE_ERROR),
+            (Some(_), None, None) | (None, None, Some(_)) => Err(UNEQUAL_DISCRIMINANT_ERROR),
         };
 
         let snippet = dummy_snippet_for_test();
@@ -549,14 +528,10 @@ mod tests {
             assert_coinbase_integrity(right_txk_mast_hash, &right_txk.coinbase);
             assert_coinbase_integrity(new_txk_mast_hash, &new_txk.coinbase);
 
-            // Assert that either left or right is not set
-            assert!(left_txk.coinbase.is_none() || right_txk.coinbase.is_none());
+            // Assert that right is not set
+            assert!(right_txk.coinbase.is_none());
 
-            let maybe_coinbase = if left_txk.coinbase.is_some() {
-                &left_txk.coinbase
-            } else {
-                &right_txk.coinbase
-            };
+            let maybe_coinbase = &left_txk.coinbase;
 
             assert_eq!(&new_txk.coinbase, maybe_coinbase);
         }
@@ -566,6 +541,7 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> ReadOnlyAlgorithmInitialState {
+            let mut rng = StdRng::from_seed(seed);
             let [primitive_witness_left, primitive_witness_right] =
                 PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
                     (2, 2, 2),
@@ -578,7 +554,7 @@ mod tests {
             let left_kernel = &primitive_witness_left.kernel;
             let right_kernel = &primitive_witness_right.kernel;
 
-            let new_kernel = if left_kernel.coinbase.is_some() || StdRng::from_seed(seed).random() {
+            let new_kernel = if left_kernel.coinbase.is_some() || rng.random() {
                 left_kernel
             } else {
                 right_kernel

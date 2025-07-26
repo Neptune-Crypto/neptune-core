@@ -10,10 +10,9 @@ use tasm_lib::triton_vm::prelude::Digest;
 
 use super::generation_address;
 use super::symmetric_key;
-use super::KeyType;
+use crate::api::export::KeyType;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
-use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 
@@ -131,12 +130,12 @@ impl ReceivingAddress {
         }
     }
 
-    /// returns a privacy digest which corresponds to the.privacy_preimage(),
-    /// of the matching [SpendingKey](super::SpendingKey)
+    /// returns a privacy digest which is the post-image of privacy preimage of
+    /// the matching [SpendingKey](super::SpendingKey)
     pub fn privacy_digest(&self) -> Digest {
         match self {
-            Self::Generation(a) => a.privacy_digest(),
-            Self::Symmetric(k) => k.privacy_digest(),
+            Self::Generation(a) => a.receiver_postimage(),
+            Self::Symmetric(k) => k.receiver_postimage(),
         }
     }
 
@@ -258,14 +257,13 @@ impl ReceivingAddress {
         }
     }
 
-    /// generates a lock script from the spending lock.
+    /// Returns the address's lock script hash.
     ///
-    /// Satisfaction of this lock script establishes the UTXO owner's assent to
-    /// the transaction.
-    pub fn lock_script(&self) -> LockScript {
+    /// In the general case, only the receiver knows the lock script.
+    pub fn lock_script_hash(&self) -> Digest {
         match self {
-            Self::Generation(k) => k.lock_script(),
-            Self::Symmetric(k) => k.lock_script(),
+            Self::Generation(x) => x.lock_script().hash(),
+            Self::Symmetric(x) => x.lock_script().hash(),
         }
     }
 

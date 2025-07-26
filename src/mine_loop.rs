@@ -19,14 +19,15 @@ use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio::time::sleep;
 use tracing::*;
-use twenty_first::prelude::Digest;
 
+use crate::api::export::ReceivingAddress;
 use crate::api::export::TxInputList;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
@@ -37,8 +38,11 @@ use crate::job_queue::errors::JobHandleError;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
+use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -49,22 +53,50 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalStateLock;
-use crate::prelude::twenty_first;
 use crate::triton_vm_job_queue::vm_job_queue;
 use crate::triton_vm_job_queue::TritonVmJobPriority;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
-/// Information related to the resources to be used for guessing.
-#[derive(Debug, Clone, Copy)]
+/// Information related to guessing.
+#[derive(Debug, Clone)]
 pub(crate) struct GuessingConfiguration {
     pub(crate) sleepy_guessing: bool,
     pub(crate) num_guesser_threads: Option<usize>,
+    pub(crate) address: ReceivingAddress,
+}
+
+/// Creates a block transaction and composes a block from it. Returns the block
+/// and the composer UTXOs. Block will reward caller according to block
+/// proposal parameters.
+pub(crate) async fn compose_block_helper(
+    latest_block: Block,
+    global_state_lock: GlobalStateLock,
+    block_timestamp: Timestamp,
+    job_options: TritonVmProofJobOptions,
+) -> Result<(Block, Vec<ExpectedUtxo>)> {
+    let (transaction, composer_utxos) = create_block_transaction(
+        &latest_block,
+        &global_state_lock,
+        block_timestamp,
+        job_options.clone(),
+    )
+    .await?;
+
+    let compose_result = Block::compose(
+        &latest_block,
+        transaction,
+        block_timestamp,
+        vm_job_queue(),
+        job_options,
+    )
+    .await?;
+
+    Ok((compose_result, composer_utxos))
 }
 
 async fn compose_block(
@@ -84,27 +116,8 @@ async fn compose_block(
         .proof_job_options(TritonVmJobPriority::High);
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
-    let (transaction, composer_utxos) = create_block_transaction(
-        &latest_block,
-        &global_state_lock,
-        timestamp,
-        job_options.clone(),
-    )
-    .await?;
-
-    let compose_result = Block::compose(
-        &latest_block,
-        transaction,
-        timestamp,
-        vm_job_queue(),
-        job_options,
-    )
-    .await;
-
-    let proposal = match compose_result {
-        Ok(template) => template,
-        Err(e) => bail!("Miner failed to generate block template. {}", e.to_string()),
-    };
+    let (proposal, composer_utxos) =
+        compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?;
 
     // Please clap.
     match sender.send((proposal, composer_utxos)) {
@@ -119,7 +132,6 @@ pub(crate) async fn guess_nonce(
     block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
-    guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
 ) {
     // We wrap mining loop with spawn_blocking() because it is a
@@ -140,10 +152,8 @@ pub(crate) async fn guess_nonce(
             block,
             previous_block_header,
             sender,
-            guesser_key,
             guessing_configuration,
             Timestamp::now(),
-            #[cfg(test)]
             None,
         )
     })
@@ -195,25 +205,22 @@ pub(crate) fn precalculate_block_auth_paths(
 }
 
 /// Guess the nonce in parallel until success.
-#[cfg_attr(test, expect(clippy::too_many_arguments))]
 fn guess_worker(
     network: Network,
     mut block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
-    guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
     now: Timestamp,
-    #[cfg(test)] target_block_interval: Option<Timestamp>,
+    override_target_block_interval: Option<Timestamp>,
 ) {
-    #[cfg(test)]
-    let target_block_interval = target_block_interval.unwrap_or(network.target_block_interval());
-    #[cfg(not(test))]
-    let target_block_interval = network.target_block_interval();
+    let target_block_interval =
+        override_target_block_interval.unwrap_or(network.target_block_interval());
 
     let GuessingConfiguration {
         sleepy_guessing,
         num_guesser_threads,
+        address: guesser_address,
     } = guessing_configuration;
 
     // Following code must match the rules in `[Block::has_proof_of_work]`.
@@ -267,7 +274,7 @@ fn guess_worker(
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
     block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
-    block.set_header_guesser_digest(guesser_key.after_image());
+    block.set_header_guesser_address(guesser_address);
 
     let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
@@ -414,11 +421,12 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, TxOutputList)> {
+    let network = job_options.job_settings.network;
     let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
         latest_block,
         composer_parameters,
         timestamp,
-        job_options.job_settings.network,
+        network,
     );
 
     let witness = PrimitiveWitness::from_transaction_details(&transaction_details);
@@ -432,7 +440,10 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 
     let kernel = witness.kernel.clone();
 
+    let target_block_height = latest_block.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, target_block_height);
     let proof = TransactionProofBuilder::new()
+        .consensus_rule_set(consensus_rule_set)
         .transaction_details(&transaction_details)
         .primitive_witness(witness)
         .job_queue(vm_job_queue)
@@ -583,7 +594,7 @@ pub(crate) async fn create_block_transaction(
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
-) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+) -> Result<(BlockTransaction, Vec<ExpectedUtxo>)> {
     create_block_transaction_from(
         predecessor_block,
         global_state_lock,
@@ -602,7 +613,7 @@ pub(crate) async fn create_block_transaction_from(
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
-) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+) -> Result<(BlockTransaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     let predecessor_block_ms = predecessor_block
@@ -618,6 +629,9 @@ pub(crate) async fn create_block_transaction_from(
         .lock_guard()
         .await
         .composer_parameters(predecessor_block.header().height.next());
+    let block_height = predecessor_block.header().height.next();
+    let network = global_state_lock.cli().network;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
 
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
@@ -656,13 +670,13 @@ pub(crate) async fn create_block_transaction_from(
         );
         let nop = PrimitiveWitness::from_transaction_details(&nop);
 
-        // ensure that proof-type is SingleProof
         let options = TritonVmProofJobOptionsBuilder::new()
             .template(&job_options)
             .proof_type(TransactionProofType::SingleProof)
             .build();
 
         let proof = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
             .primitive_witness_ref(&nop)
             .job_queue(vm_job_queue.clone())
             .proof_job_options(options)
@@ -677,7 +691,7 @@ pub(crate) async fn create_block_transaction_from(
     }
 
     let num_merges = transactions_to_merge.len();
-    let mut block_transaction = coinbase_transaction;
+    let mut block_transaction = BlockOrRegularTransaction::from(coinbase_transaction);
     for (i, tx_to_include) in transactions_to_merge.into_iter().enumerate() {
         info!("Merging transaction {} / {}", i + 1, num_merges);
         info!(
@@ -686,19 +700,26 @@ pub(crate) async fn create_block_transaction_from(
             tx_to_include.kernel.outputs.len(),
             tx_to_include.kernel.fee
         );
-        block_transaction = Transaction::merge_with(
+        block_transaction = BlockTransaction::merge(
             block_transaction,
             tx_to_include,
             rng.random(),
             vm_job_queue.clone(),
             job_options.clone(),
+            consensus_rule_set,
         )
-        .await?; // fix #579.  propagate error up.
+        .await?
+        .into(); // fix #579.  propagate error up.
     }
 
     let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
 
-    Ok((block_transaction, own_expected_utxos))
+    Ok((
+        block_transaction
+            .try_into()
+            .expect("Must have merged at least once"),
+        own_expected_utxos,
+    ))
 }
 
 ///
@@ -811,7 +832,7 @@ pub(crate) async fn mine(
                 .await
                 .wallet_state
                 .wallet_entropy
-                .guesser_spending_key(proposal.header().prev_block_digest);
+                .guesser_fee_key();
 
             let latest_block_header = global_state_lock
                 .lock(|s| s.chain.light_state().header().to_owned())
@@ -821,10 +842,10 @@ pub(crate) async fn mine(
                 proposal.to_owned(),
                 latest_block_header,
                 guesser_tx,
-                guesser_key,
                 GuessingConfiguration {
                     sleepy_guessing: cli_args.sleepy_guessing,
                     num_guesser_threads: cli_args.guesser_threads,
+                    address: guesser_key.to_address().into(),
                 },
             );
 
@@ -1081,6 +1102,7 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::api::export::GenerationSpendingKey;
     use crate::config_models::cli_args;
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
@@ -1088,7 +1110,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+    use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -1102,6 +1124,7 @@ pub(crate) mod tests {
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
@@ -1159,8 +1182,8 @@ pub(crate) mod tests {
         sleepy_guessing: bool,
         num_outputs: usize,
     ) -> f64 {
-        let mut rng = rand::rng();
         let network = Network::RegTest;
+        let mut rng = rand::rng();
         let global_state_lock = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -1180,7 +1203,7 @@ pub(crate) mod tests {
                 .map(|_| pseudorandom_addition_record(rng.random()))
                 .collect_vec();
             (
-                make_mock_transaction_with_mutator_set_hash(
+                make_mock_block_transaction_with_mutator_set_hash(
                     vec![],
                     outputs,
                     previous_block
@@ -1196,7 +1219,8 @@ pub(crate) mod tests {
             &previous_block,
             transaction,
             start_time,
-            target_block_interval,
+            Some(target_block_interval),
+            network,
         );
         let threshold = previous_block.header().difficulty.target();
         let num_iterations_launched = 1_000_000;
@@ -1249,13 +1273,15 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
+        let transaction = BlockTransaction::upgrade(transaction);
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
         let block = Block::block_template_invalid_proof(
             &genesis_block,
             transaction,
             in_seven_months,
-            network.target_block_interval(),
+            None,
+            network,
         );
         let tock = tick.elapsed().unwrap().as_millis() as f64;
         black_box(block);
@@ -1267,6 +1293,7 @@ pub(crate) mod tests {
     async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let mut alice = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -1312,6 +1339,7 @@ pub(crate) mod tests {
                 NativeCurrencyAmount::coins(1),
                 now,
                 config,
+                consensus_rule_set,
             )
             .await
             .unwrap()
@@ -1332,7 +1360,7 @@ pub(crate) mod tests {
                     &genesis_block,
                     &alice,
                     now,
-                    (TritonVmJobPriority::Normal, None).into(),
+                    TritonVmProofJobOptions::default_with_network(network),
                 )
                 .await
                 .unwrap()
@@ -1344,10 +1372,10 @@ pub(crate) mod tests {
             );
 
             let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
-            let cb_tx_claim = SingleProof::claim(cb_txkmh);
+            let cb_tx_claim = single_proof_claim(cb_txkmh, consensus_rule_set);
             assert!(
                 verify(
-                    cb_tx_claim.clone(),
+                    cb_tx_claim,
                     transaction_empty_mempool
                         .proof
                         .clone()
@@ -1472,7 +1500,8 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
-        assert!(block_1.is_valid(&genesis_block, mocked_now, network).await);
+        let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
+        assert!(validation_result.is_ok(), "{:?}", validation_result);
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
@@ -1536,14 +1565,16 @@ pub(crate) mod tests {
             .await
             .wallet_state
             .wallet_entropy
-            .guesser_spending_key(tip_block_orig.hash());
+            .guesser_fee_key();
+        let transaction = BlockTransaction::upgrade(transaction);
         let mut block = Block::block_template_invalid_proof(
             &tip_block_orig,
             transaction,
             launch_date,
-            network.target_block_interval(),
+            None,
+            network,
         );
-        block.set_header_guesser_digest(guesser_key.after_image());
+        block.set_header_guesser_address(guesser_key.to_address().into());
 
         let sleepy_guessing = false;
         let num_guesser_threads = None;
@@ -1553,10 +1584,10 @@ pub(crate) mod tests {
             block,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
-            guesser_key,
             GuessingConfiguration {
                 sleepy_guessing,
                 num_guesser_threads,
+                address: guesser_key.to_address().into(),
             },
             Timestamp::now(),
             None,
@@ -1614,13 +1645,16 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        let guesser_key = HashLockKey::from_preimage(Digest::default());
+        let mut rng = StdRng::seed_from_u64(0);
+        let guesser_key = GenerationSpendingKey::derive_from_seed(rng.random());
 
+        let transaction = BlockTransaction::upgrade(transaction);
         let template = Block::block_template_invalid_proof(
             &tip_block_orig,
             transaction,
             ten_seconds_ago,
-            network.target_block_interval(),
+            None,
+            network,
         );
 
         // sanity check that our initial state is correct.
@@ -1635,10 +1669,10 @@ pub(crate) mod tests {
             template,
             tip_block_orig.header().to_owned(),
             worker_task_tx,
-            guesser_key,
             GuessingConfiguration {
                 sleepy_guessing,
                 num_guesser_threads,
+                address: guesser_key.to_address().into(),
             },
             Timestamp::now(),
             None,
@@ -1757,6 +1791,8 @@ pub(crate) mod tests {
         let mut durations = Vec::with_capacity(NUM_BLOCKS);
         let mut start_instant = std::time::SystemTime::now();
 
+        let mut rng = StdRng::seed_from_u64(1);
+
         for i in 0..NUM_BLOCKS + ignore_first_n_blocks {
             if i <= ignore_first_n_blocks {
                 start_instant = std::time::SystemTime::now();
@@ -1771,13 +1807,15 @@ pub(crate) mod tests {
                 prev_block.mutator_set_accumulator_after().unwrap().hash(),
             );
 
-            let guesser_key = HashLockKey::from_preimage(Digest::default());
+            let guesser_key = GenerationSpendingKey::derive_from_seed(rng.random());
 
+            let transaction = BlockTransaction::upgrade(transaction);
             let block = Block::block_template_invalid_proof(
                 &prev_block,
                 transaction,
                 start_time,
-                target_block_interval,
+                Some(target_block_interval),
+                network,
             );
 
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -1788,10 +1826,10 @@ pub(crate) mod tests {
                 block,
                 *prev_block.header(),
                 worker_task_tx,
-                guesser_key,
                 GuessingConfiguration {
                     sleepy_guessing,
                     num_guesser_threads,
+                    address: guesser_key.to_address().into(),
                 },
                 Timestamp::now(),
                 Some(target_block_interval),
@@ -1851,7 +1889,7 @@ pub(crate) mod tests {
     fn fast_kernel_mast_hash_agrees_with_mast_hash_function_invalid_block() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
-        let block1 = invalid_empty_block(network, &genesis);
+        let block1 = invalid_empty_block(&genesis, network);
         for block in [genesis, block1] {
             let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
             assert_eq!(
@@ -2404,13 +2442,15 @@ pub(crate) mod tests {
             );
 
             // gen guesser key
-            let guesser_key = HashLockKey::from_preimage(Digest::default());
+            let guesser_key = GenerationSpendingKey::derive_from_seed(rng.random());
 
             // generate a block template / proposal
+            let transaction = BlockTransaction::upgrade(transaction);
             let block_template = MockBlockGenerator::mock_block_from_tx_without_pow(
                 prev_block.clone(),
                 transaction,
-                guesser_key,
+                guesser_key.to_address().into(),
+                network,
             );
 
             // create channel to listen for guessing results.
@@ -2422,10 +2462,10 @@ pub(crate) mod tests {
                 block_template,
                 *prev_block.header(),
                 worker_task_tx,
-                guesser_key,
                 GuessingConfiguration {
                     sleepy_guessing,
                     num_guesser_threads,
+                    address: guesser_key.to_address().into(),
                 },
                 block_time,
                 None,

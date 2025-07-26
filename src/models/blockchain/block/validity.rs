@@ -5,8 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::library::Library;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first;
-use twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use self::coinbase_is_valid::CoinbaseIsValid;
 use self::correct_control_parameter_update::CorrectControlParameterUpdate;

@@ -4,39 +4,41 @@ use std::pin::Pin;
 use anyhow::Result;
 use bytes::Bytes;
 use bytes::BytesMut;
+use files::unit_test_data_directory;
 use futures::sink;
 use futures::stream;
 use futures::task::Context;
 use futures::task::Poll;
+use mock_tx::fake_create_transaction_from_details_for_tests;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use tracing::warn;
-use twenty_first::prelude::Digest;
 
+use crate::api::export::TransactionDetails;
+use crate::api::export::TxOutputList;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
+use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::peer::PeerMessage;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::wallet_state::WalletState;
-use crate::prelude::twenty_first;
-use crate::tests::shared::files::unit_test_data_directory;
-use crate::tests::shared::mock_tx::fake_create_transaction_from_details_for_tests;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub mod archival;
@@ -83,6 +85,7 @@ pub enum MockError {
     WrongSend,
     UnexpectedSend,
     UnexpectedRead,
+    ReadError,
 }
 
 impl std::fmt::Display for MockError {
@@ -91,6 +94,7 @@ impl std::fmt::Display for MockError {
             MockError::WrongSend => write!(f, "WrongSend"),
             MockError::UnexpectedSend => write!(f, "UnexpectedSend"),
             MockError::UnexpectedRead => write!(f, "UnexpectedRead"),
+            MockError::ReadError => write!(f, "ReadError"),
         }
     }
 }
@@ -101,6 +105,10 @@ impl std::error::Error for MockError {}
 pub enum Action<Item> {
     Read(Item),
     Write(Item),
+
+    /// Simulates an error when reading the peer's message. Consider adding an
+    /// error type here to better simulate e.g. a deserialization error.
+    ReadError,
     // Todo: Some tests with these things
     // Wait(Duration),
     // ReadError(Option<Arc<io::Error>>),
@@ -143,13 +151,13 @@ impl<Item> stream::Stream for Mock<Item> {
     type Item = Result<Item, MockError>;
 
     fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(Action::Read(a)) = self.actions.pop() {
-            Poll::Ready(Some(Ok(a)))
-        } else {
+        match self.actions.pop() {
+            Some(Action::Read(a)) => Poll::Ready(Some(Ok(a))),
+            Some(Action::ReadError) => Poll::Ready(Some(Err(MockError::ReadError))),
             // Returning `Poll::Ready(None)` here would probably simulate better
             // a peer closing the connection. Otherwise, we have to close with a
             // `Bye` in all tests.
-            Poll::Ready(Some(Err(MockError::UnexpectedRead)))
+            _ => Poll::Ready(Some(Err(MockError::UnexpectedRead))),
         }
     }
 }
@@ -157,7 +165,7 @@ impl<Item> stream::Stream for Mock<Item> {
 pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     ExpectedUtxo {
         utxo: Utxo::new_native_currency(
-            LockScript::anyone_can_spend(),
+            LockScript::anyone_can_spend().hash(),
             NativeCurrencyAmount::zero(),
         ),
         addition_record: AdditionRecord::new(Default::default()),
@@ -185,7 +193,7 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     shuffle_seed: [u8; 32],
     mut selected_mempool_txs: Vec<Transaction>,
     network: Network,
-) -> Result<(Transaction, TxOutputList)> {
+) -> Result<(BlockTransaction, TxOutputList)> {
     let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
         predecessor_block,
         composer_parameters,
@@ -193,10 +201,12 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
         network,
     );
 
+    let block_height = predecessor_block.header().height;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height.next());
     let coinbase_transaction =
-        fake_create_transaction_from_details_for_tests(transaction_details).await;
+        fake_create_transaction_from_details_for_tests(transaction_details, consensus_rule_set)
+            .await;
 
-    let mut block_transaction = coinbase_transaction;
     if selected_mempool_txs.is_empty() {
         // create the nop-tx and merge into the coinbase transaction to set the
         // merge bit to allow the tx to be included in a block.
@@ -205,20 +215,27 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
             timestamp,
             network,
         );
-        let nop_transaction = fake_create_transaction_from_details_for_tests(nop_details).await;
+        let nop_transaction =
+            fake_create_transaction_from_details_for_tests(nop_details, consensus_rule_set).await;
 
         selected_mempool_txs = vec![nop_transaction];
     }
 
+    let mut block_transaction = BlockOrRegularTransaction::from(coinbase_transaction);
     for tx_to_include in selected_mempool_txs {
-        block_transaction = mock_tx::fake_merge_transactions_for_tests(
+        block_transaction = mock_tx::fake_merge_block_transactions_for_tests(
             block_transaction,
             tx_to_include,
             shuffle_seed,
+            consensus_rule_set,
         )
         .await
-        .expect("Must be able to merge transactions in mining context");
+        .expect("Must be able to merge transactions in mining context")
+        .into();
     }
+
+    let block_transaction = BlockTransaction::try_from(block_transaction)
+        .expect("we always merge at least once, with noptx if need be");
 
     Ok((block_transaction, composer_txos))
 }
