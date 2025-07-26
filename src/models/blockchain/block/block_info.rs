@@ -18,7 +18,8 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 pub struct BlockInfo {
     pub height: BlockHeight,
 
-    /// Block size in number of [`BFieldElement`](twenty_first::math::b_field_element::BFieldElement)s
+    /// Block size in number of
+    /// [`BFieldElement`](tasm_lib::twenty_first::math::b_field_element::BFieldElement)s.
     pub size: usize,
     pub digest: Digest,
     pub prev_block_digest: Digest,

@@ -46,7 +46,7 @@ use crate::triton_vm_job_queue::TritonVmJobPriority;
 ///     .job_priority(TritonVmJobPriority::Normal)
 ///     .cancel_job_rx(cancel_job_rx)
 ///     .max_log2_padded_height_for_proofs(23)  // 2^23
-///     .network(Network::Testnet(0)
+///     .network(Network::Testnet(0))
 ///     .proving_capability(TxProvingCapability::ProofCollection)
 ///     .proof_type(TransactionProofType::PrimitiveWitness)
 ///     .build();

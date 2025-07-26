@@ -1061,7 +1061,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::state::wallet::address::BaseKeyType;
+    /// use neptune_cash::models::state::wallet::address::KeyType;
     /// # use neptune_cash::rpc_server::RPCClient;
     /// # use neptune_cash::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1085,7 +1085,7 @@ pub trait RPC {
     /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set a key type
-    /// let key_type = BaseKeyType::Symmetric;
+    /// let key_type = KeyType::Symmetric;
     ///
     /// // query neptune-core server to get all known keys by [KeyType]
     /// let known_keys_by_keytype = client.known_keys_by_keytype(context::current(), token, key_type ).await??;

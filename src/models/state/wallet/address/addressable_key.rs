@@ -1,12 +1,3 @@
-//! provides an abstraction over addressable spending keys.
-//!
-//! The types in this module can be considered sub-types of
-//! the types in [super::base_key].
-//!
-//! In particular these enums only abstract over spending key
-//! types that have a corresponding address.  This specialization
-//! enables the type system to enforce correct-by-construction
-//! semantics wherever the type is used.
 use anyhow::bail;
 use anyhow::Result;
 use serde::Deserialize;
@@ -26,17 +17,6 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 
-// note: assigning the flags to `AddressableKeyType` variants as discriminants has bonus
-// that we get a compiler verification that values do not conflict.  which is
-// nice since they are (presently) defined in separate files.
-//
-// anyway it is a desirable property that AddressableKeyType variants match the values
-// actually stored in Announcement.
-
-/// Enumerates key types with corresponding addresses
-///
-/// `AddressableKey` enumerates the sub-set of [BaseKeyType]
-/// variants that are represented in [ReceivingAddress].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum KeyType {
@@ -103,13 +83,6 @@ impl KeyType {
 
 /// Represents cryptographic data necessary for spending funds (or, more
 /// specifically, for unlocking UTXOs).
-///
-/// This enum provides an abstraction API for spending key types, so that a
-/// method or struct may simply accept a `AddressableKey` and be
-/// forward-compatible with new types of spending key as they are implemented.
-///
-/// `AddressableKey` enumerates the sub-set of [BaseSpendingKey]
-/// variants that are represented in [ReceivingAddress].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpendingKey {
     /// a key from [generation_address]

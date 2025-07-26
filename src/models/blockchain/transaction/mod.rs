@@ -162,7 +162,9 @@ impl Transaction {
         })
     }
 
-    /// Determine whether the transaction is valid (forget about confirmable).
+    /// Determine whether the transaction is valid but not necessarily
+    /// confirmable.
+    ///
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
     pub async fn is_valid(&self, network: Network, consensus_rule_set: ConsensusRuleSet) -> bool {

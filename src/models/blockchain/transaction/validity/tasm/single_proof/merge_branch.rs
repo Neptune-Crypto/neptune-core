@@ -62,11 +62,11 @@ const MERGE_WITNESS_ADDRESS: BFieldElement = BFieldElement::new(2);
 
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub struct MergeWitness {
-    /// This field, exceptionally, *CAN* contain packed [`RemovalRecord`]s.
+    // This field, exceptionally, *CAN* contain packed `RemovalRecord`s.
     pub(crate) left_kernel: TransactionKernel,
     pub(crate) right_kernel: TransactionKernel,
 
-    /// This field, exceptionally, *CAN* contain packed [`RemovalRecord`]s.
+    // This field, exceptionally, *CAN* contain packed `RemovalRecord`s.
     pub(crate) new_kernel: TransactionKernel,
     pub(crate) left_proof: Proof,
     pub(crate) right_proof: Proof,
@@ -199,7 +199,8 @@ impl MergeWitness {
 
     /// Generate a new transaction kernel from two transactions.
     ///
-    /// Assumes the [`RemovalRecord`]s in both arguments are not packed.
+    /// Assumes the [`RemovalRecord`](crate::util_types::mutator_set::removal_record::RemovalRecord)s
+    /// in both arguments are not packed.
     pub(super) fn new_kernel(
         left_kernel: &TransactionKernel,
         right_kernel: &TransactionKernel,

@@ -22,7 +22,8 @@ use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
-/// A list of [`RemovalRecords`]s without redundant Merkle authentication data.
+/// A list of [`RemovalRecords`](crate::util_types::mutator_set::removal_record::RemovalRecord)s
+/// without redundant Merkle authentication data.
 ///
 /// This is considered a trusted data structure as it's never transmitted over
 /// the network and is only ever used internally.

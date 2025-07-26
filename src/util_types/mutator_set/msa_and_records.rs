@@ -498,7 +498,7 @@ mod tests {
     #[test_strategy::proptest(cases = 3)]
     fn state_updates_small_aocl_size(
         #[strategy(0u64..=u64::from(u8::MAX))] _aocl_size: u64,
-        #[strategy(0usize..30 as usize)]
+        #[strategy(0usize..30_usize)]
         #[filter(#_aocl_size >= (#_num_removals as u64))]
         _num_removals: usize,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
@@ -516,7 +516,7 @@ mod tests {
     #[test_strategy::proptest(cases = 3)]
     fn state_updates_midi_aocl_size(
         #[strategy(0u64..=u64::from(u16::MAX))] _aocl_size: u64,
-        #[strategy(0usize..20 as usize)]
+        #[strategy(0usize..20_usize)]
         #[filter(#_aocl_size >= (#_num_removals as u64))]
         _num_removals: usize,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
@@ -534,7 +534,7 @@ mod tests {
     #[test_strategy::proptest(cases = 3)]
     fn state_updates_medium_aocl_size(
         #[strategy(0u64..=u64::from(u32::MAX))] _aocl_size: u64,
-        #[strategy(0usize..20 as usize)]
+        #[strategy(0usize..20_usize)]
         #[filter(#_aocl_size >= (#_num_removals as u64))]
         _num_removals: usize,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
@@ -552,7 +552,7 @@ mod tests {
     #[test_strategy::proptest(cases = 2)]
     fn state_updates_big_aocl_size(
         #[strategy(0u64..=u64::MAX / 2)] _aocl_size: u64,
-        #[strategy(0usize..10 as usize)]
+        #[strategy(0usize..10_usize)]
         #[filter(#_aocl_size >= (#_num_removals as u64))]
         _num_removals: usize,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]

@@ -665,12 +665,7 @@ impl Block {
     /// Note that this function does **not** check that the block has enough
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
-    pub(crate) async fn is_valid(
-        &self,
-        previous_block: &Block,
-        now: Timestamp,
-        network: Network,
-    ) -> bool {
+    pub async fn is_valid(&self, previous_block: &Block, now: Timestamp, network: Network) -> bool {
         match self.validate(previous_block, now, network).await {
             Ok(_) => true,
             Err(e) => {

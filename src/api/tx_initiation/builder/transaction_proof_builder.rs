@@ -168,7 +168,7 @@ impl<'a> TransactionProofBuilder<'a> {
     ///
     /// valid mock proofs pass proof verification; invalid mock proofs do not.
     ///
-    /// see [NeptuneProof](crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof)
+    /// see [NeptuneProof]
     ///
     /// default = true
     ///
@@ -371,7 +371,7 @@ where
     ))
 }
 
-/// Builds a [`TransactionProof::ProofCollection`] from Cow<PrimitiveWitness>
+/// Builds a [`TransactionProof::ProofCollection`] from `Cow<PrimitiveWitness>`
 ///
 /// will generate a mock proof if Network::use_mock_proof() is true.
 ///
@@ -408,7 +408,7 @@ async fn proof_collection_from_witness(
     Ok(pc)
 }
 
-/// builds [`TransactionProof::SingleProof`] from Cow<PrimitiveWitness>
+/// builds [`TransactionProof::SingleProof`] from `Cow<PrimitiveWitness>`
 ///
 /// will generate a mock proof if Network::use_mock_proof() is true.
 ///

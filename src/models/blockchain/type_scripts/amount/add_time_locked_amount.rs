@@ -4,8 +4,8 @@ use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 
-/// Replace the [`Amount`] on stack elements 4..8 with the sum of the
-/// [`Amounts`] living on 0..4 and 4..8.
+/// Replace the amount on stack elements 4..8 with the sum of the
+/// amount living on 0..4 and 4..8.
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AddTimelockedAmount;
