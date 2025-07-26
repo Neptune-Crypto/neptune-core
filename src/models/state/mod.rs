@@ -1647,9 +1647,13 @@ impl GlobalState {
         // Set light state to this block.
         *self.chain.light_state_mut() = Arc::new(block.clone());
 
-        // No need to mark the block as tip in the block index database. If the
-        // node is unfrozen and blocks are found, the tip in the block index
-        // database will be set by the new block handler.
+        // Mark block as tip in block index database. In case we crash while
+        // frozen, we want to leave the database in a recoverable state.
+        self.chain
+            .archival_state_mut()
+            .write_block_as_tip(&block)
+            .await
+            .expect("block was stored, so must be valid; also, disk IO is assumed to work");
 
         // Update archival block MMR.
         self.chain

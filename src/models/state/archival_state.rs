@@ -329,6 +329,10 @@ impl ArchivalState {
     ///
     /// The caller should verify that the block is not already stored, otherwise
     /// the block will be stored twice which will lead to inconsistencies.
+    ///
+    /// Returns `Err` if:
+    ///  - block is invalid
+    ///  - io error
     async fn store_block(
         self: &mut ArchivalState,
         new_block: &Block,
@@ -462,6 +466,9 @@ impl ArchivalState {
         Ok(block_index_entries)
     }
 
+    /// Returns `Err` if:
+    ///  - block is invalid
+    ///  - IO error
     async fn write_block_internal(&mut self, block: &Block, is_canonical_tip: bool) -> Result<()> {
         let block_is_new = self.get_block_header(block.hash()).await.is_none();
         let mut block_index_entries = if block_is_new {
@@ -497,6 +504,10 @@ impl ArchivalState {
     ///
     /// If block was already written to database, then this is a nop as the old
     /// database entries and block stored on disk are considered valid.
+    ///
+    /// Returns `Err` if:
+    ///  - block is not valid
+    ///  - IO error
     pub(crate) async fn write_block_not_tip(&mut self, block: &Block) -> Result<()> {
         self.write_block_internal(block, false).await
     }
@@ -506,6 +517,10 @@ impl ArchivalState {
     /// If block was already written to database, then it is only marked as
     /// tip, and no write to disk occurs. Instead, the old block database entry
     /// is assumed to be valid, and so is the block stored on disk.
+    ///
+    /// Returns `Err` if:
+    ///  - block is not valid
+    ///  - IO error
     pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
         self.write_block_internal(new_block, true).await
     }
