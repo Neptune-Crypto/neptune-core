@@ -329,19 +329,25 @@ pub mod neptune_arbitrary {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 mod tests {
+    use crate::util_types::mutator_set::commit;
     use itertools::Itertools;
     use proptest::collection::vec;
     use proptest::prelude::{Arbitrary, Strategy};
     use proptest::prop_assert;
     use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::MsaAndRecords;
     use crate::util_types::mutator_set::ms_membership_proof::tests::propcompose_msmembershipproof;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
     use crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict;
 
@@ -379,10 +385,209 @@ mod tests {
         }
     }
 
+    fn state_updates_prop(
+        removables: Vec<(Digest, Digest, Digest)>,
+        msa_and_records: MsaAndRecords,
+        mut additions: Vec<(Digest, Digest, Digest)>,
+        rng_seed: u64,
+    ) -> std::result::Result<(), TestCaseError> {
+        fn assert_valid(
+            msa: &MutatorSetAccumulator,
+            rrs: &[RemovalRecord],
+            msmps: &[MsMembershipProof],
+            items: &[Digest],
+            new_msmps: &[MsMembershipProof],
+            inserted_items: &[Digest],
+        ) -> std::result::Result<(), TestCaseError> {
+            prop_assert!(msa.is_consistent());
+            for rr in rrs {
+                prop_assert!(msa.can_remove(rr));
+            }
+            for (msmp, item) in msmps
+                .iter()
+                .chain(new_msmps.iter())
+                .zip_eq(items.iter().chain(inserted_items))
+            {
+                prop_assert!(msa.verify(*item, msmp));
+            }
+
+            Ok(())
+        }
+
+        let mut items = removables
+            .into_iter()
+            .map(|(item, _, _)| item)
+            .collect_vec();
+        let mut rrs = msa_and_records.unpacked_removal_records();
+        let mut msmps = msa_and_records.membership_proofs;
+        let mut msa = msa_and_records.mutator_set_accumulator;
+        let mut new_msmps = vec![];
+        let mut inserted_items = vec![];
+
+        // Ensure initial validity
+        assert_valid(&msa, &rrs, &msmps, &items, &new_msmps, &inserted_items).unwrap();
+
+        let mut rng: StdRng = SeedableRng::seed_from_u64(rng_seed);
+
+        // Apply all removals and addition records, while keeping proof-data
+        // updated and verifying validity after each operation.
+        while !(additions.is_empty() && rrs.is_empty()) {
+            if rng.random_bool(0.5f64) {
+                // Add an element to the MSA
+                let Some((new_item, sr, rp)) = additions.pop() else {
+                    continue;
+                };
+
+                // Update all MSMPS
+                let addition = commit(new_item, sr, rp.hash());
+
+                MsMembershipProof::batch_update_from_addition(
+                    &mut msmps.iter_mut().chain(new_msmps.iter_mut()).collect_vec(),
+                    &items
+                        .iter()
+                        .chain(inserted_items.iter())
+                        .copied()
+                        .collect_vec(),
+                    &msa,
+                    &addition,
+                )
+                .unwrap();
+
+                // Update all removal records
+                RemovalRecord::batch_update_from_addition(&mut rrs.iter_mut().collect_vec(), &msa);
+
+                // Apply the addition
+                let new_msmp = msa.prove(new_item, sr, rp);
+                new_msmps.push(new_msmp);
+                inserted_items.push(new_item);
+
+                msa.add(&addition);
+            } else {
+                // Remove an element from the MSA
+                let Some(rr) = rrs.pop() else {
+                    continue;
+                };
+
+                // Update all MSMPS
+                MsMembershipProof::batch_update_from_remove(
+                    &mut msmps.iter_mut().chain(new_msmps.iter_mut()).collect_vec(),
+                    &rr,
+                )
+                .unwrap();
+
+                // Update all removal records
+                RemovalRecord::batch_update_from_remove(&mut rrs.iter_mut().collect_vec(), &rr);
+
+                prop_assert!(msa.can_remove(&rr));
+                msa.remove(&rr);
+                prop_assert!(!msa.can_remove(&rr));
+
+                // Remove the item and MSMP for the applied removal record from
+                // corresponding lists. Otherwise later validity checks fail.
+                msmps.pop().unwrap();
+                items.pop().unwrap();
+            }
+
+            // Ensure validity after operation
+            assert_valid(&msa, &rrs, &msmps, &items, &new_msmps, &inserted_items).unwrap();
+        }
+
+        Ok(())
+    }
+
+    #[test_strategy::proptest(cases = 3)]
+    fn state_updates_small_aocl_size(
+        #[strategy(0u64..=u64::from(u8::MAX))] _aocl_size: u64,
+        #[strategy(0usize..30 as usize)]
+        #[filter(#_aocl_size >= (#_num_removals as u64))]
+        _num_removals: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#removables.clone(), #_aocl_size)))]
+        msa_and_records: MsaAndRecords,
+        #[strategy(0usize..=(u8::MAX as usize))] _num_additions: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_additions))]
+        additions: Vec<(Digest, Digest, Digest)>,
+        #[strategy(arb())] rng_seed: u64,
+    ) {
+        prop_assert!(state_updates_prop(removables, msa_and_records, additions, rng_seed).is_ok())
+    }
+
+    #[test_strategy::proptest(cases = 3)]
+    fn state_updates_midi_aocl_size(
+        #[strategy(0u64..=u64::from(u16::MAX))] _aocl_size: u64,
+        #[strategy(0usize..20 as usize)]
+        #[filter(#_aocl_size >= (#_num_removals as u64))]
+        _num_removals: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#removables.clone(), #_aocl_size)))]
+        msa_and_records: MsaAndRecords,
+        #[strategy(0usize..=(u8::MAX as usize))] _num_additions: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_additions))]
+        additions: Vec<(Digest, Digest, Digest)>,
+        #[strategy(arb())] rng_seed: u64,
+    ) {
+        prop_assert!(state_updates_prop(removables, msa_and_records, additions, rng_seed).is_ok())
+    }
+
+    #[test_strategy::proptest(cases = 3)]
+    fn state_updates_medium_aocl_size(
+        #[strategy(0u64..=u64::from(u32::MAX))] _aocl_size: u64,
+        #[strategy(0usize..20 as usize)]
+        #[filter(#_aocl_size >= (#_num_removals as u64))]
+        _num_removals: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#removables.clone(), #_aocl_size)))]
+        msa_and_records: MsaAndRecords,
+        #[strategy(0usize..=100usize)] _num_additions: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_additions))]
+        additions: Vec<(Digest, Digest, Digest)>,
+        #[strategy(arb())] rng_seed: u64,
+    ) {
+        prop_assert!(state_updates_prop(removables, msa_and_records, additions, rng_seed).is_ok())
+    }
+
+    #[test_strategy::proptest(cases = 2)]
+    fn state_updates_big_aocl_size(
+        #[strategy(0u64..=u64::MAX / 2)] _aocl_size: u64,
+        #[strategy(0usize..10 as usize)]
+        #[filter(#_aocl_size >= (#_num_removals as u64))]
+        _num_removals: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#removables.clone(), #_aocl_size)))]
+        msa_and_records: MsaAndRecords,
+        #[strategy(0usize..=100usize)] _num_additions: usize,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_additions))]
+        additions: Vec<(Digest, Digest, Digest)>,
+        #[strategy(arb())] rng_seed: u64,
+    ) {
+        prop_assert!(state_updates_prop(removables, msa_and_records, additions, rng_seed).is_ok())
+    }
+
+    #[test_strategy::proptest(cases = 10)]
+    fn msa_and_records_is_valid_big_aocl(
+        #[strategy(0usize..60)] _num_removals: usize,
+        #[strategy(0u64..=u64::MAX / 2)] _aocl_size: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#removables, #_aocl_size)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        prop_assert!(msa_and_records.verify(
+            &removables
+                .iter()
+                .map(|(item, _sr, _rp)| *item)
+                .collect_vec()
+        ));
+    }
+
     #[test_strategy::proptest(cases = 20)]
-    fn msa_and_records_is_valid(
-        #[strategy(0usize..100)] _num_removals: usize,
-        #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
+    fn msa_and_records_is_valid_small_aocl(
+        #[strategy(0u64..=u64::from(u8::MAX))] _aocl_size: u64,
+        #[strategy(0usize..#_aocl_size as usize)] _num_removals: usize,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#removables, #_aocl_size)))]
