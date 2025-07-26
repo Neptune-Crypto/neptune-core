@@ -593,6 +593,8 @@ pub enum RedemptionValidationError {
 
 #[cfg(test)]
 mod tests {
+    use std::io::ErrorKind;
+
     use crate::api::redeem::redemption_report::RedemptionReportDisplayFormat;
     use crate::config_models::cli_args;
     use crate::models::blockchain::block::{Block, MINING_REWARD_TIME_LOCK_PERIOD};
@@ -703,13 +705,32 @@ mod tests {
         current_block = c_blocks.last().unwrap().to_owned();
 
         // prepare temp directory
+        println!("\n\n");
         let directory = "utxo-redemption-claims-directory-temp".to_string();
-        tokio::fs::remove_dir_all(directory.clone())
-            .await
-            .unwrap_or_else(|e| panic!("could not delete temp directory for tests: {e}"));
-        tokio::fs::create_dir_all(directory.clone())
-            .await
-            .unwrap_or_else(|e| panic!("could not create temp direcrory for tests: {e}"));
+        match fs::read_dir(&directory).await {
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                // Directory does not exist — all good
+                tokio::fs::create_dir_all(directory.clone())
+                    .await
+                    .unwrap_or_else(|err| {
+                        panic!("could not create temp direcrory for tests: {err}")
+                    });
+            }
+            Ok(mut entries) => {
+                // Directory exists and is not empty
+                assert!(
+                    entries.next_entry().await.unwrap().is_none(),
+                    "Directory {:?} exists and is not empty!\n\
+                    Panicking out of an abundance of caution, to avoid overwriting data.\n\
+                    Consider deleting or renaming the directory.",
+                    directory
+                );
+            }
+            Err(e) => {
+                // Some other error occurred
+                panic!("Error checking directory: {:?}", e);
+            }
+        }
 
         // produce redemption claim
         let address = GenerationReceivingAddress::derive_from_seed(rng.random());
