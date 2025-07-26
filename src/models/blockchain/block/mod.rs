@@ -1222,7 +1222,7 @@ pub(crate) mod tests {
         let network = Network::Main;
         let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
         assert_eq!(
-            "3eeaed3acdd8765b9a3e689d74f745365d6a3de57fb4a9a19c46ac432ce419a92fb82d47dc0d3f54",
+            "f3f279e4d278648b9645d2f0f3a7665c9c092ae0d842d63b2750c6c928c96b12fa3158391a30a64d",
             genesis_block.hash().to_hex()
         );
     }
@@ -1235,7 +1235,7 @@ pub(crate) mod tests {
         let network = Network::Testnet(0);
         let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
         assert_eq!(
-            "380df1ec5895553d056acb7a35a6eb9967c893ccc1e7c6e86995459e4d20e4f99800f04c86711d53",
+            "40247214f13156827c5fc31cb1d7b48919ce9723e391a7f0d49682946a4fb0b71c57ef11725ea6a4",
             genesis_block.hash().to_hex()
         );
     }

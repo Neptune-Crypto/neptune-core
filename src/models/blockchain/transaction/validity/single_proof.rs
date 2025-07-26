@@ -1306,7 +1306,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         SingleProof,
-        // snapshot taken from branch asz/build-public-announcements on 2025-07-23 ca7b3f51
-        "58e4a6407c48ab3fb2bb33d5630f7cd227c48c7b39bab776c353e2707a98a75820c93e9ec5d05a41"
+        "8405d2d9585de09402284acba926ef3599c07be045dd4ee6f76b9657a9c1ab3c35591b7f77828fd4"
     );
 }
