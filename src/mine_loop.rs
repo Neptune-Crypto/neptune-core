@@ -169,7 +169,7 @@ fn precalculate_header_ap(
     let header_mt = block_header_template.merkle_tree();
 
     header_mt
-        .authentication_structure(&[BlockHeaderField::Nonce as usize])
+        .authentication_structure(&[BlockHeaderField::Pow as usize])
         .unwrap()
         .try_into()
         .unwrap()
@@ -1894,7 +1894,7 @@ pub(crate) mod tests {
             let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
             assert_eq!(
                 block.kernel.mast_hash(),
-                fast_kernel_mast_hash(kernel_auth_path, header_auth_path, block.header().nonce)
+                fast_kernel_mast_hash(kernel_auth_path, header_auth_path, block.header().pow.nonce)
             );
         }
     }
@@ -1906,7 +1906,11 @@ pub(crate) mod tests {
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(a_block);
         assert_eq!(
             a_block.kernel.mast_hash(),
-            fast_kernel_mast_hash(kernel_auth_path, header_auth_path, a_block.header().nonce)
+            fast_kernel_mast_hash(
+                kernel_auth_path,
+                header_auth_path,
+                a_block.header().pow.nonce
+            )
         );
     }
 

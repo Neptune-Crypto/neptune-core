@@ -11,6 +11,7 @@ pub mod difficulty_control;
 pub(crate) mod guesser_receiver_data;
 pub mod mock_block_generator;
 pub mod mutator_set_update;
+pub(crate) mod pow;
 pub mod validity;
 
 use std::sync::Arc;
@@ -33,6 +34,7 @@ use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
+use strum::EnumCount;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
@@ -57,6 +59,7 @@ use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
+use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -165,6 +168,26 @@ pub struct Block {
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
     digest: OnceLock<Digest>,
+}
+
+impl MastHash for Block {
+    type FieldEnum = BlockField;
+
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+        vec![self.kernel.mast_hash().encode(), self.proof.encode()]
+    }
+}
+
+#[derive(Debug, Copy, Clone, EnumCount)]
+pub enum BlockField {
+    Kernel,
+    Proof,
+}
+
+impl HasDiscriminant for BlockField {
+    fn discriminant(&self) -> usize {
+        *self as usize
+    }
 }
 
 impl PartialEq for Block {
@@ -276,7 +299,7 @@ impl Block {
     /// will not recompute it unless the Block was modified since the last call.
     #[inline]
     pub fn hash(&self) -> Digest {
-        *self.digest.get_or_init(|| self.kernel.mast_hash())
+        *self.digest.get_or_init(|| self.mast_hash())
     }
 
     #[inline]
@@ -290,7 +313,7 @@ impl Block {
     /// note: this causes block digest to change.
     #[inline]
     pub fn set_header_nonce(&mut self, nonce: Digest) {
-        self.kernel.header.nonce = nonce;
+        self.kernel.header.pow.nonce = nonce;
         self.unset_digest();
     }
 

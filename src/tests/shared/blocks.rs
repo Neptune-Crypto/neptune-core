@@ -20,6 +20,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::block::pow::Pow;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
@@ -51,7 +52,7 @@ pub(crate) fn invalid_block_with_transaction(
         height: new_block_height,
         prev_block_digest: previous_block.hash(),
         timestamp: transaction.kernel.timestamp,
-        nonce: Digest::default(),
+        pow: Pow::default(),
         guesser_receiver_data: GuesserReceiverData::default(),
         cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
         difficulty: previous_block.header().difficulty,

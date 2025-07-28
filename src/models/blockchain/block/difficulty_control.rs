@@ -201,7 +201,8 @@ where
 
 const POW_NUM_LIMBS: usize = 6;
 
-/// Estimates how many hashes were used to produce the data object.
+/// Estimates how many guesses (or guess-equivalents, in case of time-memory
+/// trade-offs) were used to produce the block.
 ///
 /// Proof-of-work is used in the fork choice rule: when presented with
 /// two forks of different height, a node will choose the one with the greater

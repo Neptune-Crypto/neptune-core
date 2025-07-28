@@ -23,6 +23,8 @@ use super::Block;
 use crate::api::export::ReceivingAddress;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
+use crate::models::blockchain::block::pow::Pow;
+use crate::models::blockchain::block::pow::POW_MEMORY_PARAMETER;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -71,7 +73,7 @@ pub struct BlockHeader {
     /// Time since unix epoch, in milliseconds
     pub timestamp: Timestamp,
 
-    pub nonce: Digest,
+    pub pow: Pow,
 
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
@@ -94,7 +96,7 @@ impl Display for BlockHeader {
             Version: {}\n\
             Guesser receiver digest: {}\n\
             Guesser lock script hash: {}\n\
-            nonce: {}\n",
+            pow: {}\n",
             self.height,
             self.timestamp.standard_format(),
             self.prev_block_digest.to_hex(),
@@ -103,7 +105,7 @@ impl Display for BlockHeader {
             self.version,
             self.guesser_receiver_data.receiver_digest.to_hex(),
             self.guesser_receiver_data.lock_script_hash.to_hex(),
-            self.nonce.to_hex()
+            self.pow
         );
 
         write!(f, "{}", string)
@@ -118,15 +120,19 @@ impl BlockHeader {
             prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
 
-            // Bitcoin block at height 906975
-            // TODO: Update me right before reboot
-            nonce: Digest::new(bfe_array![
-                0x0000000000000000u64,
-                0x0001ff452761dd02u64,
-                0x9696bf75719bdc65u64,
-                0xa6b0088b8822e794u64,
-                0
-            ]),
+            pow: Pow {
+                // Bitcoin block at height 906975
+                // TODO: Update me right before reboot
+                nonce: Digest::new(bfe_array![
+                    0x0000000000000000u64,
+                    0x0001ff452761dd02u64,
+                    0x9696bf75719bdc65u64,
+                    0xa6b0088b8822e794u64,
+                    0
+                ]),
+                paths: [[Digest::default(); POW_MEMORY_PARAMETER.ilog2() as usize]; 2],
+                root: Digest::default(),
+            },
             cumulative_proof_of_work: ProofOfWork::zero(),
 
             #[cfg(not(test))]
@@ -177,7 +183,7 @@ impl BlockHeader {
             height: predecessor_header.height.next(),
             prev_block_digest: predecessor_digest,
             timestamp,
-            nonce: Digest::default(),
+            pow: Pow::default(),
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
             guesser_receiver_data: GuesserReceiverData {
@@ -201,10 +207,10 @@ pub enum BlockHeaderField {
     Height,
     PrevBlockDigest,
     Timestamp,
-    Nonce,
+    Pow,
     CumulativeProofOfWork,
     Difficulty,
-    GusserDigest,
+    GuesserReceiverData,
 }
 
 impl HasDiscriminant for BlockHeaderField {
@@ -222,7 +228,7 @@ impl MastHash for BlockHeader {
             self.height.encode(),
             self.prev_block_digest.encode(),
             self.timestamp.encode(),
-            self.nonce.encode(),
+            self.pow.encode(),
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
             self.guesser_receiver_data.encode(),
@@ -289,7 +295,7 @@ impl BlockHeader {
         let version = arb::<BFieldElement>();
         let prev_block_digest = arb::<Digest>();
         let timestamp = arb::<Timestamp>();
-        let nonce = arb::<Digest>();
+        let pow = arb::<Pow>();
         let cumulative_proof_of_work = arb::<ProofOfWork>();
         let difficulty = arb::<Difficulty>();
         let guesser_receiver_data = arb::<GuesserReceiverData>();
@@ -298,7 +304,7 @@ impl BlockHeader {
             version,
             prev_block_digest,
             timestamp,
-            nonce,
+            pow,
             cumulative_proof_of_work,
             difficulty,
             guesser_receiver_data,
@@ -308,7 +314,7 @@ impl BlockHeader {
                     version,
                     prev_block_digest,
                     timestamp,
-                    nonce,
+                    pow,
                     cumulative_proof_of_work,
                     difficulty,
                     guesser_receiver_data,
@@ -318,7 +324,7 @@ impl BlockHeader {
                         height: block_height,
                         prev_block_digest,
                         timestamp,
-                        nonce,
+                        pow,
                         cumulative_proof_of_work,
                         difficulty,
                         guesser_receiver_data,
@@ -337,6 +343,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
 
+    impl BlockHeader {
+        pub(crate) fn set_nonce(&mut self, nonce: Digest) {
+            self.pow.nonce = nonce;
+        }
+    }
+
     pub(crate) fn random_block_header() -> BlockHeader {
         let mut rng = rand::rng();
         BlockHeader {
@@ -344,7 +356,7 @@ pub(crate) mod tests {
             height: BlockHeight::from(rng.random::<u64>()),
             prev_block_digest: rng.random(),
             timestamp: rng.random(),
-            nonce: rng.random(),
+            pow: rng.random(),
             cumulative_proof_of_work: ProofOfWork::new(
                 rng.random::<[u32; ProofOfWork::NUM_LIMBS]>(),
             ),
