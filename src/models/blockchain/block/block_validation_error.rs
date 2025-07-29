@@ -120,7 +120,7 @@ mod tests {
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
     proptest::prop_compose! {
-        fn n_strategy() (
+        fn setup() (
             rness in arb::<Randomness<2, 2>>(),
             b in block_with_arbkernel().prop_filter(
                 "`.difficulty` is a divisor down the line",
@@ -196,10 +196,8 @@ mod tests {
         // );
 
         err_checking = BlockValidationError::MutatorSetUpdateIntegrity;
-        proptest::proptest!(singlecase_config, |(
-            (mut b_prev, ts, rness) in n_strategy(),
-            record_addition_an in arb::<AdditionRecord>()
-        )| {
+        proptest::proptest!(singlecase_config, |((mut b_prev, ts, rness) in setup(), record_addition_an in arb::<AdditionRecord>())|
+        {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let b_new = fake_valid_successor_for_tests(
                     &b_prev,
@@ -419,7 +417,7 @@ mod tests {
         // });
 
         err_checking = BlockValidationError::NegativeCoinbase;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let mut b_new = fake_valid_successor_for_tests(
@@ -449,7 +447,7 @@ mod tests {
         });
 
         err_checking = BlockValidationError::CoinbaseTooBig;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let mut b_new = fake_valid_successor_for_tests(
@@ -475,7 +473,7 @@ mod tests {
         });
 
         err_checking = BlockValidationError::AppendixTooLarge;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let mut b_new = fake_valid_successor_for_tests(
@@ -497,7 +495,7 @@ mod tests {
         err_checking = BlockValidationError::TransactionTimestamp;
         proptest::proptest!(
             singlecase_config,
-            |((ts_kernel, (b_prev, ts, rness)) in n_strategy().prop_flat_map(|prev| (prev.1.0.value()..=BFieldElement::MAX, Just(prev))))| {
+            |((ts_kernel, (b_prev, ts, rness)) in setup().prop_flat_map(|prev| (prev.1.0.value()..=BFieldElement::MAX, Just(prev))))| {
                 let t = crate::tests::tokio_runtime().block_on(async {
                     let mut b_new = fake_valid_successor_for_tests(
                         &b_prev,
@@ -523,7 +521,7 @@ mod tests {
         );
 
         err_checking = BlockValidationError::NegativeFee;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let mut b_new = fake_valid_successor_for_tests(
@@ -583,7 +581,7 @@ mod tests {
         // );
 
         err_checking = BlockValidationError::ProofQuality;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let mut b_new = fake_valid_successor_for_tests(
@@ -601,7 +599,7 @@ mod tests {
         });
 
         err_checking = BlockValidationError::MaxSize;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let mut b_new = fake_valid_successor_for_tests(
@@ -622,7 +620,7 @@ mod tests {
         });
 
         err_checking = BlockValidationError::AppendixMissingClaim;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, _) in n_strategy())|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, _) in setup())|
         {
             let t = crate::tests::tokio_runtime().block_on(
                 crate::tests::shared::blocks::invalid_empty_block(&b_prev, Network::Main).validate(&b_prev, ts, Network::Main)
@@ -631,7 +629,7 @@ mod tests {
         });
 
         err_checking = BlockValidationError::FutureDating;
-        proptest::proptest!(singlecase_config, |((ts_f, (b_prev, ts, _)) in n_strategy().prop_flat_map(|prev| ((prev.1.0.value() + 1288490188500000u64)..=BFieldElement::MAX, Just(prev))))|
+        proptest::proptest!(singlecase_config, |((ts_f, (b_prev, ts, _)) in setup().prop_flat_map(|prev| ((prev.1.0.value() + 1288490188500000u64)..=BFieldElement::MAX, Just(prev))))|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
                 let mut b_new = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
@@ -658,7 +656,7 @@ mod tests {
 
         err_checking = BlockValidationError::CumulativeProofOfWork;
         proptest::proptest!(singlecase_config, |(
-            (b_prev, ts, _) in n_strategy(),
+            (b_prev, ts, _) in setup(),
             cumul in arb::<difficulty_control::ProofOfWork>()
         )| {
             let t = crate::tests::tokio_runtime().block_on(async {
@@ -673,7 +671,7 @@ mod tests {
 
         err_checking = BlockValidationError::Difficulty;
         proptest::proptest!(singlecase_config, |(
-            (b_prev, ts, rness) in n_strategy(),
+            (b_prev, ts, rness) in setup(),
             d in arb::<difficulty_control::Difficulty>(),
         )| {
             let t = crate::tests::tokio_runtime().block_on(async {
@@ -692,7 +690,7 @@ mod tests {
         });
 
         err_checking = BlockValidationError::MinimumBlockTime;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, _) in n_strategy(), ts_small in 0..60u64)|
+        proptest::proptest!(singlecase_config, |((b_prev, ts, _) in setup(), ts_small in 0..60u64)|
         {
             let t = crate::tests::tokio_runtime().block_on(
                 crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
