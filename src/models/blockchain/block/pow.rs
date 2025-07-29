@@ -237,7 +237,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 
         let path_a = MerkleTreeInclusionProof {
             tree_height: MERKLE_TREE_HEIGHT as u32,
-            indexed_leafs: [(index_a as usize, Self::bud(commitment, index_a))].to_vec(),
+            indexed_leafs: [(index_a as usize, Self::leaf(commitment, index_a))].to_vec(),
             authentication_structure: self.path_a.to_vec(),
         };
         if !path_a.verify(self.root) {
@@ -246,7 +246,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 
         let path_b = MerkleTreeInclusionProof {
             tree_height: MERKLE_TREE_HEIGHT as u32,
-            indexed_leafs: [(index_b as usize, Self::bud(commitment, index_b))].to_vec(),
+            indexed_leafs: [(index_b as usize, Self::leaf(commitment, index_b))].to_vec(),
             authentication_structure: self.path_b.to_vec(),
         };
         if !path_b.verify(self.root) {
@@ -274,8 +274,10 @@ pub(crate) enum PowValidationError {
 pub(crate) mod tests {
     use std::time::Instant;
 
-    use rand::distr::{Distribution, StandardUniform};
-    use rand::{rng, Rng};
+    use rand::distr::Distribution;
+    use rand::distr::StandardUniform;
+    use rand::rng;
+    use rand::Rng;
     use tasm_lib::twenty_first::bfe;
 
     use crate::models::blockchain::block::difficulty_control::Difficulty;
