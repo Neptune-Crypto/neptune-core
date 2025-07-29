@@ -978,17 +978,16 @@ impl Block {
         self.encode().len()
     }
 
-    /// The amount rewarded to the guesser who finds a valid nonce for this
-    /// block.
+    /// The amount rewarded to the guesser who finds a valid nonce for this block.
     pub(crate) fn total_guesser_reward(
         &self,
     ) -> Result<NativeCurrencyAmount, BlockValidationError> {
-        if self.body().transaction_kernel.fee.is_negative() {
-            // if dbg!(self.body().transaction_kernel.fee).is_negative() {
-            return Err(BlockValidationError::NegativeFee);
+        let r = self.body().transaction_kernel.fee;
+        if r.is_negative() {
+            Err(BlockValidationError::NegativeFee)
+        } else {
+            Ok(r)
         }
-
-        Ok(self.body().transaction_kernel.fee)
     }
 
     /// Get the block's guesser fee UTXOs.

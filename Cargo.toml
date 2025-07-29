@@ -145,7 +145,7 @@ rayon = "1.10"
 statrs = "0.18.0"
 test-strategy = "0.3"
 tokio-test = "0.4"
-strum = {version = "*", features = ["derive"]}
+# strum = {version = "*", features = ["derive"]}
 
 [dev-dependencies.cargo-husky]
 version = "1"

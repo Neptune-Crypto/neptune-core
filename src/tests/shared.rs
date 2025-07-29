@@ -22,7 +22,6 @@ use tracing::warn;
 
 use crate::api::export::TransactionDetails;
 use crate::api::export::TxOutputList;
-
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::mine_loop::composer_parameters::ComposerParameters;
