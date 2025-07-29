@@ -265,9 +265,7 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use arbitrary::Unstructured;
     use itertools::Itertools;
-    use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
@@ -283,21 +281,6 @@ mod tests {
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
-    use arbitrary::Arbitrary;
-
-    pub fn propcompose_absindset() -> impl Strategy<Value = AbsoluteIndexSet> {
-        vec(arb::<u8>(), 16_usize + (NUM_TRIALS as usize) * 4)
-            .prop_map(|bytes| AbsoluteIndexSet::arbitrary(&mut Unstructured::new(&bytes)).unwrap())
-    }
-    prop_compose! {
-        pub fn propcompose_absindset_with_limit(l: u64) (inner in [..=u128::from(l); NUM_TRIALS as usize]) -> AbsoluteIndexSet {
-            AbsoluteIndexSet::new(&inner)
-        }
-    }
-
-    // prop_compose! {
-    //     pub fn propcompose_rr_()
-    // }
 
     #[test]
     fn increment_bloom_filter_index_behaves_as_expected() {
@@ -731,7 +714,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn test_index_set_serialization(
-            original_indexset in propcompose_absindset()
+            original_indexset in crate::tests::shared::strategies::absindset()
         ) {
             let serialized_indexset = serde_json::to_string(&original_indexset).unwrap();
             let reconstructed_indexset: AbsoluteIndexSet =

@@ -178,46 +178,12 @@ impl IntoIterator for ChunkDictionary {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use macro_rules_attr::apply;
-    use proptest::collection;
-    use proptest::prelude::any;
-    use proptest::prop_compose;
     use tasm_lib::twenty_first::math::other::random_elements;
 
     use super::*;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::archival_mmr::tests::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-
-    prop_compose! {
-        pub fn propcompose_chunkdict() (dictionary in collection::vec((
-            any::<u64>(), collection::vec(proptest_arbitrary_interop::arb::<Digest>(), 0..6), collection::vec(any::<u32>(), 0..17),
-        ), 37)) -> ChunkDictionary {
-            ChunkDictionary::new(dictionary.into_iter().map(|(key, authpath, chunk)| (
-                key,
-                (
-                    MmrMembershipProof::new(authpath),
-                    Chunk {
-                        relative_indices: chunk,
-                    },
-                )
-            )).collect_vec())
-        }
-    }
-    prop_compose! {
-        pub fn propcompose_chunkdict_with_leafs_limit(leafs_limit: u64) (dictionary in collection::vec((
-            ..=leafs_limit, collection::vec(proptest_arbitrary_interop::arb::<Digest>(), 0..6), collection::vec(any::<u32>(), 0..17),
-        ), 1..=(crate::util_types::mutator_set::shared::NUM_TRIALS as usize))) -> ChunkDictionary {
-            ChunkDictionary::new(dictionary.into_iter().map(|(key, authpath, chunk)| (
-                key,
-                (
-                    MmrMembershipProof::new(authpath),
-                    Chunk {
-                        relative_indices: chunk,
-                    },
-                )
-            )).collect_vec())
-        }
-    }
 
     #[apply(shared_tokio_runtime)]
     async fn hash_test() {

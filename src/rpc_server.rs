@@ -4331,7 +4331,7 @@ mod tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn utxo_origin_block_test(
-        #[strategy(txkernel_with_lengths(0usize, 1usize, 0usize))]
+        #[strategy(txkernel::with_lengths(0usize, 1usize, 0usize, false))]
         transaction_kernel: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         prop_assume!(!transaction_kernel.fee.is_negative());
@@ -4515,8 +4515,8 @@ mod tests {
 
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
-    async fn public_announcements_in_block_test(
-        #[strategy(txkernel::with_lengths(0usize, 2usize, NUM_PUBLIC_ANNOUNCEMENTS_BLOCK1, false))]
+    async fn announcements_in_block_test(
+        #[strategy(txkernel::with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1, false))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;

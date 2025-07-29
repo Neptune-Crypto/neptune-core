@@ -18,13 +18,13 @@ prop_compose! {
     pub fn with_lengths(
         num_inputs: impl Into<SizeRange>,
         num_outputs: impl Into<SizeRange>,
-        num_public_announcements: impl Into<SizeRange>,
+        num_announcements: impl Into<SizeRange>,
         fee_nonegative: bool,
     ) (
-        inputs in collection::vec(crate::util_types::test_shared::mutator_set::propcompose_rr_with_independent_absindset_chunkdict(), num_inputs),
+        inputs in collection::vec(super::removalrecord(), num_inputs),
         outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
-        public_announcements in collection::vec(collection::vec(arb::<tasm_lib::triton_vm::prelude::BFieldElement>(), 10..59), num_public_announcements).prop_map(
-            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message|crate::models::blockchain::transaction::PublicAnnouncement{message}))
+        announcements in collection::vec(collection::vec(arb::<tasm_lib::triton_vm::prelude::BFieldElement>(), 10..59), num_announcements).prop_map(
+            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message| crate::models::blockchain::transaction::announcement::Announcement{message}))
         ),
         fee in arb::<NativeCurrencyAmount>(),
         coinbase in arb::<Option<NativeCurrencyAmount>>(),
@@ -34,7 +34,7 @@ prop_compose! {
     ) -> TransactionKernel {TransactionKernelProxy {
         inputs,
         outputs,
-        public_announcements,
+        announcements,
         fee: if fee_nonegative {fee.abs()} else {fee},
         coinbase,
         timestamp,
@@ -54,7 +54,7 @@ prop_compose! {
         TransactionKernelProxy {
             inputs: inputs.clone(),
             outputs: outputs.clone(),
-            public_announcements: vec![],
+            announcements: vec![],
             fee,
             timestamp,
             coinbase: None,

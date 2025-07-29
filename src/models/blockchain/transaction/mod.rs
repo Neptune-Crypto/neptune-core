@@ -261,7 +261,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::tasm::prover_job::{ProverJobError, VmProcessError};
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::tests::shared::blocks::mock_block_from_transaction_and_msa;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};

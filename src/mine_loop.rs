@@ -1204,7 +1204,7 @@ pub(crate) mod tests {
                 .map(|_| pseudorandom_addition_record(rng.random()))
                 .collect_vec();
             (
-                make_mock_block_transaction_with_mutator_set_hash(
+                crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash(
                     vec![],
                     outputs,
                     previous_block
