@@ -21,7 +21,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
 /// Determines the number of leafs in the Merkle tree in the guesser buffer.
-pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 31;
+pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 30;
 pub(crate) const POW_MEMORY_TREE_HEIGHT: usize = POW_MEMORY_PARAMETER.ilog2() as usize;
 const NUM_LEAF_REPETITIONS: u32 = 41;
 const NUM_INDEX_REPETITIONS: u32 = 41;
@@ -255,6 +255,8 @@ pub(crate) enum PowValidationError {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::time::Instant;
+
     use rand::distr::{Distribution, StandardUniform};
     use rand::{rng, Rng};
     use tasm_lib::twenty_first::bfe;
@@ -282,6 +284,28 @@ pub(crate) mod tests {
                 nonce: rng.random(),
             }
         }
+    }
+
+    #[test]
+    #[ignore = "benchmark of memory and time requirements of preprocess for guessing"]
+    fn benchmark_memory_requirements() {
+        fn report<const MERKLE_TREE_HEIGHT: usize>(auth_paths: PowMastPaths) {
+            let start = Instant::now();
+            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths);
+            let duration = start.elapsed();
+            let estimated_mt_size = buffer.merkle_tree.num_leafs() * 2 * Digest::BYTES;
+            println!("Merkle tree height: {MERKLE_TREE_HEIGHT}");
+            println!("estimated_mt_size: {}GB", estimated_mt_size / 1_000_000_000);
+            println!("preprocess time: {} seconds", duration.as_secs());
+        }
+
+        let mut rng = rng();
+        let auth_paths = rng.random::<PowMastPaths>();
+        report::<25>(auth_paths);
+        report::<26>(auth_paths);
+        report::<27>(auth_paths);
+        report::<28>(auth_paths);
+        report::<29>(auth_paths);
     }
 
     #[test]
