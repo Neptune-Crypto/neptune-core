@@ -142,7 +142,7 @@ mod tests {
             ..Config::default()
         };
 
-        let mut err_checking = BlockValidationError::MutatorSetUpdateImpossible;
+        // let mut err_checking = BlockValidationError::MutatorSetUpdateImpossible;
         /* > @skaunov:
         Is that ok two identical addition records in a tx kernel proxy doesn't trigger a validation error (at least up to the digests  comparison for integrity)? I mean I can imagine some deduplication under the hood hence asking. I thought it's the simplest way to hit BlockValidationError::MutatorSetUpdateImpossible (renamed a bit); but maybe there's a better path to it?
 
@@ -153,7 +153,7 @@ mod tests {
         I'm not sure it's possible to hit the `BlockValidationError::MutatorSetUpdatePossible` error.
         */
 
-        err_checking = BlockValidationError::ProofValidity;
+        // err_checking = BlockValidationError::ProofValidity;
         /* @skaunov, [12.07.2025 18:30]
         >> ... So, you already did the negative test for this case back than: `block_with_invalid_proof_fails` it is, am I correct?
 
@@ -195,7 +195,7 @@ mod tests {
         //     }
         // );
 
-        err_checking = BlockValidationError::MutatorSetUpdateIntegrity;
+        let mut err_checking = BlockValidationError::MutatorSetUpdateIntegrity;
         proptest::proptest!(singlecase_config, |((mut b_prev, ts, rness) in setup(), record_addition_an in arb::<AdditionRecord>())|
         {
             let t = crate::tests::tokio_runtime().block_on(async {
@@ -214,7 +214,7 @@ mod tests {
             prop_assert_eq![err_checking, t.err().unwrap()];
         });
 
-        err_checking = BlockValidationError::RemovalRecordsValidity;
+        // err_checking = BlockValidationError::RemovalRecordsValidity;
         // proptest::proptest!(
         //     deterministic,
         //     |(
@@ -296,7 +296,7 @@ mod tests {
         // );
         /* feels like primitive witness guards again `RemovalRecordsValidity` so even producing a block body such that a new block validation would go this far is not possible with the tools we have for normal/good block production */
 
-        err_checking = BlockValidationError::TooManyAnnouncements;
+        // err_checking = BlockValidationError::TooManyAnnouncements;
         // Not reachable without moving a #submethod from `.validate`. See #625 for the details.
         // proptest::proptest!(
         //     singlecase_config,
@@ -336,7 +336,7 @@ mod tests {
         //     }
         // );
 
-        err_checking = BlockValidationError::TooManyOutputs;
+        // err_checking = BlockValidationError::TooManyOutputs;
         // #submethod
         // proptest::proptest!(
         //     singlecase_config,
@@ -373,7 +373,7 @@ mod tests {
         //     }
         // );
 
-        err_checking = BlockValidationError::TooManyInputs;
+        // err_checking = BlockValidationError::TooManyInputs;
         // #submethod
         // proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
         // {
@@ -548,7 +548,7 @@ mod tests {
 
         /* @skaunov am not sure if adding testing utils to test double spending
         would enable testing this with the whole `validate`, but it's something to try too */
-        err_checking = BlockValidationError::RemovalRecordsUniqueness;
+        // err_checking = BlockValidationError::RemovalRecordsUniqueness;
         // #submethod
         // proptest::proptest!(
         //     singlecase_config,
