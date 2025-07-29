@@ -15,11 +15,8 @@ use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 
 use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::block_header::BlockHeaderField;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
-use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::block::BlockField;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
@@ -33,7 +30,7 @@ const NUM_INDEX_REPETITIONS: u32 = 41;
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
-pub(crate) struct Pow<const MERKLE_TREE_HEIGHT: usize> {
+pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
     pub(super) root: Digest,
 
     #[serde(with = "serde_arrays")]
@@ -48,32 +45,14 @@ pub(crate) struct Pow<const MERKLE_TREE_HEIGHT: usize> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PowMastPaths {
-    pow: [Digest; BlockHeader::MAST_HEIGHT],
-    header: [Digest; BlockKernel::MAST_HEIGHT],
-    kernel: [Digest; Block::MAST_HEIGHT],
+pub struct PowMastPaths {
+    pub(super) pow: [Digest; BlockHeader::MAST_HEIGHT],
+    pub(super) header: [Digest; BlockKernel::MAST_HEIGHT],
+    pub(super) kernel: [Digest; Block::MAST_HEIGHT],
 }
 
 impl PowMastPaths {
-    pub fn from_block(block: &Block) -> Self {
-        let pow = BlockHeader::mast_path(block.header(), BlockHeaderField::Pow)
-            .try_into()
-            .unwrap();
-        let header = BlockKernel::mast_path(&block.kernel, BlockKernelField::Header)
-            .try_into()
-            .unwrap();
-        let kernel = Block::mast_path(block, BlockField::Kernel)
-            .try_into()
-            .unwrap();
-
-        Self {
-            pow,
-            header,
-            kernel,
-        }
-    }
-
-    fn commit(&self) -> Digest {
+    pub(super) fn commit(&self) -> Digest {
         Tip5::hash_varlen(
             &[
                 self.pow.to_vec(),
@@ -138,13 +117,19 @@ impl<const MERKLE_TREE_HEIGHT: usize> Display for Pow<MERKLE_TREE_HEIGHT> {
 
 /// Data structure that must be stored in memory for efficient guessing.
 /// Independent of the nonce.
-pub(crate) struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
+#[derive(Debug, Clone)]
+pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
     merkle_tree: MerkleTree,
 
     hash: Digest,
+
+    /// Authentication paths for all fields but the PoW field
+    mast_auth_paths: PowMastPaths,
 }
 
 impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
+    pub const MERKLE_TREE_HEIGHT: usize = MERKLE_TREE_HEIGHT;
+
     fn leaf(commitment: Digest, index: u64) -> Digest {
         let mut digest = Tip5::hash_pair(commitment, Digest::new(bfe_array![index, 0, 0, 0, 0]));
         for _ in 1..NUM_LEAF_REPETITIONS {
@@ -165,11 +150,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         (index_a, index_b)
     }
 
-    fn commitment_from_block(block_template: &Block) -> Digest {
-        let auth_paths = PowMastPaths::from_block(block_template);
-        auth_paths.commit()
-    }
-
     pub(super) fn preprocess(mast_auth_paths: PowMastPaths) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
         // Commitment to all the fields in the block that are not pow
         let commitment = mast_auth_paths.commit();
@@ -184,16 +164,14 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 
         let hash = Tip5::hash_pair(merkle_tree.root(), commitment);
 
-        GuesserBuffer::<MERKLE_TREE_HEIGHT> { merkle_tree, hash }
+        GuesserBuffer::<MERKLE_TREE_HEIGHT> {
+            merkle_tree,
+            hash,
+            mast_auth_paths,
+        }
     }
 
-    fn preprocess_from_block(block_template: &Block) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
-        let mast_auth_paths = PowMastPaths::from_block(block_template);
-        Self::preprocess(mast_auth_paths)
-    }
-
-    pub(crate) fn guess(
-        auth_paths: PowMastPaths,
+    pub fn guess(
         buffer: &GuesserBuffer<MERKLE_TREE_HEIGHT>,
         nonce: Digest,
         target: Digest,
@@ -208,12 +186,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             .unwrap()
             .try_into()
             .unwrap();
-        let mtip_a = MerkleTreeInclusionProof {
-            tree_height: MERKLE_TREE_HEIGHT as u32,
-            indexed_leafs: vec![(index_a as usize, Self::leaf(auth_paths.commit(), index_a))],
-            authentication_structure: path_a.to_vec(),
-        };
-        assert!(mtip_a.verify(root));
 
         let path_b = buffer
             .merkle_tree
@@ -229,7 +201,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             path_b,
         };
 
-        let pow_digest = auth_paths.fast_mast_hash(pow);
+        let pow_digest = buffer.mast_auth_paths.fast_mast_hash(pow);
         if pow_digest > target {
             None
         } else {
@@ -271,13 +243,6 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         }
 
         Ok(())
-    }
-
-    fn verify_from_block(block: &Block, target: Digest) -> bool {
-        let pow = block.header().pow;
-
-        let auth_paths = PowMastPaths::from_block(block);
-        pow.validate(auth_paths, target).is_ok()
     }
 }
 
@@ -349,7 +314,7 @@ pub(crate) mod tests {
             let mut successful_guess = None;
             'inner_loop: for _ in 0..120 {
                 let nonce = rng.random();
-                if let Some(solution) = Pow::guess(auth_paths, &buffer, nonce, target) {
+                if let Some(solution) = Pow::guess(&buffer, nonce, target) {
                     successful_guess = Some(solution);
                     break 'inner_loop;
                 }

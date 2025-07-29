@@ -52,9 +52,15 @@ use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::block_header::BlockHeaderField;
+use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
+use crate::models::blockchain::block::pow::GuesserBuffer;
+use crate::models::blockchain::block::pow::Pow;
+use crate::models::blockchain::block::pow::PowMastPaths;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
@@ -994,6 +1000,43 @@ impl Block {
         false
     }
 
+    /// Produce the MAST authentication paths for the `pow` field on
+    /// [`BlockHeader`], against the block MAST hash.
+    fn pow_mast_paths(&self) -> PowMastPaths {
+        let pow = BlockHeader::mast_path(self.header(), BlockHeaderField::Pow)
+            .try_into()
+            .unwrap();
+        let header = BlockKernel::mast_path(&self.kernel, BlockKernelField::Header)
+            .try_into()
+            .unwrap();
+        let kernel = Block::mast_path(self, BlockField::Kernel)
+            .try_into()
+            .unwrap();
+
+        PowMastPaths {
+            pow,
+            header,
+            kernel,
+        }
+    }
+
+    /// Preprocess block for PoW guessing
+    fn guess_preprocess(&self) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
+        let auth_paths = self.pow_mast_paths();
+        Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths)
+    }
+
+    /// Verify that block digest is less than threshold and integral.
+    fn pow_verify(&self, target: Digest) -> bool {
+        let auth_paths = self.pow_mast_paths();
+        self.header().pow.validate(auth_paths, target).is_ok()
+    }
+
+    pub fn set_header_pow(&mut self, pow: BlockPow) {
+        self.kernel.header.pow = pow;
+        self.unset_digest();
+    }
+
     /// Evaluate the fork choice rule.
     ///
     /// Given two blocks, determine which one is more canonical. This function
@@ -1138,6 +1181,7 @@ pub(crate) mod tests {
     use proptest::collection;
     use proptest_arbitrary_interop::arb;
     use rand::random;
+    use rand::rng;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -1169,6 +1213,7 @@ pub(crate) mod tests {
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
@@ -1180,6 +1225,16 @@ pub(crate) mod tests {
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
     impl Block {
+        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
+            self.kernel.header.difficulty = difficulty;
+            self.unset_digest();
+            self
+        }
+
+        pub(crate) fn set_proof(&mut self, proof: BlockProof) {
+            self.proof = proof;
+        }
+
         /// Create a block template with an invalid block proof.
         ///
         /// To be used in tests where you don't care about block validity.
@@ -1261,17 +1316,26 @@ pub(crate) mod tests {
         );
     }
 
-    #[cfg(test)]
-    impl Block {
-        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
-            self.kernel.header.difficulty = difficulty;
-            self.unset_digest();
-            self
-        }
+    #[test]
+    fn guess_nonce_happy_path() {
+        let network = Network::Main;
+        let mut invalid_block = invalid_empty_block(&Block::genesis(network), network);
+        let guesser_buffer = invalid_block.guess_preprocess();
+        let target = Difficulty::from(2u32).target();
+        let mut rng = rng();
 
-        pub(crate) fn set_proof(&mut self, proof: BlockProof) {
-            self.proof = proof;
-        }
+        let valid_pow = loop {
+            if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
+                break valid_pow;
+            }
+        };
+
+        assert!(
+            !invalid_block.pow_verify(target),
+            "Pow verification must fail prior to setting PoW"
+        );
+        invalid_block.set_header_pow(valid_pow);
+        assert!(invalid_block.pow_verify(target));
     }
 
     #[test]

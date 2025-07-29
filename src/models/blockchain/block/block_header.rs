@@ -24,8 +24,6 @@ use crate::api::export::ReceivingAddress;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::pow::Pow;
-use crate::models::blockchain::block::pow::POW_MEMORY_PARAMETER;
-use crate::models::blockchain::block::pow::POW_MEMORY_TREE_HEIGHT;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -62,6 +60,13 @@ pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
 
 pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 
+#[cfg(not(test))]
+pub type BlockPow = Pow<{ crate::models::blockchain::block::pow::POW_MEMORY_TREE_HEIGHT }>;
+
+// Set to smaller value to allow for testing of PoW
+#[cfg(test)]
+pub type BlockPow = Pow<10>;
+
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
 )]
@@ -74,7 +79,7 @@ pub struct BlockHeader {
     /// Time since unix epoch, in milliseconds
     pub timestamp: Timestamp,
 
-    pub pow: Pow<POW_MEMORY_TREE_HEIGHT>,
+    pub pow: BlockPow,
 
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
@@ -131,8 +136,8 @@ impl BlockHeader {
                     0xa6b0088b8822e794u64,
                     0
                 ]),
-                path_a: [Digest::default(); POW_MEMORY_PARAMETER.ilog2() as usize],
-                path_b: [Digest::default(); POW_MEMORY_PARAMETER.ilog2() as usize],
+                path_a: [Digest::default(); BlockPow::MERKLE_TREE_HEIGHT],
+                path_b: [Digest::default(); BlockPow::MERKLE_TREE_HEIGHT],
                 root: Digest::default(),
             },
             cumulative_proof_of_work: ProofOfWork::zero(),
@@ -297,7 +302,7 @@ impl BlockHeader {
         let version = arb::<BFieldElement>();
         let prev_block_digest = arb::<Digest>();
         let timestamp = arb::<Timestamp>();
-        let pow = arb::<Pow<POW_MEMORY_TREE_HEIGHT>>();
+        let pow = arb::<BlockPow>();
         let cumulative_proof_of_work = arb::<ProofOfWork>();
         let difficulty = arb::<Difficulty>();
         let guesser_receiver_data = arb::<GuesserReceiverData>();
