@@ -25,6 +25,7 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::pow::Pow;
 use crate::models::blockchain::block::pow::POW_MEMORY_PARAMETER;
+use crate::models::blockchain::block::pow::POW_MEMORY_TREE_HEIGHT;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -73,7 +74,7 @@ pub struct BlockHeader {
     /// Time since unix epoch, in milliseconds
     pub timestamp: Timestamp,
 
-    pub pow: Pow,
+    pub pow: Pow<POW_MEMORY_TREE_HEIGHT>,
 
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
@@ -130,7 +131,8 @@ impl BlockHeader {
                     0xa6b0088b8822e794u64,
                     0
                 ]),
-                paths: [[Digest::default(); POW_MEMORY_PARAMETER.ilog2() as usize]; 2],
+                path_a: [Digest::default(); POW_MEMORY_PARAMETER.ilog2() as usize],
+                path_b: [Digest::default(); POW_MEMORY_PARAMETER.ilog2() as usize],
                 root: Digest::default(),
             },
             cumulative_proof_of_work: ProofOfWork::zero(),
@@ -295,7 +297,7 @@ impl BlockHeader {
         let version = arb::<BFieldElement>();
         let prev_block_digest = arb::<Digest>();
         let timestamp = arb::<Timestamp>();
-        let pow = arb::<Pow>();
+        let pow = arb::<Pow<POW_MEMORY_TREE_HEIGHT>>();
         let cumulative_proof_of_work = arb::<ProofOfWork>();
         let difficulty = arb::<Difficulty>();
         let guesser_receiver_data = arb::<GuesserReceiverData>();
