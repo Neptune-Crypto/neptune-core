@@ -106,8 +106,8 @@ impl Network {
     pub fn genesis_difficulty(&self) -> Difficulty {
         match *self {
             Self::RegTest => Difficulty::MINIMUM,
-            Self::Testnet(_) | Self::TestnetMock => Difficulty::new([1_000_000, 0, 0, 0, 0]),
-            Self::Main => Difficulty::new([1_000_000_000, 0, 0, 0, 0]),
+            Self::Testnet(_) | Self::TestnetMock => Difficulty::new([100_000, 0, 0, 0, 0]),
+            Self::Main => Difficulty::new([100_000_000, 0, 0, 0, 0]),
         }
     }
 

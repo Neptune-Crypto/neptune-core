@@ -23,10 +23,10 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
 /// Determines the number of leafs in the Merkle tree in the guesser buffer.
-pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 30;
+pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 29;
 pub(crate) const POW_MEMORY_TREE_HEIGHT: usize = POW_MEMORY_PARAMETER.ilog2() as usize;
-const NUM_INDEX_REPETITIONS: u32 = 41;
-const NUM_BUD_LAYERS: usize = 5;
+const NUM_INDEX_REPETITIONS: u32 = 63;
+const NUM_BUD_LAYERS: usize = 5; // 5 => 63 Tip5 permutations per leaf
 const BUDS_PER_LEAF: usize = 1 << NUM_BUD_LAYERS;
 
 #[derive(
@@ -73,7 +73,8 @@ impl PowMastPaths {
         self,
         pow: Pow<MERKLE_TREE_HEIGHT>,
     ) -> Digest {
-        // 41 permutations to get the block hash
+        // 39 permutations to get the block hash, when Merkle tree height is
+        // 29. num_permutations = 10 + tree height.
         let header_mast_hash = Tip5::hash_pair(Tip5::hash_varlen(&pow.encode()), self.pow[0]);
         let header_mast_hash = Tip5::hash_pair(header_mast_hash, self.pow[1]);
         let header_mast_hash = Tip5::hash_pair(self.pow[2], header_mast_hash);
