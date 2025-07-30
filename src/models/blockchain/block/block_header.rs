@@ -138,7 +138,15 @@ impl BlockHeader {
                 ]),
                 path_a: [Digest::default(); BlockPow::MERKLE_TREE_HEIGHT],
                 path_b: [Digest::default(); BlockPow::MERKLE_TREE_HEIGHT],
-                root: Digest::default(),
+                // 49b65c974fa81f3e6f2f87aec83ada68236af11c284ed263c5965b6ae3644d100f5a2b594d4b810a
+                // is mutator set hash after block 21310 on legacy chain
+                root: Digest::new(bfe_array![
+                    0x49b65c974fa81f3eu64,
+                    0x6f2f87aec83ada68u64,
+                    0x236af11c284ed263u64,
+                    0xc5965b6ae3644d10u64,
+                    0x0f5a2b594d4b810au64
+                ]),
             },
             cumulative_proof_of_work: ProofOfWork::zero(),
 
