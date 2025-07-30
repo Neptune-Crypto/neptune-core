@@ -798,6 +798,9 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockHeader>>;
 
+    /// Retrieve the hash of the mutator set on the current tip.
+    async fn mutator_set_hash(token: rpc_auth::Token) -> RpcResult<Digest>;
+
     /// Get sum of confirmed, unspent, available UTXOs
     /// excludes time-locked utxos
     /// ```no_run
@@ -2737,6 +2740,31 @@ impl RPC for NeptuneRPCServer {
             .archival_state()
             .get_block_header(block_digest)
             .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn mutator_set_hash(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Digest> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let mutator_set_hash = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .map_err(|e| {
+                error::RpcError::Failed(format!(
+                    "could not produce mutator-set-accumulator-after: {e}"
+                ))
+            })?
+            .hash();
+        Ok(mutator_set_hash)
     }
 
     // documented in trait. do not add doc-comment.

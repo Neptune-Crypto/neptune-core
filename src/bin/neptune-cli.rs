@@ -182,6 +182,9 @@ enum Command {
         block_selector: BlockSelector,
     },
 
+    /// Retrieve the hash of the mutator set for the current tip.
+    MutatorSetHash,
+
     /// retrieve confirmed balance (excludes time-locked utxos)
     ConfirmedAvailableBalance,
 
@@ -924,6 +927,10 @@ async fn main() -> Result<()> {
             } else {
                 println!("{}", res.unwrap());
             }
+        }
+        Command::MutatorSetHash => {
+            let digest = client.mutator_set_hash(ctx, token).await??;
+            println!("{digest:x}");
         }
         Command::ConfirmedAvailableBalance => {
             let val = client.confirmed_available_balance(ctx, token).await??;
