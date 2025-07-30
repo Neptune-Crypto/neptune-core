@@ -3020,7 +3020,6 @@ pub(crate) mod tests {
             // Mine it till it has a valid PoW digest
             // Add this block to the wallet through the same pipeline as the
             // mine_loop.
-            let sleepy_guessing = false;
             let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
             guess_nonce(
                 network,
@@ -3028,7 +3027,6 @@ pub(crate) mod tests {
                 *genesis_block.header(),
                 guesser_tx,
                 GuessingConfiguration {
-                    sleepy_guessing,
                     num_guesser_threads: Some(2),
                     address: guesser_key.to_address().into(),
                 },

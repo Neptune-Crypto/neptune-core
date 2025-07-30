@@ -181,11 +181,6 @@ pub struct Args {
     #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
     pub(crate) guesser_fraction: f64,
 
-    /// Whether to sleep between nonce-guesses. Useful if you do not want to
-    /// dedicate all your CPU power.
-    #[clap(long)]
-    pub(crate) sleepy_guessing: bool,
-
     /// Set the number of threads to use while guessing. When no value is set,
     /// the number is set to the number of available cores.
     #[clap(long)]

@@ -6,7 +6,6 @@ use std::time::Duration;
 use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
-use block_header::BlockHeaderField;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
@@ -17,8 +16,6 @@ use rand::Rng;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
-use tasm_lib::prelude::Tip5;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -35,19 +32,19 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
 use crate::job_queue::errors::JobHandleError;
+use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::block_kernel::BlockKernel;
-use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
+use crate::models::blockchain::block::pow::GuesserBuffer;
+use crate::models::blockchain::block::pow::Pow;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::*;
-use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -65,7 +62,6 @@ use crate::COMPOSITION_FAILED_EXIT_CODE;
 /// Information related to guessing.
 #[derive(Debug, Clone)]
 pub(crate) struct GuessingConfiguration {
-    pub(crate) sleepy_guessing: bool,
     pub(crate) num_guesser_threads: Option<usize>,
     pub(crate) address: ReceivingAddress,
 }
@@ -161,49 +157,6 @@ pub(crate) async fn guess_nonce(
     .unwrap()
 }
 
-/// Return MAST nodes from which the block header MAST hash is calculated,
-/// given a variable nonce.
-fn precalculate_header_ap(
-    block_header_template: &BlockHeader,
-) -> [Digest; BlockHeader::MAST_HEIGHT] {
-    let header_mt = block_header_template.merkle_tree();
-
-    header_mt
-        .authentication_structure(&[BlockHeaderField::Pow as usize])
-        .unwrap()
-        .try_into()
-        .unwrap()
-}
-
-/// Return MAST nodes from which the block kernel MAST hash is calculated,
-/// given a variable header.
-fn precalculate_kernel_ap(block_kernel: &BlockKernel) -> [Digest; BlockKernel::MAST_HEIGHT] {
-    let block_mt = block_kernel.merkle_tree();
-
-    block_mt
-        .authentication_structure(&[BlockKernelField::Header as usize])
-        .unwrap()
-        .try_into()
-        .unwrap()
-}
-
-/// Return MAST nodes from which the block hash is calculated, given a
-/// variable block header with a variable block nonce.
-///
-/// Returns those MAST nodes that can be precalculated prior to PoW-guessing.
-/// This vastly reduces the amount of hashing needed for each PoW-guess.
-pub(crate) fn precalculate_block_auth_paths(
-    block_template: &Block,
-) -> (
-    [Digest; BlockKernel::MAST_HEIGHT],
-    [Digest; BlockHeader::MAST_HEIGHT],
-) {
-    let header_ap = precalculate_header_ap(block_template.header());
-    let kernel_ap = precalculate_kernel_ap(&block_template.kernel);
-
-    (kernel_ap, header_ap)
-}
-
 /// Guess the nonce in parallel until success.
 fn guess_worker(
     network: Network,
@@ -218,7 +171,6 @@ fn guess_worker(
         override_target_block_interval.unwrap_or(network.target_block_interval());
 
     let GuessingConfiguration {
-        sleepy_guessing,
         num_guesser_threads,
         address: guesser_address,
     } = guessing_configuration;
@@ -276,7 +228,8 @@ fn guess_worker(
 
     block.set_header_guesser_address(guesser_address);
 
-    let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
+    // let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);\
+    let guesser_buffer = block.guess_preprocess();
 
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
@@ -285,31 +238,24 @@ fn guess_worker(
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(rand::rng, |rng, _i| {
-                guess_nonce_iteration(
-                    kernel_auth_path,
-                    threshold,
-                    sleepy_guessing,
-                    rng,
-                    header_auth_path,
-                    &sender,
-                )
+                guess_nonce_iteration(&guesser_buffer, threshold, rng, &sender)
             })
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
 
-    let nonce = match guess_result {
+    let pow = match guess_result {
         GuessNonceResult::Cancelled => {
             info!("Restarting guessing task",);
             return;
         }
-        GuessNonceResult::NonceFound { nonce } => nonce,
+        GuessNonceResult::NonceFound { pow } => pow,
         GuessNonceResult::BlockNotFound => unreachable!(),
     };
 
-    info!("Found valid block with nonce ({nonce}).");
+    info!("Found valid block with nonce ({:x}).", pow.nonce);
 
-    block.set_header_nonce(nonce);
+    block.set_header_pow(*pow);
 
     let timestamp = block.header().timestamp;
     let timestamp_standard = timestamp.standard_format();
@@ -343,7 +289,7 @@ Difficulty threshold: {threshold}
 }
 
 enum GuessNonceResult {
-    NonceFound { nonce: Digest },
+    NonceFound { pow: Box<BlockPow> },
     BlockNotFound,
     Cancelled,
 }
@@ -353,61 +299,27 @@ impl GuessNonceResult {
     }
 }
 
-/// Return the block-kernel MAST hash given a variable nonce, holding all other
-/// fields constant.
-///
-/// Calculates the block hash in as few Tip5 invocations as possible.
-/// This function is required for benchmarks, but is not part of the public API.
-#[inline(always)]
-#[doc(hidden)]
-pub fn fast_kernel_mast_hash(
-    kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
-    header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
-    nonce: Digest,
-) -> Digest {
-    let header_mast_hash = Tip5::hash_pair(Tip5::hash_varlen(&nonce.encode()), header_auth_path[0]);
-    let header_mast_hash = Tip5::hash_pair(header_mast_hash, header_auth_path[1]);
-    let header_mast_hash = Tip5::hash_pair(header_auth_path[2], header_mast_hash);
-
-    Tip5::hash_pair(
-        Tip5::hash_pair(
-            Tip5::hash_varlen(&header_mast_hash.encode()),
-            kernel_auth_path[0],
-        ),
-        kernel_auth_path[1],
-    )
-}
-
 /// Run a single iteration of the mining loop.
 #[inline]
 fn guess_nonce_iteration(
-    kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
+    guesser_buffer: &GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }>,
     threshold: Digest,
-    sleepy_guessing: bool,
     rng: &mut rand::rngs::ThreadRng,
-    bh_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
-    if sleepy_guessing {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    // Modify the nonce in the block header. In order to collect the guesser
-    // fee, this nonce must be the post-image of a known pre-image under Tip5.
     let nonce: Digest = rng.random();
 
     // Check every N guesses if task has been cancelled.
-    if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
+    if nonce.values()[0].raw_u64().trailing_zeros() >= 16 && sender.is_canceled() {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
 
-    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, nonce);
-    let success = block_hash <= threshold;
+    let result = Pow::guess(guesser_buffer, nonce, threshold);
 
-    match success {
-        false => GuessNonceResult::BlockNotFound,
-        true => GuessNonceResult::NonceFound { nonce },
+    match result {
+        Some(pow) => GuessNonceResult::NonceFound { pow: Box::new(pow) },
+        None => GuessNonceResult::BlockNotFound,
     }
 }
 
@@ -733,8 +645,9 @@ pub(crate) async fn mine(
 ) -> Result<()> {
     // Set PoW guessing to restart every N seconds, if it has been started. Only
     // the guesser task may set this to actually resolve, as this will otherwise
-    // abort e.g. the composer.
-    const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
+    // abort e.g. the composer. Since preprocessing is expensive, don't do this
+    // very often!
+    const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 1800;
 
     // we disable the initial sleep when invoked for unit tests.
     //
@@ -843,7 +756,6 @@ pub(crate) async fn mine(
                 latest_block_header,
                 guesser_tx,
                 GuessingConfiguration {
-                    sleepy_guessing: cli_args.sleepy_guessing,
                     num_guesser_threads: cli_args.guesser_threads,
                     address: guesser_key.to_address().into(),
                 },
@@ -1108,7 +1020,6 @@ pub(crate) mod tests {
     use crate::config_models::network::Network;
     use crate::job_queue::errors::JobHandleError;
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
-    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1121,7 +1032,6 @@ pub(crate) mod tests {
     use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
@@ -1177,11 +1087,7 @@ pub(crate) mod tests {
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds
-    async fn estimate_own_hash_rate(
-        target_block_interval: Timestamp,
-        sleepy_guessing: bool,
-        num_outputs: usize,
-    ) -> f64 {
+    async fn estimate_own_hash_rate(target_block_interval: Timestamp, num_outputs: usize) -> f64 {
         let network = Network::RegTest;
         let mut rng = rand::rng();
         let global_state_lock = mock_genesis_global_state(
@@ -1225,20 +1131,13 @@ pub(crate) mod tests {
         let threshold = previous_block.header().difficulty.target();
         let num_iterations_launched = 1_000_000;
         let tick = std::time::SystemTime::now();
-        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
+        let guesser_buffer = block.guess_preprocess();
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
-                    guess_nonce_iteration(
-                        kernel_auth_path,
-                        threshold,
-                        sleepy_guessing,
-                        prng,
-                        header_auth_path,
-                        &worker_task_tx,
-                    );
+                    guess_nonce_iteration(&guesser_buffer, threshold, prng, &worker_task_tx);
                 })
                 .count();
         drop(worker_task_rx);
@@ -1576,7 +1475,6 @@ pub(crate) mod tests {
         );
         block.set_header_guesser_address(guesser_key.to_address().into());
 
-        let sleepy_guessing = false;
         let num_guesser_threads = None;
 
         guess_worker(
@@ -1585,7 +1483,6 @@ pub(crate) mod tests {
             tip_block_orig.header().to_owned(),
             worker_task_tx,
             GuessingConfiguration {
-                sleepy_guessing,
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
             },
@@ -1661,7 +1558,6 @@ pub(crate) mod tests {
         let initial_header_timestamp = template.header().timestamp;
         assert_eq!(ten_seconds_ago, initial_header_timestamp);
 
-        let sleepy_guessing = false;
         let num_guesser_threads = None;
 
         guess_worker(
@@ -1670,7 +1566,6 @@ pub(crate) mod tests {
             tip_block_orig.header().to_owned(),
             worker_task_tx,
             GuessingConfiguration {
-                sleepy_guessing,
                 num_guesser_threads,
                 address: guesser_key.to_address().into(),
             },
@@ -1718,9 +1613,6 @@ pub(crate) mod tests {
     /// We ignore the first 2 blocks after genesis because they are typically
     /// mined very fast.
     ///
-    /// We avoid sleepy guessing to avoid complications from the
-    /// sleep(100 millis) call in mining loop when restricted mining is enabled.
-    ///
     /// This serves as a regression test for issue #154.
     /// https://github.com/Neptune-Crypto/neptune-core/issues/154
     async fn mine_m_blocks_in_n_seconds<const NUM_BLOCKS: usize, const NUM_SECONDS: usize>(
@@ -1751,11 +1643,9 @@ pub(crate) mod tests {
         );
 
         // set initial difficulty in accordance with own hash rate
-        let sleepy_guessing = false;
         let num_guesser_threads = None;
         let num_outputs = 0;
-        let hash_rate =
-            estimate_own_hash_rate(target_block_interval, sleepy_guessing, num_outputs).await;
+        let hash_rate = estimate_own_hash_rate(target_block_interval, num_outputs).await;
         println!("estimating hash rate at {} per millisecond", hash_rate);
         let prepare_time = estimate_block_preparation_time_invalid_proof().await;
         println!("estimating block preparation time at {prepare_time} ms");
@@ -1827,7 +1717,6 @@ pub(crate) mod tests {
                 *prev_block.header(),
                 worker_task_tx,
                 GuessingConfiguration {
-                    sleepy_guessing,
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
                 },
@@ -1885,35 +1774,6 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    #[test]
-    fn fast_kernel_mast_hash_agrees_with_mast_hash_function_invalid_block() {
-        let network = Network::Main;
-        let genesis = Block::genesis(network);
-        let block1 = invalid_empty_block(&genesis, network);
-        for block in [genesis, block1] {
-            let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
-            assert_eq!(
-                block.kernel.mast_hash(),
-                fast_kernel_mast_hash(kernel_auth_path, header_auth_path, block.header().pow.nonce)
-            );
-        }
-    }
-
-    #[test]
-    fn fast_kernel_mast_hash_agrees_with_mast_hash_function_valid_block() {
-        let block_primitive_witness = deterministic_block_primitive_witness();
-        let a_block = block_primitive_witness.predecessor_block();
-        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(a_block);
-        assert_eq!(
-            a_block.kernel.mast_hash(),
-            fast_kernel_mast_hash(
-                kernel_auth_path,
-                header_auth_path,
-                a_block.header().pow.nonce
-            )
-        );
-    }
-
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn mine_20_blocks_in_40_seconds() -> Result<()> {
@@ -1929,13 +1789,10 @@ pub(crate) mod tests {
         // It's crucial that the hash rate is independent of the size of the
         // block, since miners are otherwise heavily incentivized to mine small
         // or empty blocks.
-        let sleepy_guessing = false;
-        let hash_rate_empty_tx =
-            estimate_own_hash_rate(network.target_block_interval(), sleepy_guessing, 0).await;
+        let hash_rate_empty_tx = estimate_own_hash_rate(network.target_block_interval(), 0).await;
         println!("hash_rate_empty_tx: {hash_rate_empty_tx}");
 
-        let hash_rate_big_tx =
-            estimate_own_hash_rate(network.target_block_interval(), sleepy_guessing, 10000).await;
+        let hash_rate_big_tx = estimate_own_hash_rate(network.target_block_interval(), 10000).await;
         println!("hash_rate_big_tx: {hash_rate_big_tx}");
 
         assert!(
@@ -2397,7 +2254,6 @@ pub(crate) mod tests {
 
         // basic setup
         let mut rng = rand::rng();
-        let sleepy_guessing = false;
         let num_guesser_threads = None;
         let num_blocks = 20; // generate 20 blocks
         let mut block_time = Timestamp::now();
@@ -2467,7 +2323,6 @@ pub(crate) mod tests {
                 *prev_block.header(),
                 worker_task_tx,
                 GuessingConfiguration {
-                    sleepy_guessing,
                     num_guesser_threads,
                     address: guesser_key.to_address().into(),
                 },

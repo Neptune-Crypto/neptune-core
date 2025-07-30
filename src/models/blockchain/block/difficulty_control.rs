@@ -21,8 +21,6 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use super::block_height::BlockHeight;
-use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
-use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
 const DIFFICULTY_NUM_LIMBS: usize = 5;
@@ -341,7 +339,9 @@ impl Display for ProofOfWork {
 /// It assumes that the block timestamp is valid.
 ///
 /// This mechanism is a PID controller with P = -2^-4 (and I = D = 0) and with
-/// with a few modifications such as clamping and advance correction.
+/// with a few modifications such as clamping multiplicative instead of
+/// additive correction.
+///
 /// The following diagram describes the mechanism.
 ///
 /// ```notest
@@ -350,29 +350,29 @@ impl Display for ProofOfWork {
 ///  --- new difficulty    --->|  blockchain  |------ old timestamp ----  |
 /// |   (control signal)       |              |------ old difficulty -  | |
 /// |                           --------------                        | | |
-/// |   ---                            ---                            | | |
-///  --| * |<-------------------------| * |<--------------------------  | |
-///     ---                            ---                              | |
-///      ^ PID                          ^  advance                      | |
-///      | adjustment                   |  correction                 - v v
-///      |                              |                               ---
-///      |                           ------                            | + |
-///     ---                         | 2^-x |                            ---
-///    | + |<--- 1.0                 ------                   (process   |
-///     ---                             ^      (setpoint:)    variable:) |
-///      ^                              |        target         observed |
-///      |                           -------      block       block time |
-///      |                          | floor |    interval                v
-///      |                           -------       |                 -  ---
-///      |                              ^          |------------------>| + |
-///      |                              |          |                    ---
-///      |                          --------       |                     |
-///      |                         | * 2^-7 |      v                     |
-///      |   (P =)                  --------     -----                   |
-///      |   -2^-4                      ^       | 1/x |                  |
-///      |     |                        |        -----                   |
-///      |     v                        |          v                     |
-///      |    ---     ---------------   |         ---     absolute error |
+/// |   ---                                                           | | |
+///  --| * |<---------------------------------------------------------  | |
+///     ---                                                             | |
+///      ^ PID                                                          | |
+///      | adjustment                                                 - v v
+///      |                                                              ---
+///      |                                                             | + |
+///     ---                                                             ---
+///    | + |<--- 1.0                                          (process   |
+///     ---                                    (setpoint:)    variable:) |
+///      ^                                       target         observed |
+///      |                                        block       block time |
+///      |                                       interval                v
+///      |                                         |                 -  ---
+///      |                                         |------------------>| + |
+///      |                                         |                    ---
+///      |                                         |                     |
+///      |                                         v                     |
+///      |   (P =)                               -----                   |
+///      |   -2^-4                              | 1/x |                  |
+///      |     |                                 -----                   |
+///      |     v                                   v                     |
+///      |    ---     ---------------             ---     absolute error |
 ///       ---| * |<--| clamp [-1; 4] |<----------| * |<------------------
 ///           ---     ---------------   relative  ---
 ///                                      error
@@ -388,7 +388,7 @@ impl Display for ProofOfWork {
 pub(crate) fn difficulty_control(
     new_timestamp: Timestamp,
     old_timestamp: Timestamp,
-    mut old_difficulty: Difficulty,
+    old_difficulty: Difficulty,
     target_block_interval: Timestamp,
     previous_block_height: BlockHeight,
 ) -> Difficulty {
@@ -414,20 +414,6 @@ pub(crate) fn difficulty_control(
     // large downward adjustment to the difficulty.
     // After clamping a `u64` suffices but before clamping we might get overflow
     // for very large block times so we use i128 for the `relative_error`.
-
-    // Every time ADVANCE_DIFFICULTY_CORRECTION_WAIT target block times pass
-    // between two blocks, the effective difficulty (the thing being compared
-    // against the new block's hash) drops by a factor
-    // ADVANCE_DIFFICULTY_CORRECTION_FACTOR, or drops to the minimum difficulty,
-    // whichever is largest.
-    let num_advance_reductions =
-        relative_error >> (32 + ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2());
-    if num_advance_reductions > 0 {
-        let shift_amount = ((num_advance_reductions as u128)
-            * u128::from(ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()))
-            as usize;
-        old_difficulty >>= shift_amount;
-    }
 
     // change to control signal
     // adjustment_factor = (1 + P * error)
@@ -547,14 +533,15 @@ mod tests {
 
     fn sample_block_time(
         hash_rate: f64,
-        mut difficulty: Difficulty,
+        difficulty: Difficulty,
         proving_time: f64,
         target_block_time: f64,
         seed: [u8; 32],
     ) -> f64 {
+        const CUTOFF_FACTOR: f64 = 128f64;
         let mut rng = TestRng::from_seed(proptest::test_runner::RngAlgorithm::ChaCha, &seed);
         let mut block_time_so_far = proving_time;
-        let window_duration = target_block_time * (ADVANCE_DIFFICULTY_CORRECTION_WAIT as f64);
+        let window_duration = target_block_time * CUTOFF_FACTOR;
         let num_hashes_calculated_per_window = hash_rate * window_duration;
         for window in 0.. {
             // probability of success per Bernoulli trial
@@ -573,18 +560,9 @@ mod tests {
                 .unwrap()
                 .sample(&mut rng);
 
-            // if not, advance-correct difficulty
+            // if not, try again (will probably never happen)
             if !success {
-                println!(
-                    "window {window}: time spent mining so far is {block_time_so_far}; \
-                    probability of collective success is \
-                    {prob_collective_success} and success was {success}, \
-                    so correcting difficulty ...",
-                );
-                difficulty >>= ADVANCE_DIFFICULTY_CORRECTION_FACTOR
-                    .ilog2()
-                    .try_into()
-                    .unwrap();
+                println!("Unlikely event happened, window: {window}. Check your premises!");
                 block_time_so_far += window_duration;
                 continue;
             }

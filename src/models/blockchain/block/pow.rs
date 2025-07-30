@@ -2,6 +2,9 @@ use std::fmt::Display;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::Rng;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::IntoParallelRefMutIterator;
@@ -23,8 +26,13 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
 /// Determines the number of leafs in the Merkle tree in the guesser buffer.
+#[cfg(not(test))]
 pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 29;
+#[cfg(test)] // Set to smaller value to allow for testing of PoW
+pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 10;
+
 pub(crate) const POW_MEMORY_TREE_HEIGHT: usize = POW_MEMORY_PARAMETER.ilog2() as usize;
+
 const NUM_INDEX_REPETITIONS: u32 = 63;
 const NUM_BUD_LAYERS: usize = 5; // 5 => 63 Tip5 permutations per leaf
 const BUDS_PER_LEAF: usize = 1 << NUM_BUD_LAYERS;
@@ -47,7 +55,7 @@ pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
     pub(crate) nonce: Digest,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec)]
 pub struct PowMastPaths {
     pub(super) pow: [Digest; BlockHeader::MAST_HEIGHT],
     pub(super) header: [Digest; BlockKernel::MAST_HEIGHT],
@@ -69,7 +77,7 @@ impl PowMastPaths {
         )
     }
 
-    fn fast_mast_hash<const MERKLE_TREE_HEIGHT: usize>(
+    pub fn fast_mast_hash<const MERKLE_TREE_HEIGHT: usize>(
         self,
         pow: Pow<MERKLE_TREE_HEIGHT>,
     ) -> Digest {
@@ -271,40 +279,41 @@ pub(crate) enum PowValidationError {
     ThresholdNotMet,
 }
 
+// Not under test flag since it's used in both tests and benchmarks
+impl Distribution<PowMastPaths> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PowMastPaths {
+        PowMastPaths {
+            pow: rng.random(),
+            header: rng.random(),
+            kernel: rng.random(),
+        }
+    }
+}
+
+// Not under test flag since it's used in both tests and benchmarks
+impl<const MERKLE_TREE_HEIGHT: usize> Distribution<Pow<MERKLE_TREE_HEIGHT>> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Pow<MERKLE_TREE_HEIGHT> {
+        Pow {
+            root: rng.random(),
+            path_a: rng.random(),
+            path_b: rng.random(),
+            nonce: rng.random(),
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::time::Instant;
 
-    use rand::distr::Distribution;
-    use rand::distr::StandardUniform;
     use rand::rng;
-    use rand::Rng;
     use tasm_lib::twenty_first::bfe;
 
+    use crate::api::export::Network;
     use crate::models::blockchain::block::difficulty_control::Difficulty;
+    use crate::tests::shared::blocks::invalid_empty_block;
 
     use super::*;
-
-    impl Distribution<PowMastPaths> for StandardUniform {
-        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PowMastPaths {
-            PowMastPaths {
-                pow: rng.random(),
-                header: rng.random(),
-                kernel: rng.random(),
-            }
-        }
-    }
-
-    impl<const MERKLE_TREE_HEIGHT: usize> Distribution<Pow<MERKLE_TREE_HEIGHT>> for StandardUniform {
-        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Pow<MERKLE_TREE_HEIGHT> {
-            Pow {
-                root: rng.random(),
-                path_a: rng.random(),
-                path_b: rng.random(),
-                nonce: rng.random(),
-            }
-        }
-    }
 
     #[test]
     fn leafs_agree_with_bud_trees() {
@@ -358,6 +367,15 @@ pub(crate) mod tests {
         for item in encoding.iter().skip(Digest::LEN) {
             assert_eq!(bfe!(0), *item);
         }
+    }
+
+    #[test]
+    fn fast_mast_hash_agrees_with_block_hash() {
+        let network = Network::Main;
+        let invalid_block = invalid_empty_block(&Block::genesis(network), network);
+        let block_pow = invalid_block.header().pow;
+        let hash_from_fast_mast = invalid_block.pow_mast_paths().fast_mast_hash(block_pow);
+        assert_eq!(invalid_block.hash(), hash_from_fast_mast);
     }
 
     #[test]

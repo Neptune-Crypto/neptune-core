@@ -28,44 +28,9 @@ use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
-/// Controls how long to wait before the difficulty for the *next* block is
-/// reduced.
-///
-/// Typically, the difficulty of the block's predecessor is used to determine
-/// whether the new block has enough proof-of-work. But if the time difference
-/// (relative to the target block interval) exceeds this parameter, the
-/// difficulty is effectively reduced by a factor
-/// [`ADVANCE_DIFFICULTY_CORRECTION_FACTOR`]. Consequently, if for whatever
-/// reason the difficulty is set too high for the available mining power to find
-/// blocks, then the network has to wait some time (without needing to find
-/// blocks) before the difficulty is automatically lowered.
-///
-/// This parameter must be a power of two.
-pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_WAIT: usize = 128;
-
-/// Controls by how much the advance difficulty correction reduces the effective
-/// difficulty by.
-///
-/// Typically, the difficulty of the block's predecessor is used to determine
-/// whether the new block has enough proof-of-work. But if the time difference
-/// (relative to the target block interval) exceeds parameter
-/// [`ADVANCE_DIFFICULTY_CORRECTION_WAIT`], the
-/// difficulty is effectively reduced by this amount. Consequently, if for
-/// whatever reason the difficulty is set too high for the available mining
-/// power to find blocks, then the network has to wait some time (without
-/// needing to find blocks) before the difficulty is automatically lowered.
-///
-/// This parameter must be a power of two.
-pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
-
 pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 
-#[cfg(not(test))]
 pub type BlockPow = Pow<{ crate::models::blockchain::block::pow::POW_MEMORY_TREE_HEIGHT }>;
-
-// Set to smaller value to allow for testing of PoW
-#[cfg(test)]
-pub type BlockPow = Pow<10>;
 
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
@@ -390,18 +355,6 @@ pub(crate) mod tests {
             let decoded = *BlockHeader::decode(&encoded).unwrap();
             assert_eq!(block_header, decoded);
         }
-    }
-
-    #[test]
-    fn advance_difficulty_correction_parameters_are_powers_of_two() {
-        assert_eq!(
-            ADVANCE_DIFFICULTY_CORRECTION_WAIT,
-            1 << ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()
-        );
-        assert_eq!(
-            ADVANCE_DIFFICULTY_CORRECTION_FACTOR,
-            1 << ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()
-        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ pub mod difficulty_control;
 pub(crate) mod guesser_receiver_data;
 pub mod mock_block_generator;
 pub mod mutator_set_update;
-pub(crate) mod pow;
+pub mod pow;
 pub mod validity;
 
 use std::sync::Arc;
@@ -21,8 +21,6 @@ use block_appendix::BlockAppendix;
 use block_appendix::MAX_NUM_CLAIMS;
 use block_body::BlockBody;
 use block_header::BlockHeader;
-use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
-use block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use block_validation_error::BlockValidationError;
@@ -961,13 +959,16 @@ impl Block {
     /// Determine whether the proof-of-work puzzle was solved correctly.
     ///
     /// Specifically, compare the hash of the current block against the
-    /// target corresponding to the previous block;s difficulty and return true
+    /// target corresponding to the previous block's difficulty and return true
     /// if the former is smaller. If the timestamp difference exceeds the
     /// `TARGET_BLOCK_INTERVAL` by a factor `ADVANCE_DIFFICULTY_CORRECTION_WAIT`
     /// then the effective difficulty is reduced by a factor
     /// `ADVANCE_DIFFICULTY_CORRECTION_FACTOR`.
     pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
-        // enforce network difficulty-reset-interval if present.
+        // enforce network difficulty-reset-interval if present. Note that *no*
+        // pow checks are enforced in this case, not even Merkle authentication
+        // path checks. Consequently, very little memory is required to produce
+        // blocks on networks that reset difficulty.
         if Self::should_reset_difficulty(
             network,
             self.header().timestamp,
@@ -977,32 +978,14 @@ impl Block {
             return true;
         }
 
-        let hash = self.hash();
         let threshold = previous_block_header.difficulty.target();
-        if hash <= threshold {
-            return true;
-        }
 
-        let delta_t = self.header().timestamp - previous_block_header.timestamp;
-        let excess_multiple =
-            usize::try_from(delta_t.to_millis() / network.target_block_interval().to_millis())
-                .expect(
-                    "excessive timestamp on incoming block should have been caught by peer loop",
-                );
-        let shift = usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()).unwrap()
-            * (excess_multiple
-                >> usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()).unwrap());
-        let effective_difficulty = previous_block_header.difficulty >> shift;
-        if hash <= effective_difficulty.target() {
-            return true;
-        }
-
-        false
+        self.pow_verify(threshold)
     }
 
     /// Produce the MAST authentication paths for the `pow` field on
     /// [`BlockHeader`], against the block MAST hash.
-    fn pow_mast_paths(&self) -> PowMastPaths {
+    pub(crate) fn pow_mast_paths(&self) -> PowMastPaths {
         let pow = BlockHeader::mast_path(self.header(), BlockHeaderField::Pow)
             .try_into()
             .unwrap();
@@ -1021,7 +1004,7 @@ impl Block {
     }
 
     /// Preprocess block for PoW guessing
-    fn guess_preprocess(&self) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
+    pub fn guess_preprocess(&self) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
         let auth_paths = self.pow_mast_paths();
         Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths)
     }
