@@ -537,13 +537,13 @@ impl Redeemer {
         dir: PathBuf,
     ) -> Result<Vec<(PathBuf, Transaction)>, RedemptionValidationError> {
         let mut transactions = Vec::new();
-        let mut rd = fs::read_dir(&dir)
-            .await
-            .map_err(RedemptionValidationError::ReadDir)?;
+        let mut rd = fs::read_dir(&dir).await.map_err(|e| {
+            RedemptionValidationError::ReadDir(e, dir.to_string_lossy().to_string())
+        })?;
         while let Some(entry) = rd
             .next_entry()
             .await
-            .map_err(RedemptionValidationError::ReadDir)?
+            .map_err(|e| RedemptionValidationError::ReadDir(e, dir.to_string_lossy().to_string()))?
         {
             let file_path = entry.path();
             // skip directories
@@ -569,8 +569,8 @@ impl Redeemer {
 
 #[derive(Debug, Error)]
 pub enum RedemptionValidationError {
-    #[error("error reading directory: {0}")]
-    ReadDir(#[from] std::io::Error),
+    #[error("error reading directory '{1}': {0}")]
+    ReadDir(std::io::Error, String),
     #[error("error reading file '{0}': {1}")]
     FileRead(PathBuf, #[source] std::io::Error),
     #[error("failed to deserialize file `{0}`: {1}")]
