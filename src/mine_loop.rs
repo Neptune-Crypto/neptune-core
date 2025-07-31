@@ -1077,15 +1077,6 @@ pub(crate) mod tests {
         Ok((transaction, own_expected_utxos))
     }
 
-    /// Similar to [mine_iteration] function but intended for tests.
-    ///
-    /// Does *not* update the timestamp of the block and therefore also does not
-    /// update the difficulty field, as this applies to the next block and only
-    /// changes as a result of the timestamp of this block.
-    pub(crate) fn mine_iteration_for_tests(block: &mut Block, rng: &mut StdRng) {
-        block.set_header_nonce(rng.random());
-    }
-
     /// Estimates the hash rate in number of hashes per milliseconds
     async fn estimate_own_hash_rate(target_block_interval: Timestamp, num_outputs: usize) -> f64 {
         let network = Network::RegTest;
@@ -1982,8 +1973,8 @@ pub(crate) mod tests {
 
     #[test]
     fn block_hash_relates_to_predecessor_difficulty() {
-        let network = Network::Main;
         let difficulty = 100u32;
+
         // Difficulty X means we expect X trials before success.
         // Modeling the process as a geometric distribution gives the
         // probability of success in a single trial, p = 1/X.
@@ -2031,18 +2022,20 @@ pub(crate) mod tests {
         );
 
         let mut counter = 0;
-        let mut successor_block = Block::new(
+        let successor_block = Block::new(
             successor_header,
             successor_body.clone(),
             appendix,
             BlockProof::Invalid,
         );
-        loop {
-            successor_block.set_header_nonce(rng.random());
 
-            if successor_block.has_proof_of_work(network, predecessor_block.header()) {
+        let guesser_buffer = successor_block.guess_preprocess();
+        let target = predecessor_block.header().difficulty.target();
+        loop {
+            if let Some(_) = BlockPow::guess(&guesser_buffer, rng.random(), target) {
+                println!("found solution after {counter} guesses.");
                 break;
-            }
+            };
 
             counter += 1;
 

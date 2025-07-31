@@ -347,10 +347,23 @@ pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
 
+    let guesser_buffer = block.guess_preprocess();
+    let difficulty = predecessor.header().difficulty;
+    println!("Trying to guess for difficulty: {difficulty}");
+    assert!(
+        difficulty < Difficulty::from(1_000_000_000u32),
+        "Don't use high difficulty in test"
+    );
+    let target = difficulty.target();
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
-    while !block.has_proof_of_work(network, predecessor.header()) {
-        mine_iteration_for_tests(&mut block, &mut rng);
-    }
+
+    let valid_pow = loop {
+        if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
+            break valid_pow;
+        }
+    };
+
+    block.set_header_pow(valid_pow);
 
     block
 }
