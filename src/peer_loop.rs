@@ -1644,11 +1644,14 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // punish, don't disconnect
                 self.punish(NegativePeerSanction::SynchronizationTimeout)
                     .await?;
 
-                // If this peer failed the last synchronization attempt, we only
-                // sanction, we don't disconnect.
+                // try recover: ask for block height notification, whouch could
+                // re-trigger entire sync sequence
+                peer.send(PeerMessage::BlockNotificationRequest).await?;
+
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::MakePeerDiscoveryRequest => {
