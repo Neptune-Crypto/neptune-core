@@ -23,6 +23,8 @@ use neptune_cash::api::redeem::redemption_report::RedemptionReportDisplayFormat;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
+use neptune_cash::database::storage::storage_schema::RustyKey;
+use neptune_cash::database::NeptuneLevelDb;
 use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -40,6 +42,8 @@ use neptune_cash::models::state::wallet::wallet_status::WalletStatusExportFormat
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
+
+use neptune_cash::database::storage::storage_schema::RustyValue;
 use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;
@@ -129,6 +133,27 @@ impl TransactionOutput {
     }
 }
 
+#[derive(Debug, Clone, Parser, strum::EnumIs, clap::ValueEnum)]
+enum LevelDbStore {
+    ArchivalBlockMmr,
+    BannedIps,
+    BlockIndex,
+    MutatorSet,
+    Wallet,
+}
+
+impl LevelDbStore {
+    pub fn dir(&self, data_dir: &DataDirectory) -> PathBuf {
+        match *self {
+            Self::ArchivalBlockMmr => data_dir.archival_block_mmr_dir_path(),
+            Self::BannedIps => data_dir.banned_ips_database_dir_path(),
+            Self::BlockIndex => data_dir.block_index_database_dir_path(),
+            Self::MutatorSet => data_dir.mutator_set_database_dir_path(),
+            Self::Wallet => data_dir.wallet_database_dir_path(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 enum Command {
     /// Dump shell completions.
@@ -163,6 +188,20 @@ enum Command {
 
     /// retrieve info about peers
     PeerInfo,
+
+    /// Dump all key/val pairs in the indicated database.
+    ///
+    /// Note that the resulting data dump contains private information that
+    /// would enable the reader to deanonymize transactions. Only share this
+    /// information if the privacy risk is acceptable.
+    ///
+    /// Furthermore, if the current node owns guesser reward UTXOs, this data
+    /// dump contains the secret spending keys for those UTXOs. No other UTXO
+    /// types are at risk of being spent.
+    DumpDb {
+        network: Network,
+        db_store: LevelDbStore,
+    },
 
     /// retrieve list of punished peers
     AllPunishedPeers,
@@ -788,6 +827,22 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
+
+        Command::DumpDb { network, db_store } => {
+            let data_dir = DataDirectory::get(args.data_dir.clone(), *network)?;
+            let dir_path = db_store.dir(&data_dir);
+
+            match NeptuneLevelDb::<RustyKey, RustyValue>::new(
+                &dir_path,
+                &leveldb::options::Options::new(),
+            )
+            .await
+            {
+                Ok(db) => db.dump_database().await,
+                Err(e) => eprintln!("Unable to open database. {}", e),
+            }
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -833,6 +888,7 @@ async fn main() -> Result<()> {
         | Command::ShamirCombine { .. }
         | Command::ShamirShare { .. }
         | Command::NthReceivingAddress { .. }
+        | Command::DumpDb { .. }
         | Command::PremineReceivingAddress { .. } => {
             unreachable!("Case should be handled earlier.")
         }
