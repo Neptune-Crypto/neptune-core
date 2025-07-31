@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::Stream;
-use itertools::Itertools;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 

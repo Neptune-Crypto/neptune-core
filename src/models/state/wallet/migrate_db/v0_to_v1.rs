@@ -378,6 +378,45 @@ mod tests {
         Ok(())
     }
 
+    #[ignore = "testing dependencies"]
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn store_big_random() -> anyhow::Result<()> {
+        let network = Network::Testnet;
+        let data_dir = DataDirectory::get(Some("test_database_migration/".into()), network)?;
+
+        let rng_seed: u64 = rng().random();
+        let mut rng = StdRng::seed_from_u64(rng_seed);
+        println!("rng seed: {rng_seed}");
+
+        // create v0 schema and populate the db randomly
+        big_random_database_v0(rng.random(), &data_dir).await?;
+
+        println!("database created and saved at '{}'", data_dir);
+
+        Ok(())
+    }
+
+    #[ignore = "testing dependencies"]
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn load_and_migrate_big_random() -> anyhow::Result<()> {
+        let network = Network::Testnet;
+        let data_dir = DataDirectory::get(Some("test_database_migration/".into()), network)?;
+
+        // open and migrate
+        tracing::info!("opening existing v0 DB for migration to v1");
+        let db_v0 = worker::open_db(&data_dir).await?;
+
+        // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
+        // migration occurs. Verify no crash.
+        let _ = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
+
+        tracing::info!("migration done.");
+
+        Ok(())
+    }
+
     /// tests migrating a simulated v0 wallet db to v1.
     ///
     /// This test uses mock types from v0 wallet to create a v0
