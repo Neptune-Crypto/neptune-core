@@ -140,12 +140,32 @@ mod migration {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::collections::VecDeque;
+
     use macro_rules_attr::apply;
     use num_traits::Zero;
+    use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::RngAlgorithm;
+    use proptest::test_runner::TestRng;
+    use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
+    use rand::distr::Distribution;
+    use rand::distr::StandardUniform;
+    use rand::rng;
+    use rand::rngs::StdRng;
+    use rand::seq::IteratorRandom;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
 
     use super::*;
+    use crate::api::export::BlockHeight;
     use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::ReceivingAddress;
+    use crate::api::export::SymmetricKey;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::traits::StorageWriter;
     use crate::database::storage::storage_schema::DbtSingleton;
@@ -154,12 +174,209 @@ mod tests {
     use crate::database::storage::storage_schema::RustyValue;
     use crate::database::NeptuneLevelDb;
     use crate::models::blockchain::transaction::utxo::pseudorandom_utxo;
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+    use crate::models::state::wallet::migrate_db::v0_to_v1::migration::schema_v0;
+    use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
     use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
     use crate::models::state::Timestamp;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::DataDirectory;
+
+    impl Distribution<MsMembershipProof> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> MsMembershipProof {
+            let config = proptest::test_runner::Config::default();
+            let mut test_runner = TestRunner::new_with_rng(
+                config,
+                TestRng::from_seed(RngAlgorithm::ChaCha, &rng.random::<[u8; 32]>()),
+            );
+            arb::<MsMembershipProof>()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current()
+        }
+    }
+
+    impl Distribution<MonitoredUtxo> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> MonitoredUtxo {
+            let number_of_mps_per_utxo = rng.random_range(1..5);
+            let event_triple = |r: &mut R| {
+                if r.random_bool(0.5_f64) {
+                    None
+                } else {
+                    Some((
+                        r.random::<Digest>(),
+                        r.random::<Timestamp>(),
+                        BlockHeight::from(r.random::<BFieldElement>()),
+                    ))
+                }
+            };
+            MonitoredUtxo {
+                utxo: pseudorandom_utxo(rng.random()),
+                blockhash_to_membership_proof: (1..number_of_mps_per_utxo)
+                    .map(|_| (rng.random::<Digest>(), rng.random::<MsMembershipProof>()))
+                    .collect::<VecDeque<_>>(),
+                number_of_mps_per_utxo,
+                spent_in_block: event_triple(rng),
+                confirmed_in_block: event_triple(rng),
+                abandoned_at: event_triple(rng),
+            }
+        }
+    }
+
+    impl Distribution<UtxoNotifier> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> UtxoNotifier {
+            UtxoNotifier::iter().choose(rng).unwrap()
+        }
+    }
+
+    impl Distribution<ExpectedUtxo> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ExpectedUtxo {
+            let event_pair = |r: &mut R| {
+                if r.random_bool(0.5_f64) {
+                    None
+                } else {
+                    Some((r.random::<Digest>(), r.random::<Timestamp>()))
+                }
+            };
+            ExpectedUtxo {
+                utxo: pseudorandom_utxo(rng.random()),
+                addition_record: AdditionRecord {
+                    canonical_commitment: rng.random::<Digest>(),
+                },
+                sender_randomness: rng.random(),
+                receiver_preimage: rng.random(),
+                received_from: rng.random(),
+                notification_received: rng.random(),
+                mined_in_block: event_pair(rng),
+            }
+        }
+    }
+    impl Distribution<UtxoNotifyMethod> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> UtxoNotifyMethod {
+            let receiving_address: ReceivingAddress = if rng.random_bool(0.5_f64) {
+                GenerationReceivingAddress::derive_from_seed(rng.random()).into()
+            } else {
+                SymmetricKey::from_seed(rng.random()).into()
+            };
+            match rng.random_range(0usize..3) {
+                0 => UtxoNotifyMethod::None,
+                1 => UtxoNotifyMethod::OnChain(receiving_address),
+                2 => UtxoNotifyMethod::OffChain(receiving_address),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl Distribution<schema_v0::TxOutput> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> schema_v0::TxOutput {
+            schema_v0::TxOutput {
+                utxo: pseudorandom_utxo(rng.random()),
+                sender_randomness: rng.random(),
+                receiver_digest: rng.random(),
+                notification_method: rng.random(),
+                owned: rng.random(),
+            }
+        }
+    }
+
+    impl Distribution<schema_v0::SentTransaction> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> schema_v0::SentTransaction {
+            let tx_inputs = (0..rng.random_range(1..20))
+                .map(|_| (rng.random(), pseudorandom_utxo(rng.random())))
+                .collect_vec();
+            let tx_outputs = (0..rng.random_range(1..20))
+                .map(|_| rng.random::<schema_v0::TxOutput>())
+                .collect_vec();
+            schema_v0::SentTransaction {
+                tx_inputs,
+                tx_outputs,
+                fee: NativeCurrencyAmount::from_nau(rng.random_range(0i128..10000000000i128)),
+                timestamp: rng.random(),
+                tip_when_sent: rng.random(),
+            }
+        }
+    }
+
+    /// Create a database according to v0 schema and populate it with many
+    /// random values.
+    async fn big_random_database_v0(
+        seed: [u8; 32],
+        data_dir: &DataDirectory,
+    ) -> anyhow::Result<()> {
+        let mut rng = StdRng::from_seed(seed);
+
+        tracing::info!("creating v0 DB");
+        let db_v0 = worker::open_db(data_dir).await?;
+
+        // connect to DB with v0 simulated RustyWalletDatabase
+        let mut wdb = test_schema_v0::RustyWalletDatabase::connect(db_v0).await;
+
+        // populate tables
+        for _ in 0..rng.random_range(256..512) {
+            let mutxo = rng.random();
+            wdb.monitored_utxos.push(mutxo).await;
+        }
+
+        for _ in 0..rng.random_range(256..512) {
+            let expected_utxo = rng.random();
+            wdb.expected_utxos.push(expected_utxo).await;
+        }
+
+        for _ in 0..rng.random_range(256..512) {
+            let sent_transaction = rng.random();
+            wdb.sent_transactions.push(sent_transaction).await;
+        }
+
+        wdb.sync_label.set(rng.random()).await;
+
+        wdb.counter.set(rng.random()).await;
+        wdb.generation_key_counter.set(rng.random()).await;
+        wdb.symmetric_key_counter.set(rng.random()).await;
+
+        for _ in 0..rng.random_range(256..512) {
+            let guesser_preimage = rng.random::<Digest>();
+            wdb.guesser_preimages.push(guesser_preimage).await;
+        }
+
+        wdb.storage.persist().await;
+
+        Ok(())
+    }
+
+    /// Tests migrating a simulated v0 wallet db to v1.
+    ///
+    /// Populates a v0 database with many random values. Then migrates it to v1.
+    /// Verify no crash.
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn migrate_big_random_fly() -> anyhow::Result<()> {
+        // basics
+        let network = Network::Main;
+        let data_dir = unit_test_data_directory(network)?;
+
+        let rng_seed: u64 = rng().random();
+        let mut rng = StdRng::seed_from_u64(rng_seed);
+        println!("rng seed: {rng_seed}");
+
+        // create v0 schema and populate the db randomly
+        big_random_database_v0(rng.random(), &data_dir).await?;
+
+        // open and migrate
+        tracing::info!("opening existing v0 DB for migration to v1");
+        let db_v0 = worker::open_db(&data_dir).await?;
+
+        // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
+        // migration occurs. Verify no crash.
+        let _ = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
+
+        Ok(())
+    }
 
     /// tests migrating a simulated v0 wallet db to v1.
     ///
@@ -167,7 +384,7 @@ mod tests {
     /// database and then migrates it.
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn migrate() -> anyhow::Result<()> {
+    async fn migrate_small_random_fly() -> anyhow::Result<()> {
         // basics
         let network = Network::Main;
         let data_dir = unit_test_data_directory(network)?;
@@ -311,13 +528,47 @@ mod tests {
 
     // contains schema version 0 types for test(s)
     mod test_schema_v0 {
+        use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+        use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+
         use super::*;
 
-        // represents a subset of RustyWalletDatabase as it was in v0
+        // represents RustyWalletDatabase as it was in v0
         pub(super) struct RustyWalletDatabase {
             pub storage: SimpleRustyStorage,
-            pub sent_transactions: DbtVec<migration::schema_v0::SentTransaction>, // table 2
-            pub sync_label: DbtSingleton<Digest>,                                 // table 3
+            // list of utxos we have already received in a block
+            // table number: 0
+            pub(super) monitored_utxos: DbtVec<MonitoredUtxo>,
+
+            // list of off-chain utxos we are expecting to receive in a future block
+            // table number: 1
+            pub(super) expected_utxos: DbtVec<ExpectedUtxo>,
+
+            // table 2
+            // This is the change:                   vvvvvvvvv
+            pub sent_transactions: DbtVec<migration::schema_v0::SentTransaction>,
+
+            // table 3
+            pub sync_label: DbtSingleton<Digest>,
+
+            // counts the number of output UTXOs generated by this wallet
+            // table number: 4
+            pub(super) counter: DbtSingleton<u64>,
+
+            // counts derived generation keys
+            // The counter value represents derive index of next unused key.
+            // table number: 5
+            pub(super) generation_key_counter: DbtSingleton<u64>,
+
+            // counts derived symmetric keys
+            // The counter value represents derive index of next unused key.
+            // table number: 6
+            pub(super) symmetric_key_counter: DbtSingleton<u64>,
+
+            /// list of pre-images to guesser digests in blocks we found. Allows wallet
+            /// to spend guesser-fee UTXOs.
+            // table number: 7
+            pub(super) guesser_preimages: DbtVec<Digest>,
         }
         impl RustyWalletDatabase {
             // simulates connecting to DB with v0 schema
@@ -328,17 +579,47 @@ mod tests {
                     "RustyWalletDatabase-Schema",
                     crate::LOG_TOKIO_LOCK_EVENT_CB,
                 );
-                storage.schema.table_count = WalletDbTables::sent_transactions_table_count();
+
+                let monitored_utxos = storage
+                    .schema
+                    .new_vec::<MonitoredUtxo>("monitored_utxos")
+                    .await;
+
+                let expected_utxos = storage
+                    .schema
+                    .new_vec::<ExpectedUtxo>("expected_utxos")
+                    .await;
+
                 let sent_transactions = storage
                     .schema
                     .new_vec::<migration::schema_v0::SentTransaction>("sent_transactions")
                     .await;
+
                 let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
+
+                let counter = storage.schema.new_singleton::<u64>("counter").await;
+
+                let generation_key_counter = storage
+                    .schema
+                    .new_singleton::<u64>("generation_key_counter")
+                    .await;
+                let symmetric_key_counter = storage
+                    .schema
+                    .new_singleton::<u64>("symmetric_key_counter")
+                    .await;
+
+                let guesser_preimages = storage.schema.new_vec::<Digest>("guesser_preimages").await;
 
                 Self {
                     storage,
                     sent_transactions,
                     sync_label,
+                    monitored_utxos,
+                    expected_utxos,
+                    counter,
+                    generation_key_counter,
+                    symmetric_key_counter,
+                    guesser_preimages,
                 }
             }
         }

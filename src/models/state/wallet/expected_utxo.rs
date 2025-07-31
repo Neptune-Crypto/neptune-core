@@ -80,7 +80,9 @@ impl ExpectedUtxo {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize, strum::EnumIter,
+)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub enum UtxoNotifier {
     OwnMinerComposeBlock,
