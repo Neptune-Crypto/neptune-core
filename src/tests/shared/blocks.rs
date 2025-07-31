@@ -1,3 +1,4 @@
+use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first;
 use tasm_lib::twenty_first::bfe;
@@ -12,12 +13,12 @@ use crate::api::export::Timestamp;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
-use crate::mine_loop::tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::pow::Pow;
@@ -259,6 +260,19 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .await?;
 
     Ok(block)
+}
+
+pub(crate) fn invalid_empty_block_with_proof_size(
+    predecessor: &Block,
+    network: Network,
+    proof_size: usize,
+) -> Block {
+    let mut block = invalid_empty_block(predecessor, network);
+    block.set_proof(BlockProof::SingleProof(Proof::invalid_with_size(
+        proof_size,
+    )));
+
+    block
 }
 
 pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {

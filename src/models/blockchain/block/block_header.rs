@@ -220,12 +220,16 @@ impl MastHash for BlockHeader {
 /// in the block header.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HeaderToBlockHashWitness {
-    /// The "body" leaf of the Merkle tree from which block hash is calculated.
+    /// The "body" leaf of the Merkle tree from which block kernel MAST hash is
+    /// calculated.
     body_leaf: Digest,
 
-    /// The "appendix" leaf of the Merkle tree from which block hash is
-    /// calculated.
+    /// The "appendix" leaf of the Merkle tree from which block kernel MAST hash
+    /// is calculated.
     appendix_leaf: Digest,
+
+    /// The "proof" leaf of the Merkle tree from which block hash is calculated.
+    proof_leaf: Digest,
 }
 
 impl From<&Block> for HeaderToBlockHashWitness {
@@ -233,6 +237,7 @@ impl From<&Block> for HeaderToBlockHashWitness {
         Self {
             body_leaf: Tip5::hash_varlen(&value.body().mast_hash().encode()),
             appendix_leaf: Tip5::hash_varlen(&value.appendix().encode()),
+            proof_leaf: Tip5::hash_varlen(&value.proof.encode()),
         }
     }
 }
@@ -250,13 +255,18 @@ impl BlockHeaderWithBlockHashWitness {
 
     pub(crate) fn hash(&self) -> Digest {
         let block_header_leaf = Tip5::hash_varlen(&self.header.mast_hash().encode());
-        let leafs = [
+        let kernel_leafs = [
             block_header_leaf,
             self.witness.body_leaf,
             self.witness.appendix_leaf,
             Digest::default(),
         ];
-        MerkleTree::sequential_new(&leafs).unwrap().root()
+        let kernel_hash = MerkleTree::sequential_frugal_root(&kernel_leafs).unwrap();
+        let block_leafs = [
+            Tip5::hash_varlen(&kernel_hash.encode()),
+            self.witness.proof_leaf,
+        ];
+        MerkleTree::sequential_frugal_root(&block_leafs).unwrap()
     }
 
     pub(crate) fn is_successor_of(&self, parent: &Self) -> bool {
@@ -318,10 +328,11 @@ impl BlockHeader {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use rand::rng;
     use rand::Rng;
 
     use super::*;
-    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
+    use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
 
     impl BlockHeader {
         pub(crate) fn set_nonce(&mut self, nonce: Digest) {
@@ -360,12 +371,13 @@ pub(crate) mod tests {
     #[test]
     fn witness_agrees_with_block_hash() {
         let network = Network::Main;
-        let block_primitive_witness = deterministic_block_primitive_witness();
-        let block = Block::block_template_invalid_proof_from_witness(
-            block_primitive_witness,
-            Timestamp::now(),
-            network.target_block_interval(),
-        );
+        let genesis = Block::genesis(network);
+        let mut rng = rng();
+
+        // Use non-empty proof to ensure the proof is correctly accounted for
+        // in calculated block hash.
+        let proof_size = rng.random_range(0..100);
+        let block = invalid_empty_block_with_proof_size(&genesis, network, proof_size);
         let expected = block.hash();
         let witness: HeaderToBlockHashWitness = (&block).into();
         let calculated = BlockHeaderWithBlockHashWitness::new(*block.header(), witness).hash();
