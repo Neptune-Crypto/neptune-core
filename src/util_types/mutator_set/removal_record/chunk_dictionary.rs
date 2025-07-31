@@ -25,10 +25,10 @@ type ChunkIndex = u64;
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct ChunkDictionary {
-    // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
-    // This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
-    // don't care about the cost of reallocation when `insert`ing or
-    // `remove`ing.
+    /// {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
+    /// This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
+    /// don't care about the cost of reallocation when `insert`ing or
+    /// `remove`ing.
     pub(crate) dictionary: Vec<(u64, (MmrMembershipProof, Chunk))>,
 }
 
@@ -178,31 +178,12 @@ impl IntoIterator for ChunkDictionary {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod tests {
     use macro_rules_attr::apply;
-    use proptest::collection;
-    use proptest::prelude::any;
-    use proptest::prop_compose;
     use tasm_lib::twenty_first::math::other::random_elements;
 
     use super::*;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::archival_mmr::tests::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-
-    prop_compose! {
-        pub fn propcompose_chunkdict() (dictionary in collection::vec((
-            any::<u64>(), collection::vec(proptest_arbitrary_interop::arb::<Digest>(), 0..6), collection::vec(any::<u32>(), 0..17),
-        ), 37)) -> ChunkDictionary {
-            ChunkDictionary::new(dictionary.into_iter().map(|(key, authpath, chunk)| (
-                key,
-                (
-                    MmrMembershipProof::new(authpath),
-                    Chunk {
-                        relative_indices: chunk,
-                    },
-                )
-            )).collect_vec())
-        }
-    }
 
     #[apply(shared_tokio_runtime)]
     async fn hash_test() {

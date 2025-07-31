@@ -22,8 +22,6 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
-#[cfg(test)]
-pub use tests::propcompose_absindset;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
@@ -267,9 +265,7 @@ pub(crate) enum RemovalRecordValidityError {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use arbitrary::Unstructured;
     use itertools::Itertools;
-    use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
@@ -285,12 +281,6 @@ mod tests {
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
-    use arbitrary::Arbitrary;
-
-    pub fn propcompose_absindset() -> impl Strategy<Value = AbsoluteIndexSet> {
-        vec(arb::<u8>(), 16_usize + (NUM_TRIALS as usize) * 4)
-            .prop_map(|bytes| AbsoluteIndexSet::arbitrary(&mut Unstructured::new(&bytes)).unwrap())
-    }
 
     #[test]
     fn increment_bloom_filter_index_behaves_as_expected() {
@@ -724,7 +714,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn test_index_set_serialization(
-            original_indexset in propcompose_absindset()
+            original_indexset in crate::tests::shared::strategies::absindset()
         ) {
             let serialized_indexset = serde_json::to_string(&original_indexset).unwrap();
             let reconstructed_indexset: AbsoluteIndexSet =

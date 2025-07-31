@@ -92,6 +92,7 @@ pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmo
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub enum BlockProof {
     Genesis,
     #[default]
@@ -833,7 +834,7 @@ impl Block {
         let msa_before = previous_block.mutator_set_accumulator_after()?;
         for removal_record in &inputs {
             if !msa_before.can_remove(removal_record) {
-                return Err(BlockValidationError::RemovalRecordsValid);
+                return Err(BlockValidationError::RemovalRecordsValidity);
             }
         }
 
@@ -845,7 +846,7 @@ impl Block {
         absolute_index_sets.sort();
         absolute_index_sets.dedup();
         if absolute_index_sets.len() != inputs.len() {
-            return Err(BlockValidationError::RemovalRecordsUnique);
+            return Err(BlockValidationError::RemovalRecordsUniqueness);
         }
 
         let mutator_set_update = MutatorSetUpdate::new(
@@ -857,12 +858,12 @@ impl Block {
 
         // 2.d)
         if ms_update_result.is_err() {
-            return Err(BlockValidationError::MutatorSetUpdatePossible);
+            return Err(BlockValidationError::MutatorSetUpdateImpossible);
         };
 
         // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
-            return Err(BlockValidationError::MutatorSetUpdateIntegral);
+            return Err(BlockValidationError::MutatorSetUpdateIntegrity);
         }
 
         // 2.f)
@@ -880,7 +881,7 @@ impl Block {
 
             // 2.h)
             if coinbase.is_negative() {
-                return Err(BlockValidationError::CoinbaseTooSmall);
+                return Err(BlockValidationError::NegativeCoinbase);
             }
         }
 
@@ -1022,16 +1023,16 @@ impl Block {
         self.encode().len()
     }
 
-    /// The amount rewarded to the guesser who finds a valid nonce for this
-    /// block.
+    /// The amount rewarded to the guesser who finds a valid nonce for this block.
     pub(crate) fn total_guesser_reward(
         &self,
     ) -> Result<NativeCurrencyAmount, BlockValidationError> {
-        if self.body().transaction_kernel.fee.is_negative() {
-            return Err(BlockValidationError::NegativeFee);
+        let r = self.body().transaction_kernel.fee;
+        if r.is_negative() {
+            Err(BlockValidationError::NegativeFee)
+        } else {
+            Ok(r)
         }
-
-        Ok(self.body().transaction_kernel.fee)
     }
 
     /// Get the block's guesser fee UTXOs.
@@ -1113,13 +1114,13 @@ impl Block {
 pub(crate) mod tests {
     use macro_rules_attr::apply;
     use proptest::collection;
+    use proptest::prop_compose;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
-    use test_strategy::proptest;
     use tracing_test::traced_test;
 
     use super::super::transaction::transaction_kernel::TransactionKernelModifier;
@@ -1210,6 +1211,26 @@ pub(crate) mod tests {
             .unwrap();
 
             (fake_genesis, fake_child)
+        }
+    }
+
+    prop_compose! {
+        /// Relies on the private fields hence is here for re-export via `tests::shared::strategies`.
+        pub fn arbitrary_kernel() (
+            header in arb::<BlockHeader>(),
+            transaction_kernel in crate::tests::shared::strategies::txkernel::default(true),
+            lock_free_mmr_accumulator in arb::<MmrAccumulator>(),
+            block_mmr_accumulator in arb::<MmrAccumulator>(),
+            appendix in arb::<BlockAppendix>(),
+            mutator_set_accumulator in arb::<MutatorSetAccumulator>()
+        ) -> Block {
+            Block{
+                kernel: BlockKernel{ header, body: BlockBody::new(
+                    transaction_kernel, mutator_set_accumulator, lock_free_mmr_accumulator, block_mmr_accumulator
+                ), appendix },
+                proof: Default::default(),
+                digest: Default::default()
+            }
         }
     }
 
@@ -1531,7 +1552,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[test_strategy::proptest(async = "tokio", cases = 1)]
     async fn can_prove_block_ancestry(
         #[strategy(collection::vec(arb::<Digest>(), 55))] mut sender_randomness_vec: Vec<Digest>,
         #[strategy(0..54usize)] index: usize,
@@ -1954,8 +1975,8 @@ pub(crate) mod tests {
 
         // test: verify clone + modify does not change original.
         //
-        // note: a naive impl that derives Clone on `Block` containing
-        //       Arc<Mutex<Option<Digest>>> would link the digest in the clone
+        // note: a naive impl that derives `Clone` on `Block` containing
+        //       `Arc<Mutex<Option<Digest>>>` would link the digest in the clone
         #[test]
         fn clone_and_modify() {
             let gblock = Block::genesis(Network::RegTest);

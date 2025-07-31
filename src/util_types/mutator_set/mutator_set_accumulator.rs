@@ -495,7 +495,7 @@ impl MutatorSetAccumulator {
     /// Determine if the window slides before absorbing an item,
     /// given the index of the to-be-added item.
     pub fn window_slides(added_index: u64) -> bool {
-        added_index != 0 && added_index % u64::from(BATCH_SIZE) == 0
+        added_index != 0 && added_index.is_multiple_of(u64::from(BATCH_SIZE))
 
         // example cases:
         //  - index == 0 we don't care about

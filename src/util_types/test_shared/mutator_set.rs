@@ -109,13 +109,6 @@ pub fn random_mmra() -> MmrAccumulator {
     pseudorandom_mmra(rand::rng().random())
 }
 
-proptest::prop_compose! {
-    pub fn propcompose_rr_with_independent_absindset_chunkdict() (
-        absolute_indices in crate::util_types::mutator_set::removal_record::propcompose_absindset(),
-        target_chunks in crate::util_types::mutator_set::removal_record::chunk_dictionary::tests::propcompose_chunkdict()
-    ) -> RemovalRecord {RemovalRecord {absolute_indices, target_chunks}}
-}
-
 pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let ar: Digest = rng.random();
