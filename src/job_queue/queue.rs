@@ -256,7 +256,7 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
         }; // mutex lock is released when guard drops.
 
         // log that we are starting a job
-        tracing::info!(
+        tracing::debug!(
             "  *** JobQueue: begin job #{} - {} - {} queued job(s) ***",
             job_num,
             next_job.job_id,
@@ -305,7 +305,7 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
         };
 
         // log that job has ended.
-        tracing::info!(
+        tracing::debug!(
             "  *** JobQueue: ended job #{} - {} - Completion: {} - {} secs ***",
             job_num,
             next_job.job_id,

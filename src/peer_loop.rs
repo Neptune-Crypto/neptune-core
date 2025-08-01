@@ -191,7 +191,7 @@ impl PeerLoopHandler {
     ///   * acquires `global_state_lock` for write
     async fn reward(&mut self, reason: PositivePeerSanction) -> Result<()> {
         let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-        info!("Rewarding peer {} for {:?}", self.peer_address.ip(), reason);
+        debug!("Rewarding peer {} for {:?}", self.peer_address.ip(), reason);
         let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_address) else {
             error!("Could not read peer map.");
             return Ok(());
@@ -336,7 +336,7 @@ impl PeerLoopHandler {
                 warn!("Failed to validate block: invalid block");
                 return Ok(None);
             }
-            info!(
+            debug!(
                 "Block with height {} is valid. mined: {}",
                 new_block.kernel.header.height,
                 new_block.kernel.header.timestamp.standard_format()
@@ -380,7 +380,7 @@ impl PeerLoopHandler {
         self.to_main_tx
             .send(PeerTaskToMain::NewBlocks(received_blocks))
             .await?;
-        info!(
+        debug!(
             "Updated block info by block from peer. block height {}",
             last_block_height
         );
@@ -1494,7 +1494,7 @@ impl PeerLoopHandler {
                         .await?
                     }
                     Err(reject_reason) => {
-                        info!(
+                        debug!(
                         "Rejecting notification of block proposal with guesser fee {} from peer \
                         {}. Reason:\n{reject_reason}",
                         block_proposal_notification.guesser_fee.display_n_decimals(5),

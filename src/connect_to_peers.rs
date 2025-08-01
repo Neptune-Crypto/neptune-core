@@ -255,7 +255,7 @@ async fn answer_peer_inner<S>(
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
-    info!("Established incoming TCP connection with {peer_address}");
+    debug!("Established incoming TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
@@ -422,7 +422,7 @@ async fn call_peer_inner<S>(
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
-    info!("Established outgoing TCP connection with {peer_address}");
+    debug!("Established outgoing TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
@@ -507,6 +507,8 @@ where
         false,
         peer_distance,
     );
+
+    info!("Established outgoing connection to {peer_address}");
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_task_rx)
         .await?;

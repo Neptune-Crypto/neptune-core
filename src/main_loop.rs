@@ -1223,7 +1223,7 @@ impl MainLoopHandler {
             return Ok(());
         }
 
-        info!("Performing peer discovery");
+        debug!("Performing peer discovery");
 
         // Ask all peers for their peer lists. This will eventually – once the
         // responses have come in – update the list of potential peers.
@@ -1238,12 +1238,12 @@ impl MainLoopHandler {
             .potential_peers
             .get_candidate(&connected_peers, own_instance_id)
         else {
-            info!("Found no peer candidate to connect to. Not making new connection.");
+            debug!("Found no peer candidate to connect to. Not making new connection.");
             return Ok(());
         };
 
         // Try to connect to the selected candidate.
-        info!("Connecting to peer {peer_candidate} with distance {candidate_distance}");
+        debug!("Connecting to peer {peer_candidate} with distance {candidate_distance}");
         let global_state_lock = self.global_state_lock.clone();
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
         let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();

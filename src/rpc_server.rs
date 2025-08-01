@@ -2832,8 +2832,6 @@ impl RPC for NeptuneRPCServer {
         let cpu_temp = None; // disable for now.  call is too slow.
         let proving_capability = self.state.cli().proving_capability();
 
-        info!("proving capability: {proving_capability}");
-
         let peer_count = Some(state.net.peer_map.len());
         let max_num_peers = self.state.cli().max_num_peers;
 
