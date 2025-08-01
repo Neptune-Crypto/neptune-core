@@ -228,8 +228,9 @@ fn guess_worker(
 
     block.set_header_guesser_address(guesser_address);
 
-    // let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);\
+    info!("Start: guess preprocessing.");
     let guesser_buffer = block.guess_preprocess(Some(&sender));
+    info!("Completed: guess preprocessing.");
 
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
