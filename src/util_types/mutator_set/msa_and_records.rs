@@ -584,10 +584,10 @@ mod tests {
         ));
     }
 
-    #[test_strategy::proptest(cases = 20)]
+    #[test_strategy::proptest]
     fn msa_and_records_is_valid_small_aocl(
         #[strategy(0u64..=u64::from(u8::MAX))] _aocl_size: u64,
-        #[strategy(0usize..#_aocl_size as usize)] _num_removals: usize,
+        #[strategy(0usize..=#_aocl_size as usize)] _num_removals: usize,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#removables, #_aocl_size)))]
