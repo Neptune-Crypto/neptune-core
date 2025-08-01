@@ -67,7 +67,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         let process_jobs_task_handle =
             tokio::spawn(process_jobs(shared_queue.clone(), rx_stop, rx_job_added));
 
-        tracing::info!("JobQueue: started new queue.");
+        tracing::debug!("JobQueue: started new queue.");
 
         // construct and return JobQueue
         Self {

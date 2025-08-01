@@ -503,7 +503,7 @@ impl PeerLoopHandler {
                 self.punish(NegativePeerSanction::DifferentGenesis).await?;
                 return Ok(());
             }
-            info!(
+            debug!(
                 "Parent not known: Requesting previous block with height {} from peer",
                 parent_height
             );
@@ -937,7 +937,7 @@ impl PeerLoopHandler {
             PeerMessage::Block(t_block) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Block");
 
-                info!(
+                debug!(
                     "Got new block from peer {}, height {}, mined {}",
                     self.peer_address,
                     t_block.header.height,

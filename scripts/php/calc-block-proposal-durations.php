@@ -47,7 +47,7 @@ while(!$file->eof()) {
     $line = preg_replace('/\e[[][A-Za-z0-9];?[0-9]*m?/', '', $line);
 
     if (preg_match(
-        "/(.*)..INFO.*Got new block from peer.*, height (.*),/i",
+        "/(.*)..DEBUG.*Got new block from peer.*, height (.*),/i",
         $line,
         $matches
     )
@@ -189,5 +189,3 @@ function format_iso8601_time($iso8601_time)
 
     return $formatted_time;
 }
-
-

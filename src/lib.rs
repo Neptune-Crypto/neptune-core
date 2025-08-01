@@ -76,6 +76,7 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
+use tracing::debug;
 use tracing::info;
 use triton_vm::prelude::BFieldElement;
 
@@ -211,7 +212,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
             })?;
         task_join_handles.push(peer_join_handle);
     }
-    info!("Made outgoing connections to peers");
+    debug!("Made outgoing connections to peers");
 
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);

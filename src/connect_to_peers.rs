@@ -94,7 +94,7 @@ async fn check_if_connection_is_allowed(
     // Disallow connection if peer is banned via CLI arguments
     if cli_arguments.ban.contains(&peer_address.ip()) {
         let ip = peer_address.ip();
-        warn!("Peer {ip}, banned via CLI argument, attempted to connect. Disallowing.");
+        debug!("Peer {ip}, banned via CLI argument, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
@@ -106,7 +106,7 @@ async fn check_if_connection_is_allowed(
 
     if standing.is_some_and(|s| s.is_bad()) {
         let ip = peer_address.ip();
-        warn!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
+        debug!("Peer {ip}, banned because of bad standing, attempted to connect. Disallowing.");
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
@@ -118,7 +118,7 @@ async fn check_if_connection_is_allowed(
             .duration_since(time)
             .is_ok_and(|d| d < cli_arguments.reconnect_cooldown)
         {
-            info!(
+            debug!(
                 "Refusing connection with {peer_address} \
                  due to reconnect cooldown ({cooldown} seconds).",
                 cooldown = cli_arguments.reconnect_cooldown.as_secs(),
@@ -190,7 +190,7 @@ async fn check_if_connection_is_allowed(
         return InternalConnectionStatus::AcceptedMaxReached;
     }
 
-    info!("ConnectionStatus::Accepted");
+    debug!("ConnectionStatus::Accepted");
     InternalConnectionStatus::Accepted
 }
 
@@ -462,7 +462,7 @@ where
 
     match peer.try_next().await? {
         Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Accepted)) => {
-            info!("Outgoing connection accepted by {peer_address}");
+            debug!("Outgoing connection accepted by {peer_address}");
         }
         Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Refused(reason))) => {
             bail!("Outgoing connection attempt to {peer_address} refused. Reason: {reason:?}");
