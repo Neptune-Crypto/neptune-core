@@ -148,7 +148,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         self.tx_job_added.send(())?;
 
         // log that job is added to the queue
-        tracing::info!(
+        tracing::debug!(
             "JobQueue: job added - {}  {} queued job(s).  job running: {}",
             job_id,
             num_jobs,

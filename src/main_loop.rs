@@ -1166,11 +1166,11 @@ impl MainLoopHandler {
                 .get_peer_standing_from_database(peer_with_lost_connection.ip())
                 .await;
             if peer_standing.is_some_and(|standing| standing.is_bad()) {
-                info!("Not reconnecting to peer in bad standing: {peer_with_lost_connection}");
+                debug!("Not reconnecting to peer in bad standing: {peer_with_lost_connection}");
                 continue;
             }
 
-            info!("Attempting to reconnect to peer: {peer_with_lost_connection}");
+            debug!("Attempting to reconnect to peer: {peer_with_lost_connection}");
             let global_state_lock = self.global_state_lock.clone();
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
             let peer_task_to_main_tx = self.peer_task_to_main_tx.to_owned();
@@ -1218,8 +1218,8 @@ impl MainLoopHandler {
         // - the peer limit is _almost_ reached; reserve the last slot for an
         //   incoming connection.
         if num_peers >= max_num_peers || num_peers > 2 && num_peers - 1 == max_num_peers {
-            info!("Connected to {num_peers} peers. The configured max is {max_num_peers} peers.");
-            info!("Skipping peer discovery.");
+            debug!("Connected to {num_peers} peers. The configured max is {max_num_peers} peers.");
+            debug!("Skipping peer discovery.");
             return Ok(());
         }
 
@@ -1366,7 +1366,7 @@ impl MainLoopHandler {
         }
 
         if !try_new_request {
-            info!("Waiting for last sync to complete.");
+            debug!("Waiting for last sync to complete.");
             return Ok(());
         }
 

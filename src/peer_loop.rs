@@ -1525,7 +1525,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposal(new_proposal) => {
-                info!("Got block proposal from peer.");
+                debug!("Got block proposal from peer.");
 
                 // Is the proposal valid?
                 // Lock needs to be held here because race conditions: otherwise
