@@ -829,7 +829,7 @@ impl MainLoopHandler {
                     }
 
                     info!(
-                        "Last block from peer is new canonical tip: {}; height: {}",
+                        "Last block from peer is new canonical tip: {:x}; height: {}",
                         last_block.hash(),
                         last_block.header().height
                     );
@@ -1015,7 +1015,12 @@ impl MainLoopHandler {
                 // To ensure atomicity, a write-lock must be held over global
                 // state while we check if this proposal is favorable.
                 {
-                    info!("Received new favorable block proposal for mining operation.");
+                    if self.global_state_lock.cli().guess {
+                        info!("Received new favorable block proposal for mining operation.");
+                    } else {
+                        debug!("Received new favorable block proposal");
+                    }
+
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
                         block.header().prev_block_digest,
