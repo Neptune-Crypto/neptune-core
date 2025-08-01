@@ -230,6 +230,10 @@ fn guess_worker(
 
     info!("Start: guess preprocessing.");
     let guesser_buffer = block.guess_preprocess(Some(&sender));
+    if sender.is_canceled() {
+        info!("Guess preprocessing canceled. Stopping guessing task.");
+        return;
+    }
     info!("Completed: guess preprocessing.");
 
     let pool = ThreadPoolBuilder::new()
@@ -247,7 +251,7 @@ fn guess_worker(
 
     let pow = match guess_result {
         GuessNonceResult::Cancelled => {
-            info!("Restarting guessing task",);
+            info!("Stopping guessing task",);
             return;
         }
         GuessNonceResult::NonceFound { pow } => pow,
