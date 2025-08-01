@@ -2032,10 +2032,10 @@ pub(crate) mod tests {
         let guesser_buffer = successor_block.guess_preprocess();
         let target = predecessor_block.header().difficulty.target();
         loop {
-            if let Some(_) = BlockPow::guess(&guesser_buffer, rng.random(), target) {
+            if BlockPow::guess(&guesser_buffer, rng.random(), target).is_some() {
                 println!("found solution after {counter} guesses.");
                 break;
-            };
+            }
 
             counter += 1;
 

@@ -312,15 +312,6 @@ impl Block {
         self.digest = Default::default();
     }
 
-    /// sets header nonce.
-    ///
-    /// note: this causes block digest to change.
-    #[inline]
-    pub fn set_header_nonce(&mut self, nonce: Digest) {
-        self.kernel.header.pow.nonce = nonce;
-        self.unset_digest();
-    }
-
     /// Set the guesser digest in the block's header.
     ///
     /// Note: this causes the block digest to change.
@@ -979,6 +970,9 @@ impl Block {
         }
 
         let threshold = previous_block_header.difficulty.target();
+        if network.allows_mock_pow() && self.is_valid_mock_pow(threshold) {
+            return true;
+        }
 
         self.pow_verify(threshold)
     }
@@ -1007,6 +1001,13 @@ impl Block {
     pub fn guess_preprocess(&self) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
         let auth_paths = self.pow_mast_paths();
         Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths)
+    }
+
+    /// Mock verification of Pow. Use only on networks that allow for PoW
+    /// mocking. Only checks that block hash is less than target. Does not
+    /// verify other aspects of PoW.
+    fn is_valid_mock_pow(&self, target: Digest) -> bool {
+        self.hash() <= target
     }
 
     /// Verify that block digest is less than threshold and integral.
@@ -2035,7 +2036,7 @@ pub(crate) mod tests {
             assert_eq!(gblock.hash(), g_hash);
             assert_eq!(gblock.hash(), g2.hash());
 
-            g2.set_header_nonce(Digest::new(bfe_array![1u64, 1u64, 1u64, 1u64, 1u64]));
+            g2.set_header_pow(Default::default());
             assert_ne!(gblock.hash(), g2.hash());
             assert_eq!(gblock.hash(), g_hash);
         }
@@ -2055,14 +2056,14 @@ pub(crate) mod tests {
             assert_eq!(gblock.hash(), block.hash());
         }
 
-        // test: verify digest changes after nonce is updated.
+        // test: verify digest changes after pow is updated.
         #[test]
-        fn set_header_nonce() {
+        fn set_header_pow() {
             let gblock = Block::genesis(Network::RegTest);
             let mut rng = rand::rng();
 
             let mut new_block = gblock.clone();
-            new_block.set_header_nonce(rng.random());
+            new_block.set_header_pow(rng.random());
             assert_ne!(gblock.hash(), new_block.hash());
         }
 
@@ -2073,7 +2074,7 @@ pub(crate) mod tests {
             let mut rng = rand::rng();
 
             let mut unique_block = gblock.clone();
-            unique_block.set_header_nonce(rng.random());
+            unique_block.set_header_pow(rng.random());
 
             let mut block = gblock.clone();
             block.set_block(unique_block.clone());
