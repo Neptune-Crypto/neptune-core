@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use futures::channel::oneshot;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -213,4 +214,14 @@ pub enum RPCServerToMain {
     Shutdown,
     PauseMiner,
     RestartMiner,
+}
+
+pub trait Cancelable {
+    fn is_canceled(&self) -> bool;
+}
+
+impl<T> Cancelable for oneshot::Sender<T> {
+    fn is_canceled(&self) -> bool {
+        self.is_canceled()
+    }
 }

@@ -63,6 +63,7 @@ use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
+use crate::models::channel::Cancelable;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -998,9 +999,12 @@ impl Block {
     }
 
     /// Preprocess block for PoW guessing
-    pub fn guess_preprocess(&self) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
+    pub fn guess_preprocess(
+        &self,
+        maybe_cancel_channel: Option<&dyn Cancelable>,
+    ) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
         let auth_paths = self.pow_mast_paths();
-        Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths)
+        Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths, maybe_cancel_channel)
     }
 
     /// Mock verification of Pow. Use only on networks that allow for PoW
@@ -1304,7 +1308,7 @@ pub(crate) mod tests {
     fn guess_nonce_happy_path() {
         let network = Network::Main;
         let mut invalid_block = invalid_empty_block(&Block::genesis(network), network);
-        let guesser_buffer = invalid_block.guess_preprocess();
+        let guesser_buffer = invalid_block.guess_preprocess(None);
         let target = Difficulty::from(2u32).target();
         let mut rng = rng();
 

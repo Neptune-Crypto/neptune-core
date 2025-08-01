@@ -229,7 +229,7 @@ fn guess_worker(
     block.set_header_guesser_address(guesser_address);
 
     // let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);\
-    let guesser_buffer = block.guess_preprocess();
+    let guesser_buffer = block.guess_preprocess(Some(&sender));
 
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
@@ -1123,8 +1123,8 @@ pub(crate) mod tests {
         let num_iterations_launched = 1_000_000;
         let tick = std::time::SystemTime::now();
 
-        let guesser_buffer = block.guess_preprocess();
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+        let guesser_buffer = block.guess_preprocess(Some(&worker_task_tx));
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
@@ -2029,7 +2029,7 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer = successor_block.guess_preprocess();
+        let guesser_buffer = successor_block.guess_preprocess(None);
         let target = predecessor_block.header().difficulty.target();
         loop {
             if BlockPow::guess(&guesser_buffer, rng.random(), target).is_some() {

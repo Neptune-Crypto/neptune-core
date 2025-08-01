@@ -368,7 +368,7 @@ pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
 
-    let guesser_buffer = block.guess_preprocess();
+    let guesser_buffer = block.guess_preprocess(None);
     let difficulty = predecessor.header().difficulty;
     println!("Trying to guess for difficulty: {difficulty}");
     assert!(

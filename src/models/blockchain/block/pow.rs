@@ -22,6 +22,7 @@ use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::Block;
+use crate::models::channel::Cancelable;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 
@@ -55,7 +56,7 @@ pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
     pub(crate) nonce: Digest,
 }
 
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec, Default)]
 pub struct PowMastPaths {
     pub(super) pow: [Digest; BlockHeader::MAST_HEIGHT],
     pub(super) header: [Digest; BlockKernel::MAST_HEIGHT],
@@ -139,6 +140,16 @@ pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
     mast_auth_paths: PowMastPaths,
 }
 
+impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIGHT> {
+    fn default() -> Self {
+        Self {
+            merkle_tree: MerkleTree::sequential_new(&[Digest::default()]).unwrap(),
+            hash: Default::default(),
+            mast_auth_paths: Default::default(),
+        }
+    }
+}
+
 impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
     pub const MERKLE_TREE_HEIGHT: usize = MERKLE_TREE_HEIGHT;
     pub const NUM_LEAFS: usize = 1_usize << Self::MERKLE_TREE_HEIGHT;
@@ -166,7 +177,10 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         (index_a, index_b)
     }
 
-    pub(super) fn preprocess(mast_auth_paths: PowMastPaths) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
+    pub(super) fn preprocess(
+        mast_auth_paths: PowMastPaths,
+        cancel_channel: Option<&dyn Cancelable>,
+    ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {
         // Commitment to all the fields in the block that are not pow
         let commitment = mast_auth_paths.commit();
 
@@ -175,6 +189,11 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             .into_par_iter()
             .map(|i| Self::bud(commitment, i as u64))
             .collect::<Vec<_>>();
+
+        if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
+            return Default::default();
+        }
+
         let mut outs = ins.clone();
         let mut buds = &mut ins;
         let mut leafs = &mut outs;
@@ -183,6 +202,10 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 *leaf = Tip5::hash_pair(buds[j], buds[(j + (1 << i)) % Self::NUM_LEAFS]);
             });
             std::mem::swap(&mut leafs, &mut buds);
+
+            if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
+                return Default::default();
+            }
         }
 
         std::mem::swap(&mut leafs, &mut buds);
@@ -321,7 +344,7 @@ pub(crate) mod tests {
         const MERKLE_TREE_NUM_LEAFS: usize = 1usize << 10;
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths);
+        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
 
         let index = rng.random_range(0..MERKLE_TREE_NUM_LEAFS);
         let expensive_leaf = Pow::<MERKLE_TREE_HEIGHT>::leaf(auth_paths.commit(), index as u64);
@@ -334,7 +357,7 @@ pub(crate) mod tests {
     fn benchmark_memory_requirements() {
         fn report<const MERKLE_TREE_HEIGHT: usize>(auth_paths: PowMastPaths) {
             let start = Instant::now();
-            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths);
+            let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
             let duration = start.elapsed();
             let estimated_mt_size = buffer.merkle_tree.num_leafs() * 2 * Digest::BYTES;
             println!("Merkle tree height: {MERKLE_TREE_HEIGHT}");
@@ -383,7 +406,7 @@ pub(crate) mod tests {
         const MERKLE_TREE_HEIGHT: usize = 10;
         let mut rng = rng();
         let auth_paths = rng.random::<PowMastPaths>();
-        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths);
+        let buffer = Pow::<MERKLE_TREE_HEIGHT>::preprocess(auth_paths, None);
 
         for difficulty in [2_u32, 4] {
             let target = Difficulty::from(difficulty).target();
