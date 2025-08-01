@@ -842,10 +842,10 @@ impl WalletState {
         block: &Block,
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
         let own_guesser_key = self.wallet_entropy.guesser_fee_key();
-        let incoming_utxos = if block
+        let was_guessed_by_us = block
             .header()
-            .was_guessed_by(own_guesser_key.to_address().into())
-        {
+            .was_guessed_by(own_guesser_key.to_address().into());
+        let incoming_utxos = if was_guessed_by_us {
             let sender_randomness = block.hash();
             block
                 .guesser_fee_utxos()

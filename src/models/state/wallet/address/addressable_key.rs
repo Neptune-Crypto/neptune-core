@@ -242,7 +242,7 @@ impl SpendingKey {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
-                    is_guesser_fee: true,
+                    is_guesser_fee: false,
                 }
             }).collect()
     }
