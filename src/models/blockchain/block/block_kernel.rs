@@ -55,39 +55,3 @@ impl MastHash for BlockKernel {
         sequences
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use tasm_lib::prelude::Digest;
-    use tasm_lib::prelude::Tip5;
-    use tasm_lib::twenty_first::prelude::MerkleTree;
-
-    use super::*;
-    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
-    use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::block::Network;
-    use crate::models::proof_abstractions::timestamp::Timestamp;
-
-    #[test]
-    fn kernel_hash_calculation() {
-        let network = Network::Main;
-        let block_primitive_witness = deterministic_block_primitive_witness();
-        let invalid_block = Block::block_template_invalid_proof_from_witness(
-            block_primitive_witness,
-            Timestamp::now(),
-            network.target_block_interval(),
-        );
-        let calculated = invalid_block.hash();
-        let merkle_tree_leafs = [
-            Tip5::hash_varlen(&invalid_block.header().mast_hash().encode()),
-            Tip5::hash_varlen(&invalid_block.body().mast_hash().encode()),
-            Tip5::hash_varlen(&invalid_block.appendix().encode()),
-            Digest::default(),
-        ];
-
-        let mt = MerkleTree::par_new(&merkle_tree_leafs).unwrap();
-        let expected_root = mt.root();
-        assert_eq!(expected_root, calculated);
-    }
-}

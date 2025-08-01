@@ -11,6 +11,7 @@ pub mod difficulty_control;
 pub(crate) mod guesser_receiver_data;
 pub mod mock_block_generator;
 pub mod mutator_set_update;
+pub mod pow;
 pub mod validity;
 
 use std::sync::Arc;
@@ -20,8 +21,6 @@ use block_appendix::BlockAppendix;
 use block_appendix::MAX_NUM_CLAIMS;
 use block_body::BlockBody;
 use block_header::BlockHeader;
-use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
-use block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use block_validation_error::BlockValidationError;
@@ -33,6 +32,7 @@ use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
+use strum::EnumCount;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
@@ -50,13 +50,21 @@ use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::block_header::BlockHeaderField;
+use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
+use crate::models::blockchain::block::pow::GuesserBuffer;
+use crate::models::blockchain::block::pow::Pow;
+use crate::models::blockchain::block::pow::PowMastPaths;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
+use crate::models::channel::Cancelable;
+use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -165,6 +173,26 @@ pub struct Block {
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
     digest: OnceLock<Digest>,
+}
+
+impl MastHash for Block {
+    type FieldEnum = BlockField;
+
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+        vec![self.kernel.mast_hash().encode(), self.proof.encode()]
+    }
+}
+
+#[derive(Debug, Copy, Clone, EnumCount)]
+pub enum BlockField {
+    Kernel,
+    Proof,
+}
+
+impl HasDiscriminant for BlockField {
+    fn discriminant(&self) -> usize {
+        *self as usize
+    }
 }
 
 impl PartialEq for Block {
@@ -276,22 +304,13 @@ impl Block {
     /// will not recompute it unless the Block was modified since the last call.
     #[inline]
     pub fn hash(&self) -> Digest {
-        *self.digest.get_or_init(|| self.kernel.mast_hash())
+        *self.digest.get_or_init(|| self.mast_hash())
     }
 
     #[inline]
     fn unset_digest(&mut self) {
         // note: this replaces the OnceLock so the digest will be calc'd in hash()
         self.digest = Default::default();
-    }
-
-    /// sets header nonce.
-    ///
-    /// note: this causes block digest to change.
-    #[inline]
-    pub fn set_header_nonce(&mut self, nonce: Digest) {
-        self.kernel.header.nonce = nonce;
-        self.unset_digest();
     }
 
     /// Set the guesser digest in the block's header.
@@ -932,13 +951,16 @@ impl Block {
     /// Determine whether the proof-of-work puzzle was solved correctly.
     ///
     /// Specifically, compare the hash of the current block against the
-    /// target corresponding to the previous block;s difficulty and return true
+    /// target corresponding to the previous block's difficulty and return true
     /// if the former is smaller. If the timestamp difference exceeds the
     /// `TARGET_BLOCK_INTERVAL` by a factor `ADVANCE_DIFFICULTY_CORRECTION_WAIT`
     /// then the effective difficulty is reduced by a factor
     /// `ADVANCE_DIFFICULTY_CORRECTION_FACTOR`.
     pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
-        // enforce network difficulty-reset-interval if present.
+        // enforce network difficulty-reset-interval if present. Note that *no*
+        // pow checks are enforced in this case, not even Merkle authentication
+        // path checks. Consequently, very little memory is required to produce
+        // blocks on networks that reset difficulty.
         if Self::should_reset_difficulty(
             network,
             self.header().timestamp,
@@ -948,27 +970,59 @@ impl Block {
             return true;
         }
 
-        let hash = self.hash();
         let threshold = previous_block_header.difficulty.target();
-        if hash <= threshold {
+        if network.allows_mock_pow() && self.is_valid_mock_pow(threshold) {
             return true;
         }
 
-        let delta_t = self.header().timestamp - previous_block_header.timestamp;
-        let excess_multiple =
-            usize::try_from(delta_t.to_millis() / network.target_block_interval().to_millis())
-                .expect(
-                    "excessive timestamp on incoming block should have been caught by peer loop",
-                );
-        let shift = usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()).unwrap()
-            * (excess_multiple
-                >> usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()).unwrap());
-        let effective_difficulty = previous_block_header.difficulty >> shift;
-        if hash <= effective_difficulty.target() {
-            return true;
-        }
+        self.pow_verify(threshold)
+    }
 
-        false
+    /// Produce the MAST authentication paths for the `pow` field on
+    /// [`BlockHeader`], against the block MAST hash.
+    pub(crate) fn pow_mast_paths(&self) -> PowMastPaths {
+        let pow = BlockHeader::mast_path(self.header(), BlockHeaderField::Pow)
+            .try_into()
+            .unwrap();
+        let header = BlockKernel::mast_path(&self.kernel, BlockKernelField::Header)
+            .try_into()
+            .unwrap();
+        let kernel = Block::mast_path(self, BlockField::Kernel)
+            .try_into()
+            .unwrap();
+
+        PowMastPaths {
+            pow,
+            header,
+            kernel,
+        }
+    }
+
+    /// Preprocess block for PoW guessing
+    pub fn guess_preprocess(
+        &self,
+        maybe_cancel_channel: Option<&dyn Cancelable>,
+    ) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
+        let auth_paths = self.pow_mast_paths();
+        Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths, maybe_cancel_channel)
+    }
+
+    /// Mock verification of Pow. Use only on networks that allow for PoW
+    /// mocking. Only checks that block hash is less than target. Does not
+    /// verify other aspects of PoW.
+    fn is_valid_mock_pow(&self, target: Digest) -> bool {
+        self.hash() <= target
+    }
+
+    /// Verify that block digest is less than threshold and integral.
+    fn pow_verify(&self, target: Digest) -> bool {
+        let auth_paths = self.pow_mast_paths();
+        self.header().pow.validate(auth_paths, target).is_ok()
+    }
+
+    pub fn set_header_pow(&mut self, pow: BlockPow) {
+        self.kernel.header.pow = pow;
+        self.unset_digest();
     }
 
     /// Evaluate the fork choice rule.
@@ -1115,6 +1169,7 @@ pub(crate) mod tests {
     use proptest::collection;
     use proptest_arbitrary_interop::arb;
     use rand::random;
+    use rand::rng;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -1146,6 +1201,7 @@ pub(crate) mod tests {
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
+    use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
@@ -1157,6 +1213,17 @@ pub(crate) mod tests {
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
     impl Block {
+        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
+            self.kernel.header.difficulty = difficulty;
+            self.unset_digest();
+            self
+        }
+
+        pub(crate) fn set_proof(&mut self, proof: BlockProof) {
+            self.proof = proof;
+            self.unset_digest();
+        }
+
         /// Create a block template with an invalid block proof.
         ///
         /// To be used in tests where you don't care about block validity.
@@ -1238,17 +1305,26 @@ pub(crate) mod tests {
         );
     }
 
-    #[cfg(test)]
-    impl Block {
-        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
-            self.kernel.header.difficulty = difficulty;
-            self.unset_digest();
-            self
-        }
+    #[test]
+    fn guess_nonce_happy_path() {
+        let network = Network::Main;
+        let mut invalid_block = invalid_empty_block(&Block::genesis(network), network);
+        let guesser_buffer = invalid_block.guess_preprocess(None);
+        let target = Difficulty::from(2u32).target();
+        let mut rng = rng();
 
-        pub(crate) fn set_proof(&mut self, proof: BlockProof) {
-            self.proof = proof;
-        }
+        let valid_pow = loop {
+            if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
+                break valid_pow;
+            }
+        };
+
+        assert!(
+            !invalid_block.pow_verify(target),
+            "Pow verification must fail prior to setting PoW"
+        );
+        invalid_block.set_header_pow(valid_pow);
+        assert!(invalid_block.pow_verify(target));
     }
 
     #[test]
@@ -1950,6 +2026,8 @@ pub(crate) mod tests {
     /// have a test here.
     mod digest_encapsulation {
 
+        use crate::api::export::NeptuneProof;
+
         use super::*;
 
         // test: verify clone + modify does not change original.
@@ -1965,7 +2043,7 @@ pub(crate) mod tests {
             assert_eq!(gblock.hash(), g_hash);
             assert_eq!(gblock.hash(), g2.hash());
 
-            g2.set_header_nonce(Digest::new(bfe_array![1u64, 1u64, 1u64, 1u64, 1u64]));
+            g2.set_header_pow(Default::default());
             assert_ne!(gblock.hash(), g2.hash());
             assert_eq!(gblock.hash(), g_hash);
         }
@@ -1985,14 +2063,23 @@ pub(crate) mod tests {
             assert_eq!(gblock.hash(), block.hash());
         }
 
-        // test: verify digest changes after nonce is updated.
         #[test]
-        fn set_header_nonce() {
+        fn hash_depends_on_proof() {
+            let network = Network::Main;
+            let mut block = invalid_empty_block(&Block::genesis(network), network);
+            let original_hash = block.hash();
+            block.set_proof(BlockProof::SingleProof(NeptuneProof::invalid_with_size(65)));
+            assert_ne!(original_hash, block.hash());
+        }
+
+        // test: verify digest changes after pow is updated.
+        #[test]
+        fn set_header_pow() {
             let gblock = Block::genesis(Network::RegTest);
             let mut rng = rand::rng();
 
             let mut new_block = gblock.clone();
-            new_block.set_header_nonce(rng.random());
+            new_block.set_header_pow(rng.random());
             assert_ne!(gblock.hash(), new_block.hash());
         }
 
@@ -2003,7 +2090,7 @@ pub(crate) mod tests {
             let mut rng = rand::rng();
 
             let mut unique_block = gblock.clone();
-            unique_block.set_header_nonce(rng.random());
+            unique_block.set_header_pow(rng.random());
 
             let mut block = gblock.clone();
             block.set_block(unique_block.clone());

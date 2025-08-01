@@ -79,9 +79,10 @@ impl MockBlockGenerator {
         let mut rng = StdRng::from_seed(seed);
 
         // mining (guessing) loop.
-        while !block.has_proof_of_work(network, predecessor.header()) {
-            let nonce = rng.random();
-            block.set_header_nonce(nonce);
+        let threshold = predecessor.header().difficulty.target();
+        while !block.is_valid_mock_pow(threshold) {
+            let pow = rng.random();
+            block.set_header_pow(pow);
         }
 
         block

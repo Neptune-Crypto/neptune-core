@@ -71,13 +71,14 @@ use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::mine_loop::precalculate_block_auth_paths;
 use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
+use crate::models::blockchain::block::pow::PowMastPaths;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -90,7 +91,6 @@ use crate::models::channel::RPCServerToMain;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerStanding;
-use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::models::state::mining_status::MiningStatus;
@@ -213,8 +213,7 @@ impl MempoolTransactionInfo {
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct ProofOfWorkPuzzle {
     // All fields public since used downstream by mining pool software.
-    pub kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
-    pub header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
+    pub auth_paths: PowMastPaths,
 
     /// The threshold digest that defines when a PoW solution is valid. The
     /// block's hash must be less than or equal to this value.
@@ -225,7 +224,7 @@ pub struct ProofOfWorkPuzzle {
 
     /// An identifier for the puzzle. Needed since more than one block proposal
     /// may be known for the next block. A commitment to the entire block
-    /// kernel, apart from the nonce.
+    /// kernel, apart from the PoW-field of the header.
     pub id: Digest,
 
     /// Indicates whether template is invalid due to the presence of a new tip.
@@ -241,15 +240,14 @@ impl ProofOfWorkPuzzle {
         let guesser_reward = block_proposal
             .total_guesser_reward()
             .expect("Block proposal must have well-defined guesser reward");
-        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block_proposal);
+        let auth_paths = block_proposal.pow_mast_paths();
         let threshold = latest_block_header.difficulty.target();
         let prev_block = block_proposal.header().prev_block_digest;
 
-        let id = Tip5::hash(&(kernel_auth_path, header_auth_path));
+        let id = Tip5::hash(&auth_paths);
 
         Self {
-            kernel_auth_path,
-            header_auth_path,
+            auth_paths,
             threshold,
             total_guesser_reward: guesser_reward,
             id,
@@ -1897,7 +1895,7 @@ pub trait RPC {
     /// Otherwise the provided solution is ignored, and `false` is returned.
     async fn provide_pow_solution(
         token: rpc_auth::Token,
-        nonce: Digest,
+        pow: BlockPow,
         proposal_id: Digest,
     ) -> RpcResult<bool>;
 
@@ -3270,7 +3268,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-        nonce: Digest,
+        pow: BlockPow,
         proposal_id: Digest,
     ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
@@ -3296,7 +3294,7 @@ impl RPC for NeptuneRPCServer {
         // A proposal was found. Check if solution works.
         let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
 
-        proposal.set_header_nonce(nonce);
+        proposal.set_header_pow(pow);
         let threshold = latest_block_header.difficulty.target();
         let solution_digest = proposal.hash();
         if solution_digest > threshold {
@@ -3760,6 +3758,7 @@ mod tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
@@ -4391,7 +4390,7 @@ mod tests {
             "Must return none on bad digest"
         );
         assert_eq!(
-            Block::genesis(network).hash(),
+            Block::genesis(network).kernel.mast_hash(),
             rpc_server
                 .block_kernel(ctx, token, BlockSelector::Genesis)
                 .await
@@ -4721,7 +4720,8 @@ mod tests {
         use rand::random;
 
         use super::*;
-        use crate::mine_loop::fast_kernel_mast_hash;
+        use crate::models::blockchain::block::block_header::BlockPow;
+        use crate::models::blockchain::block::pow::Pow;
         use crate::models::state::block_proposal::BlockProposal;
         use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::models::state::wallet::address::KeyType;
@@ -4739,14 +4739,10 @@ mod tests {
             let guess_challenge = ProofOfWorkPuzzle::new(block1.clone(), *genesis.header());
             assert_eq!(guess_challenge.prev_block, genesis.hash());
 
-            let nonce = random();
-            let resulting_block_hash = fast_kernel_mast_hash(
-                guess_challenge.kernel_auth_path,
-                guess_challenge.header_auth_path,
-                nonce,
-            );
+            let pow: BlockPow = random();
+            block1.set_header_pow(pow);
 
-            block1.set_header_nonce(nonce);
+            let resulting_block_hash = block1.pow_mast_paths().fast_mast_hash(pow);
 
             assert_eq!(block1.hash(), resulting_block_hash);
         }
@@ -4881,7 +4877,7 @@ mod tests {
             let entropy_for_external_key = WalletEntropy::new_random();
             let external_guesser_key = entropy_for_external_key.guesser_fee_key();
             let external_guesser_address = external_guesser_key.to_address();
-            let internal_guesser_digest = bob
+            let internal_guesser_address = bob
                 .state
                 .lock(|x| x.wallet_state.wallet_entropy.guesser_fee_key())
                 .await
@@ -4908,7 +4904,7 @@ mod tests {
                 };
 
                 let guesser_address = if use_internal_key {
-                    internal_guesser_digest
+                    internal_guesser_address
                 } else {
                     external_guesser_address
                 };
@@ -4923,14 +4919,10 @@ mod tests {
                     "Must have stored exported block proposal"
                 );
 
-                let mock_nonce = random();
-                let mut resulting_block_hash = fast_kernel_mast_hash(
-                    pow_puzzle.kernel_auth_path,
-                    pow_puzzle.header_auth_path,
-                    mock_nonce,
-                );
+                let pow: BlockPow = random();
+                let resulting_block_hash = pow_puzzle.auth_paths.fast_mast_hash(pow);
 
-                block1.set_header_nonce(mock_nonce);
+                block1.set_header_pow(pow);
                 block1.set_header_guesser_address(guesser_address.into());
                 assert_eq!(block1.hash(), resulting_block_hash);
                 assert_eq!(
@@ -4939,26 +4931,18 @@ mod tests {
                 );
 
                 // Check that succesful guess is accepted by endpoint.
-                let actual_threshold = genesis.header().difficulty.target();
-                let mut actual_nonce = mock_nonce;
-                while resulting_block_hash > actual_threshold {
-                    actual_nonce = random();
-                    resulting_block_hash = fast_kernel_mast_hash(
-                        pow_puzzle.kernel_auth_path,
-                        pow_puzzle.header_auth_path,
-                        actual_nonce,
-                    );
-                }
+                let guesser_buffer = block1.guess_preprocess(None);
+                let target = genesis.header().difficulty.target();
+                let valid_pow = loop {
+                    if let Some(valid_pow) = Pow::guess(&guesser_buffer, random(), target) {
+                        break valid_pow;
+                    }
+                };
 
-                block1.set_header_nonce(actual_nonce);
+                block1.set_header_pow(valid_pow);
                 let good_is_accepted = bob
                     .clone()
-                    .provide_pow_solution(
-                        context::current(),
-                        bob_token,
-                        actual_nonce,
-                        pow_puzzle.id,
-                    )
+                    .provide_pow_solution(context::current(), bob_token, valid_pow, pow_puzzle.id)
                     .await
                     .unwrap();
                 assert!(
@@ -4967,18 +4951,10 @@ mod tests {
                 );
 
                 // Check that bad guess is rejected by endpoint.
-                let mut bad_nonce: Digest = actual_nonce;
-                while resulting_block_hash <= actual_threshold {
-                    bad_nonce = random();
-                    resulting_block_hash = fast_kernel_mast_hash(
-                        pow_puzzle.kernel_auth_path,
-                        pow_puzzle.header_auth_path,
-                        bad_nonce,
-                    );
-                }
+                let bad_pow: BlockPow = random();
                 let bad_is_accepted = bob
                     .clone()
-                    .provide_pow_solution(context::current(), bob_token, bad_nonce, pow_puzzle.id)
+                    .provide_pow_solution(context::current(), bob_token, bad_pow, pow_puzzle.id)
                     .await
                     .unwrap();
                 assert!(

@@ -3787,22 +3787,22 @@ pub(super) mod tests {
 
     mod block_hash_witness {
         use super::*;
-        use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
+        use crate::tests::shared::blocks::invalid_empty_block;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn stored_block_hash_witness_agrees_with_block_hash() {
             let network = Network::Main;
-            let mut rng = rand::rng();
             let mut archival_state = make_test_archival_state(network).await;
             let genesis_block = Block::genesis(network);
-            let blocks: [Block; 3] = fake_valid_sequence_of_blocks_for_tests(
-                &genesis_block,
-                Timestamp::now(),
-                rng.random(),
-                network,
-            )
-            .await;
+            let mut blocks = vec![];
+            let mut predecessor = genesis_block;
+            for _ in 0..3 {
+                let block = invalid_empty_block(&predecessor, network);
+                blocks.push(block.clone());
+                predecessor = block;
+            }
+
             for block in &blocks {
                 archival_state.write_block_as_tip(block).await.unwrap();
             }

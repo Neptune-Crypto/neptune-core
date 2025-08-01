@@ -2175,7 +2175,7 @@ mod tests {
                 .get_tip()
                 .await;
 
-            different_genesis_block.set_header_nonce(StdRng::seed_from_u64(5550001).random());
+            different_genesis_block.set_header_pow(StdRng::seed_from_u64(5550001).random());
             let [block_1_with_different_genesis] = fake_valid_sequence_of_blocks_for_tests(
                 &different_genesis_block,
                 Timestamp::hours(1),
@@ -2267,9 +2267,8 @@ mod tests {
             )
             .await;
 
-            // This *probably* is invalid PoW -- and needs to be for this test to
-            // work.
-            block_without_valid_pow.set_header_nonce(Digest::default());
+            // Ensure invalid PoW
+            block_without_valid_pow.set_header_pow(Default::default());
 
             // Sending an invalid block will not necessarily result in a ban. This depends on the peer
             // tolerance that is set in the client. For this reason, we include a "Bye" here.

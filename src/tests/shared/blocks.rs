@@ -1,3 +1,4 @@
+use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first;
 use tasm_lib::twenty_first::bfe;
@@ -12,14 +13,15 @@ use crate::api::export::Timestamp;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
-use crate::mine_loop::tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::block::pow::Pow;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
@@ -51,7 +53,7 @@ pub(crate) fn invalid_block_with_transaction(
         height: new_block_height,
         prev_block_digest: previous_block.hash(),
         timestamp: transaction.kernel.timestamp,
-        nonce: Digest::default(),
+        pow: Pow::default(),
         guesser_receiver_data: GuesserReceiverData::default(),
         cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
         difficulty: previous_block.header().difficulty,
@@ -260,6 +262,19 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     Ok(block)
 }
 
+pub(crate) fn invalid_empty_block_with_proof_size(
+    predecessor: &Block,
+    network: Network,
+    proof_size: usize,
+) -> Block {
+    let mut block = invalid_empty_block(predecessor, network);
+    block.set_proof(BlockProof::SingleProof(Proof::invalid_with_size(
+        proof_size,
+    )));
+
+    block
+}
+
 pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {
     let tx = crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash(
         vec![],
@@ -269,6 +284,27 @@ pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Bloc
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     let tx = BlockTransaction::upgrade(tx);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
+}
+
+/// Return a list of `n` invalid, empty blocks.
+pub(crate) fn invalid_empty_blocks_with_proof_size(
+    ancestor: &Block,
+    n: usize,
+    network: Network,
+    proof_size: usize,
+) -> Vec<Block> {
+    let mut blocks = vec![];
+    let mut predecessor = ancestor;
+    for _ in 0..n {
+        blocks.push(invalid_empty_block_with_proof_size(
+            predecessor,
+            network,
+            proof_size,
+        ));
+        predecessor = blocks.last().unwrap();
+    }
+
+    blocks
 }
 
 /// Return a list of `n` invalid, empty blocks.
@@ -332,10 +368,23 @@ pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
 
+    let guesser_buffer = block.guess_preprocess(None);
+    let difficulty = predecessor.header().difficulty;
+    println!("Trying to guess for difficulty: {difficulty}");
+    assert!(
+        difficulty < Difficulty::from(1_000_000_000u32),
+        "Don't use high difficulty in test"
+    );
+    let target = difficulty.target();
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
-    while !block.has_proof_of_work(network, predecessor.header()) {
-        mine_iteration_for_tests(&mut block, &mut rng);
-    }
+
+    let valid_pow = loop {
+        if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
+            break valid_pow;
+        }
+    };
+
+    block.set_header_pow(valid_pow);
 
     block
 }

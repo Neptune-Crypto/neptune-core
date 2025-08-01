@@ -78,6 +78,11 @@ impl Network {
         matches!(self, Self::RegTest | Self::TestnetMock)
     }
 
+    /// Indicates if network allows for mocked PoW
+    pub(crate) fn allows_mock_pow(self) -> bool {
+        matches!(self, Network::RegTest)
+    }
+
     /// indicates max duration between blocks before difficulty reset, if any.
     ///
     /// The difficulty is reset to genesis difficulty on testnet network(s) any
@@ -106,8 +111,8 @@ impl Network {
     pub fn genesis_difficulty(&self) -> Difficulty {
         match *self {
             Self::RegTest => Difficulty::MINIMUM,
-            Self::Testnet(_) | Self::TestnetMock => Difficulty::new([1_000_000, 0, 0, 0, 0]),
-            Self::Main => Difficulty::new([1_000_000_000, 0, 0, 0, 0]),
+            Self::Testnet(_) | Self::TestnetMock => Difficulty::new([100_000, 0, 0, 0, 0]),
+            Self::Main => Difficulty::new([100_000_000, 0, 0, 0, 0]),
         }
     }
 

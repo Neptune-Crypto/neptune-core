@@ -23,41 +23,14 @@ use super::Block;
 use crate::api::export::ReceivingAddress;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
+use crate::models::blockchain::block::pow::Pow;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
-/// Controls how long to wait before the difficulty for the *next* block is
-/// reduced.
-///
-/// Typically, the difficulty of the block's predecessor is used to determine
-/// whether the new block has enough proof-of-work. But if the time difference
-/// (relative to the target block interval) exceeds this parameter, the
-/// difficulty is effectively reduced by a factor
-/// [`ADVANCE_DIFFICULTY_CORRECTION_FACTOR`]. Consequently, if for whatever
-/// reason the difficulty is set too high for the available mining power to find
-/// blocks, then the network has to wait some time (without needing to find
-/// blocks) before the difficulty is automatically lowered.
-///
-/// This parameter must be a power of two.
-pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_WAIT: usize = 128;
-
-/// Controls by how much the advance difficulty correction reduces the effective
-/// difficulty by.
-///
-/// Typically, the difficulty of the block's predecessor is used to determine
-/// whether the new block has enough proof-of-work. But if the time difference
-/// (relative to the target block interval) exceeds parameter
-/// [`ADVANCE_DIFFICULTY_CORRECTION_WAIT`], the
-/// difficulty is effectively reduced by this amount. Consequently, if for
-/// whatever reason the difficulty is set too high for the available mining
-/// power to find blocks, then the network has to wait some time (without
-/// needing to find blocks) before the difficulty is automatically lowered.
-///
-/// This parameter must be a power of two.
-pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
-
 pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
+
+pub type BlockPow = Pow<{ crate::models::blockchain::block::pow::POW_MEMORY_TREE_HEIGHT }>;
 
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
@@ -71,7 +44,7 @@ pub struct BlockHeader {
     /// Time since unix epoch, in milliseconds
     pub timestamp: Timestamp,
 
-    pub nonce: Digest,
+    pub pow: BlockPow,
 
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
@@ -94,7 +67,7 @@ impl Display for BlockHeader {
             Version: {}\n\
             Guesser receiver digest: {}\n\
             Guesser lock script hash: {}\n\
-            nonce: {}\n",
+            pow: {}\n",
             self.height,
             self.timestamp.standard_format(),
             self.prev_block_digest.to_hex(),
@@ -103,7 +76,7 @@ impl Display for BlockHeader {
             self.version,
             self.guesser_receiver_data.receiver_digest.to_hex(),
             self.guesser_receiver_data.lock_script_hash.to_hex(),
-            self.nonce.to_hex()
+            self.pow
         );
 
         write!(f, "{}", string)
@@ -118,15 +91,28 @@ impl BlockHeader {
             prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
 
-            // Bitcoin block at height 906975
-            // TODO: Update me right before reboot
-            nonce: Digest::new(bfe_array![
-                0x0000000000000000u64,
-                0x0001ff452761dd02u64,
-                0x9696bf75719bdc65u64,
-                0xa6b0088b8822e794u64,
-                0
-            ]),
+            pow: Pow {
+                // Bitcoin block at height 906975
+                // TODO: Update me right before reboot
+                nonce: Digest::new(bfe_array![
+                    0x0000000000000000u64,
+                    0x0001ff452761dd02u64,
+                    0x9696bf75719bdc65u64,
+                    0xa6b0088b8822e794u64,
+                    0
+                ]),
+                path_a: [Digest::default(); BlockPow::MERKLE_TREE_HEIGHT],
+                path_b: [Digest::default(); BlockPow::MERKLE_TREE_HEIGHT],
+                // 49b65c974fa81f3e6f2f87aec83ada68236af11c284ed263c5965b6ae3644d100f5a2b594d4b810a
+                // is mutator set hash after block 21310 on legacy chain
+                root: Digest::new(bfe_array![
+                    0x49b65c974fa81f3eu64,
+                    0x6f2f87aec83ada68u64,
+                    0x236af11c284ed263u64,
+                    0xc5965b6ae3644d10u64,
+                    0x0f5a2b594d4b810au64
+                ]),
+            },
             cumulative_proof_of_work: ProofOfWork::zero(),
 
             #[cfg(not(test))]
@@ -177,7 +163,7 @@ impl BlockHeader {
             height: predecessor_header.height.next(),
             prev_block_digest: predecessor_digest,
             timestamp,
-            nonce: Digest::default(),
+            pow: Pow::default(),
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
             guesser_receiver_data: GuesserReceiverData {
@@ -201,10 +187,10 @@ pub enum BlockHeaderField {
     Height,
     PrevBlockDigest,
     Timestamp,
-    Nonce,
+    Pow,
     CumulativeProofOfWork,
     Difficulty,
-    GusserDigest,
+    GuesserReceiverData,
 }
 
 impl HasDiscriminant for BlockHeaderField {
@@ -222,7 +208,7 @@ impl MastHash for BlockHeader {
             self.height.encode(),
             self.prev_block_digest.encode(),
             self.timestamp.encode(),
-            self.nonce.encode(),
+            self.pow.encode(),
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
             self.guesser_receiver_data.encode(),
@@ -234,12 +220,16 @@ impl MastHash for BlockHeader {
 /// in the block header.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HeaderToBlockHashWitness {
-    /// The "body" leaf of the Merkle tree from which block hash is calculated.
+    /// The "body" leaf of the Merkle tree from which block kernel MAST hash is
+    /// calculated.
     body_leaf: Digest,
 
-    /// The "appendix" leaf of the Merkle tree from which block hash is
-    /// calculated.
+    /// The "appendix" leaf of the Merkle tree from which block kernel MAST hash
+    /// is calculated.
     appendix_leaf: Digest,
+
+    /// The "proof" leaf of the Merkle tree from which block hash is calculated.
+    proof_leaf: Digest,
 }
 
 impl From<&Block> for HeaderToBlockHashWitness {
@@ -247,6 +237,7 @@ impl From<&Block> for HeaderToBlockHashWitness {
         Self {
             body_leaf: Tip5::hash_varlen(&value.body().mast_hash().encode()),
             appendix_leaf: Tip5::hash_varlen(&value.appendix().encode()),
+            proof_leaf: Tip5::hash_varlen(&value.proof.encode()),
         }
     }
 }
@@ -264,13 +255,18 @@ impl BlockHeaderWithBlockHashWitness {
 
     pub(crate) fn hash(&self) -> Digest {
         let block_header_leaf = Tip5::hash_varlen(&self.header.mast_hash().encode());
-        let leafs = [
+        let kernel_leafs = [
             block_header_leaf,
             self.witness.body_leaf,
             self.witness.appendix_leaf,
             Digest::default(),
         ];
-        MerkleTree::sequential_new(&leafs).unwrap().root()
+        let kernel_hash = MerkleTree::sequential_frugal_root(&kernel_leafs).unwrap();
+        let block_leafs = [
+            Tip5::hash_varlen(&kernel_hash.encode()),
+            self.witness.proof_leaf,
+        ];
+        MerkleTree::sequential_frugal_root(&block_leafs).unwrap()
     }
 
     pub(crate) fn is_successor_of(&self, parent: &Self) -> bool {
@@ -289,7 +285,7 @@ impl BlockHeader {
         let version = arb::<BFieldElement>();
         let prev_block_digest = arb::<Digest>();
         let timestamp = arb::<Timestamp>();
-        let nonce = arb::<Digest>();
+        let pow = arb::<BlockPow>();
         let cumulative_proof_of_work = arb::<ProofOfWork>();
         let difficulty = arb::<Difficulty>();
         let guesser_receiver_data = arb::<GuesserReceiverData>();
@@ -298,7 +294,7 @@ impl BlockHeader {
             version,
             prev_block_digest,
             timestamp,
-            nonce,
+            pow,
             cumulative_proof_of_work,
             difficulty,
             guesser_receiver_data,
@@ -308,7 +304,7 @@ impl BlockHeader {
                     version,
                     prev_block_digest,
                     timestamp,
-                    nonce,
+                    pow,
                     cumulative_proof_of_work,
                     difficulty,
                     guesser_receiver_data,
@@ -318,7 +314,7 @@ impl BlockHeader {
                         height: block_height,
                         prev_block_digest,
                         timestamp,
-                        nonce,
+                        pow,
                         cumulative_proof_of_work,
                         difficulty,
                         guesser_receiver_data,
@@ -332,10 +328,17 @@ impl BlockHeader {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use rand::rng;
     use rand::Rng;
 
     use super::*;
-    use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
+    use crate::tests::shared::blocks::invalid_empty_block_with_proof_size;
+
+    impl BlockHeader {
+        pub(crate) fn set_nonce(&mut self, nonce: Digest) {
+            self.pow.nonce = nonce;
+        }
+    }
 
     pub(crate) fn random_block_header() -> BlockHeader {
         let mut rng = rand::rng();
@@ -344,7 +347,7 @@ pub(crate) mod tests {
             height: BlockHeight::from(rng.random::<u64>()),
             prev_block_digest: rng.random(),
             timestamp: rng.random(),
-            nonce: rng.random(),
+            pow: rng.random(),
             cumulative_proof_of_work: ProofOfWork::new(
                 rng.random::<[u32; ProofOfWork::NUM_LIMBS]>(),
             ),
@@ -366,26 +369,15 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn advance_difficulty_correction_parameters_are_powers_of_two() {
-        assert_eq!(
-            ADVANCE_DIFFICULTY_CORRECTION_WAIT,
-            1 << ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()
-        );
-        assert_eq!(
-            ADVANCE_DIFFICULTY_CORRECTION_FACTOR,
-            1 << ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()
-        );
-    }
-
-    #[test]
     fn witness_agrees_with_block_hash() {
         let network = Network::Main;
-        let block_primitive_witness = deterministic_block_primitive_witness();
-        let block = Block::block_template_invalid_proof_from_witness(
-            block_primitive_witness,
-            Timestamp::now(),
-            network.target_block_interval(),
-        );
+        let genesis = Block::genesis(network);
+        let mut rng = rng();
+
+        // Use non-empty proof to ensure the proof is correctly accounted for
+        // in calculated block hash.
+        let proof_size = rng.random_range(0..100);
+        let block = invalid_empty_block_with_proof_size(&genesis, network, proof_size);
         let expected = block.hash();
         let witness: HeaderToBlockHashWitness = (&block).into();
         let calculated = BlockHeaderWithBlockHashWitness::new(*block.header(), witness).hash();
