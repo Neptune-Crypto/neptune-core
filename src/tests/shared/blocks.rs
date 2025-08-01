@@ -287,6 +287,27 @@ pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Bloc
 }
 
 /// Return a list of `n` invalid, empty blocks.
+pub(crate) fn invalid_empty_blocks_with_proof_size(
+    ancestor: &Block,
+    n: usize,
+    network: Network,
+    proof_size: usize,
+) -> Vec<Block> {
+    let mut blocks = vec![];
+    let mut predecessor = ancestor;
+    for _ in 0..n {
+        blocks.push(invalid_empty_block_with_proof_size(
+            predecessor,
+            network,
+            proof_size,
+        ));
+        predecessor = blocks.last().unwrap();
+    }
+
+    blocks
+}
+
+/// Return a list of `n` invalid, empty blocks.
 pub(crate) fn invalid_empty_blocks(ancestor: &Block, n: usize, network: Network) -> Vec<Block> {
     let mut blocks = vec![];
     let mut predecessor = ancestor;

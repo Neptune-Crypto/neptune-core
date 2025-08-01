@@ -2064,13 +2064,11 @@ mod tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
-    use crate::api::export::NeptuneProof;
     use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::block::BlockProof;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
@@ -2079,7 +2077,6 @@ mod tests {
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_empty_block;
-    use crate::tests::shared::blocks::invalid_empty_blocks;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -4235,20 +4232,21 @@ mod tests {
         use std::io::Write;
 
         use super::*;
+        use crate::tests::shared::blocks::invalid_empty_blocks_with_proof_size;
         use crate::tests::shared::files::test_helper_data_dir;
         use crate::tests::shared::files::try_fetch_file_from_server;
         use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
 
         async fn state_with_three_big_mocked_blocks(network: Network) -> GlobalStateLock {
             // Ensure more than one file is used to store blocks.
-            const MANY_BLOCKS: usize = 3;
+            const NUM_BLOCKS: usize = 3;
             const BIG_PROOF_LEN: usize = 6_250_000; // ~= 50MB
-            let mut blocks = invalid_empty_blocks(&Block::genesis(network), MANY_BLOCKS, network);
-            let big_bad_proof =
-                BlockProof::SingleProof(NeptuneProof::invalid_with_size(BIG_PROOF_LEN));
-            for block in &mut blocks {
-                block.set_proof(big_bad_proof.clone());
-            }
+            let blocks = invalid_empty_blocks_with_proof_size(
+                &Block::genesis(network),
+                NUM_BLOCKS,
+                network,
+                BIG_PROOF_LEN,
+            );
 
             let peer_count = 0;
             let mut state = mock_genesis_global_state(
