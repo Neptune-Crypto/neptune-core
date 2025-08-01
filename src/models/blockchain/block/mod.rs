@@ -1221,6 +1221,7 @@ pub(crate) mod tests {
 
         pub(crate) fn set_proof(&mut self, proof: BlockProof) {
             self.proof = proof;
+            self.unset_digest();
         }
 
         /// Create a block template with an invalid block proof.
@@ -2025,6 +2026,8 @@ pub(crate) mod tests {
     /// have a test here.
     mod digest_encapsulation {
 
+        use crate::api::export::NeptuneProof;
+
         use super::*;
 
         // test: verify clone + modify does not change original.
@@ -2058,6 +2061,15 @@ pub(crate) mod tests {
                 g2.proof,
             );
             assert_eq!(gblock.hash(), block.hash());
+        }
+
+        #[test]
+        fn hash_depends_on_proof() {
+            let network = Network::Main;
+            let mut block = invalid_empty_block(&Block::genesis(network), network);
+            let original_hash = block.hash();
+            block.set_proof(BlockProof::SingleProof(NeptuneProof::invalid_with_size(65)));
+            assert_ne!(original_hash, block.hash());
         }
 
         // test: verify digest changes after pow is updated.
