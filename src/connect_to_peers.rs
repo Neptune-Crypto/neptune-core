@@ -364,7 +364,7 @@ pub(crate) async fn call_peer(
                     // arguments, and should be warned if this fails.
                     warn!("{msg}");
                 } else {
-                    info!("{msg}");
+                    debug!("{msg}");
                 }
             }
             Ok(stream) => {
@@ -388,7 +388,7 @@ pub(crate) async fn call_peer(
                         if peer_distance == 1 {
                             warn!("{msg}");
                         } else {
-                            info!("{msg}");
+                            debug!("{msg}");
                         }
                     }
                 }

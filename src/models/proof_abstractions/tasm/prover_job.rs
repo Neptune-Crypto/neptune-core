@@ -218,7 +218,7 @@ impl ProverJob {
 
         let padded_height_processor_table = vm_state.cycle_count.next_power_of_two();
 
-        tracing::info!(
+        tracing::debug!(
             "VM program execution finished: padded-height (processor table): {}",
             padded_height_processor_table
         );
@@ -360,7 +360,7 @@ impl ProverJob {
                 match output.status.code() {
                     Some(0) => {
                         let proof: Proof = bincode::deserialize(&output.stdout)?;
-                        tracing::info!(
+                        tracing::debug!(
                             "Generated proof, with padded height: {}",
                             proof.padded_height()
                                 .map(|x| x.to_string())
