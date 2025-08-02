@@ -78,14 +78,18 @@ impl MTree {
 
         // the first layer connects the leafs to the internal nodes, so special
         let range_layer_0 = (1 << (height - 1))..(1 << height);
-        Self::par_merkle_zip(&mut internal_nodes[range_layer_0], &leafs);
+        Self::par_merkle_zip(&mut internal_nodes[range_layer_0], &leafs, cancel_channel);
+
+        if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
+            return Default::default();
+        }
 
         // remaining layers connect internal nodes to internal nodes
         for layer in 1..seq_cutoff_height {
             let parents_start = 1 << (height - 1 - layer);
             let mid_point = 1 << (height - layer);
             let (parents, children) = internal_nodes.split_at_mut(mid_point);
-            Self::par_merkle_zip(&mut parents[parents_start..], children);
+            Self::par_merkle_zip(&mut parents[parents_start..], children, cancel_channel);
 
             if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
                 return Default::default();
@@ -112,13 +116,32 @@ impl MTree {
         }
     }
 
-    fn par_merkle_zip(parents: &mut [Digest], children: &[Digest]) {
-        parents
-            .par_iter_mut()
-            .zip(children.par_chunks(2))
-            .for_each(|(p, ch)| {
-                *p = Tip5::hash_pair(ch[0], ch[1]);
-            });
+    fn par_merkle_zip(
+        parents: &mut [Digest],
+        children: &[Digest],
+        cancel_channel: Option<&dyn Cancelable>,
+    ) {
+        let checkpoint_distance = usize::min(CHECKPOINT_DISTANCE, parents.len());
+        let num_checkpoints = parents.len() / checkpoint_distance;
+        for i in 0..num_checkpoints {
+            parents
+                .par_iter_mut()
+                .skip(checkpoint_distance * i)
+                .take(checkpoint_distance)
+                .zip(
+                    children
+                        .par_chunks(2)
+                        .skip(checkpoint_distance * i)
+                        .take(checkpoint_distance),
+                )
+                .for_each(|(p, ch)| {
+                    *p = Tip5::hash_pair(ch[0], ch[1]);
+                });
+
+            if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
+                return;
+            }
+        }
     }
 
     pub fn root(&self) -> Digest {
@@ -605,7 +628,7 @@ pub(crate) mod tests {
             let mast_auth_paths = rng.random::<PowMastPaths>();
 
             // spawn preprocess task
-            let join_handle = tokio::task::spawn_blocking(async move || {
+            let join_handle = tokio::task::spawn_blocking(move || {
                 Pow::<MERKLE_TREE_HEIGHT>::preprocess(mast_auth_paths, Some(&tx))
             });
 
@@ -622,8 +645,7 @@ pub(crate) mod tests {
             // wait until preprocessing is finished
             let guesser_buffer = join_handle
                 .await
-                .expect("preprocessing should have aborted by now")
-                .await;
+                .expect("preprocessing should have aborted by now");
 
             // assert not too much time passed
             let elapsed = tick.elapsed();
@@ -635,6 +657,47 @@ pub(crate) mod tests {
 
             // assert that preprocessing was indeed aborted
             assert_eq!(guesser_buffer, GuesserBuffer::default());
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn can_cancel_merkle_tree_construction_within_two_seconds() {
+            const MERKLE_TREE_HEIGHT: usize = 29;
+            let num_leafs = 1 << MERKLE_TREE_HEIGHT;
+            let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+            let (start_tx, mut start_rx) = oneshot::channel::<()>();
+
+            // spawn preprocess task
+            let join_handle = tokio::task::spawn_blocking(move || {
+                let leafs = vec![Digest::default(); num_leafs];
+                let internal_nodes = leafs.clone();
+                start_tx.send(()).unwrap();
+                MTree::build_inplace(leafs, internal_nodes, Some(&cancel_tx))
+            });
+
+            // wait until we are sure the task started
+            while start_rx.try_recv().unwrap().is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+
+            // cancel channel
+            cancel_rx.close();
+            let tick = Instant::now();
+
+            // wait until task is finished
+            let mtree = join_handle
+                .await
+                .expect("preprocessing should have aborted by now");
+
+            // assert not too much time passed
+            let elapsed = tick.elapsed();
+            assert!(
+                elapsed < Duration::from_secs(2),
+                "elapsed time between channel-cancellation and task finish: {:?} > 2 s",
+                elapsed
+            );
+
+            // assert that merkle tree construction did not finish
+            assert_eq!(mtree.num_leafs(), 0);
         }
     }
 
