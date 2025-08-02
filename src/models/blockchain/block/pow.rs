@@ -56,7 +56,7 @@ pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
     pub(crate) nonce: Digest,
 }
 
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec, Default)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec, Default, PartialEq, Eq)]
 pub struct PowMastPaths {
     pub(super) pow: [Digest; BlockHeader::MAST_HEIGHT],
     pub(super) header: [Digest; BlockKernel::MAST_HEIGHT],
@@ -130,7 +130,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Display for Pow<MERKLE_TREE_HEIGHT> {
 
 /// Data structure that must be stored in memory for efficient guessing.
 /// Independent of the nonce.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
     merkle_tree: MerkleTree,
 
@@ -423,6 +423,57 @@ pub(crate) mod tests {
                 Ok(()),
                 successful_guess.unwrap().validate(auth_paths, target)
             );
+        }
+    }
+
+    mod async_tests {
+        use std::time::Duration;
+
+        use futures::channel::oneshot;
+        use macro_rules_attr::apply;
+
+        use crate::tests::shared_tokio_runtime;
+
+        use super::*;
+
+        #[apply(shared_tokio_runtime)]
+        async fn can_cancel_preprocess_within_one_second() {
+            const MERKLE_TREE_HEIGHT: usize = 29;
+            let mut rng = rng();
+            let (tx, mut rx) = oneshot::channel::<()>();
+            let mast_auth_paths = rng.random::<PowMastPaths>();
+
+            // spawn preprocess task
+            let join_handle = tokio::task::spawn_blocking(async move || {
+                Pow::<MERKLE_TREE_HEIGHT>::preprocess(mast_auth_paths, Some(&tx))
+            });
+
+            // wait 0.5 millis
+            tokio::time::sleep(Duration::from_micros(500)).await;
+
+            // cancel channel
+            rx.close();
+            let tick = Instant::now();
+
+            // wait 0.5 seconds
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // wait until preprocessing is finished
+            let guesser_buffer = join_handle
+                .await
+                .expect("preprocessing should have aborted by now")
+                .await;
+
+            // assert not too much time passed
+            let elapsed = tick.elapsed();
+            assert!(
+                elapsed < Duration::from_secs(1),
+                "elapsed time between channel-cancellation and task finish: {:?} > 1 s",
+                elapsed
+            );
+
+            // assert that preprocessing was indeed aborted
+            assert_eq!(guesser_buffer, GuesserBuffer::default());
         }
     }
 }
