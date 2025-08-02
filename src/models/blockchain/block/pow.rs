@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::mem::MaybeUninit;
 
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -189,20 +190,36 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         let num_checkpoints: usize = (1 << Self::MERKLE_TREE_HEIGHT) / checkpoint_distance;
 
         // fill the buffer with buds
-        let mut ins = Vec::<Digest>::with_capacity(1 << Self::MERKLE_TREE_HEIGHT);
+        let mut ins = Vec::<MaybeUninit<Digest>>::with_capacity(Self::NUM_LEAFS);
+        // SAFETY:
+        //  - new_len must be less than or equal to [capacity()].
+        //    -> OK because new_len == capacity() == Self::NUM_LEAFS.
+        //  - The elements at old_len..new_len must be initialized.
+        //    -> OK because either
+        //        - all are initialized in the loop below; or
+        //        - we abort early and drop the data structure.
+        unsafe {
+            ins.set_len(Self::NUM_LEAFS);
+        }
         for j in 0..num_checkpoints {
             let range = (j * checkpoint_distance)..((j + 1) * checkpoint_distance);
-            ins.extend(
-                range
-                    .into_par_iter()
-                    .map(|i| Self::bud(commitment, i as u64))
-                    .collect::<Vec<_>>(),
-            );
+
+            range
+                .clone()
+                .into_par_iter()
+                .zip(ins[range].par_iter_mut())
+                .for_each(|(i, bud)| {
+                    bud.write(Self::bud(commitment, i as u64));
+                });
 
             if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
                 return Default::default();
             }
         }
+        // SAFETY:
+        //  - `Vec<MaybeUninit<Digest>>` and `Vec<Digest>` are byte-by-byte
+        //    identical; `MaybeUninit` guarantees this.
+        let mut ins: Vec<Digest> = unsafe { std::mem::transmute(ins) };
 
         // iterate log-many times over the buffer to compute leafs from buds
         let mut outs = ins.clone();
