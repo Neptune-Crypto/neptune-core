@@ -244,6 +244,10 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         }
 
         std::mem::swap(&mut leafs, &mut buds);
+
+        // free memory -- we need those bytes!
+        *buds = vec![];
+
         let merkle_tree = MerkleTree::par_new(leafs).expect("Merkle tree generation must succeeed");
 
         let hash = Tip5::hash_pair(merkle_tree.root(), commitment);
