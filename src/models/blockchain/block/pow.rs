@@ -10,6 +10,7 @@ use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
+use rayon::slice::ParallelSlice;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -17,8 +18,6 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::bfe_array;
-use tasm_lib::twenty_first::prelude::MerkleTree;
-use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
@@ -35,9 +34,127 @@ pub(crate) const POW_MEMORY_PARAMETER: usize = 1 << 10;
 
 pub(crate) const POW_MEMORY_TREE_HEIGHT: usize = POW_MEMORY_PARAMETER.ilog2() as usize;
 
+/// The number of hash steps before checking for channel cancellation.
+const CHECKPOINT_DISTANCE: usize = 1 << 19;
+
 const NUM_INDEX_REPETITIONS: u32 = 63;
 const NUM_BUD_LAYERS: usize = 5; // 5 => 63 Tip5 permutations per leaf
 const BUDS_PER_LEAF: usize = 1 << NUM_BUD_LAYERS;
+
+/// Merkle tree, tailored to the `pow` module.
+///
+/// Note that `twenty-first` has a Merkle tree module that is perfectly adequate
+/// for most applications; you probably want to use that unless in the specific
+/// context of proof-of-work.
+///
+/// Differences relative to
+/// [`twenty-first`'s Merkle tree](twenty_first::prelude::MerkleTree):
+///
+///  - Constructor takes ownership of pre-allocated vector.
+///  - Constructor is interruptible.
+///  - Implements `GetSize`.
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize, Default,
+)]
+pub struct MTree {
+    leafs: Vec<Digest>,
+    internal_nodes: Vec<Digest>,
+}
+
+impl MTree {
+    /// Build a Merkle tree without reallocation.
+    ///
+    /// Takes a vector of `Digest`s of length some power of two and whose second
+    /// half represents the Merkle tree's leafs. Also takes an optional cancel
+    /// channel, which enables mid-process abortion.
+    pub fn build_inplace(
+        leafs: Vec<Digest>,
+        mut internal_nodes: Vec<Digest>,
+        cancel_channel: Option<&dyn Cancelable>,
+    ) -> Self {
+        let height = leafs.len().ilog2() as usize;
+        let num_sequential_layers = usize::min(height, 8);
+        let seq_cutoff_height = usize::max(1, height - num_sequential_layers);
+
+        // the first layer connects the leafs to the internal nodes, so special
+        let range_layer_0 = (1 << (height - 1))..(1 << height);
+        Self::par_merkle_zip(&mut internal_nodes[range_layer_0], &leafs);
+
+        // remaining layers connect internal nodes to internal nodes
+        for layer in 1..seq_cutoff_height {
+            let parents_start = 1 << (height - 1 - layer);
+            let mid_point = 1 << (height - layer);
+            let (parents, children) = internal_nodes.split_at_mut(mid_point);
+            Self::par_merkle_zip(&mut parents[parents_start..], children);
+
+            if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
+                return Default::default();
+            }
+        }
+
+        // do top of tree sequentially
+        for layer in seq_cutoff_height..height {
+            let parents_start = 1 << (height - 1 - layer);
+            let mid_point = 1 << (height - layer);
+            let (parents, children) = internal_nodes.split_at_mut(mid_point);
+            Self::merkle_zip(&mut parents[parents_start..], children);
+        }
+
+        Self {
+            leafs,
+            internal_nodes,
+        }
+    }
+
+    fn merkle_zip(parents: &mut [Digest], children: &[Digest]) {
+        for (p, ch) in parents.iter_mut().zip(children.chunks(2)) {
+            *p = Tip5::hash_pair(ch[0], ch[1]);
+        }
+    }
+
+    fn par_merkle_zip(parents: &mut [Digest], children: &[Digest]) {
+        parents
+            .par_iter_mut()
+            .zip(children.par_chunks(2))
+            .for_each(|(p, ch)| {
+                *p = Tip5::hash_pair(ch[0], ch[1]);
+            });
+    }
+
+    pub fn root(&self) -> Digest {
+        self.internal_nodes[1]
+    }
+
+    pub fn path(&self, index: usize) -> Vec<Digest> {
+        let mut running_index = index + self.leafs.len();
+        let mut path = vec![self.leafs[index ^ 1]];
+        for _ in 1..(self.leafs.len().ilog2()) {
+            running_index >>= 1;
+            path.push(self.internal_nodes[running_index ^ 1]);
+        }
+        path
+    }
+
+    pub fn verify(root: Digest, index: usize, path: &[Digest], element: Digest) -> bool {
+        // if index out of bounds, reject early
+        if index > 1 << path.len() {
+            return false;
+        }
+
+        let mut running_index = index;
+        let mut running_digest = element;
+        for sibling in path {
+            if running_index & 1 == 1 {
+                running_digest = Tip5::hash_pair(*sibling, running_digest);
+            } else {
+                running_digest = Tip5::hash_pair(running_digest, *sibling);
+            }
+            running_index >>= 1;
+        }
+
+        running_digest == root
+    }
+}
 
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
@@ -133,7 +250,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Display for Pow<MERKLE_TREE_HEIGHT> {
 /// Independent of the nonce.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
-    merkle_tree: MerkleTree,
+    merkle_tree: MTree,
 
     hash: Digest,
 
@@ -144,7 +261,7 @@ pub struct GuesserBuffer<const MERKLE_TREE_HEIGHT: usize> {
 impl<const MERKLE_TREE_HEIGHT: usize> Default for GuesserBuffer<MERKLE_TREE_HEIGHT> {
     fn default() -> Self {
         Self {
-            merkle_tree: MerkleTree::sequential_new(&[Digest::default()]).unwrap(),
+            merkle_tree: MTree::default(),
             hash: Default::default(),
             mast_auth_paths: Default::default(),
         }
@@ -164,7 +281,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             .map(|i| Self::bud(commitment, i % Self::NUM_LEAFS as u64))
             .collect_vec();
 
-        MerkleTree::sequential_new(&buds).unwrap().root()
+        let internal_nodes = buds.clone();
+        MTree::build_inplace(buds, internal_nodes, None).root()
     }
 
     fn indices(hash: Digest, nonce: Digest) -> (u64, u64) {
@@ -173,8 +291,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             indexer = Tip5::hash_pair(indexer, Digest::default());
         }
 
-        let index_a = indexer.values()[0].value() % (1_u64 << MERKLE_TREE_HEIGHT);
-        let index_b = indexer.values()[1].value() % (1_u64 << MERKLE_TREE_HEIGHT);
+        let index_a = indexer.values()[0].value() % (1_u64 << Self::MERKLE_TREE_HEIGHT);
+        let index_b = indexer.values()[1].value() % (1_u64 << Self::MERKLE_TREE_HEIGHT);
         (index_a, index_b)
     }
 
@@ -186,7 +304,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         let commitment = mast_auth_paths.commit();
 
         // number steps between checking channel cancellation
-        let checkpoint_distance: usize = usize::min(1 << (Self::MERKLE_TREE_HEIGHT - 1), 1 << 18);
+        let checkpoint_distance: usize =
+            usize::min(1 << (Self::MERKLE_TREE_HEIGHT - 1), CHECKPOINT_DISTANCE);
         let num_checkpoints: usize = (1 << Self::MERKLE_TREE_HEIGHT) / checkpoint_distance;
 
         // fill the buffer with buds
@@ -225,6 +344,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         let mut outs = ins.clone();
         let mut buds = &mut ins;
         let mut leafs = &mut outs;
+        let mut num_swaps = 0;
         for i in 0..NUM_BUD_LAYERS {
             for j in 0..num_checkpoints {
                 let range = (j * checkpoint_distance)..((j + 1) * checkpoint_distance);
@@ -241,14 +361,17 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
                 }
             }
             std::mem::swap(&mut leafs, &mut buds);
+            num_swaps += 1;
         }
 
         std::mem::swap(&mut leafs, &mut buds);
+        num_swaps += 1;
 
-        // free memory -- we need those bytes!
-        *buds = vec![];
-
-        let merkle_tree = MerkleTree::par_new(leafs).expect("Merkle tree generation must succeeed");
+        let merkle_tree = if num_swaps & 1 == 1 {
+            MTree::build_inplace(ins, outs, cancel_channel)
+        } else {
+            MTree::build_inplace(outs, ins, cancel_channel)
+        };
 
         let hash = Tip5::hash_pair(merkle_tree.root(), commitment);
 
@@ -268,17 +391,15 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
 
         let (index_a, index_b) = Self::indices(buffer.hash, nonce);
 
-        let path_a: [Digest; MERKLE_TREE_HEIGHT] = buffer
+        let path_a = buffer
             .merkle_tree
-            .authentication_structure(&[index_a as usize])
-            .unwrap()
+            .path(index_a as usize)
             .try_into()
             .unwrap();
 
         let path_b = buffer
             .merkle_tree
-            .authentication_structure(&[index_b as usize])
-            .unwrap()
+            .path(index_b as usize)
             .try_into()
             .unwrap();
 
@@ -305,22 +426,13 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         let commitment = auth_paths.commit();
         let buffer_hash = Tip5::hash_pair(self.root, commitment);
         let (index_a, index_b) = Self::indices(buffer_hash, self.nonce);
-
-        let path_a = MerkleTreeInclusionProof {
-            tree_height: MERKLE_TREE_HEIGHT as u32,
-            indexed_leafs: [(index_a as usize, Self::leaf(commitment, index_a))].to_vec(),
-            authentication_structure: self.path_a.to_vec(),
-        };
-        if !path_a.verify(self.root) {
+        let leaf_a = Self::leaf(commitment, index_a);
+        if !MTree::verify(self.root, index_a as usize, &self.path_a, leaf_a) {
             return Err(PowValidationError::PathAInvalid);
         }
 
-        let path_b = MerkleTreeInclusionProof {
-            tree_height: MERKLE_TREE_HEIGHT as u32,
-            indexed_leafs: [(index_b as usize, Self::leaf(commitment, index_b))].to_vec(),
-            authentication_structure: self.path_b.to_vec(),
-        };
-        if !path_b.verify(self.root) {
+        let leaf_b = Self::leaf(commitment, index_b);
+        if !MTree::verify(self.root, index_b as usize, &self.path_b, leaf_b) {
             return Err(PowValidationError::PathBInvalid);
         }
 
@@ -377,6 +489,16 @@ pub(crate) mod tests {
 
     use super::*;
 
+    impl MTree {
+        fn num_leafs(&self) -> usize {
+            self.leafs.len()
+        }
+
+        fn leaf(&self, index: usize) -> Digest {
+            self.leafs[index]
+        }
+    }
+
     #[test]
     fn leafs_agree_with_bud_trees() {
         const MERKLE_TREE_HEIGHT: usize = 10;
@@ -387,7 +509,7 @@ pub(crate) mod tests {
 
         let index = rng.random_range(0..MERKLE_TREE_NUM_LEAFS);
         let expensive_leaf = Pow::<MERKLE_TREE_HEIGHT>::leaf(auth_paths.commit(), index as u64);
-        let amortized_leaf = buffer.merkle_tree.leaf(index).unwrap();
+        let amortized_leaf = buffer.merkle_tree.leaf(index);
         assert_eq!(amortized_leaf, expensive_leaf);
     }
 
@@ -513,6 +635,159 @@ pub(crate) mod tests {
 
             // assert that preprocessing was indeed aborted
             assert_eq!(guesser_buffer, GuesserBuffer::default());
+        }
+    }
+
+    mod merkle_tree_tests {
+        use super::*;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+        use tasm_lib::twenty_first::prelude::MerkleTree;
+
+        #[test]
+        fn roots_agree() {
+            let mut rng = rng();
+            let height = 10;
+            let num_leafs = 1 << height;
+            let leafs = (0..num_leafs).map(|_| rng.random::<Digest>()).collect_vec();
+            let merkle_tree =
+                MerkleTree::sequential_new(&leafs).expect("must not forget to unwrap");
+            let internal_nodes = vec![Digest::default(); num_leafs];
+            let mtree = MTree::build_inplace(leafs, internal_nodes, None);
+
+            assert_eq!(mtree.root(), merkle_tree.root());
+        }
+
+        #[test]
+        fn paths_agree() {
+            let mut rng = rng();
+            let height = 10;
+            let num_leafs = 1 << height;
+            let leafs = (0..num_leafs).map(|_| rng.random::<Digest>()).collect_vec();
+            let index = rng.random_range(0..num_leafs);
+            let merkle_tree =
+                MerkleTree::sequential_new(&leafs).expect("must not forget to unwrap");
+            let internal_nodes = vec![Digest::default(); num_leafs];
+            let mtree = MTree::build_inplace(leafs, internal_nodes, None);
+
+            assert_eq!(
+                mtree.path(index),
+                merkle_tree
+                    .authentication_structure(&[index])
+                    .expect("must not forget to unwrap")
+            );
+        }
+
+        fn valid_root_index_path_element_tuple(
+            tree_height: usize,
+            seed: [u8; 32],
+        ) -> (Digest, usize, Vec<Digest>, Digest) {
+            let mut rng = StdRng::from_seed(seed);
+            let num_leafs = 1 << tree_height;
+
+            let leafs = (0..num_leafs).map(|_| rng.random::<Digest>()).collect_vec();
+            let index = rng.random_range(0..num_leafs);
+            let element = leafs[index];
+            let internal_nodes = vec![Digest::default(); num_leafs];
+            let mtree = MTree::build_inplace(leafs, internal_nodes, None);
+            let root = mtree.root();
+            let path = mtree.path(index);
+
+            (root, index, path, element)
+        }
+
+        #[test]
+        fn can_verify() {
+            let mut rng = rng();
+            for height in [1, 5, 10] {
+                let (root, index, path, element) =
+                    valid_root_index_path_element_tuple(height, rng.random());
+                assert!(MTree::verify(root, index, &path, element));
+            }
+        }
+
+        #[test]
+        fn verify_fails_on_wrong_root() {
+            let mut rng = rng();
+            let height = 10;
+            let (_root, index, path, element) =
+                valid_root_index_path_element_tuple(height, rng.random());
+
+            let root = rng.random();
+
+            assert!(!MTree::verify(root, index, &path, element));
+        }
+
+        #[test]
+        fn verify_fails_on_wrong_index() {
+            let mut rng = rng();
+            let height = 10;
+            let (root, _index, path, element) =
+                valid_root_index_path_element_tuple(height, rng.random());
+
+            let index = rng.random_range(0..(1 << height));
+
+            assert!(!MTree::verify(root, index, &path, element));
+        }
+
+        #[test]
+        fn verify_fails_on_index_out_of_bounds() {
+            let mut rng = rng();
+            let height = 10;
+            let (root, index, path, element) =
+                valid_root_index_path_element_tuple(height, rng.random());
+
+            let index = index + (1 << height);
+
+            assert!(!MTree::verify(root, index, &path, element));
+        }
+
+        #[test]
+        fn verify_fails_on_wrong_path() {
+            let mut rng = rng();
+            let height = 10;
+            let (root, index, mut path, element) =
+                valid_root_index_path_element_tuple(height, rng.random());
+
+            path[rng.random_range(0..height)] = rng.random();
+
+            assert!(!MTree::verify(root, index, &path, element));
+        }
+
+        #[test]
+        fn verify_fails_on_path_too_long() {
+            let mut rng = rng();
+            let height = 10;
+            let (root, index, mut path, element) =
+                valid_root_index_path_element_tuple(height, rng.random());
+
+            path.push(rng.random());
+
+            assert!(!MTree::verify(root, index, &path, element));
+        }
+
+        #[test]
+        fn verify_fails_on_path_too_short() {
+            let mut rng = rng();
+            let height = 10;
+            let (root, index, mut path, element) =
+                valid_root_index_path_element_tuple(height, rng.random());
+
+            path.pop();
+
+            assert!(!MTree::verify(root, index, &path, element));
+        }
+
+        #[test]
+        fn verify_fails_on_wrong_element() {
+            let mut rng = rng();
+            let height = 10;
+            let (root, index, path, _element) =
+                valid_root_index_path_element_tuple(height, rng.random());
+
+            let element = rng.random();
+
+            assert!(!MTree::verify(root, index, &path, element));
         }
     }
 }
