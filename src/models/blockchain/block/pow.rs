@@ -184,28 +184,46 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         // Commitment to all the fields in the block that are not pow
         let commitment = mast_auth_paths.commit();
 
-        // iterate log-many times over the buffer to compute leafs from buds
-        let mut ins = (0..(1 << MERKLE_TREE_HEIGHT))
-            .into_par_iter()
-            .map(|i| Self::bud(commitment, i as u64))
-            .collect::<Vec<_>>();
+        // number steps between checking channel cancellation
+        let checkpoint_distance: usize = usize::min(1 << (Self::MERKLE_TREE_HEIGHT - 1), 1 << 18);
+        let num_checkpoints: usize = (1 << Self::MERKLE_TREE_HEIGHT) / checkpoint_distance;
 
-        if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
-            return Default::default();
-        }
-
-        let mut outs = ins.clone();
-        let mut buds = &mut ins;
-        let mut leafs = &mut outs;
-        for i in 0..NUM_BUD_LAYERS {
-            leafs.par_iter_mut().enumerate().for_each(|(j, leaf)| {
-                *leaf = Tip5::hash_pair(buds[j], buds[(j + (1 << i)) % Self::NUM_LEAFS]);
-            });
-            std::mem::swap(&mut leafs, &mut buds);
+        // fill the buffer with buds
+        let mut ins = Vec::<Digest>::with_capacity(1 << Self::MERKLE_TREE_HEIGHT);
+        for j in 0..num_checkpoints {
+            let range = (j * checkpoint_distance)..((j + 1) * checkpoint_distance);
+            ins.extend(
+                range
+                    .into_par_iter()
+                    .map(|i| Self::bud(commitment, i as u64))
+                    .collect::<Vec<_>>(),
+            );
 
             if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
                 return Default::default();
             }
+        }
+
+        // iterate log-many times over the buffer to compute leafs from buds
+        let mut outs = ins.clone();
+        let mut buds = &mut ins;
+        let mut leafs = &mut outs;
+        for i in 0..NUM_BUD_LAYERS {
+            for j in 0..num_checkpoints {
+                let range = (j * checkpoint_distance)..((j + 1) * checkpoint_distance);
+                range
+                    .clone()
+                    .into_par_iter()
+                    .zip(leafs[range].par_iter_mut())
+                    .for_each(|(k, leaf)| {
+                        *leaf = Tip5::hash_pair(buds[k], buds[(k + (1 << i)) % Self::NUM_LEAFS]);
+                    });
+
+                if cancel_channel.is_some_and(|channel| channel.is_canceled()) {
+                    return Default::default();
+                }
+            }
+            std::mem::swap(&mut leafs, &mut buds);
         }
 
         std::mem::swap(&mut leafs, &mut buds);
