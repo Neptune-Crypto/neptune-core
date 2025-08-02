@@ -47,8 +47,7 @@ const BUDS_PER_LEAF: usize = 1 << NUM_BUD_LAYERS;
 /// for most applications; you probably want to use that unless in the specific
 /// context of proof-of-work.
 ///
-/// Differences relative to
-/// [`twenty-first`'s Merkle tree](twenty_first::prelude::MerkleTree):
+/// Differences relative to `twenty-first`'s Merkle tree:
 ///
 ///  - Constructor takes ownership of pre-allocated vector.
 ///  - Constructor is interruptible.
