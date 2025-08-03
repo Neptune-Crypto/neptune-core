@@ -34,7 +34,11 @@ live.
 - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development*
   branch, skip this step.)
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`):
-  `cargo install --locked --path .` (needs at least 3 GB of RAM and a few minutes)
+  ```
+  cargo install --locked --path neptune-core
+  cargo install --locked --path neptune-cli
+  cargo install --locked --path neptune-dashboard
+  ```
 
 > [!IMPORTANT]
 > Any branch except `release` is considered an _unstable development_ branch. Should you choose to use
@@ -54,8 +58,12 @@ Windows should just work out-of-the-box with cargo build etc.
 - Enter the repository: `cd neptune-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for an *unstable development*
   branch, skip this step.)
-
-- Run `cargo install --locked --path .`
+- Build for release and put the binaries in your local path (`~/.cargo/bin/`):
+  ```
+  cargo install --locked --path neptune-core
+  cargo install --locked --path neptune-cli
+  cargo install --locked --path neptune-dashboard
+  ```
 
 ## Running & Connecting
 
