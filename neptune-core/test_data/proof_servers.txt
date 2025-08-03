@@ -1,3 +1,0 @@
-http://neptunefundamentals.org:42580/
-http://explorer.neptune.cash:42580/
-http://51.158.203.7:42580/
