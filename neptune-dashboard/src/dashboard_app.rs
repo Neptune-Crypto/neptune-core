@@ -144,6 +144,7 @@ impl fmt::Display for MenuItem {
 
 #[derive(Debug, Clone)]
 pub enum ConsoleIO {
+    #[allow(dead_code)]
     Output(String),
     InputRequested(String),
     InputSupplied(String),

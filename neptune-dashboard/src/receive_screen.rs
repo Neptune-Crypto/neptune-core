@@ -29,12 +29,6 @@ use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Sign {
-    In,
-    Out,
-}
-
 #[derive(Debug, Clone)]
 pub struct ReceiveScreen {
     active: bool,

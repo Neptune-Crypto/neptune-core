@@ -1,3 +1,13 @@
+mod address_screen;
+mod dashboard_app;
+mod history_screen;
+mod mempool_screen;
+mod overview_screen;
+mod peers_screen;
+mod receive_screen;
+mod screen;
+mod send_screen;
+
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::process;
@@ -6,8 +16,8 @@ use clap::Parser;
 use crossterm::event::DisableMouseCapture;
 use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::LeaveAlternateScreen;
-use dashboard_src::dashboard_app::Config;
-use dashboard_src::dashboard_app::DashboardApp;
+use dashboard_app::Config;
+use dashboard_app::DashboardApp;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
@@ -15,8 +25,6 @@ use neptune_cash::rpc_server::RPCClient;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
-
-pub mod dashboard_src;
 
 #[tokio::main]
 async fn main() {
