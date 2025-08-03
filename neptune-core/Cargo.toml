@@ -13,13 +13,6 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 default-run = "neptune-core"
 
-# for `dist`-generated Windows installer “msi”
-[package.metadata.wix]
-upgrade-guid = "A6452C01-7126-49A5-A6BD-7D440E71737B"
-path-guid = "8D2A09BD-A068-42BA-B4C7-9DD7AE1F9B94"
-license = false
-eula = false
-
 [features]
 
 # logs write-lock acquisitions that are held over 100 millis.  requires nightly.
