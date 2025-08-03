@@ -222,10 +222,7 @@ impl PeersScreen {
     ///
     /// In particular we handle Up/Down keypress for scrolling
     /// the history table.
-    pub fn handle(
-        &mut self,
-        event: DashboardEvent,
-    ) -> Result<Option<DashboardEvent>, Box<dyn std::error::Error>> {
+    pub fn handle(&mut self, event: DashboardEvent) -> Option<DashboardEvent> {
         let mut escalate_event = None;
 
         if self.in_focus {
@@ -237,7 +234,7 @@ impl PeersScreen {
                         // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
                         KeyCode::Char(c) => {
                             if self.set_sort_column(c) {
-                                return Ok(None);
+                                return None;
                             }
                         }
 
@@ -248,7 +245,7 @@ impl PeersScreen {
                 }
             }
         }
-        Ok(escalate_event)
+        escalate_event
     }
 }
 

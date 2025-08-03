@@ -188,10 +188,7 @@ impl HistoryScreen {
     ///
     /// In particular we handle Up/Down keypress for scrolling
     /// the history table.
-    pub fn handle(
-        &mut self,
-        event: DashboardEvent,
-    ) -> Result<Option<DashboardEvent>, Box<dyn std::error::Error>> {
+    pub fn handle(&mut self, event: DashboardEvent) -> Option<DashboardEvent> {
         let mut escalate_event = None;
 
         if self.in_focus {
@@ -208,7 +205,7 @@ impl HistoryScreen {
                 }
             }
         }
-        Ok(escalate_event)
+        escalate_event
     }
 }
 

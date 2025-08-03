@@ -32,3 +32,6 @@ tasm-lib = "0.50.0"
 humantime = "2.1.0"
 
 [dev-dependencies]
+
+[lints]
+workspace = true

@@ -1,5 +1,4 @@
 use std::cmp::max;
-use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -181,7 +180,7 @@ impl SendScreen {
         &mut self,
         event: DashboardEvent,
         refresh_tx: tokio::sync::mpsc::Sender<()>,
-    ) -> Result<Option<DashboardEvent>, Box<dyn Error>> {
+    ) -> Option<DashboardEvent> {
         let mut escalate_event = None;
         if let Ok(mut reset_me_mutex_guard) = self.reset_me.try_lock() {
             match *reset_me_mutex_guard {
@@ -212,11 +211,11 @@ impl SendScreen {
                             if let Ok(mut own_focus) = self.focus.try_lock() {
                                 match own_focus.to_owned() {
                                     SendScreenWidget::Address => {
-                                        return Ok(Some(DashboardEvent::ConsoleMode(
+                                        return Some(DashboardEvent::ConsoleMode(
                                             ConsoleIO::InputRequested(
                                                 "Please enter recipient address:\n".to_string(),
                                             ),
-                                        )));
+                                        ));
                                     }
                                     SendScreenWidget::Amount => {
                                         *own_focus = SendScreenWidget::Fee;
@@ -331,7 +330,7 @@ impl SendScreen {
                 }
             }
         }
-        Ok(escalate_event)
+        escalate_event
     }
 }
 

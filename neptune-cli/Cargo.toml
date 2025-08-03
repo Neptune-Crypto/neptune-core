@@ -33,3 +33,6 @@ tarpc = { version = "^0.34", features = [
 tokio = { version = "1.41", features = ["full", "tracing"] }
 
 [dev-dependencies]
+
+[lints]
+workspace = true
