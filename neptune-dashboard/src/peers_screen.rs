@@ -312,13 +312,11 @@ impl Widget for PeersScreen {
 
         let peer_count_buf = if self.in_focus {
             format!(
-                "Peers connected: {}           sort-keys: i, v, c, s, p, r",
-                num_peers
+                "Peers connected: {num_peers}           sort-keys: i, v, c, s, p, r"
             )
         } else {
             format!(
-                "Peers connected: {}           press enter for options",
-                num_peers
+                "Peers connected: {num_peers}           press enter for options"
             )
         };
 

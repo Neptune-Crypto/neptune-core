@@ -66,7 +66,7 @@ async fn main() {
     let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory).await {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("Unable to load RPC auth cookie. error = {}", e);
+            eprintln!("Unable to load RPC auth cookie. error = {e}");
             process::exit(2)
         }
     }
@@ -94,11 +94,11 @@ async fn main() {
 
     match res {
         Err(err) => {
-            eprintln!("{:?}", err);
+            eprintln!("{err:?}");
             process::exit(1);
         }
         Ok(output) => {
-            print!("{}", output);
+            print!("{output}");
         }
     }
 }
