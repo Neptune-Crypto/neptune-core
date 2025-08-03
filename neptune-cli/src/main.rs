@@ -829,9 +829,7 @@ async fn main() -> Result<()> {
                     Some((sanction, _timestamp)) => sanction.to_string(),
                     None => String::default(),
                 };
-                println!(
-                    "{ip}\nstanding: {standing}\nlatest sanction: {latest_sanction_str} \n\n"
-                );
+                println!("{ip}\nstanding: {standing}\nlatest sanction: {latest_sanction_str} \n\n");
             }
         }
         Command::TipDigest => {
