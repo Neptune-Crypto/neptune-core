@@ -112,7 +112,7 @@ impl ConsensusProgram for CollectTypeScripts {
         let field_with_size_salted_output_utxos =
             field_with_size!(CollectTypeScriptsWitness::salted_output_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
-        let field_coin = field!(Utxo::coins);
+        let field_coins = field!(Utxo::coins);
         let field_type_script_hash = field!(Coin::type_script_hash);
         let contains = library.import(Box::new(Contains::new(DataType::Digest)));
         let new_list = library.import(Box::new(New));
@@ -247,6 +247,7 @@ impl ConsensusProgram for CollectTypeScripts {
 
             {&DataType::Digest.compare()}
             assert error_id {Self::FIRST_TYPE_SCRIPT_HASH_NOT_NATIVE_CURRENCY}
+            // _ *ctsw *type_script_hashes[0] len
 
 
             /* Write all hashes to std-out */
@@ -272,26 +273,26 @@ impl ConsensusProgram for CollectTypeScripts {
                 skiz return
                 // _ *type_script_hashes N i *utxos[i]_si
 
-                dup 0 addi 1 {&field_coin}
-                // _ *type_script_hashes N i *utxos[i]_si *coin
+                dup 0 addi 1 {&field_coins}
+                // _ *type_script_hashes N i *utxos[i]_si *coins
 
                 read_mem 1 addi 2
-                // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si
+                // _ *type_script_hashes N i *utxos[i]_si len *coins[0]_si
 
                 /* Verify not too many coins */
                 push {MAX_NUM_COINS_PER_UTXOS}
                 dup 2
                 lt
-                // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si (max_num_coins > len)
+                // _ *type_script_hashes N i *utxos[i]_si len *coins[0]_si (max_num_coins > len)
 
                 assert error_id {Self::TOO_MANY_COINS}
-                // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si
+                // _ *type_script_hashes N i *utxos[i]_si len *coins[0]_si
 
                 push 0 swap 1
-                // _ *type_script_hashes N i *utxos[i]_si len 0 *coin[0]_si
+                // _ *type_script_hashes N i *utxos[i]_si len 0 *coins[0]_si
 
                 call {collect_type_script_hashes_from_coins}
-                // _ *type_script_hashes N i *utxos[i]_si len len *coin[len]_si
+                // _ *type_script_hashes N i *utxos[i]_si len len *coins[len]_si
 
 
                 /* Ensure pointer is inside allowed ND-memory region */
@@ -618,13 +619,18 @@ mod tests {
     }
 
     #[test]
-    fn derived_edge_case_witnesses_generate_accepting_programs_unit() {
-        let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        prop(primitive_witness).expect("");
+    fn small_transaction_unit() {
+        for num_inputs in 0..=2 {
+            for num_outputs in 0..=2 {
+                let mut test_runner = TestRunner::deterministic();
+                let primitive_witness =
+                    PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                        .new_tree(&mut test_runner)
+                        .unwrap()
+                        .current();
+                prop(primitive_witness).unwrap();
+            }
+        }
     }
 
     #[test]
@@ -639,7 +645,7 @@ mod tests {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-        prop(primitive_witness).expect("");
+        prop(primitive_witness).unwrap();
     }
 
     #[test]
