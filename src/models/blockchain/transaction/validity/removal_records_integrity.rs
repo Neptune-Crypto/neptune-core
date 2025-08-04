@@ -690,7 +690,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let utxo_hash_alloc = library.kmalloc(digest_stack_size);
 
         let for_all_utxos_loop = triton_asm! {
-            // INVARIANT: _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+            // INVARIANT: _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
             {for_all_utxos}:
                 /*
                     1. Check loop stop-condition
@@ -708,10 +708,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 /* 1. */
                 dup 3 dup 3 eq
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl(num_utxos == i)
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl (num_utxos == i)
 
                 skiz return
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 2. */
@@ -719,51 +719,51 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 read_mem 1
                 addi 2
                 swap 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *utxos[i] utxos[i]_size
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *utxos[i] utxos[i]_size
 
                 call {hash_varlen}
                 hint utxo_hash = stack[0..5]
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [utxo_hash]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [utxo_hash]
 
                 push {utxo_hash_alloc.write_address()}
                 write_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 3. */
                 divine {u64_stack_size}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
 
                 push {aocl_leaf_index_alloc.write_address()}
                 write_mem {u64_stack_size}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 4. */
                 divine {Digest::LEN}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [receiver_preimage]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [receiver_preimage]
 
                 push {receiver_preimage_alloc.write_address()}
                 write_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 5. */
                 divine {Digest::LEN}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [sender_randomness]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [sender_randomness]
 
                 push {sender_randomness_alloc.write_address()}
                 write_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 6. */
                 dup 0
                 {&field_peaks}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks
 
                 push 0
                 push 0
@@ -773,135 +773,135 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 push {receiver_preimage_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [default] [receiver_preimage]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [default] [receiver_preimage]
 
                 hash
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest]
 
                 push {sender_randomness_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
                 push {utxo_hash_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
                 call {ms_commit}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment]
 
 
                 /* 7. */
                 dup 6 {&field_mmr_num_leafs}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] *num_leafs
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] *num_leafs
 
                 addi 1 read_mem {u64_stack_size} pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
                 push {aocl_leaf_index_alloc.read_address()}
                 read_mem {u64_stack_size}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
                 call {mmr_verify}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 8. */
                 push {aocl_leaf_index_alloc.read_address()}
                 read_mem {u64_stack_size}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
 
                 push {receiver_preimage_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage]
 
                 push {sender_randomness_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness]
 
                 push {utxo_hash_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness] [utxo_hash]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness] [utxo_hash]
 
                 call {compute_absolute_indices}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *absolute_indices
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl *absolute_indices
 
                 call {hash_absolute_indices}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices]
 
                 /* 9. */
                 dup 9
                 addi 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *rrs[i]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *rrs[i]
 
                 {&field_indices}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *claimed_indices[i]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *claimed_indices[i]
 
                 call {hash_absolute_indices}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices_h] [claimed_indices_h]
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices_h] [claimed_indices_h]
 
                 {&compare_digests}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl (computed_bloom_indices_h == claimed_indices_h)
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl (computed_bloom_indices_h == claimed_indices_h)
 
                 assert error_id {COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 10. */
                 swap 1
                 read_mem 1
-                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1)
+                // _ *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1)
 
                 push {MAX_JUMP_LENGTH}
-                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1) MAX_JUMP_LEN
+                // _ *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1) MAX_JUMP_LEN
 
                 dup 2
                 lt
-                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1) (utxos[i]_si < MAX_JUMP_LEN)
+                // _ *rrs[i]_si num_utxos i *aocl utxos[i]_si (*utxos[i]_si-1) (utxos[i]_si < MAX_JUMP_LEN)
                 assert error_id {JUMP_OUT_OF_BOUNDS}
 
                 addi 2
-                // _ *witness *rrs[i]_si num_utxos i *aocl utxos[i]_si *utxos[i]
+                // _ *rrs[i]_si num_utxos i *aocl utxos[i]_si *utxos[i]
 
                 add
-                // _ *witness *rrs[i]_si num_utxos i *aocl *utxos[i+1]_si
+                // _ *rrs[i]_si num_utxos i *aocl *utxos[i+1]_si
 
                 swap 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i + 1]_si *aocl
+                // _ *rrs[i]_si num_utxos i *utxos[i + 1]_si *aocl
 
                 swap 2
                 addi 1
                 swap 2
-                // _ *witness *rrs[i]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
+                // _ *rrs[i]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
 
                 swap 4
                 read_mem 1
-                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1)
+                // _ *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1)
 
                 push {MAX_JUMP_LENGTH}
-                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1) MAX_JUMP_LENGTH
+                // _ *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1) MAX_JUMP_LENGTH
 
                 dup 2
                 lt
-                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1) (rrs[i]_si < MAX_JUMP_LENGTH)
+                // _ *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1) (rrs[i]_si < MAX_JUMP_LENGTH)
 
                 assert error_id {JUMP_OUT_OF_BOUNDS}
-                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1)
+                // _ *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si (*rrs[i]_si-1)
 
                 addi 2
-                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si *rrs[i]
+                // _ *aocl num_utxos (i + 1) *utxos[i + 1]_si rrs[i]_si *rrs[i]
 
                 add
-                // _ *witness *aocl num_utxos (i + 1) *utxos[i + 1]_si *rrs[i+1]_si
+                // _ *aocl num_utxos (i + 1) *utxos[i + 1]_si *rrs[i+1]_si
 
                 swap 4
-                // _ *witness *rrs[i + 1]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
+                // _ *rrs[i + 1]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
 
                 recurse
         };
@@ -1051,7 +1051,6 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseResult;
     use proptest::test_runner::TestRunner;
-    use strum::EnumCount;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use test_strategy::proptest;
 
@@ -1096,7 +1095,7 @@ mod tests {
                 txk_digest,
                 TransactionKernelField::MutatorSetHash as u32,
                 Hash::hash(&msah),
-                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+                TransactionKernel::MAST_HEIGHT as u32,
             );
 
             // authenticate divined removal records against txk mast hash
@@ -1105,7 +1104,7 @@ mod tests {
                 txk_digest,
                 TransactionKernelField::Inputs as u32,
                 removal_records_digest,
-                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+                TransactionKernel::MAST_HEIGHT as u32,
             );
 
             // authenticate coinbase against kernel mast hash
@@ -1115,16 +1114,10 @@ mod tests {
                 txk_digest,
                 TransactionKernelField::Coinbase as u32,
                 coinbase_leaf,
-                TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+                TransactionKernel::MAST_HEIGHT as u32,
             );
 
-            // Assert that a coinbase transaction has no inputs. This, combined with
-            // a potential future softfork requiring each block to have at least one
-            // input in its transaction, forces the miner to prove at least one
-            // execution of a `Merge` which removes any incentive to mine empty
-            // blocks. Mining empty blocks could otherwise be beneficial since it
-            // allows the miner to complete the proofs faster and get to the
-            // guessing part as soon as possible, to the detriment of the network.
+            // Assert that a coinbase transaction has no inputs.
             assert!(coinbase.is_none() || input_utxos.is_empty());
 
             // iterate over all input UTXOs
