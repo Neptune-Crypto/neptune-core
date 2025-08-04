@@ -249,8 +249,8 @@ pub struct Args {
     #[clap(long, default_value = "1000", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
     pub(crate) sync_mode_threshold: usize,
 
-    /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
-    #[structopt(long)]
+    /// IPs of nodes to connect to, e.g.: --peer 8.8.8.8:9798 --peer 8.8.4.4:1337.
+    #[structopt(long = "peer")]
     pub peers: Vec<SocketAddr>,
 
     /// Specify network, `main`, `alpha`, `beta`, `testnet`, or `regtest`

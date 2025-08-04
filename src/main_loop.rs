@@ -1051,7 +1051,7 @@ impl MainLoopHandler {
 
                 // filter out CLI peers
                 let disconnect_candidates =
-                    all_peers.filter(|p| !global_state.cli_peers().contains(p.0));
+                    all_peers.filter(|p| !global_state.cli().peers.contains(p.0));
 
                 // find the one with the oldest connection
                 let longest_lived_peer = disconnect_candidates.min_by(

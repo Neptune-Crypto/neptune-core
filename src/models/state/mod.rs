@@ -1883,11 +1883,6 @@ impl GlobalState {
         &self.cli
     }
 
-    /// Return the list of peers that were supplied as CLI arguments.
-    pub(crate) fn cli_peers(&self) -> Vec<SocketAddr> {
-        self.cli().peers.clone()
-    }
-
     pub(crate) fn proving_capability(&self) -> TxProvingCapability {
         self.cli().proving_capability()
     }
