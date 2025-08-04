@@ -166,7 +166,7 @@ impl ConsensusProgram for CollectLockScripts {
                 add
                 // _ N i *utxos[i+1]_si
 
-                swap 1 push 1 add swap 1
+                swap 1 addi 1 swap 1
                 // _ N (i+1) *utxos[i+1]_si
 
                 recurse
