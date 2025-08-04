@@ -1694,11 +1694,11 @@ pub(crate) mod tests {
             .map(|(_receiving_address, amount)| *amount)
             .sum::<NativeCurrencyAmount>();
 
-        assert_eq!(premine_plus_claims_pool, premine_max_size + claims_pool);
+        assert_eq!(premine_max_size + claims_pool, premine_plus_claims_pool);
         assert!(
             premine_max_size.to_nau_f64() / asymptotic_total_cap.to_nau_f64() < 0.0198f64,
             "Premine must be less than or equal to promised"
-        )
+        );
     }
 
     mod block_is_valid {

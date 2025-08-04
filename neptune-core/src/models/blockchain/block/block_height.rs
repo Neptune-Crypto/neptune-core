@@ -212,47 +212,53 @@ mod tests {
             .unwrap();
 
         println!("mineable_amount: {mineable_amount}");
-        let designated_premine = PREMINE_MAX_SIZE;
+        let original_premine = PREMINE_MAX_SIZE;
         let claims_pool = total_skipped_subsidies_generation_0;
         let asymptotic_limit = mineable_amount
-            .checked_add(&designated_premine)
+            .checked_add(&original_premine)
             .unwrap()
             .checked_add(&claims_pool)
             .unwrap();
 
-        let expected_limit = NativeCurrencyAmount::coins(42_000_000);
-        assert_eq!(expected_limit, asymptotic_limit);
+        assert_eq!(NativeCurrencyAmount::coins(42_000_000), asymptotic_limit);
 
         // Premine is less than promise of 1.98 %
-        let relative_premine = designated_premine.to_nau_f64() / expected_limit.to_nau_f64();
+        let relative_premine = original_premine.to_nau_f64() / asymptotic_limit.to_nau_f64();
         println!("asymptotic_limit: {asymptotic_limit}");
         println!("claims pool: {claims_pool}");
         println!("relative_premine: {relative_premine}");
-        println!("absolute premine: {designated_premine} coins");
+        println!("absolute premine: {original_premine} coins");
         assert!(relative_premine < 0.0198, "Premine may not exceed promise");
 
         // Designated premine is less than or equal to allocation. Note that
         // the allocation for reboot-claims is not considered part of the
         // premine.
-        let actual_premine = Block::premine_distribution()
+        let reboot_premine_including_claims_pool = Block::premine_distribution()
             .iter()
             .map(|(_receiving_address, amount)| *amount)
-            .rev()
-            .skip(1)
             .sum::<NativeCurrencyAmount>();
+        let of_which_is_claims_pool = Block::utxo_redemption_fund_and_claims()
+            .iter()
+            .map(|(_receiving_address, amount)| *amount)
+            .sum::<NativeCurrencyAmount>();
+        let actual_premine = reboot_premine_including_claims_pool
+            .checked_sub(&of_which_is_claims_pool)
+            .unwrap();
+        println!("reboot_premine: {reboot_premine_including_claims_pool}");
+        println!("of_which_is_claims_pool: {of_which_is_claims_pool}");
         println!("actual_premine: {actual_premine}");
-        assert!(
-            actual_premine <= designated_premine,
+        assert_eq!(
+            actual_premine, original_premine,
             "Distributed premine may not exceed designated value"
         );
 
-        let premine_including_claims_pool = Block::premine_distribution()
-            .iter()
-            .map(|(_receiving_address, amount)| *amount)
-            .sum::<NativeCurrencyAmount>();
         assert_eq!(
             actual_premine + total_skipped_subsidies_generation_0,
-            premine_including_claims_pool
+            reboot_premine_including_claims_pool
+        );
+        assert_eq!(
+            total_skipped_subsidies_generation_0,
+            of_which_is_claims_pool
         );
     }
 }
