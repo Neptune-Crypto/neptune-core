@@ -113,6 +113,7 @@ pub struct KernelToOutputs;
 impl KernelToOutputs {
     const JUMP_OUT_OF_BOUNDS_ERROR: i128 = 1_000_270;
     const INCONSISTENT_INDICATED_SALTED_OUTPUT_UTXOS_SIZE: i128 = 1_000_271;
+    const INCONSISTENT_LENGTHS: i128 = 1_000_272;
 }
 
 impl ConsensusProgram for KernelToOutputs {
@@ -169,9 +170,20 @@ impl ConsensusProgram for KernelToOutputs {
             {&field_receiver_digests}       // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests
 
             read_mem 1
-            push {1 + Digest::LEN} add
+            addi {1 + Digest::LEN}
             swap 1
             dup 0
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N
+
+            dup 5
+            {&field_utxos}
+            read_mem 1
+            pop 1
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N utxos_len
+
+            dup 1
+            eq
+            assert error_id {Self::INCONSISTENT_LENGTHS}
             // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N
 
             call {new_list}
@@ -192,7 +204,7 @@ impl ConsensusProgram for KernelToOutputs {
 
 
             call {calculate_canonical_commitments}
-            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[0] N N
+            // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N N
 
             pop 1
             // _ [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len  *utxos[N]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N
@@ -281,7 +293,7 @@ impl ConsensusProgram for KernelToOutputs {
 
                 dup 3
                 read_mem {Digest::LEN}
-                push {2 * Digest::LEN} add
+                addi {2 * Digest::LEN}
                 swap 9
                 pop 1
                 // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]]
@@ -292,7 +304,7 @@ impl ConsensusProgram for KernelToOutputs {
                 dup 15
                 // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] *utxos[i]_len
 
-                read_mem 1 push 2 add swap 1
+                read_mem 1 addi 2 swap 1
                 // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] *utxos[i] utxos[i]_len
 
                 call {hash_varlen}
@@ -324,7 +336,7 @@ impl ConsensusProgram for KernelToOutputs {
                 swap 6 pop 1
                 // _ *utxos[i+1]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i
 
-                push 1 add
+                addi 1
                 // _ *utxos[i+1]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N (i+1)
 
                 recurse
@@ -354,6 +366,7 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
+    use rand::random;
     use tasm_lib::triton_vm;
     use test_strategy::proptest;
 
@@ -382,10 +395,13 @@ mod tests {
             let sender_randomnesses: &Vec<Digest> = &ktow.sender_randomnesses;
             let receiver_digests: &Vec<Digest> = &ktow.receiver_digests;
 
+            let n = receiver_digests.len();
+            assert!(n == output_utxos.len());
+
             // compute the canonical commitments (= addition records)
-            let mut addition_records: Vec<AdditionRecord> = Vec::with_capacity(output_utxos.len());
+            let mut addition_records: Vec<AdditionRecord> = Vec::default();
             let mut i = 0;
-            while i < output_utxos.len() {
+            while i < n {
                 let addition_record: AdditionRecord = commit(
                     Hash::hash(&output_utxos[i]),
                     sender_randomnesses[i],
@@ -439,22 +455,47 @@ mod tests {
     }
 
     #[test]
-    fn kernel_to_outputs_unittest() {
+    fn inconsistent_lengths() {
         let mut test_runner = TestRunner::deterministic();
-
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(3), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        let tasm_result = KernelToOutputs
-            .run_tasm(
-                &kernel_to_outputs_witness.standard_input(),
-                kernel_to_outputs_witness.nondeterminism(),
+        let mut witness = KernelToOutputsWitness::from(&primitive_witness);
+        witness.receiver_digests.push(random());
+        KernelToOutputs
+            .test_assertion_failure(
+                witness.standard_input(),
+                witness.nondeterminism(),
+                &[KernelToOutputs::INCONSISTENT_LENGTHS],
             )
             .unwrap();
+    }
 
-        assert_eq!(kernel_to_outputs_witness.output(), tasm_result);
+    #[test]
+    fn kernel_to_outputs_unittest() {
+        for num_inputs in 0..=2 {
+            for num_outputs in 0..=2 {
+                let mut test_runner = TestRunner::deterministic();
+                let primitive_witness =
+                    PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                        .new_tree(&mut test_runner)
+                        .unwrap()
+                        .current();
+                let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
+                let std_input = kernel_to_outputs_witness.standard_input();
+                let non_determinism = kernel_to_outputs_witness.nondeterminism();
+                let tasm_result = KernelToOutputs
+                    .run_tasm(&std_input, non_determinism.clone())
+                    .unwrap();
+                assert_eq!(kernel_to_outputs_witness.output(), tasm_result);
+
+                let rust_result = KernelToOutputs
+                    .run_rust(&std_input, non_determinism)
+                    .unwrap();
+                assert_eq!(rust_result, tasm_result);
+            }
+        }
     }
 
     #[test]
@@ -497,7 +538,6 @@ mod tests {
 
     test_program_snapshot!(
         KernelToOutputs,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "ea038961191a092999f1b22b0f3dc7661f47ed6a7da7f6eb7104d7b6733514feeb881c317fb92681"
+        "7b5cdf881ba64ef4d74245da25f4beb1c4b416922af46eacaa17ebc328021e0249a9301505c3223f"
     );
 }
