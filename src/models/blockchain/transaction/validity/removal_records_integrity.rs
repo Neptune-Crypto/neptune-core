@@ -1313,6 +1313,24 @@ mod tests {
     }
 
     #[test]
+    fn removal_records_fail_on_bad_coinbase_field() {
+        let mut test_runner = TestRunner::deterministic();
+
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        bad_witness.mast_path_coinbase[1] = Digest::default();
+        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
+            bad_witness.standard_input(),
+            bad_witness.nondeterminism(),
+            &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+        );
+        assert!(let Ok(_) = assertion_failure);
+    }
+
+    #[test]
     fn removal_records_coinbase_tx_cannot_have_inputs() {
         let mut test_runner = TestRunner::deterministic();
 

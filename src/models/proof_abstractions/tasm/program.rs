@@ -267,6 +267,7 @@ pub mod tests {
             let emulation_result = catch_unwind(|| {
                 environment::init(program_digest, &input.individual_tokens, nondeterminism);
                 self.source();
+                environment::audit_end_state();
                 environment::PUB_OUTPUT.take()
             });
 
@@ -275,8 +276,7 @@ pub mod tests {
 
         /// Use Triton VM to run the tasm code.
         ///
-        /// Should only be called in tests. In production code, use [`Self::run_rust`]
-        /// instead – it's faster.
+        /// Only used in tests, since in production, you always need the proofs.
         #[cfg(test)]
         fn run_tasm(
             &self,
@@ -300,6 +300,14 @@ pub mod tests {
             assert!(
                 vm_state.secret_digests.is_empty(),
                 "Secret digest list must be empty after executing consensus program"
+            );
+            assert!(
+                vm_state.secret_individual_tokens.is_empty(),
+                "Secret token list must be empty after executing consensus program"
+            );
+            assert!(
+                vm_state.public_input.is_empty(),
+                "input must be empty after executing consensus program"
             );
             assert_eq!(&init_stack, &vm_state.op_stack);
 
