@@ -1010,6 +1010,56 @@ pub mod tests {
         assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
+    fn prop_inflation_violation_when_fee_too_big(mut primitive_witness: PrimitiveWitness) {
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
+
+        // Increase fee by 1 nau and verify inflation violation
+        primitive_witness.kernel = TransactionKernelModifier::default()
+            .fee(primitive_witness.kernel.fee + NativeCurrencyAmount::from_nau(1))
+            .modify(primitive_witness.kernel);
+        assert_both_rust_and_tasm_fail(
+            NativeCurrencyWitness::from(primitive_witness.clone()),
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
+        );
+
+        // Increase fee by 2^{32} nau and verify inflation violation
+        primitive_witness.kernel = TransactionKernelModifier::default()
+            .fee(primitive_witness.kernel.fee + NativeCurrencyAmount::from_nau(1 << 32))
+            .modify(primitive_witness.kernel);
+        assert_both_rust_and_tasm_fail(
+            NativeCurrencyWitness::from(primitive_witness.clone()),
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
+        );
+    }
+
+    #[test]
+    fn balanced_transaction_valid_unbalanced_invalid_no_coinbase() {
+        for num_inputs in 0..=2 {
+            for num_outputs in 0..=2 {
+                let mut test_runner = TestRunner::deterministic();
+                let no_coinbase_pw =
+                    PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                        .new_tree(&mut test_runner)
+                        .unwrap()
+                        .current();
+                prop_inflation_violation_when_fee_too_big(no_coinbase_pw)
+            }
+        }
+    }
+
+    #[test]
+    fn balanced_transaction_valid_unbalanced_invalid_with_coinbase() {
+        for num_outputs in 0..=3 {
+            let mut test_runner = TestRunner::deterministic();
+            let coinbase_pw = PrimitiveWitness::arbitrary_with_size_numbers(None, num_outputs, 1)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            prop_inflation_violation_when_fee_too_big(coinbase_pw)
+        }
+    }
+
     #[proptest(cases = 30)]
     fn balanced_transaction_is_valid(
         #[strategy(0usize..=6)] _num_inputs: usize,
