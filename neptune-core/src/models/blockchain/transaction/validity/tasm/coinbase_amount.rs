@@ -149,10 +149,13 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::push_encodable;
+    use tasm_lib::test_helpers::test_assertion_failure;
     use tasm_lib::traits::function::Function;
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::InitVmState;
 
     use super::*;
 
@@ -160,6 +163,27 @@ mod tests {
     fn coinbase_amount_pbt() {
         let shadowed_function = ShadowedFunction::new(CoinbaseAmount);
         shadowed_function.test();
+    }
+
+    #[test]
+    fn panic_on_negative_amount() {
+        fn set_up_test_stack(coinbase_ptr: BFieldElement) -> Vec<BFieldElement> {
+            let mut stack = CoinbaseAmount.init_stack_for_isolated_run();
+            push_encodable(&mut stack, &coinbase_ptr);
+            stack
+        }
+
+        let coinbase = Some(-NativeCurrencyAmount::coins(2));
+        let coinbase_ptr: BFieldElement = bfe!(14);
+        let mut memory = HashMap::default();
+        encode_to_memory(&mut memory, coinbase_ptr, &coinbase);
+        let stack = set_up_test_stack(coinbase_ptr);
+
+        test_assertion_failure(
+            &ShadowedFunction::new(CoinbaseAmount),
+            InitVmState::with_stack_and_memory(stack, memory),
+            &[CoinbaseAmount::ILLEGAL_COINBASE_AMOUNT_ERROR],
+        );
     }
 
     impl Function for CoinbaseAmount {
@@ -190,6 +214,8 @@ mod tests {
             let coinbase = *CoinbaseAmount::decode(&coinbase_encoded).unwrap();
 
             let coinbase_amount = coinbase.unwrap_or_else(NativeCurrencyAmount::zero);
+
+            assert!(!coinbase_amount.is_negative());
 
             for word in coinbase_amount.encode().into_iter().rev() {
                 stack.push(word)
