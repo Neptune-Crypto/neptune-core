@@ -216,11 +216,11 @@ pub enum RPCServerToMain {
     RestartMiner,
 }
 
-pub trait Cancelable {
+pub trait Cancelable: Send + Sync {
     fn is_canceled(&self) -> bool;
 }
 
-impl<T> Cancelable for oneshot::Sender<T> {
+impl<T: Send + Sync> Cancelable for oneshot::Sender<T> {
     fn is_canceled(&self) -> bool {
         self.is_canceled()
     }

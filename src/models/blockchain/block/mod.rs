@@ -30,6 +30,7 @@ use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use rayon::ThreadPoolBuilder;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -1006,9 +1007,20 @@ impl Block {
     pub fn guess_preprocess(
         &self,
         maybe_cancel_channel: Option<&dyn Cancelable>,
+        num_guesser_threads: Option<usize>,
     ) -> GuesserBuffer<{ BlockPow::MERKLE_TREE_HEIGHT }> {
+        // build a rayon thread pool that respects the limitation on the number
+        // of threads
+        let num_threads = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build()
+            .unwrap();
+
         let auth_paths = self.pow_mast_paths();
-        Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths, maybe_cancel_channel)
+        thread_pool.install(|| {
+            Pow::<{ BlockPow::MERKLE_TREE_HEIGHT }>::preprocess(auth_paths, maybe_cancel_channel)
+        })
     }
 
     /// Mock verification of Pow. Use only on networks that allow for PoW
@@ -1313,7 +1325,7 @@ pub(crate) mod tests {
     fn guess_nonce_happy_path() {
         let network = Network::Main;
         let mut invalid_block = invalid_empty_block(&Block::genesis(network), network);
-        let guesser_buffer = invalid_block.guess_preprocess(None);
+        let guesser_buffer = invalid_block.guess_preprocess(None, None);
         let target = Difficulty::from(2u32).target();
         let mut rng = rng();
 

@@ -621,7 +621,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn can_cancel_preprocess_within_one_second() {
-            const MERKLE_TREE_HEIGHT: usize = 29;
+            const MERKLE_TREE_HEIGHT: usize = 25; // 2.5 GB
             let mut rng = rng();
             let (tx, mut rx) = oneshot::channel::<()>();
             let mast_auth_paths = rng.random::<PowMastPaths>();
@@ -660,7 +660,7 @@ pub(crate) mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn can_cancel_merkle_tree_construction_within_two_seconds() {
-            const MERKLE_TREE_HEIGHT: usize = 29;
+            const MERKLE_TREE_HEIGHT: usize = 25; // 2.5 GB
             let num_leafs = 1 << MERKLE_TREE_HEIGHT;
             let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
             let (start_tx, mut start_rx) = oneshot::channel::<()>();
@@ -721,7 +721,7 @@ pub(crate) mod tests {
         }
 
         #[test]
-        fn paths_agree() {
+        fn authentication_paths_agree() {
             let mut rng = rng();
             let height = 10;
             let num_leafs = 1 << height;
@@ -784,10 +784,11 @@ pub(crate) mod tests {
         fn verify_fails_on_wrong_index() {
             let mut rng = rng();
             let height = 10;
-            let (root, _index, path, element) =
+            let (root, index, path, element) =
                 valid_root_index_path_element_tuple(height, rng.random());
 
-            let index = rng.random_range(0..(1 << height));
+            let translation = rng.random_range(0..((1 << height) - 1));
+            let index = (index + translation) % (1 << height);
 
             assert!(!MTree::verify(root, index, &path, element));
         }
