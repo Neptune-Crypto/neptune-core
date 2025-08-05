@@ -60,6 +60,7 @@ use config_models::cli_args;
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
+use owo_colors::OwoColorize;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::handshake_data::HandshakeData;
@@ -104,6 +105,12 @@ const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub const NEPTUNE_BANNER: &str = include_str!("../../assets/neptune-banner.txt");
+
+pub fn display_banner() {
+    println!("{}", NEPTUNE_BANNER.fg_rgb::<255, 255, 255>().bold());
+}
 
 /// Causes compilation failures on targets where `u32` does not fit within a
 /// `usize`.

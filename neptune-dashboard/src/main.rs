@@ -20,6 +20,7 @@ use dashboard_app::Config;
 use dashboard_app::DashboardApp;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::rpc_auth;
+use neptune_cash::display_banner;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
 use tarpc::client;
@@ -28,6 +29,7 @@ use tarpc::tokio_serde::formats::Json;
 
 #[tokio::main]
 async fn main() {
+    display_banner();
     // we set this panic hook so we can drop out of raw mode in order to
     // display the panic message.  else there is wicked screen corruption.
     set_panic_hook();

@@ -5,8 +5,10 @@ use clap::Parser;
 use neptune_cash::config_models::cli_args;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
+use neptune_cash::display_banner;
 
 pub fn main() -> Result<()> {
+    display_banner();
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
