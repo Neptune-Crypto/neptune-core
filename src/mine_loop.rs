@@ -229,7 +229,7 @@ fn guess_worker(
     block.set_header_guesser_address(guesser_address);
 
     info!("Start: guess preprocessing.");
-    let guesser_buffer = block.guess_preprocess(Some(&sender));
+    let guesser_buffer = block.guess_preprocess(Some(&sender), Some(threads_to_use));
     if sender.is_canceled() {
         info!("Guess preprocessing canceled. Stopping guessing task.");
         return;
@@ -1129,7 +1129,7 @@ pub(crate) mod tests {
         let tick = std::time::SystemTime::now();
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-        let guesser_buffer = block.guess_preprocess(Some(&worker_task_tx));
+        let guesser_buffer = block.guess_preprocess(Some(&worker_task_tx), None);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
@@ -2034,7 +2034,7 @@ pub(crate) mod tests {
             BlockProof::Invalid,
         );
 
-        let guesser_buffer = successor_block.guess_preprocess(None);
+        let guesser_buffer = successor_block.guess_preprocess(None, None);
         let target = predecessor_block.header().difficulty.target();
         loop {
             if BlockPow::guess(&guesser_buffer, rng.random(), target).is_some() {
