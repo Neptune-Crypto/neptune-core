@@ -18,6 +18,7 @@ pub mod transaction_proof;
 pub mod utxo;
 pub(crate) mod utxo_triple;
 pub mod validity;
+pub mod payment_proof;
 
 use anyhow::ensure;
 use anyhow::Result;
