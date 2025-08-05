@@ -1377,7 +1377,7 @@ fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
         {
             phrase.push(word.to_string());
             i += 1;
-            if i > 18 {
+            if i > 24 {
                 break;
             }
         } else {

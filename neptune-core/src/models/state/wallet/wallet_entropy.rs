@@ -5,16 +5,14 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe_vec;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::math::x_field_element::XFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
-use tasm_lib::twenty_first::xfe;
 use zeroize::ZeroizeOnDrop;
 
 use super::address::ReceivingAddress;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::symmetric_key;
-use crate::models::state::wallet::secret_key_material::SecretKeyMaterial;
+use crate::models::state::wallet::secret_key_material::{BField32Bytes, SecretKeyMaterial};
 
 /// The wallet's one source of randomness, from which all keys are derived.
 ///
@@ -34,10 +32,11 @@ impl WalletEntropy {
 
     /// Create a `WalletEntropy` object with a fixed digest
     pub fn devnet_wallet() -> Self {
-        let secret_seed = SecretKeyMaterial(xfe!([
+        let secret_seed = SecretKeyMaterial(BField32Bytes::from([
             12063201067205522823_u64,
             1529663126377206632_u64,
             2090171368883726200_u64,
+            2140191564833716103_u64,
         ]));
 
         Self::new(secret_seed)
@@ -162,7 +161,7 @@ impl WalletEntropy {
         )
     }
 
-    /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a
+    /// Convert a secret seed phrase (list of 24 valid BIP-39 words) to a
     /// [`WalletEntropy`] object
     pub fn from_phrase(phrase: &[String]) -> Result<Self> {
         let key = SecretKeyMaterial::from_phrase(phrase)?;
