@@ -37,10 +37,26 @@ impl BasicSnippet for NewClaim {
 
         let dyn_malloc = library.import(Box::new(DynMalloc));
 
+        let size_empty_claim = Claim::new(Digest::default()).encode().len();
         triton_asm! {
             // BEFORE: _ input_length output_length
             // AFTER:  _ *claim *output *input *program_digest
             {entrypoint}:
+
+                /* Ensure claim lives within one page */
+                dup 1
+                pop_count
+                dup 1
+                pop_count
+                pop 2
+                // _ input_length output_length
+
+                dup 1
+                dup 1
+                add
+                addi {size_empty_claim}
+                pop_count
+                pop 1
 
                 call {dyn_malloc}
                 hint claim = stack[0]
