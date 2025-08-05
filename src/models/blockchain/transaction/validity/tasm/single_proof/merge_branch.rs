@@ -376,7 +376,7 @@ impl BasicSnippet for MergeBranch {
                     hash
                     return
             },
-            DataType::Digest, // domain knowledge
+            DataType::Digest, // addition record
             DataType::Digest,
         );
         let hash_1_list_of_outputs = library.import(Box::new(Map::new(InnerFunction::RawCode(
@@ -467,6 +467,8 @@ impl BasicSnippet for MergeBranch {
             {&push_max_amount}
             // _ *left_txk *right_txk *new_txk *left_fee *right_fee [right_fee] [max_amount]
 
+            /* Ensure right fee is less than or equal to max amount, also guarantees that right
+               fee is not negative. */
             call {lt_u128}
             // _ *left_txk *right_txk *new_txk *left_fee *right_fee (max_amount < right_fee)
 
