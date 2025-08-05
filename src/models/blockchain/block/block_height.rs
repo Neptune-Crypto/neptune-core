@@ -241,11 +241,16 @@ mod tests {
             .iter()
             .map(|(_receiving_address, amount)| *amount)
             .sum::<NativeCurrencyAmount>();
+        let individual_claims = Block::redemption_claims()
+            .iter()
+            .map(|(_receiving_address, amount)| *amount)
+            .sum::<NativeCurrencyAmount>();
         let actual_premine = reboot_premine_including_claims_pool
             .checked_sub(&of_which_is_claims_pool)
             .unwrap();
         println!("reboot_premine: {reboot_premine_including_claims_pool}");
         println!("of_which_is_claims_pool: {of_which_is_claims_pool}");
+        println!("of which is individual claims: {individual_claims}");
         println!("actual_premine: {actual_premine}");
         assert_eq!(
             actual_premine, original_premine,
