@@ -63,9 +63,9 @@ impl Network {
                 let now_rounded = (now / SEVEN_DAYS) * SEVEN_DAYS;
                 Timestamp(BFieldElement::new(now_rounded))
             }
-            // 25 July 2025, 06:30:59 UTC
+            // 5 August 2025, 19:00:00 UTC
             Network::TestnetMock | Network::Testnet(_) | Network::Main => {
-                Timestamp(BFieldElement::new(1753425059000u64))
+                Timestamp(BFieldElement::new(1754420400000u64))
             }
         }
     }
