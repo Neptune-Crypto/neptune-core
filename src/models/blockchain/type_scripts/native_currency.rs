@@ -11,7 +11,6 @@ use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
@@ -112,11 +111,10 @@ impl ConsensusProgram for NativeCurrency {
         let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
         let coinbase_release_date_alloc = library.kmalloc(1);
 
-        let amount_logic_main_loop = TotalAmountMainLoop {
+        let loop_utxos_add_amounts_label = library.import(Box::new(TotalAmountMainLoop {
             digest_source: DigestSource::StaticMemory(own_program_digest_alloc),
             release_date: coinbase_release_date_alloc,
-        };
-        let loop_utxos_add_amounts_label = amount_logic_main_loop.entrypoint();
+        }));
 
         let store_own_program_digest = triton_asm!(
             // _
@@ -608,13 +606,10 @@ impl ConsensusProgram for NativeCurrency {
             halt
         };
 
-        let subroutines = amount_logic_main_loop.code(&mut library);
-
         let imports = library.all_imports();
 
         let code = triton_asm!(
             {&main_code}
-            {&subroutines}
             {&assert_half_output_amount_timelocked}
             {&imports}
         );
@@ -1652,6 +1647,6 @@ pub mod tests {
 
     test_program_snapshot!(
         NativeCurrency,
-        "f2c7eca6d9c13946c17a641fd5aa1b8813c8c0e86b616f0d8d53ba53ac742f554d01eb5e17fa3673"
+        "35ab20eaca74e39c97b1b1c6eeb337853babec0d1b4152b6218f12ab673618df11bb3a534af30f64"
     );
 }

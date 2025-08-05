@@ -1306,6 +1306,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         SingleProof,
-        "8405d2d9585de09402284acba926ef3599c07be045dd4ee6f76b9657a9c1ab3c35591b7f77828fd4"
+        "627d1f3c87dd36ee17618f1b048cd98c9aed6186063f7c97b41a47ced288e0d5f36d931790f56514"
     );
 }

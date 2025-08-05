@@ -33,22 +33,45 @@ impl AddAllAmountsAndCheckTimeLock {
         BFieldElement::new(5280486431890426245),
         BFieldElement::new(12484740501891840491),
     ]);
+}
 
-    /// Produce the snippet's source code, along with non-imported dependencies,
-    /// in a format that `TotalAmountMainLoop` expects.
-    ///
-    /// Note: this is a backwards-compatibility layer. Under normal
-    /// circumstances it would be preferable to use `Library::import` and let
-    /// the [`Library`] handle the dependencies.
-    pub(crate) fn view_for_main_loop(
-        &self,
-        test_time_lock_and_maybe_mark: String,
-        read_and_add_amount: String,
-    ) -> Vec<LabelledInstruction> {
+impl BasicSnippet for AddAllAmountsAndCheckTimeLock {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::U32, "num_coins".to_string()),
+            (DataType::U32, "index".to_string()),
+            (DataType::VoidPointer, "*coins[j]_si".to_string()),
+            (DataType::U128, "amount".to_string()),
+            (DataType::U128, "timelocked_amount".to_string()),
+            (DataType::U128, "utxo_amount".to_string()),
+            (DataType::Bool, "utxo_is_timelocked".to_string()),
+        ]
+    }
+
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::U32, "num_coins".to_string()),
+            (DataType::U32, "num_coins".to_string()),
+            (DataType::VoidPointer, "*eof".to_string()),
+            (DataType::U128, "amount".to_string()),
+            (DataType::U128, "timelocked_amount".to_string()),
+            (DataType::U128, "utxo_amount'".to_string()),
+            (DataType::Bool, "utxo_is_timelocked'".to_string()),
+        ]
+    }
+
+    fn entrypoint(&self) -> String {
+        "neptune_type_script_total_amount_and_check_timelock".to_string()
+    }
+
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
+        let test_time_lock_and_maybe_mark = library.import(Box::new(TestTimeLockAndMaybeMark {
+            release_date: self.release_date,
+        }));
+        let read_and_add_amount = library.import(Box::new(ReadAndAddAmount));
+
         let field_type_script_hash = field!(Coin::type_script_hash);
-
         let digest_eq = DataType::Digest.compare();
-
         let push_digest = |digest: Digest| {
             digest
                 .values()
@@ -161,46 +184,6 @@ impl AddAllAmountsAndCheckTimeLock {
                 // _ M (j+1) *coins[j+1]_si [amount] [timelocked_amount]  [utxo_amount] utxo_is_timelocked
 
                 recurse
-        }
-    }
-}
-
-impl BasicSnippet for AddAllAmountsAndCheckTimeLock {
-    fn inputs(&self) -> Vec<(DataType, String)> {
-        vec![
-            (DataType::U32, "num_coins".to_string()),
-            (DataType::U32, "index".to_string()),
-            (DataType::VoidPointer, "*coins[j]_si".to_string()),
-            (DataType::U128, "amount".to_string()),
-            (DataType::U128, "timelocked_amount".to_string()),
-            (DataType::U128, "utxo_amount".to_string()),
-            (DataType::Bool, "utxo_is_timelocked".to_string()),
-        ]
-    }
-
-    fn outputs(&self) -> Vec<(DataType, String)> {
-        vec![
-            (DataType::U32, "num_coins".to_string()),
-            (DataType::U32, "num_coins".to_string()),
-            (DataType::VoidPointer, "*eof".to_string()),
-            (DataType::U128, "amount".to_string()),
-            (DataType::U128, "timelocked_amount".to_string()),
-            (DataType::U128, "utxo_amount'".to_string()),
-            (DataType::Bool, "utxo_is_timelocked'".to_string()),
-        ]
-    }
-
-    fn entrypoint(&self) -> String {
-        "neptune_type_script_total_amount_and_check_timelock".to_string()
-    }
-
-    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let test_time_lock_and_maybe_mark = library.import(Box::new(TestTimeLockAndMaybeMark {
-            release_date: self.release_date,
-        }));
-        let read_and_add_amount = library.import(Box::new(ReadAndAddAmount));
-        triton_asm! {
-            {&self.view_for_main_loop(test_time_lock_and_maybe_mark, read_and_add_amount)}
         }
     }
 }
