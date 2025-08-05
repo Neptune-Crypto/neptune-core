@@ -363,8 +363,7 @@ impl ConsensusProgram for SingleProof {
                 // _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size
 
                 dup 3
-                push {Digest::LEN - 1}
-                add
+                addi {Digest::LEN - 1}
                 read_mem {Digest::LEN}
                 pop 1
                 // _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size [current_program_digest]
@@ -384,13 +383,13 @@ impl ConsensusProgram for SingleProof {
 
                 read_mem 1
                 // _ *claim_template *claim_program_digest *current_program_digest *eof next_proof_size (*next_proof_si-1)
-                push 2 add
+                addi 2
                 // _ *claim_template *claim_program_digest *current_program_digest *eof next_proof_size *next_proof
                 swap 1
                 // _ *claim_template *claim_program_digest *current_program_digest *eof *next_proof next_proof_size
 
                 swap 3
-                push {Digest::LEN} add
+                addi {Digest::LEN}
                 swap 3
                 // _ *claim_template *claim_program_digest *next_program_digest *eof *next_proof next_proof_size
 
@@ -562,11 +561,11 @@ impl ConsensusProgram for SingleProof {
                 hint lock_script_hashes = stack[1]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes size
 
-                dup 1 add push 2 add
+                dup 1 add addi 2
                 hint eof = stack[0]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes *eof
 
-                swap 1 push 2 add
+                swap 1 addi 2
                 hint lock_script_hashes_i = stack[0]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *eof *lock_script_hashes[0]
 
@@ -577,13 +576,13 @@ impl ConsensusProgram for SingleProof {
                 dup 6
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes[0] *eof *proof_collection
 
-                {&proof_collection_field_lock_scripts_halt} push 1 add
+                {&proof_collection_field_lock_scripts_halt} addi 1
                 hint lock_script_proofs_i_si = stack[0]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes *eof *lock_script_proofs[0]_si
 
                 read_mem 1
                 hint proof_size = stack[1]
-                push 2 add
+                addi 2
                 swap 1
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes *eof *lock_script_proofs[0] proof_size
 
@@ -1306,6 +1305,6 @@ pub(crate) mod tests {
 
     test_program_snapshot!(
         SingleProof,
-        "627d1f3c87dd36ee17618f1b048cd98c9aed6186063f7c97b41a47ced288e0d5f36d931790f56514"
+        "9ed47e4aff83681ce46618c59971cc5eca2ef5a063b3f35828946f4810295871338072751af633e0"
     );
 }
