@@ -3620,9 +3620,9 @@ pub(crate) mod tests {
                 let num_to_derive = 20;
 
                 // 2. Request 20 spending keys
-                for _ in 0..num_to_derive {
-                    let _ = wallet.next_unused_spending_key(key_type).await;
-                }
+                wallet
+                    .bump_derivation_counter(key_type, num_to_derive.try_into().unwrap())
+                    .await;
 
                 let expected_num_known_keys = num_known_keys + num_to_derive;
                 let known_keys = wallet
