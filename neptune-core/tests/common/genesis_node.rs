@@ -49,8 +49,12 @@ impl GenesisNode {
 
     /// provides default neptune-core cli arguments for typical integration tests.
     pub fn default_args() -> Args {
+        Self::default_args_with_network(Network::RegTest)
+    }
+
+    pub fn default_args_with_network(network: Network) -> Args {
         let mut args = Args::default();
-        args.network = Network::RegTest;
+        args.network = network;
 
         // ensure we bind to localhost so windows firewall does not prevent/block
         args.listen_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
