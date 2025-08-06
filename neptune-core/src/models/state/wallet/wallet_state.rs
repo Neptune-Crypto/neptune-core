@@ -1092,10 +1092,26 @@ impl WalletState {
 
     pub(crate) async fn bump_derivation_counter(&mut self, key_type: KeyType, max_used_index: u64) {
         let new_counter = max_used_index + 1;
-        if self.spending_key_counter(key_type) < new_counter {
+        let current_counter = self.spending_key_counter(key_type);
+
+        if current_counter < new_counter {
             match key_type {
-                KeyType::Generation => self.wallet_db.set_generation_key_counter(new_counter).await,
-                KeyType::Symmetric => self.wallet_db.set_symmetric_key_counter(new_counter).await,
+                KeyType::Generation => {
+                    self.wallet_db.set_generation_key_counter(new_counter).await;
+
+                    for idx in current_counter..new_counter {
+                        let key = self.wallet_entropy.nth_generation_spending_key(idx).into();
+                        self.known_generation_keys.push(key);
+                    }
+                }
+                KeyType::Symmetric => {
+                    self.wallet_db.set_symmetric_key_counter(new_counter).await;
+
+                    for idx in current_counter..new_counter {
+                        let key = self.wallet_entropy.nth_symmetric_key(idx).into();
+                        self.known_symmetric_keys.push(key);
+                    }
+                }
             }
         }
     }
