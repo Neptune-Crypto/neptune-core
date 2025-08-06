@@ -144,7 +144,7 @@ impl MTree {
     }
 
     pub fn root(&self) -> Digest {
-        self.internal_nodes[1]
+        self.internal_nodes.get(1).copied().unwrap_or_default()
     }
 
     pub fn path(&self, index: usize) -> Vec<Digest> {
