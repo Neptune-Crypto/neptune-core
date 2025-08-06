@@ -144,6 +144,7 @@ impl fmt::Display for MenuItem {
 
 #[derive(Debug, Clone)]
 pub enum ConsoleIO {
+    #[allow(dead_code)]
     Output(String),
     InputRequested(String),
     InputSupplied(String),
@@ -339,7 +340,7 @@ impl DashboardApp {
                             Self::disable_raw_mode(terminal)?;
 
                             sleep(Duration::from_millis(200)).await;
-                            println!("{}", string);
+                            println!("{string}");
                             let mut str = "".to_string();
                             io::stdin().read_line(&mut str)?;
 
@@ -350,7 +351,7 @@ impl DashboardApp {
                             Self::disable_raw_mode(terminal)?;
 
                             sleep(Duration::from_millis(200)).await;
-                            println!("{}", string);
+                            println!("{string}");
                             let mut str = "".to_string();
                             io::stdin().read_line(&mut str)?;
                             console_input = Some(str);
@@ -479,23 +480,23 @@ impl DashboardApp {
                 // MenuItem::Peers => todo!(),
                 MenuItem::Address => {
                     let mut address_screen = self.address_screen.as_ref().borrow_mut();
-                    address_screen.handle(event)?
+                    address_screen.handle(event)
                 }
                 MenuItem::History => {
                     let mut history_screen = self.history_screen.as_ref().borrow_mut();
-                    history_screen.handle(event)?
+                    history_screen.handle(event)
                 }
                 MenuItem::Peers => {
                     let mut peers_screen = self.peers_screen.as_ref().borrow_mut();
-                    peers_screen.handle(event)?
+                    peers_screen.handle(event)
                 }
                 MenuItem::Receive => {
                     let mut receive_screen = self.receive_screen.as_ref().borrow_mut();
-                    receive_screen.handle(event)?
+                    receive_screen.handle(event)
                 }
                 MenuItem::Send => {
                     let mut send_screen = self.send_screen.as_ref().borrow_mut();
-                    send_screen.handle(event, refresh_tx)?
+                    send_screen.handle(event, refresh_tx)
                 }
                 // MenuItem::Quit => todo!(),
                 _ => Some(event),

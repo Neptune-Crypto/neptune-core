@@ -1,0 +1,180 @@
+[package]
+name = "neptune-cash"
+description = "A layer-1 cryptocurrency featuring scalable privacy and post-quantum security."
+authors = ["Triton Software"]
+
+version = "0.3.0"
+edition = "2021"
+license = "Apache-2.0"
+readme = "README.md"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
+default-run = "neptune-core"
+
+[features]
+
+# logs write-lock acquisitions that are held over 100 millis.  requires nightly.
+# to enable: cargo +nightly build --features log-slow-write-lock
+# note: nothing logged until lock is released (guard dropped)
+# alternative: run tokio-console
+log-slow-write-lock = ["track-lock-location", "track-lock-time"]
+
+# logs read-lock acquisitions that are held over 100 millis.  requires nightly.
+# to enable: cargo +nightly build --features log-slow-read-lock
+# note: nothing logged until lock is released (guard dropped)
+# alternative: run tokio-console
+log-slow-read-lock = ["track-lock-location", "track-lock-time"]
+
+# logs all lock events (try_acquire, acquire, release).
+# useful for debugging deadlocks, or if a lock is never being released.
+# includes acquisition location if track-lock-location feature is enabled.
+# alternative: run tokio-console
+log-lock_events = ["track-lock-location"]
+
+# locks::sync::tokio support for tracking location of lock acquisition
+# requires nightly.  not generally useful by itself.
+track-lock-location = []
+
+# locks::sync::tokio support for tracking instant of lock acquisition
+# not generally useful by itself.
+track-lock-time = []
+
+# implements arbitrary::Arbitrary for various types
+arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop", "dep:proptest"]
+
+# for sending trace events to tokio-console utility
+tokio-console = ["dep:console-subscriber"]
+
+[dependencies]
+
+# note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
+# because they are optional deps but required for unit tests.
+# please ensure versions match in both sections.
+
+aead = { version = "0.5", features = ["std"] }
+aes-gcm = "0.10"
+anyhow = { version = "1.0", features = ["backtrace"] }
+arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
+arraystring = { version = "0.3.0", features = ["serde-traits"] }
+bech32 = "0.9"
+bincode = "1.3"
+bytes = "1.8"
+bytesize = "1.3"
+chrono = "^0.4.34"
+clap = { version = "4.5", features = ["derive"] }
+console-subscriber = { version = "0.2", optional = true}
+directories = "5.0"
+field_count = "0.1"
+futures = "0.3"
+get-size2 = { version = "0.5", features = ["derive"] }
+itertools = "0.11"
+memmap2 = "0.9"
+num-bigint = { version = "0.4", features = ["serde"] }
+num-rational = "0.4"
+num-traits = "0.2"
+priority-queue = "1.4"
+proptest = { version = "1.5", optional = true }
+proptest-arbitrary-interop = { version = "0.1", optional = true }
+rand = "0.9"
+regex = "1.11.0"
+semver = "^1.0.23"
+serde = { version = "1.0", features = ["derive"] }
+serde_arrays = "0.2"
+serde_derive = "1.0"
+serde_json = "1.0"
+strum = { version = "0.27.0", features = ["derive"] }
+strum_macros = "0.27.0"
+tarpc = { version = "^0.34", features = [
+    "tokio1",
+    "serde-transport",
+    "serde-transport-json",
+    "tcp",
+] }
+tasm-lib = "0.50.0"
+tiny-bip39 = "1.0"
+tokio = { version = "1.41", features = ["full", "tracing"] }
+tokio-serde = { version = "0.8", features = ["bincode", "json"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["std", "env-filter", "time", "fmt"] }
+tracing-test = "0.2"
+zeroize = "1.8.1"
+rs-leveldb = "0.1.5"
+leveldb-sys = "2.0.9"
+async-trait = "0.1.83"
+async-stream = "0.3.6"
+sha3 = "0.10.8"
+rand_distr = "0.4.3"
+readonly = "0.2.12"
+thiserror = "1.0.65"
+systemstat = "0.2.3"
+sysinfo = "0.31.4"
+thread-priority = "1.2.0"
+rayon = "1.10"
+humantime = "2.1.0"
+
+[dev-dependencies]
+
+# note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
+# because they are optional deps but required for unit tests.
+# please ensure versions match in both sections.
+
+arbitrary = { version = "1.4.1", features = ["derive"] }
+assert2 = "0.3"
+blake3 = "1.5.4"
+clienter = "0.1.1"
+divan = "0.1.14"
+macro_rules_attr = "0.1.3"
+pin-project-lite = "0.2.14"
+proptest = { version = "1.5" }
+proptest-arbitrary-interop = { version = "0.1" }
+rand_distr = "0.4.3"
+rayon = "1.10"
+statrs = "0.18.0"
+test-strategy = "0.3"
+tokio-test = "0.4"
+
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false
+features = ["user-hooks"]
+
+[[bin]]
+name = "neptune-core"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+## We use harness = false on these so that the divan reports are output on stdout.
+
+[[bench]]
+name = "sync_atomic"
+harness = false
+
+[[bench]]
+name = "db_leveldb"
+harness = false
+
+[[bench]]
+name = "db_dbtvec"
+harness = false
+
+[[bench]]
+name = "archival_mmr"
+harness = false
+
+[[bench]]
+name = "consensus"
+harness = false
+required-features = ["arbitrary-impls"]
+
+[[bench]]
+name = "fast_kernel_mast_hash"
+harness = false
+
+[[bench]]
+name = "wallet_state"
+harness = false

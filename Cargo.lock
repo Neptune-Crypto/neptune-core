@@ -1756,10 +1756,8 @@ dependencies = [
  "cargo-husky",
  "chrono",
  "clap",
- "clap_complete",
  "clienter",
  "console-subscriber",
- "crossterm 0.27.0",
  "directories",
  "divan",
  "field_count",
@@ -1779,7 +1777,6 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.1",
  "rand_distr",
- "ratatui",
  "rayon",
  "readonly",
  "regex",
@@ -1808,8 +1805,45 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
- "unicode-width 0.1.14",
  "zeroize",
+]
+
+[[package]]
+name = "neptune-cli"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "itertools 0.11.0",
+ "neptune-cash",
+ "rand 0.9.1",
+ "regex",
+ "serde",
+ "serde_json",
+ "tarpc",
+ "tiny-bip39",
+ "tokio",
+]
+
+[[package]]
+name = "neptune-dashboard"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "bytesize",
+ "clap",
+ "crossterm 0.27.0",
+ "humantime",
+ "itertools 0.11.0",
+ "neptune-cash",
+ "num-traits",
+ "ratatui",
+ "strum 0.27.0",
+ "tarpc",
+ "tasm-lib",
+ "tokio",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]

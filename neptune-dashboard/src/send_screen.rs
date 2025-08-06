@@ -1,5 +1,4 @@
 use std::cmp::max;
-use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -114,7 +113,7 @@ impl SendScreen {
         let valid_amount = match NativeCurrencyAmount::coins_from_str(&amount) {
             Ok(a) => a,
             Err(e) => {
-                *notice_arc.lock().await = format!("amount: {}", e);
+                *notice_arc.lock().await = format!("amount: {e}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
@@ -124,13 +123,13 @@ impl SendScreen {
         let valid_fee = match NativeCurrencyAmount::coins_from_str(&fee) {
             Ok(a) if !a.is_negative() => a,
             Ok(a) => {
-                *notice_arc.lock().await = format!("fee: {}", a);
+                *notice_arc.lock().await = format!("fee: {a}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
             }
             Err(e) => {
-                *notice_arc.lock().await = format!("fee: {}", e);
+                *notice_arc.lock().await = format!("fee: {e}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
@@ -140,7 +139,7 @@ impl SendScreen {
         let valid_address = match ReceivingAddress::from_bech32m(&address, network) {
             Ok(a) => a,
             Err(e) => {
-                *notice_arc.lock().await = format!("address: {}", e);
+                *notice_arc.lock().await = format!("address: {e}");
                 *reset_me.lock().await = ResetType::Notice;
                 refresh_tx.send(()).await.unwrap();
                 return;
@@ -181,7 +180,7 @@ impl SendScreen {
         &mut self,
         event: DashboardEvent,
         refresh_tx: tokio::sync::mpsc::Sender<()>,
-    ) -> Result<Option<DashboardEvent>, Box<dyn Error>> {
+    ) -> Option<DashboardEvent> {
         let mut escalate_event = None;
         if let Ok(mut reset_me_mutex_guard) = self.reset_me.try_lock() {
             match *reset_me_mutex_guard {
@@ -212,11 +211,11 @@ impl SendScreen {
                             if let Ok(mut own_focus) = self.focus.try_lock() {
                                 match own_focus.to_owned() {
                                     SendScreenWidget::Address => {
-                                        return Ok(Some(DashboardEvent::ConsoleMode(
+                                        return Some(DashboardEvent::ConsoleMode(
                                             ConsoleIO::InputRequested(
                                                 "Please enter recipient address:\n".to_string(),
                                             ),
-                                        )));
+                                        ));
                                     }
                                     SendScreenWidget::Amount => {
                                         *own_focus = SendScreenWidget::Fee;
@@ -331,7 +330,7 @@ impl SendScreen {
                 }
             }
         }
-        Ok(escalate_event)
+        escalate_event
     }
 }
 

@@ -1,0 +1,37 @@
+[package]
+name = "neptune-dashboard"
+description = "neptune-cash tui dashboard and wallet"
+authors = ["Triton Software"]
+
+version = "0.3.0"
+edition = "2021"
+license = "Apache-2.0"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
+[dependencies]
+anyhow = { version = "1.0" }
+neptune-cash = { version = "0.3.0-alpha.1", path = "../neptune-core" }
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.27"
+tarpc = { version = "^0.34", features = [
+    "tokio1",
+    "serde-transport",
+    "serde-transport-json",
+    "tcp",
+] }
+tokio = { version = "1.41", features = ["full", "tracing"] }
+ratatui = "0.29"
+itertools = "0.11"
+num-traits = "0.2"
+unicode-width = "0.1"
+strum = { version = "0.27.0", features = ["derive"] }
+bytesize = "1.3"
+tasm-lib = "0.50.0"
+humantime = "2.1.0"
+
+[dev-dependencies]
+
+[lints]
+workspace = true

@@ -1,5 +1,4 @@
 use std::cmp::max;
-use std::error::Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -28,12 +27,6 @@ use super::dashboard_app::ConsoleIO;
 use super::dashboard_app::DashboardEvent;
 use super::overview_screen::VerticalRectifier;
 use super::screen::Screen;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Sign {
-    In,
-    Out,
-}
 
 #[derive(Debug, Clone)]
 pub struct ReceiveScreen {
@@ -108,10 +101,7 @@ impl ReceiveScreen {
         });
     }
 
-    pub fn handle(
-        &mut self,
-        event: DashboardEvent,
-    ) -> Result<Option<DashboardEvent>, Box<dyn Error>> {
+    pub fn handle(&mut self, event: DashboardEvent) -> Option<DashboardEvent> {
         let mut escalate_event = None;
         if self.in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
@@ -128,12 +118,12 @@ impl ReceiveScreen {
                         }
                         KeyCode::Char('c') => {
                             if let Some(address) = self.data.lock().unwrap().as_ref() {
-                                return Ok(Some(DashboardEvent::ConsoleMode(
+                                return Some(DashboardEvent::ConsoleMode(
                                     ConsoleIO::InputRequested(format!(
                                         "{}\n\n",
                                         address.to_bech32m(self.network).unwrap()
                                     )),
-                                )));
+                                ));
                             }
                         }
                         _ => {
@@ -143,7 +133,7 @@ impl ReceiveScreen {
                 }
             }
         }
-        Ok(escalate_event)
+        escalate_event
     }
 }
 

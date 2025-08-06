@@ -222,10 +222,7 @@ impl PeersScreen {
     ///
     /// In particular we handle Up/Down keypress for scrolling
     /// the history table.
-    pub fn handle(
-        &mut self,
-        event: DashboardEvent,
-    ) -> Result<Option<DashboardEvent>, Box<dyn std::error::Error>> {
+    pub fn handle(&mut self, event: DashboardEvent) -> Option<DashboardEvent> {
         let mut escalate_event = None;
 
         if self.in_focus {
@@ -237,7 +234,7 @@ impl PeersScreen {
                         // todo: PgUp,PgDn.  (but how to determine page size?  fixed n?)
                         KeyCode::Char(c) => {
                             if self.set_sort_column(c) {
-                                return Ok(None);
+                                return None;
                             }
                         }
 
@@ -248,7 +245,7 @@ impl PeersScreen {
                 }
             }
         }
-        Ok(escalate_event)
+        escalate_event
     }
 }
 
@@ -311,15 +308,9 @@ impl Widget for PeersScreen {
         let num_peers = self.data.lock().unwrap().len();
 
         let peer_count_buf = if self.in_focus {
-            format!(
-                "Peers connected: {}           sort-keys: i, v, c, s, p, r",
-                num_peers
-            )
+            format!("Peers connected: {num_peers}           sort-keys: i, v, c, s, p, r")
         } else {
-            format!(
-                "Peers connected: {}           press enter for options",
-                num_peers
-            )
+            format!("Peers connected: {num_peers}           press enter for options")
         };
 
         let peer_count = Line::from(vec![Span::from(peer_count_buf)]);
