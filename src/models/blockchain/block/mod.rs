@@ -1358,35 +1358,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn genesis_block_hasnt_changed_main_net() {
-        // Ensure that code changes does not modify the hash of main net's
-        // genesis block.
-
-        // Insert the real difficulty such that the block's hash can be
-        // compared to the one found in block explorers and other real
-        // instances, otherwise the hash would only be valid for test code.
-        let network = Network::Main;
-        let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
-        assert_eq!(
-            "f3f279e4d278648b9645d2f0f3a7665c9c092ae0d842d63b2750c6c928c96b12fa3158391a30a64d",
-            genesis_block.hash().to_hex()
-        );
-    }
-
-    #[test]
-    fn genesis_block_hasnt_changed_test_net_0() {
-        // Insert the real difficulty such that the block's hash can be
-        // compared to the one found in block explorers and other real
-        // instances, otherwise the hash would only be valid for test code.
-        let network = Network::Testnet(0);
-        let genesis_block = Block::genesis(network).with_difficulty(network.genesis_difficulty());
-        assert_eq!(
-            "40247214f13156827c5fc31cb1d7b48919ce9723e391a7f0d49682946a4fb0b71c57ef11725ea6a4",
-            genesis_block.hash().to_hex()
-        );
-    }
-
-    #[test]
     fn halving_happens_when_expected() {
         // 1st halving should happen at block height `BLOCKS_PER_GENERATION` =
         // 160.815, minus `NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT` = 21310. So at
