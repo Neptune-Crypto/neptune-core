@@ -4962,7 +4962,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
 
-            // Lo! upgrader utxos
+            // Lo! an upgrader utxo
             let wallet_status = rando
                 .lock_guard()
                 .await
@@ -4972,7 +4972,25 @@ pub(crate) mod tests {
                     &block_two.mutator_set_accumulator_after().unwrap(),
                 )
                 .await;
-            assert_eq!(2, wallet_status.synced_unspent.len());
+            assert_eq!(1, wallet_status.synced_unspent.len());
+
+            let (gobble_utxo, gobble_msmp) = wallet_status.synced_unspent[0].clone();
+            assert_eq!(
+                fee,
+                gobble_utxo.utxo.get_native_currency_amount(),
+                "Entire fee must be gobbled."
+            );
+            assert!(
+                !gobble_utxo.utxo.is_timelocked(),
+                "Gobbling fees may not be timelocked."
+            );
+            assert!(
+                block_two
+                    .mutator_set_accumulator_after()
+                    .unwrap()
+                    .verify(Tip5::hash(&gobble_utxo.utxo), &gobble_msmp),
+                "Wallet's MSMP must be correctly synced"
+            );
         }
     }
 

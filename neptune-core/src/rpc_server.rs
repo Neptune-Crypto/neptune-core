@@ -4929,7 +4929,7 @@ mod tests {
                 );
 
                 // Check that succesful guess is accepted by endpoint.
-                let guesser_buffer = block1.guess_preprocess(None);
+                let guesser_buffer = block1.guess_preprocess(None, None);
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
                     if let Some(valid_pow) = Pow::guess(&guesser_buffer, random(), target) {

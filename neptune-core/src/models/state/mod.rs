@@ -3511,9 +3511,9 @@ mod tests {
                 .is_valid(network, consensus_rule_set)
                 .await
         );
-        assert!(Transaction::from(block_transaction2.clone())
-            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
+        // We can't check confirmability of transaction since its records are now packed.
+        // So we produce a block instead and validate it.
         let block_2 = Block::compose(
             &block_1,
             block_transaction2,

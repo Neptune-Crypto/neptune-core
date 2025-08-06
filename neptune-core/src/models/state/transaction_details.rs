@@ -11,7 +11,6 @@ use tasm_lib::prelude::Digest;
 use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;
-use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
@@ -128,10 +127,13 @@ impl TransactionDetails {
     /// Create (`TransactionDetails` for) a new fee-gobbler transaction.
     ///
     /// The produced transaction has no inputs, sets a negative fee, and
-    /// distributes it over two UTXOs (one time-locked and one liquid
-    /// immediately) of which both are locked to the given lock script hash.
-    /// The produced transaction is supported by a [`PrimitiveWitness`], so
-    /// the caller still needs a follow-up proving operation.
+    /// distributes it over one UTXO which is locked to the given lock script
+    /// hash.
+    ///
+    /// # Panics
+    ///
+    /// - If the supplied fee is negative.
+    /// - If UtxoNotifyMethod is set to none
     pub(crate) fn fee_gobbler(
         gobbled_fee: NativeCurrencyAmount,
         sender_randomness: Digest,
@@ -140,43 +142,30 @@ impl TransactionDetails {
         notification_method: UtxoNotifyMethod,
         network: Network,
     ) -> Self {
+        assert!(
+            !gobbled_fee.is_negative(),
+            "Gobbled fee may not be negative"
+        );
         let gobbling_utxos = if gobbled_fee.is_zero() {
             vec![]
         } else {
-            let mut amount_liquid = gobbled_fee;
-            amount_liquid.div_two();
-            let amount_timelocked = gobbled_fee.checked_sub(&amount_liquid).unwrap();
             match notification_method {
-                UtxoNotifyMethod::OnChain(receiving_address) => vec![
-                    TxOutput::onchain_native_currency(
-                        amount_liquid,
+                UtxoNotifyMethod::OnChain(receiving_address) => {
+                    vec![TxOutput::onchain_native_currency(
+                        gobbled_fee,
                         sender_randomness,
                         receiving_address.clone(),
                         true, // owned
-                    ),
-                    TxOutput::onchain_native_currency(
-                        amount_timelocked,
-                        sender_randomness,
-                        receiving_address,
-                        true, // owned
-                    )
-                    .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
-                ],
-                UtxoNotifyMethod::OffChain(receiving_address) => vec![
-                    TxOutput::offchain_native_currency(
-                        amount_liquid,
+                    )]
+                }
+                UtxoNotifyMethod::OffChain(receiving_address) => {
+                    vec![TxOutput::offchain_native_currency(
+                        gobbled_fee,
                         sender_randomness,
                         receiving_address.clone(),
                         true, // owned
-                    ),
-                    TxOutput::offchain_native_currency(
-                        amount_timelocked,
-                        sender_randomness,
-                        receiving_address,
-                        true, // owned
-                    )
-                    .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
-                ],
+                    )]
+                }
                 UtxoNotifyMethod::None => {
                     panic!("Cannot produce fee gobbler transaction without UTXO notification")
                 }
@@ -358,12 +347,11 @@ impl TransactionDetails {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proptest_arbitrary_interop::arb;
-    use test_strategy::proptest;
 
     use super::*;
 
-    #[proptest]
-    fn test_fee_gobbler_properties(
+    #[test_strategy::proptest(async = "tokio", cases = 30)]
+    async fn test_fee_gobbler_properties(
         #[strategy(NativeCurrencyAmount::arbitrary_non_negative())]
         gobbled_fee: NativeCurrencyAmount,
         #[strategy(arb())] sender_randomness: Digest,
@@ -404,25 +392,14 @@ mod tests {
             fee_gobbler.fee
         );
 
-        let mut half_of_fee = fee_gobbler.fee;
-        half_of_fee.div_two();
-
-        let time_locked_amount = fee_gobbler
-            .tx_outputs
-            .iter()
-            .map(|txo| txo.utxo())
-            .filter(|utxo| match utxo.release_date() {
-                Some(date) => date >= fee_gobbler.timestamp + MINING_REWARD_TIME_LOCK_PERIOD,
-                None => false,
-            })
-            .map(|utxo| utxo.get_native_currency_amount())
-            .sum::<NativeCurrencyAmount>();
         assert!(
-            -half_of_fee
-                <= time_locked_amount,
-            "at least half of negative-fee must be time-locked\nhalf of negative fee: {}\ntime-locked amount: {}",
-            -half_of_fee,
-            time_locked_amount,
+            fee_gobbler
+                .tx_outputs
+                .iter()
+                .all(|x| !x.utxo().is_timelocked()),
+            "Gobbler fees should not be timelocked"
         );
+
+        assert!(fee_gobbler.primitive_witness().validate().await.is_ok());
     }
 }

@@ -281,7 +281,6 @@ mod tests {
 
     test_program_snapshot!(
         CollectLockScripts,
-        // snapshot taken from master on 2025-04-11 e2a712efc34f78c6a28801544418e7051127d284
-        "482c8f63c12a5be600f82376d3631b591cb949c99a8416c77e7d6391322b8fca9399fa35bcaa0891"
+        "7b608d9bbe5b5dc9f3f25af57ebb5a26302e404d0485d8b87abe74d9b339921493922b685efad062"
     );
 }

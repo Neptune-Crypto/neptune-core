@@ -45,7 +45,8 @@ The unused _jh1 and _jh2 are tokio `JoinHandle` for waiting on the main applicat
 
 See existing tests for further usage.
 
-## api layer
+
+## API layer
 
 It is hoped/intended that these tests will primarily make use of the
 public interface in src/api.
@@ -53,7 +54,7 @@ public interface in src/api.
 When the src/api is insufficient, that is a good indicator it needs to be extended and improved.
 
 
-## style
+## Style
 
 It is hoped these test can also serve a dual-purpose as example usage.  To that end, they should be as clear and readable as possible.
 
@@ -66,6 +67,14 @@ simple logic: use straight code flow as much as possible. aim for  general code 
 
 conventions: please study the existing tests and follow the same style and convention when adding your own or modifying.
 
-## not the only game in town
+## Not the only game in town
 
 Keep in mind that anyone can create separate crate(s) that use the same public APIs. So for any long and complicated scenarios it is likely better to place them in one or more companion crates dedicated to integration tests.
+
+## Unchanged Consensus Rules
+To allow for testing of the PoW algorithm, the data structure of blocks is different under the test
+flag than it is in production. Otherwise running the test would require at least 40GB RAM and take
+dozens of minutes more than it does now. So tests that the genesis blocks have not changed must
+live outside of the `cfg(test)` flag. For this reasons, such tests are added as integration tests
+here. This allows for the comparison of the hash of genesis blocks to that presented by various
+block explorers, giving the developer confidence that they didn't accidently change it.

@@ -1,4 +1,95 @@
 
+
+## [0.3.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.2..v0.3.0) - 2025-08-05
+
+### ✨ Features
+
+- Make PoW preprocessing cancelable ([1b37599b](https://github.com/Neptune-Crypto/neptune-core/commit/1b37599b))
+- *(`Pow`)* Make Merkle tree construction cancelable ([ed5f5ebc](https://github.com/Neptune-Crypto/neptune-core/commit/ed5f5ebc))
+
+### 🐛 Bug Fixes
+
+- *(`mine_loop`)* Stop guessing task when aborted during preprocessing ([bdbb048a](https://github.com/Neptune-Crypto/neptune-core/commit/bdbb048a))
+- *(wallet)* Announced UTXOs are never guesser fees ([4c75d0d4](https://github.com/Neptune-Crypto/neptune-core/commit/4c75d0d4))
+
+### 🚀 Performance
+
+- *(`Pow`)* Unsafely avoid memory-copies in `preprocess` ([66522fb4](https://github.com/Neptune-Crypto/neptune-core/commit/66522fb4))
+- *(`Pow`)* Free memory as soon as possible ([4094aef1](https://github.com/Neptune-Crypto/neptune-core/commit/4094aef1))
+- Drop reliance on `twenty_first`'s Merkle tree ([0fdaa8be](https://github.com/Neptune-Crypto/neptune-core/commit/0fdaa8be))
+
+### 📚 Documentation
+
+- *(merge_branch)* Clarify two non-trivial things ([a7f5d995](https://github.com/Neptune-Crypto/neptune-core/commit/a7f5d995))
+- *(`README.md`)* Correct CLI arg: `--peers` -> `--peer` ([5a7238e1](https://github.com/Neptune-Crypto/neptune-core/commit/5a7238e1))
+
+### ♻️ Refactor
+
+- *(HeaderToBlockHashWitness)* Add missing proof hash ([4a56f776](https://github.com/Neptune-Crypto/neptune-core/commit/4a56f776))
+- Rename `peers` to `peer` when specifying through CLI ([284773b1](https://github.com/Neptune-Crypto/neptune-core/commit/284773b1))
+- *(proof_upgrader)* Don't timelock half of gobbled fee ([e89645dc](https://github.com/Neptune-Crypto/neptune-core/commit/e89645dc))
+
+### ✅ Testing
+
+- Delete deprecated BlockKernel-hash test ([2a5f0de9](https://github.com/Neptune-Crypto/neptune-core/commit/2a5f0de9))
+- Fix potential empty range error in proptest ([d7cad741](https://github.com/Neptune-Crypto/neptune-core/commit/d7cad741))
+- Fix test related to new block hash definition ([9d34ae7c](https://github.com/Neptune-Crypto/neptune-core/commit/9d34ae7c))
+- Verify that block hash depends on block proof ([21c01914](https://github.com/Neptune-Crypto/neptune-core/commit/21c01914))
+- Fix test related to premine size check ([c08f2216](https://github.com/Neptune-Crypto/neptune-core/commit/c08f2216))
+- *(coinbase_amount)* Verify crash on negative amount ([93b11f24](https://github.com/Neptune-Crypto/neptune-core/commit/93b11f24))
+- *(native_currency)* Add two no-inflation violation tests ([e58dc806](https://github.com/Neptune-Crypto/neptune-core/commit/e58dc806))
+- *(mutator_set)* Fix flaky test ([fee1b405](https://github.com/Neptune-Crypto/neptune-core/commit/fee1b405))
+- Verify native currency hash always present in UTXO helper function ([df3086a7](https://github.com/Neptune-Crypto/neptune-core/commit/df3086a7))
+- Fix hardcoded program hash ([26e6f566](https://github.com/Neptune-Crypto/neptune-core/commit/26e6f566))
+- *(`Pow`)* Verify that `preprocess` can be canceled within 1 s ([5859879f](https://github.com/Neptune-Crypto/neptune-core/commit/5859879f))
+- Fix proof-upgrader gobbling fee test ([e5a018ba](https://github.com/Neptune-Crypto/neptune-core/commit/e5a018ba))
+
+### 🎨 Styling
+
+- *(collect_type_scripts)* Rename variable ([d7249bf2](https://github.com/Neptune-Crypto/neptune-core/commit/d7249bf2))
+
+### ⚙️ Miscellaneous
+
+- Release v0.3.0-alpha.1 ([44c96540](https://github.com/Neptune-Crypto/neptune-core/commit/44c96540))
+- *(`Block`)* Add UTXO redemption claim to genesis block ([079e730d](https://github.com/Neptune-Crypto/neptune-core/commit/079e730d))
+- *(`Block`)* Add UTXO redemption claim to genesis ([821848e4](https://github.com/Neptune-Crypto/neptune-core/commit/821848e4))
+- *(`Block`)* Add UTXO redemption to genesis ([d17edc5b](https://github.com/Neptune-Crypto/neptune-core/commit/d17edc5b))
+- *(`Block`)* Add UTXO redemption claim to genesis ([4deaa961](https://github.com/Neptune-Crypto/neptune-core/commit/4deaa961))
+
+### 🪵 Log
+
+- Add an info message for each block on bootstrap ([c925263a](https://github.com/Neptune-Crypto/neptune-core/commit/c925263a))
+- Add log message for preprocessing ([64d65f29](https://github.com/Neptune-Crypto/neptune-core/commit/64d65f29))
+- Reduce number of `info` logs ([7e030db9](https://github.com/Neptune-Crypto/neptune-core/commit/7e030db9))
+- Reduce number of `info` messages ([dd123c99](https://github.com/Neptune-Crypto/neptune-core/commit/dd123c99))
+- Reduce severity of multiple messages ([fbabe6ad](https://github.com/Neptune-Crypto/neptune-core/commit/fbabe6ad))
+- Reduce number of info log messages ([f0fc780a](https://github.com/Neptune-Crypto/neptune-core/commit/f0fc780a))
+- Adjust some log messages ([e1c36d04](https://github.com/Neptune-Crypto/neptune-core/commit/e1c36d04))
+
+### 🕵️ Privacy
+
+- *(mine_loop)* Never add zero-valued composer outputs ([825a3b2f](https://github.com/Neptune-Crypto/neptune-core/commit/825a3b2f))
+
+### Harden
+
+- *(collect_type_scripts)* Ensure all pointer jumps are forward ([b87bc2cb](https://github.com/Neptune-Crypto/neptune-core/commit/b87bc2cb))
+- *(PrimitiveWitness)* Verify not too many type script witnesses ([fa3fe55a](https://github.com/Neptune-Crypto/neptune-core/commit/fa3fe55a))
+- *(collect_type_scripts)* Add extra check that witness lives in ND-memory region ([cfc13b6f](https://github.com/Neptune-Crypto/neptune-core/commit/cfc13b6f))
+- *(collect_type_scripts)* Bound num inputs/outputs and num coins ([7c097730](https://github.com/Neptune-Crypto/neptune-core/commit/7c097730))
+- Verify sane end-state after consensus program ([e9c5c0b8](https://github.com/Neptune-Crypto/neptune-core/commit/e9c5c0b8))
+- *(kernel_to_outputs)* Add some extra checks ([8a25bb46](https://github.com/Neptune-Crypto/neptune-core/commit/8a25bb46))
+- *(new_claim)* Ensure claim bound to one memory page ([57982703](https://github.com/Neptune-Crypto/neptune-core/commit/57982703))
+
+### Joy
+
+- Update genesis parameters to reboot ([8b155690](https://github.com/Neptune-Crypto/neptune-core/commit/8b155690))
+
+### Ux
+
+- *(`Pow`)* Check cancel channel periodically during `preprocess` ([be1d09d2](https://github.com/Neptune-Crypto/neptune-core/commit/be1d09d2))
+- *(guess-preprocess)* Respect user-defined parallelism limit ([e5966931](https://github.com/Neptune-Crypto/neptune-core/commit/e5966931))
+
+
 ## [0.3.0-alpha.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.2.2..v0.3.0-alpha.1) - 2025-08-01
 
 ### ✨ Features

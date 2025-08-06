@@ -145,6 +145,7 @@ impl Utxo {
 
     /// Return all type script hashes referenced by any coin in any UTXO,
     /// without duplicates.
+    ///
     /// Always includes [`NativeCurrency`].
     pub(crate) fn type_script_hashes<'a, I: Iterator<Item = &'a Self>>(utxos: I) -> Vec<Digest> {
         vec![NativeCurrency.hash()]
@@ -372,5 +373,15 @@ mod tests {
         prop_assert!(!utxo.can_spend_at(release_date));
         prop_assert!(utxo.can_spend_at(release_date + epsilon));
         prop_assert!(utxo.can_spend_at(release_date + delta));
+    }
+
+    #[test]
+    fn always_include_native_currency_type_script() {
+        assert!(Utxo::type_script_hashes([].iter()).contains(&NativeCurrency.hash()));
+        let utxo = Utxo {
+            lock_script_hash: Digest::default(),
+            coins: vec![],
+        };
+        assert!(Utxo::type_script_hashes([utxo].iter()).contains(&NativeCurrency.hash()));
     }
 }

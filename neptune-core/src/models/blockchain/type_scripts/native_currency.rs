@@ -11,7 +11,6 @@ use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
@@ -112,11 +111,10 @@ impl ConsensusProgram for NativeCurrency {
         let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
         let coinbase_release_date_alloc = library.kmalloc(1);
 
-        let amount_logic_main_loop = TotalAmountMainLoop {
+        let loop_utxos_add_amounts_label = library.import(Box::new(TotalAmountMainLoop {
             digest_source: DigestSource::StaticMemory(own_program_digest_alloc),
             release_date: coinbase_release_date_alloc,
-        };
-        let loop_utxos_add_amounts_label = amount_logic_main_loop.entrypoint();
+        }));
 
         let store_own_program_digest = triton_asm!(
             // _
@@ -608,13 +606,10 @@ impl ConsensusProgram for NativeCurrency {
             halt
         };
 
-        let subroutines = amount_logic_main_loop.code(&mut library);
-
         let imports = library.all_imports();
 
         let code = triton_asm!(
             {&main_code}
-            {&subroutines}
             {&assert_half_output_amount_timelocked}
             {&imports}
         );
@@ -1008,6 +1003,56 @@ pub mod tests {
             .current();
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
+    }
+
+    fn prop_inflation_violation_when_fee_too_big(mut primitive_witness: PrimitiveWitness) {
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
+
+        // Increase fee by 1 nau and verify inflation violation
+        primitive_witness.kernel = TransactionKernelModifier::default()
+            .fee(primitive_witness.kernel.fee + NativeCurrencyAmount::from_nau(1))
+            .modify(primitive_witness.kernel);
+        assert_both_rust_and_tasm_fail(
+            NativeCurrencyWitness::from(primitive_witness.clone()),
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
+        );
+
+        // Increase fee by 2^{32} nau and verify inflation violation
+        primitive_witness.kernel = TransactionKernelModifier::default()
+            .fee(primitive_witness.kernel.fee + NativeCurrencyAmount::from_nau(1 << 32))
+            .modify(primitive_witness.kernel);
+        assert_both_rust_and_tasm_fail(
+            NativeCurrencyWitness::from(primitive_witness.clone()),
+            &[NativeCurrency::NO_INFLATION_VIOLATION],
+        );
+    }
+
+    #[test]
+    fn balanced_transaction_valid_unbalanced_invalid_no_coinbase() {
+        for num_inputs in 0..=2 {
+            for num_outputs in 0..=2 {
+                let mut test_runner = TestRunner::deterministic();
+                let no_coinbase_pw =
+                    PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                        .new_tree(&mut test_runner)
+                        .unwrap()
+                        .current();
+                prop_inflation_violation_when_fee_too_big(no_coinbase_pw)
+            }
+        }
+    }
+
+    #[test]
+    fn balanced_transaction_valid_unbalanced_invalid_with_coinbase() {
+        for num_outputs in 0..=3 {
+            let mut test_runner = TestRunner::deterministic();
+            let coinbase_pw = PrimitiveWitness::arbitrary_with_size_numbers(None, num_outputs, 1)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            prop_inflation_violation_when_fee_too_big(coinbase_pw)
+        }
     }
 
     #[proptest(cases = 30)]
@@ -1602,6 +1647,6 @@ pub mod tests {
 
     test_program_snapshot!(
         NativeCurrency,
-        "f2c7eca6d9c13946c17a641fd5aa1b8813c8c0e86b616f0d8d53ba53ac742f554d01eb5e17fa3673"
+        "35ab20eaca74e39c97b1b1c6eeb337853babec0d1b4152b6218f12ab673618df11bb3a534af30f64"
     );
 }

@@ -102,7 +102,7 @@ pub mod neptune_arbitrary {
             let (removables, aocl_size) = parameters;
             assert!(
                 removables.len() <= usize::try_from(aocl_size).unwrap(),
-                "Cannot remove more elements than are present"
+                "Cannot remove more elements than are present. aocl_size: {aocl_size}; #removables: {}", removables.len()
             );
 
             // compute the canonical commitments that were added to the aocl at some prior,
@@ -495,12 +495,10 @@ mod tests {
         Ok(())
     }
 
-    #[test_strategy::proptest(cases = 3)]
+    #[test_strategy::proptest(cases = 4)]
     fn state_updates_small_aocl_size(
-        #[strategy(0u64..=u64::from(u8::MAX))] _aocl_size: u64,
-        #[strategy(0usize..30_usize)]
-        #[filter(#_aocl_size >= (#_num_removals as u64))]
-        _num_removals: usize,
+        #[strategy(0usize..30_usize)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=u64::from(u8::MAX))] _aocl_size: u64,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#removables.clone(), #_aocl_size)))]
