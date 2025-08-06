@@ -1243,12 +1243,6 @@ pub(crate) mod tests {
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
     impl Block {
-        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
-            self.kernel.header.difficulty = difficulty;
-            self.unset_digest();
-            self
-        }
-
         pub(crate) fn set_proof(&mut self, proof: BlockProof) {
             self.proof = proof;
             self.unset_digest();
