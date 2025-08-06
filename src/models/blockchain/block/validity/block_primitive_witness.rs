@@ -45,7 +45,6 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 pub(crate) struct BlockPrimitiveWitness {
     pub(super) predecessor_block: Block,
 
-    /// Inputs can be packed, depending on consensus rules.
     transaction: BlockTransaction,
 
     maybe_body: OnceLock<BlockBody>,
@@ -54,7 +53,6 @@ pub(crate) struct BlockPrimitiveWitness {
 }
 
 impl BlockPrimitiveWitness {
-    /// Takes transaction without packed inputs
     pub(crate) fn new(
         predecessor_block: Block,
         transaction: BlockTransaction,

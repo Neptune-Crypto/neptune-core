@@ -1149,7 +1149,7 @@ mod tests {
                 "TXID in peer msg must match that from transaction"
             );
 
-            // Ensure PC-backed tx exists in mempool
+            // Ensure PC/SP-backed tx exists in mempool
             let mempool_tx = alice
                 .lock_guard()
                 .await
