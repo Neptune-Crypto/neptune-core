@@ -994,12 +994,17 @@ impl MainLoopHandler {
                         .await;
                 }
 
-                // send notification to peers
-                let transaction_notification: TransactionNotification =
-                    (&pt2m_transaction.transaction).try_into()?;
+                let is_nop = pt2m_transaction.transaction.kernel.inputs.is_empty()
+                    && pt2m_transaction.transaction.kernel.outputs.is_empty()
+                    && pt2m_transaction.transaction.kernel.announcements.is_empty();
+                if !is_nop {
+                    // if meaningful, send notification to peers
+                    let transaction_notification: TransactionNotification =
+                        (&pt2m_transaction.transaction).try_into()?;
 
-                let pmsg = MainToPeerTask::TransactionNotification(transaction_notification);
-                self.main_to_peer_broadcast(pmsg);
+                    let pmsg = MainToPeerTask::TransactionNotification(transaction_notification);
+                    self.main_to_peer_broadcast(pmsg);
+                }
             }
             PeerTaskToMain::BlockProposal(block) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::BlockProposal");

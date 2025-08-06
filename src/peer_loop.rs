@@ -1369,8 +1369,6 @@ impl PeerLoopHandler {
                 // If transaction cannot be applied to mutator set, punish.
                 // I don't think this can happen when above checks pass but we include
                 // the check to ensure that transaction can be applied.
-
-                // TODO: Try unpacking tx-inputs
                 let ms_update = MutatorSetUpdate::new(
                     transaction.kernel.inputs.clone(),
                     transaction.kernel.outputs.clone(),
