@@ -1095,10 +1095,26 @@ impl WalletState {
 
     pub(crate) async fn bump_derivation_counter(&mut self, key_type: KeyType, max_used_index: u64) {
         let new_counter = max_used_index + 1;
-        if self.spending_key_counter(key_type) < new_counter {
+        let current_counter = self.spending_key_counter(key_type);
+
+        if current_counter < new_counter {
             match key_type {
-                KeyType::Generation => self.wallet_db.set_generation_key_counter(new_counter).await,
-                KeyType::Symmetric => self.wallet_db.set_symmetric_key_counter(new_counter).await,
+                KeyType::Generation => {
+                    self.wallet_db.set_generation_key_counter(new_counter).await;
+
+                    for idx in current_counter..new_counter {
+                        let key = self.wallet_entropy.nth_generation_spending_key(idx).into();
+                        self.known_generation_keys.push(key);
+                    }
+                }
+                KeyType::Symmetric => {
+                    self.wallet_db.set_symmetric_key_counter(new_counter).await;
+
+                    for idx in current_counter..new_counter {
+                        let key = self.wallet_entropy.nth_symmetric_key(idx).into();
+                        self.known_symmetric_keys.push(key);
+                    }
+                }
             }
         }
     }
@@ -3607,7 +3623,6 @@ pub(crate) mod tests {
                 for _ in 0..num_to_derive {
                     let _ = wallet.next_unused_spending_key(key_type).await;
                 }
-
                 let expected_num_known_keys = num_known_keys + num_to_derive;
                 let known_keys = wallet
                     .get_known_addressable_spending_keys(key_type)
@@ -4155,7 +4170,7 @@ pub(crate) mod tests {
         ///  - If Alice does nothing special, she does not catch the UTXO.
         ///  - If Alice activates scan mode with the right parameters, she does
         ///    catch the UTXO.
-        ///  - In the last case, her derivation counter is updated accordingly.
+        ///  - In the last case, her derivation counter and keys are updated accordingly.
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn test_recovery_on_imported_wallet() {
@@ -4269,9 +4284,21 @@ pub(crate) mod tests {
                         21,
                         alice_wallet_state.wallet_db.get_generation_key_counter()
                     );
+                    assert_eq!(
+                        21,
+                        alice_wallet_state
+                            .get_known_generation_spending_keys()
+                            .count()
+                    );
                 } else {
                     assert_eq!(NativeCurrencyAmount::coins(0), balance);
                     assert_eq!(1, alice_wallet_state.wallet_db.get_generation_key_counter());
+                    assert_eq!(
+                        1,
+                        alice_wallet_state
+                            .get_known_generation_spending_keys()
+                            .count()
+                    );
                 }
             }
         }
