@@ -3620,10 +3620,9 @@ pub(crate) mod tests {
                 let num_to_derive = 20;
 
                 // 2. Request 20 spending keys
-                wallet
-                    .bump_derivation_counter(key_type, num_to_derive.try_into().unwrap())
-                    .await;
-
+                for _ in 0..num_to_derive {
+                    let _ = wallet.next_unused_spending_key(key_type).await;
+                }
                 let expected_num_known_keys = num_known_keys + num_to_derive;
                 let known_keys = wallet
                     .get_known_addressable_spending_keys(key_type)
@@ -4171,7 +4170,7 @@ pub(crate) mod tests {
         ///  - If Alice does nothing special, she does not catch the UTXO.
         ///  - If Alice activates scan mode with the right parameters, she does
         ///    catch the UTXO.
-        ///  - In the last case, her derivation counter is updated accordingly.
+        ///  - In the last case, her derivation counter and keys are updated accordingly.
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn test_recovery_on_imported_wallet() {
@@ -4285,9 +4284,21 @@ pub(crate) mod tests {
                         21,
                         alice_wallet_state.wallet_db.get_generation_key_counter()
                     );
+                    assert_eq!(
+                        21,
+                        alice_wallet_state
+                            .get_known_generation_spending_keys()
+                            .count()
+                    );
                 } else {
                     assert_eq!(NativeCurrencyAmount::coins(0), balance);
                     assert_eq!(1, alice_wallet_state.wallet_db.get_generation_key_counter());
+                    assert_eq!(
+                        1,
+                        alice_wallet_state
+                            .get_known_generation_spending_keys()
+                            .count()
+                    );
                 }
             }
         }
