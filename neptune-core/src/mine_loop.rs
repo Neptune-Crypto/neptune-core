@@ -711,41 +711,32 @@ pub(crate) async fn mine(
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
 
-        let maybe_proposal = global_state_lock
+        let proposal_meets_threshold = global_state_lock
             .lock_guard()
             .await
-            .mining_state
-            .block_proposal
-            .clone();
-        let guess = cli_args.guess;
-
+            .current_block_proposal_meets_threshold();
         let should_guess = !wait_for_confirmation
-            && guess
-            && maybe_proposal.is_some()
+            && cli_args.guess
+            && proposal_meets_threshold
             && !is_syncing
             && !pause_mine
             && is_connected;
-
-        // if start_guessing is true, then we are in a state change from
-        // inactive state to guessing state.
-        //
-        // if start_guessing is false and should_guess is true then we
-        // have already been guessing and are restarting with new params.
-        let start_guessing = matches!(
-            (mining_status, should_guess),
-            (MiningStatus::Inactive, true)
-        );
-
-        if start_guessing {
-            let proposal = maybe_proposal.unwrap(); // is_some() verified above
-            global_state_lock
-                .set_mining_status_to_guessing(proposal)
-                .await;
-        }
-
         let guesser_task: Option<JoinHandle<()>> = if should_guess {
-            // safe because above `is_some`
-            let proposal = maybe_proposal.unwrap();
+            let proposal = global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .block_proposal
+                .expect("Block proposal must be present when guesser threshold is met")
+                .clone();
+
+            // Only apply state change if we were not already guessing.
+            if matches!(mining_status, MiningStatus::Inactive) {
+                global_state_lock
+                    .set_mining_status_to_guessing(&proposal)
+                    .await;
+            }
+
             let guesser_key = global_state_lock
                 .lock_guard()
                 .await
@@ -758,7 +749,7 @@ pub(crate) async fn mine(
                 .await;
             let guesser_task = guess_nonce(
                 network,
-                proposal.to_owned(),
+                proposal,
                 latest_block_header,
                 guesser_tx,
                 GuessingConfiguration {

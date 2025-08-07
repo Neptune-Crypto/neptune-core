@@ -873,6 +873,54 @@ impl GlobalState {
         }
     }
 
+    /// Returns true iff the block proposal exceeds the previous proposal with
+    /// enough guesser reward to warrant a restart of the guesser with the
+    /// overhead that that brings.
+    ///
+    /// Caller must have validated the new block proposal before calling this
+    /// function.
+    ///
+    /// # Panics
+    ///
+    /// - If the new block proposal has a negative fee.
+    pub(crate) fn block_proposal_warrants_guess_restart(&self, new_proposal: &Block) -> bool {
+        match self.mining_state.mining_status {
+            // If a proposal is already being worked on, check if a
+            // re-calculation of the preprocess-data is worth it.
+            MiningStatus::Guessing(guessing_work_info) => {
+                let old_guesser_reward = guessing_work_info.total_guesser_fee;
+                let new_guesser_reward = new_proposal
+                    .total_guesser_reward()
+                    .expect("New proposal must be valid");
+                let Some(delta) = new_guesser_reward.checked_sub(&old_guesser_reward) else {
+                    return false;
+                };
+
+                let relative_delta = delta.to_nau_f64() / old_guesser_reward.to_nau_f64();
+                relative_delta >= self.cli.minimum_guesser_improvement_fraction
+            }
+
+            // If currently composing, don't interrupt this process
+            MiningStatus::Composing(_) => false,
+
+            // If no proposal is being worked on, get started on one.
+            MiningStatus::Inactive => true,
+        }
+    }
+
+    /// Returns true iff the current block proposal is present and has a high
+    /// enough guesser fee to be worth guessing on. Always  returns true if
+    /// proposal was made locally.
+    pub(crate) fn current_block_proposal_meets_threshold(&self) -> bool {
+        match &self.mining_state.block_proposal {
+            BlockProposal::OwnComposition(_) => true,
+            BlockProposal::ForeignComposition(block) => block
+                .relative_guesser_reward()
+                .is_ok_and(|x| x >= self.cli.minimum_guesser_fraction),
+            BlockProposal::None => false,
+        }
+    }
+
     /// Determine whether the incoming block is more canonical than the current
     /// tip, *i.e.*, wins the fork choice rule.
     ///
@@ -2163,7 +2211,7 @@ mod tests {
 
         bob.set_new_tip(block1).await.unwrap();
         assert!(
-            bob.mining_state.block_proposal.is_none(),
+            matches!(bob.mining_state.block_proposal, BlockProposal::None),
             "block proposal must be reset after setting new tip."
         );
         assert!(
@@ -3573,106 +3621,167 @@ mod tests {
         );
     }
 
-    #[apply(shared_tokio_runtime)]
-    async fn favor_incoming_block_proposal_test() {
-        let network = Network::Main;
-        async fn block1_proposal(global_state_lock: &GlobalStateLock, network: Network) -> Block {
-            let genesis_block = Block::genesis(global_state_lock.cli().network);
-            let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
-            let (cb, _) = make_coinbase_transaction_from_state(
-                &genesis_block,
-                global_state_lock,
-                timestamp,
-                global_state_lock
-                    .cli()
-                    .proof_job_options_primitive_witness(),
-            )
-            .await
-            .unwrap();
+    mod block_proposals {
+        use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
 
-            let coinbase_kernel = TransactionKernelModifier::default()
-                .merge_bit(true)
-                .modify(cb.kernel);
-            let coinbase_transaction = Transaction {
-                kernel: coinbase_kernel,
-                proof: cb.proof,
-            };
+        use super::*;
 
-            Block::block_template_invalid_proof(
-                &genesis_block,
-                BlockTransaction::try_from(coinbase_transaction).unwrap(),
-                timestamp,
-                None,
-                network,
+        #[apply(shared_tokio_runtime)]
+        async fn dont_guess_when_block_proposal_not_known() {
+            let gsl = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default_with_network(Network::Main),
             )
+            .await;
+            assert!(
+                !gsl.lock_guard()
+                    .await
+                    .current_block_proposal_meets_threshold(),
+                "Must return false when no proposal is known"
+            );
         }
 
-        let mut global_state_lock_small = mock_genesis_global_state(
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args {
-                network,
-                guesser_fraction: 0.1,
-                ..Default::default()
-            },
-        )
-        .await;
-        let global_state_lock_big = mock_genesis_global_state(
-            2,
-            WalletEntropy::devnet_wallet(),
-            cli_args::Args {
-                network,
-                guesser_fraction: 0.5,
-                ..Default::default()
-            },
-        )
-        .await;
-        let small_guesser_fraction = block1_proposal(&global_state_lock_small, network).await;
-        let small_prev_block_digest = small_guesser_fraction.header().prev_block_digest;
-        let big_guesser_fraction = block1_proposal(&global_state_lock_big, network).await;
-        let big_prev_block_digest = big_guesser_fraction.header().prev_block_digest;
-
-        let mut state = global_state_lock_small
-            .global_state_lock
-            .lock_guard_mut()
+        #[apply(shared_tokio_runtime)]
+        async fn dont_guess_when_block_proposal_too_cheap() {
+            let network = Network::Main;
+            let mut gsl = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args {
+                    network,
+                    minimum_guesser_fraction: 0.5f64,
+                    ..Default::default()
+                },
+            )
             .await;
-        assert!(
-            state
-                .favor_incoming_block_proposal(
-                    small_prev_block_digest,
-                    small_guesser_fraction.total_guesser_reward().unwrap()
-                )
-                .is_ok(),
-            "Must favor low guesser fee over none"
-        );
+            let mut gsl = gsl.lock_guard_mut().await;
 
-        state.mining_state.block_proposal =
-            BlockProposal::foreign_proposal(small_guesser_fraction.clone());
-        assert!(
-            state
-                .favor_incoming_block_proposal(
-                    big_prev_block_digest,
-                    big_guesser_fraction.total_guesser_reward().unwrap()
-                )
-                .is_ok(),
-            "Must favor big guesser fee over low"
-        );
+            let too_cheap = invalid_empty_block1_with_guesser_fraction(network, 0.1).await;
+            gsl.mining_state.block_proposal = BlockProposal::ForeignComposition(too_cheap.clone());
+            assert!(
+                !gsl.current_block_proposal_meets_threshold(),
+                "Must return false when no proposal is too cheap"
+            );
 
-        state.mining_state.block_proposal =
-            BlockProposal::foreign_proposal(big_guesser_fraction.clone());
-        assert_eq!(
-            BlockProposalRejectError::InsufficientFee {
-                current: Some(big_guesser_fraction.total_guesser_reward().unwrap()),
-                received: big_guesser_fraction.total_guesser_reward().unwrap()
-            },
-            state
-                .favor_incoming_block_proposal(
-                    big_prev_block_digest,
-                    big_guesser_fraction.total_guesser_reward().unwrap()
+            let not_too_cheap = invalid_empty_block1_with_guesser_fraction(network, 0.55).await;
+            gsl.mining_state.block_proposal = BlockProposal::ForeignComposition(not_too_cheap);
+            assert!(
+                gsl.current_block_proposal_meets_threshold(),
+                "Must return true when proposal pays enough"
+            );
+
+            gsl.mining_state.block_proposal = BlockProposal::OwnComposition((too_cheap, vec![]));
+            assert!(
+                gsl.current_block_proposal_meets_threshold(),
+                "Must return true when proposal is own"
+            );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn favor_incoming_block_proposal_test() {
+            let network = Network::Main;
+            async fn block1_proposal(
+                global_state_lock: &GlobalStateLock,
+                network: Network,
+            ) -> Block {
+                let genesis_block = Block::genesis(global_state_lock.cli().network);
+                let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
+                let (cb, _) = make_coinbase_transaction_from_state(
+                    &genesis_block,
+                    global_state_lock,
+                    timestamp,
+                    global_state_lock
+                        .cli()
+                        .proof_job_options_primitive_witness(),
                 )
-                .unwrap_err(),
-            "Must favor existing over incoming equivalent"
-        );
+                .await
+                .unwrap();
+
+                let coinbase_kernel = TransactionKernelModifier::default()
+                    .merge_bit(true)
+                    .modify(cb.kernel);
+                let coinbase_transaction = Transaction {
+                    kernel: coinbase_kernel,
+                    proof: cb.proof,
+                };
+
+                Block::block_template_invalid_proof(
+                    &genesis_block,
+                    BlockTransaction::try_from(coinbase_transaction).unwrap(),
+                    timestamp,
+                    None,
+                    network,
+                )
+            }
+
+            let mut global_state_lock_small = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args {
+                    network,
+                    guesser_fraction: 0.1,
+                    ..Default::default()
+                },
+            )
+            .await;
+            let global_state_lock_big = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args {
+                    network,
+                    guesser_fraction: 0.5,
+                    ..Default::default()
+                },
+            )
+            .await;
+            let small_guesser_fraction = block1_proposal(&global_state_lock_small, network).await;
+            let small_prev_block_digest = small_guesser_fraction.header().prev_block_digest;
+            let big_guesser_fraction = block1_proposal(&global_state_lock_big, network).await;
+            let big_prev_block_digest = big_guesser_fraction.header().prev_block_digest;
+
+            let mut state = global_state_lock_small
+                .global_state_lock
+                .lock_guard_mut()
+                .await;
+            assert!(
+                state
+                    .favor_incoming_block_proposal(
+                        small_prev_block_digest,
+                        small_guesser_fraction.total_guesser_reward().unwrap()
+                    )
+                    .is_ok(),
+                "Must favor low guesser fee over none"
+            );
+
+            state.mining_state.block_proposal =
+                BlockProposal::foreign_proposal(small_guesser_fraction.clone());
+            assert!(
+                state
+                    .favor_incoming_block_proposal(
+                        big_prev_block_digest,
+                        big_guesser_fraction.total_guesser_reward().unwrap()
+                    )
+                    .is_ok(),
+                "Must favor big guesser fee over low"
+            );
+
+            state.mining_state.block_proposal =
+                BlockProposal::foreign_proposal(big_guesser_fraction.clone());
+            assert_eq!(
+                BlockProposalRejectError::InsufficientFee {
+                    current: Some(big_guesser_fraction.total_guesser_reward().unwrap()),
+                    received: big_guesser_fraction.total_guesser_reward().unwrap()
+                },
+                state
+                    .favor_incoming_block_proposal(
+                        big_prev_block_digest,
+                        big_guesser_fraction.total_guesser_reward().unwrap()
+                    )
+                    .unwrap_err(),
+                "Must favor existing over incoming equivalent"
+            );
+        }
     }
 
     mod state_update_on_reorganizations {
