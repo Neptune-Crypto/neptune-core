@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use neptune_cash::api::export::BlockHeight;
+use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Network;
+use neptune_cash::api::export::Timestamp;
 use neptune_cash::models::blockchain::block::Block;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
@@ -42,8 +44,8 @@ pub fn genesis_block_hasnt_changed_testnet_0() {
 /// and that a global state can be restored from it.
 #[tokio::test(flavor = "multi_thread")]
 async fn can_restore_from_real_mainnet_data_with_reorganizations() {
-    // TODO: Local functions copied from elsewhere because
-    // they're under the test flag the other place. Solution?
+    // Local function copied from elsewhere because it's under the test flag
+    // the other place.
     fn test_helper_data_dir() -> PathBuf {
         const TEST_DATA_DIR_NAME: &str = "test_data/";
         let mut path = PathBuf::new();
@@ -51,6 +53,8 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
         path
     }
 
+    // Local function copied from elsewhere because it's under the test flag
+    // the other place.
     fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, String)> {
         const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
@@ -182,7 +186,7 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
     let expected_blk_files = ["blk0.dat"];
 
     let network = Network::Main;
-    let cli = GenesisNode::default_args_with_network(network);
+    let cli = GenesisNode::default_args_with_network_and_devnet_wallet(network).await;
     let mut alice = GenesisNode::start_node(cli).await.unwrap();
 
     let mut state = alice.gsl.lock_guard_mut().await;
@@ -209,8 +213,21 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
         .unwrap();
     let restored_block_height = state.chain.light_state().header().height;
     assert_eq!(
-        BlockHeight::new(bfe!(124)),
+        BlockHeight::new(bfe!(127)),
         restored_block_height,
         "Expected block height not reached in state-recovery. Reached: {restored_block_height}"
+    );
+
+    // Verify that wallet state was handled correctly, that balance is still
+    // premine reward, since the devnet reward was not spent during first
+    // blocks.
+    let wallet_status = state.get_wallet_status_for_tip().await;
+    let balance = state
+        .wallet_state
+        .confirmed_available_balance(&wallet_status, network.launch_date() + Timestamp::months(7));
+    assert_eq!(
+        NativeCurrencyAmount::coins(20),
+        balance,
+        "Expected balance must be available after state-recovery"
     );
 }

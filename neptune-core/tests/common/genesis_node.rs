@@ -16,6 +16,9 @@ use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
 use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
+use neptune_cash::models::state::wallet::wallet_entropy::WalletEntropy;
+use neptune_cash::models::state::wallet::wallet_file::WalletFile;
+use neptune_cash::models::state::wallet::wallet_file::WalletFileContext;
 use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
@@ -63,10 +66,42 @@ impl GenesisNode {
         // denominator and because otherwise dev machines often miss this case.
         args.tx_proving_capability = Some(TxProvingCapability::PrimitiveWitness);
 
-        if let Ok(dd) = Self::integration_test_data_directory(args.network) {
-            args.data_dir = Some(dd.root_dir_path());
-        }
+        // Prevent integration tests from overwriting any real data that might
+        // be present on the host machine by setting a unique data directory.
+        let dd = Self::integration_test_data_directory(args.network)
+            .expect("Failed to get an integration test directory");
+        args.data_dir = Some(dd.root_dir_path());
+
         args
+    }
+
+    pub async fn default_args_with_network_and_devnet_wallet(network: Network) -> Args {
+        let cli_args = Self::default_args_with_network(network);
+        let data_directory =
+            DataDirectory::get(cli_args.data_dir.clone(), cli_args.network).unwrap();
+        DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path())
+            .await
+            .unwrap();
+        let wallet_dir = data_directory.wallet_directory_path();
+        DataDirectory::create_dir_if_not_exists(&wallet_dir)
+            .await
+            .unwrap();
+        let secret = WalletEntropy::devnet_wallet();
+        let wallet_file_content = WalletFile::new(secret.into());
+        let wallet_file_path = WalletFileContext::wallet_secret_path(&wallet_dir);
+
+        // Ensure existing wallet file is **never** overwritten by integration
+        // test.
+        assert!(
+            !wallet_file_path.exists(),
+            "Attempted to overwrite existing wallet file in integration test. Aborting."
+        );
+
+        wallet_file_content
+            .save_to_disk(&wallet_file_path)
+            .expect("Storing wallet secret must work.");
+
+        cli_args
     }
 
     /// applies instance specific settings to cli Args: rpc_port and peer_port
