@@ -40,7 +40,7 @@ pub fn genesis_block_hasnt_changed_testnet_0() {
     );
 }
 
-/// test: Verify that first ~120 blocks on main net are still considered valid,
+/// test: Verify that first ~250 blocks on main net are still considered valid,
 /// and that a global state can be restored from it.
 #[tokio::test(flavor = "multi_thread")]
 async fn can_restore_from_real_mainnet_data_with_reorganizations() {
@@ -183,7 +183,7 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
 
     logging::tracing_logger();
 
-    let expected_blk_files = ["blk0.dat"];
+    let expected_blk_files = ["blk0.dat", "blk1.dat"];
 
     let network = Network::Main;
     let cli = GenesisNode::default_args_with_network_and_devnet_wallet(network).await;
@@ -212,8 +212,9 @@ async fn can_restore_from_real_mainnet_data_with_reorganizations() {
         .await
         .unwrap();
     let restored_block_height = state.chain.light_state().header().height;
+    println!("restored_block_height: {restored_block_height}");
     assert_eq!(
-        BlockHeight::new(bfe!(127)),
+        BlockHeight::new(bfe!(250)),
         restored_block_height,
         "Expected block height not reached in state-recovery. Reached: {restored_block_height}"
     );
