@@ -181,6 +181,16 @@ pub struct Args {
     #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
     pub(crate) minimum_guesser_fraction: f64,
 
+    /// If guessing has already started, and a new proposal comes in, the new
+    /// proposal will be guessed on only if it exceeds the previous proposal
+    /// with this fraction. Ideally this fraction should be set to the value of
+    /// 1 - BTI' / (BTI' - PPT), where BTI' is block target interval minus
+    /// proving time minus preprocessing time, and PPT is preprocessing time.
+    /// This value will optimize guesser rewards. On a Threadrippper 7995wx this
+    /// value is 16.7 %. On weaker CPUs, this value should be set higher.
+    #[clap(long, default_value = "0.17", value_parser = fraction_validator)]
+    pub(crate) minimum_guesser_improvement_fraction: f64,
+
     /// Whether to engage in guess-nonce-and-hash, which is the 3rd step in
     /// three-step mining. If this flag is set and the `compose` flag is not
     /// set, then the client will rely on block proposals from other nodes. In

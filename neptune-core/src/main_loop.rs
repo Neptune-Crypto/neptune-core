@@ -1046,7 +1046,16 @@ impl MainLoopHandler {
                 let pmsg = MainToPeerTask::BlockProposalNotification((&*block).into());
                 self.main_to_peer_broadcast(pmsg);
 
-                self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
+                // Only notify miner if delta from current proposal is
+                // sufficient
+                if self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .block_proposal_warrants_guess_restart(&block)
+                {
+                    self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
+                }
             }
             PeerTaskToMain::DisconnectFromLongestLivedPeer => {
                 let global_state = self.global_state_lock.lock_guard().await;

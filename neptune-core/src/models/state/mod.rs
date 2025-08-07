@@ -873,6 +873,28 @@ impl GlobalState {
         }
     }
 
+    /// Returns true iff the block proposal exceeds the previous proposal with
+    /// enough guesser reward to warrant a restart of the guesser with the
+    /// overhead that that brings.
+    pub(crate) fn block_proposal_warrants_guess_restart(&self, new_proposal: &Block) -> bool {
+        match &self.mining_state.block_proposal {
+            BlockProposal::OwnComposition(_) => false,
+            BlockProposal::None => true,
+            BlockProposal::ForeignComposition(old_proposal) => {
+                let old_guesser_reward = old_proposal
+                    .total_guesser_reward()
+                    .expect("Old proposal must be valid");
+                let new_guesser_reward = new_proposal
+                    .total_guesser_reward()
+                    .expect("New proposal must be valid");
+                let delta = new_guesser_reward - old_guesser_reward;
+                let relative_delta = delta.to_nau_f64() / old_guesser_reward.to_nau_f64();
+
+                relative_delta >= self.cli.minimum_guesser_improvement_fraction
+            }
+        }
+    }
+
     /// Returns true iff the current block proposal should be guessed on.
     pub(crate) fn should_guess_on_block_proposal(&self) -> bool {
         match &self.mining_state.block_proposal {

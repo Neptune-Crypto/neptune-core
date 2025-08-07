@@ -718,8 +718,7 @@ pub(crate) async fn mine(
             && cli_args.guess
             && proposal_meets_threshold
             && !is_syncing
-            && !pause_mine
-            && is_connected;
+            && !pause_mine;
         let guesser_task: Option<JoinHandle<()>> = if should_guess {
             let proposal = global_state_lock
                 .lock_guard()
