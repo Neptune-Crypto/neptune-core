@@ -4755,13 +4755,13 @@ mod tests {
             )
             .await;
             let bob_token = cookie_token(&bob).await;
-            assert!(!bob
-                .state
-                .lock_guard()
-                .await
-                .mining_state
-                .block_proposal
-                .is_some());
+            assert!(
+                matches!(
+                    bob.state.lock_guard().await.mining_state.block_proposal,
+                    BlockProposal::None
+                ),
+                "Test assumption: no block proposal known"
+            );
             let accepted = bob
                 .clone()
                 .provide_pow_solution(context::current(), bob_token, random(), random())

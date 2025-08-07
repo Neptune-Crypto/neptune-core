@@ -1108,6 +1108,19 @@ impl Block {
         self.encode().len()
     }
 
+    /// A number showing how big the guesser reward is relative to the block
+    /// subsidy.  Notice that this number can exceed 1 because of transaction
+    /// fees.
+    ///
+    /// May not be used in any consensus-related setting, as precision is lost
+    /// because of the use of floats.
+    pub(crate) fn relative_guesser_reward(&self) -> Result<f64, BlockValidationError> {
+        let guesser_reward = self.total_guesser_reward()?;
+        let block_subsidy = Self::block_subsidy(self.header().height);
+
+        Ok(guesser_reward.to_nau_f64() / block_subsidy.to_nau_f64())
+    }
+
     /// The amount rewarded to the guesser who finds a valid nonce for this
     /// block.
     pub(crate) fn total_guesser_reward(
@@ -1233,6 +1246,7 @@ pub(crate) mod tests {
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block;
+    use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
@@ -1415,6 +1429,15 @@ pub(crate) mod tests {
             NativeCurrencyAmount::coins(128),
             Block::block_subsidy(block_height_generation_0)
         );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn relative_guesser_reward() {
+        let network = Network::Main;
+        for fraction in [0.01, 0.1, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99, 1.0] {
+            let block = invalid_empty_block1_with_guesser_fraction(network, fraction).await;
+            assert_eq!(fraction, block.relative_guesser_reward().unwrap());
+        }
     }
 
     #[traced_test]

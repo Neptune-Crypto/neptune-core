@@ -158,6 +158,29 @@ pub struct Args {
     #[clap(long, default_value = "1")]
     pub(crate) max_num_compose_mergers: NonZero<usize>,
 
+    /// By default, a composer will share block proposals with all peers. If
+    /// this flag is set, the composer will *not* share their block proposals.
+    #[clap(long)]
+    pub(crate) secret_compositions: bool,
+
+    /// Regulates the fraction of the block subsidy that a composer sends to the
+    /// guesser.
+    /// Value must be between 0 and 1.
+    ///
+    /// The remainder goes to the composer. This flag is ignored if the
+    /// `compose` flag is not set.
+    #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
+    pub(crate) guesser_fraction: f64,
+
+    /// The minimum fraction that a guesser will require from the composer
+    /// before they start guessing. Block proposals with a guesser fraction
+    /// below this number will not cause guessing to start.
+    ///
+    /// Only applies to external block proposals. Own block proposals will
+    /// always be guessed on if both composition and guessing is set.
+    #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
+    pub(crate) minimum_guesser_fraction: f64,
+
     /// Whether to engage in guess-nonce-and-hash, which is the 3rd step in
     /// three-step mining. If this flag is set and the `compose` flag is not
     /// set, then the client will rely on block proposals from other nodes. In
@@ -167,19 +190,6 @@ pub struct Args {
     /// always guess on their own block proposal.
     #[clap(long)]
     pub(crate) guess: bool,
-
-    /// By default, a composer will share block proposals with all peers. If
-    /// this flag is set, the composer will *not* share their block proposals.
-    #[clap(long)]
-    pub(crate) secret_compositions: bool,
-
-    /// Regulates the fraction of the block subsidy that goes to the guesser.
-    /// Value must be between 0 and 1.
-    ///
-    /// The remainder goes to the composer. This flag is ignored if the
-    /// `compose` flag is not set.
-    #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
-    pub(crate) guesser_fraction: f64,
 
     /// Set the number of threads to use while guessing. When no value is set,
     /// the number is set to the number of available cores.
