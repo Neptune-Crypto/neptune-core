@@ -7,6 +7,7 @@ use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::SymmetricKey;
 use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::TxProvingCapability;
+use neptune_cash::api::tx_initiation::transparent_transaction_details::TransparentTransactionDetails;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
 
@@ -351,6 +352,144 @@ pub async fn alice_sends_to_random_key() -> anyhow::Result<()> {
     );
 
     // after send() the tx in mempool initially has PrimitiveWitness proof
+    // so we must wait until it has been upgraded to SingleProof
+    // before it can be included in a block.
+    //
+    // another option would be to provide the single proof ourselves.
+    alice
+        .wait_until_tx_in_mempool_has_single_proof(tx_artifacts.transaction().txid(), timeout_secs)
+        .await?;
+
+    // alice mines another block to her wallet.
+    let include_mempool_txs = true;
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(1, include_mempool_txs)
+        .await?;
+
+    // alice checks that confirmed and unconfirmed balances are now equal.
+    let alice_balances_after_confirmed = alice.gsl.api().wallet().balances(Timestamp::now()).await;
+    tracing::info!(
+        "alice balances after confirmed:\n{}",
+        alice_balances_after_confirmed
+    );
+
+    assert_eq!(
+        alice_balances_after_confirmed.confirmed_total.to_string(),
+        alice_balances_after_confirmed.unconfirmed_total.to_string()
+    );
+    assert_eq!(
+        (alice_balances_after_send.unconfirmed_total
+            + NativeCurrencyAmount::coins(128)
+            + fee_amount)
+            .to_string(),
+        alice_balances_after_confirmed.confirmed_total.to_string(),
+    );
+
+    Ok(())
+}
+
+/// test: alice sends funds to random key in a transparent transaction
+///
+/// this test is essentially a copy of alice_sends_to_random_key()
+/// but uses a transparent transaction to do that. Verify that the produced
+/// [`Announcement`] matches with the inputs and outputs.
+#[tokio::test(flavor = "multi_thread")]
+pub async fn alice_sends_transparent_transaction() -> anyhow::Result<()> {
+    logging::tracing_logger();
+    let timeout_secs = 5;
+
+    // alice starts a single node cluster
+    let [mut alice] =
+        GenesisNode::start_connected_cluster(&GenesisNode::cluster_id(), 1, None, timeout_secs)
+            .await?;
+
+    // alice generates a random symmetric key outside her wallet.
+    let other_address = SymmetricKey::from_seed(rand::random());
+
+    // alice mines 3 blocks to her wallet
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(3, false)
+        .await?;
+
+    tracing::info!("alice mined 3 blocks!");
+
+    // alice checks that she received some funds from mining efforts.
+    let alice_balances_before_send = alice.gsl.api().wallet().balances(Timestamp::now()).await;
+    tracing::info!(
+        "alice balances before send:\n{}",
+        alice_balances_before_send
+    );
+
+    assert_eq!(
+        alice
+            .gsl
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height,
+        3u64.into()
+    );
+
+    // alice sends a payment to the random key's "address".
+    let payment_amount = NativeCurrencyAmount::coins_from_str("2.45")?;
+    let fee_amount = NativeCurrencyAmount::coins_from_str("0.01")?;
+    let alice_spend_amount = payment_amount + fee_amount;
+    let tx_artifacts = alice
+        .gsl
+        .api_mut()
+        .tx_initiator_mut()
+        .send_transparent(
+            vec![(other_address.into(), payment_amount)],
+            Default::default(),
+            fee_amount,
+            Timestamp::now(),
+        )
+        .await?;
+
+    tracing::info!("tx sent! {}", tx_artifacts);
+
+    // alice checks that payment is reflected in her unconfirmed wallet balance (only)
+    let alice_balances_after_send = alice.gsl.api().wallet().balances(Timestamp::now()).await;
+
+    tracing::info!("alice balances after send:\n{}", alice_balances_after_send);
+    tracing::info!("alice spend_amount:\n{}", alice_spend_amount);
+
+    assert_eq!(
+        alice_balances_after_send.confirmed_available,
+        alice_balances_before_send.confirmed_available
+    );
+    assert_eq!(
+        alice_balances_after_send.unconfirmed_available,
+        alice_balances_after_send
+            .confirmed_available
+            .checked_sub(&alice_spend_amount)
+            .unwrap()
+    );
+
+    // try and interpret each announcement as a TransparentTransactionDetails
+    // object. Verify one successful validation.
+    let mut validated_transparent_transaction_details_objects = vec![];
+    for announcement in &tx_artifacts.transaction().kernel.announcements {
+        if let Ok(transparent_transaction_details) =
+            TransparentTransactionDetails::try_from_announcement(announcement)
+        {
+            if transparent_transaction_details.validate(&tx_artifacts.transaction().kernel) {
+                validated_transparent_transaction_details_objects
+                    .push(transparent_transaction_details);
+            }
+        }
+    }
+    assert_eq!(1, validated_transparent_transaction_details_objects.len());
+
+    // after send_transparent() the tx in mempool initially has PrimitiveWitness proof
     // so we must wait until it has been upgraded to SingleProof
     // before it can be included in a block.
     //
