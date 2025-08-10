@@ -5,9 +5,8 @@
 [![crates.io](https://img.shields.io/crates/v/neptune-cash.svg)](https://crates.io/crates/neptune-cash)
 [![Coverage Status](https://coveralls.io/repos/github/Neptune-Crypto/neptune-core/badge.svg?branch=master)](https://coveralls.io/github/Neptune-Crypto/neptune-core?branch=master)
 
-Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The
-implementation is not complete yet, but already supports many integral components and mainnet is
-live.
+Neptune-core is the reference implementation for the [Neptune Cash](https://neptune.cash/) protocol.
+The implementation is not complete yet, but already supports many integral components.
 
 ## Disclaimer
 
@@ -204,8 +203,9 @@ changes to the code, you can run through the following checks
 
 If any cryptographic data ends up in an invalid state, and the note crashes as a result, please copy
 your entire data directory (except `wallet.dat`, `incoming_randomness.dat`, and
-`outgoing_randomness.dat`) and share it publicly. If you're not on `main` net, which hasn't been
-released yet, it should be OK to share `wallet.dat`, which contains your secret key, as well.
+`outgoing_randomness.dat`) and share it publicly. If you're not on `main` net it should be OK to
+share `wallet.dat`, which contains your secret key, as well. If you are on mainnet, don't share any
+of these files with anyone because doing so will put your funds at risk.
 
 ## Restarting Node from the Genesis Block
 
