@@ -13,10 +13,10 @@ use std::sync::Arc;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::api::tx_initiation::transparent_input::TransparentInput;
+use crate::api::tx_initiation::transparent_transaction_details::TransparentTransactionDetails;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -296,10 +296,9 @@ impl TransactionDetailsBuilder {
                 .cloned()
                 .map(UtxoTriple::from)
                 .collect::<Vec<_>>();
-            let transparent_transaction_data = (transparent_inputs, transparent_outputs).encode();
-            custom_announcements.push(Announcement {
-                message: transparent_transaction_data,
-            });
+            let transparent_transaction_details =
+                TransparentTransactionDetails::new(transparent_inputs, transparent_outputs);
+            custom_announcements.push(transparent_transaction_details.to_announcement());
         }
 
         let transaction_details = TransactionDetails::new(

@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use super::error;
+use crate::api::export::TransactionDetails;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;

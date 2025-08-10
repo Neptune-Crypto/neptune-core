@@ -8,6 +8,7 @@ pub use crate::api::wallet::WalletBalances;
 pub use crate::config_models::cli_args::Args;
 pub use crate::config_models::network::Network;
 pub use crate::models::blockchain::block::block_height::BlockHeight;
+pub use crate::models::blockchain::transaction::announcement::Announcement;
 pub use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProof;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
