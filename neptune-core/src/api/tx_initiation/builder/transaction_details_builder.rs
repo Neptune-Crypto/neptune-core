@@ -1,6 +1,6 @@
 //! This module provides a builder for generating [TransactionDetails].
 //!
-//! The builder will modify state only if one ore more new keys must be added to
+//! The builder will modify state only if one or more new keys must be added to
 //! the wallet for change output(s).  see [TransactionDetailsBuilder::build()]
 //! for details.
 //!
@@ -13,12 +13,15 @@ use std::sync::Arc;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::api::tx_initiation::error::CreateTxError;
+use crate::api::tx_initiation::transparent_input::TransparentInput;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -41,11 +44,12 @@ use crate::WalletState;
 pub struct TransactionDetailsBuilder {
     tx_inputs: TxInputList,
     tx_outputs: TxOutputList,
-    announcements: Vec<Announcement>,
+    custom_announcements: Vec<Announcement>,
     fee: NativeCurrencyAmount,
     coinbase: Option<NativeCurrencyAmount>,
     change_policy: ChangePolicy,
     timestamp: Option<Timestamp>,
+    transparent: bool,
 }
 
 impl TransactionDetailsBuilder {
@@ -86,12 +90,14 @@ impl TransactionDetailsBuilder {
 
     /// Add many custom announcements.
     ///
+    /// Use this method for announcements that are *not* any of the following:
+    ///  - encrypted UTXO notifications;
+    ///  - transparent transaction data.
     ///
-    /// Use this method for announcements that are *not* encrypted UTXO
-    /// notifications. The encrypted UTXO notifications are generated on the fly
-    /// at a later stage.
+    /// Announcements that do satisfy any of these descriptions are generated on
+    /// the fly at a later stage.
     pub fn custom_announcements(mut self, mut announcements: Vec<Announcement>) -> Self {
-        self.announcements.append(&mut announcements);
+        self.custom_announcements.append(&mut announcements);
         self
     }
 
@@ -113,13 +119,24 @@ impl TransactionDetailsBuilder {
         self
     }
 
+    /// Set the transparency flag.
+    ///
+    /// Transactions that are transparent include an announcements which
+    /// contains the raw UTXOs and commitment data for all inputs and outputs,
+    /// in plaintext. By default, transactions are *not* transparent.
+    pub fn transparent(mut self, transparent: bool) -> Self {
+        self.transparent = transparent;
+        self
+    }
+
     // ##multicoin## : we must consider change for non-native Coin.
     //   1. how to obtain the coin amount for these? need some kind of CoinAmount type.
     //   2. if inputs and outputs have more than one Coin type, how do we
     //      sum(inputs) and sum(outputs) to determine if inputs exceed outputs?
     //      (perhaps in a loop for each Coin type present?)
 
-    /// build [TransactionDetails] and possibly mutate wallet state, acquiring write-lock if necessary.
+    /// Build [TransactionDetails] and possibly mutate wallet state, acquiring
+    /// write-lock if necessary.
     ///
     /// Some basic validation of inputs is performed however the result could
     /// still represent an invalid transaction.  One can call
@@ -264,6 +281,27 @@ impl TransactionDetailsBuilder {
             state_lock.tip().await
         };
 
+        let mut custom_announcements = self.custom_announcements;
+
+        // if transaction is supposed to be transparent, serialize critical data
+        // and include it as an announcement
+        if self.transparent {
+            let transparent_inputs = tx_inputs
+                .iter()
+                .cloned()
+                .map(TransparentInput::from)
+                .collect::<Vec<_>>();
+            let transparent_outputs = tx_outputs
+                .iter()
+                .cloned()
+                .map(UtxoTriple::from)
+                .collect::<Vec<_>>();
+            let transparent_transaction_data = (transparent_inputs, transparent_outputs).encode();
+            custom_announcements.push(Announcement {
+                message: transparent_transaction_data,
+            });
+        }
+
         let transaction_details = TransactionDetails::new(
             tx_inputs,
             tx_outputs,
@@ -275,7 +313,7 @@ impl TransactionDetailsBuilder {
                 .map_err(|_| CreateTxError::NoMutatorSetAccumulatorAfter)?,
             state_lock.cli().network,
         )
-        .with_announcements(self.announcements);
+        .with_announcements(custom_announcements);
 
         Ok(transaction_details)
     }

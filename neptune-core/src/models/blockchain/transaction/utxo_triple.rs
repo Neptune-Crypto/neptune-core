@@ -10,14 +10,14 @@ use crate::util_types::mutator_set::commit;
 /// Represents the preimage of a transaction output, so not just the UTXO but
 /// also the randomnesses.
 #[derive(Debug, Clone, BFieldCodec)]
-pub(crate) struct UtxoTriple {
-    pub(crate) utxo: Utxo,
-    pub(crate) sender_randomness: Digest,
-    pub(crate) receiver_digest: Digest,
+pub struct UtxoTriple {
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
+    pub receiver_digest: Digest,
 }
 
 impl UtxoTriple {
-    pub(crate) fn addition_record(&self) -> AdditionRecord {
+    pub fn addition_record(&self) -> AdditionRecord {
         commit(
             Tip5::hash(&self.utxo),
             self.sender_randomness,
