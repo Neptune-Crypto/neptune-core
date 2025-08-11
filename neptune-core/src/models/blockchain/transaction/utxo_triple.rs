@@ -10,6 +10,7 @@ use crate::util_types::mutator_set::commit;
 /// Represents the preimage of a transaction output, so not just the UTXO but
 /// also the randomnesses.
 #[derive(Debug, Clone, BFieldCodec)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct UtxoTriple {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
