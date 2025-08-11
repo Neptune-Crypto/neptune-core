@@ -41,6 +41,7 @@ use mining_status::ComposingWorkInfo;
 use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
+use num_traits::CheckedSub;
 use num_traits::Zero;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::tip5::digest::Digest;

@@ -1019,7 +1019,7 @@ impl MainLoopHandler {
                 // validity, since that was done in peer loop.
                 // To ensure atomicity, a write-lock must be held over global
                 // state while we check if this proposal is favorable.
-                {
+                let should_inform_own_miner = {
                     if self.global_state_lock.cli().guess {
                         info!("Received new favorable block proposal for mining operation.");
                     } else {
@@ -1040,13 +1040,19 @@ impl MainLoopHandler {
 
                     global_state_mut.mining_state.block_proposal =
                         BlockProposal::foreign_proposal(*block.clone());
-                }
 
-                // Notify all peers of the block proposal we just accepted
+                    global_state_mut.block_proposal_warrants_guess_restart(&block)
+                };
+
+                // Notify all peers of the block proposal we just accepted. Do
+                // this regardless of the difference in guesser fee relative to
+                // the previous proposal (as long as it is positive).
                 let pmsg = MainToPeerTask::BlockProposalNotification((&*block).into());
                 self.main_to_peer_broadcast(pmsg);
 
-                self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
+                if should_inform_own_miner {
+                    self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
+                }
             }
             PeerTaskToMain::DisconnectFromLongestLivedPeer => {
                 let global_state = self.global_state_lock.lock_guard().await;
@@ -2001,6 +2007,7 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::tests::shared::blocks::invalid_empty_block;
+    use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
     use crate::tests::shared::globalstate::get_test_genesis_setup;
     use crate::tests::shared_tokio_runtime;
@@ -2015,6 +2022,7 @@ mod tests {
     struct TestSetup {
         main_loop_handler: MainLoopHandler,
         main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
+        main_to_miner_rx: mpsc::Receiver<MainToMiner>,
     }
 
     async fn setup(
@@ -2058,7 +2066,7 @@ mod tests {
 
         let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
 
-        let (main_to_miner_tx, _main_to_miner_rx) =
+        let (main_to_miner_tx, main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
         let (_miner_to_main_tx, miner_to_main_rx) =
             mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY_MINER_TO_MAIN);
@@ -2081,6 +2089,7 @@ mod tests {
         TestSetup {
             main_loop_handler,
             main_to_peer_rx,
+            main_to_miner_rx,
         }
     }
 
@@ -2703,6 +2712,128 @@ mod tests {
             instants.iter().copied().min_by(|l, r| l.cmp(r)).unwrap()
         );
     }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn should_switch_guessing_proposal_iff_sufficient_delta() {
+        let network = Network::Main;
+        let cli = cli_args::Args {
+            network,
+            guess: true,
+            minimum_guesser_improvement_fraction: 0.2f64,
+            ..Default::default()
+        };
+
+        let TestSetup {
+            mut main_loop_handler,
+            mut main_to_miner_rx,
+            ..
+        } = setup(1, 0, cli).await;
+        let mut mutable_main_loop_state = main_loop_handler.mutable();
+
+        let proposal_0_5 = invalid_empty_block1_with_guesser_fraction(network, 0.5).await;
+        let proposal_0_55 = invalid_empty_block1_with_guesser_fraction(network, 0.55).await;
+        let proposal_0_61 = invalid_empty_block1_with_guesser_fraction(network, 0.61).await;
+
+        // New proposal when none is known: must inform mine loop
+        main_loop_handler
+            .handle_peer_task_message(
+                PeerTaskToMain::BlockProposal(Box::new(proposal_0_5.clone())),
+                &mut mutable_main_loop_state,
+            )
+            .await
+            .unwrap();
+        let MainToMiner::NewBlockProposal = main_to_miner_rx
+            .try_recv()
+            .expect("Block proposal warrants miner message")
+        else {
+            panic!("Expected new block proposal message");
+        };
+        let BlockProposal::ForeignComposition(best_known_proposal0) = main_loop_handler
+            .global_state_lock
+            .lock_guard()
+            .await
+            .mining_state
+            .block_proposal
+            .clone()
+        else {
+            panic!("Block proposal must be known and foreign")
+        };
+        assert_eq!(
+            proposal_0_5.pow_mast_paths(),
+            best_known_proposal0.pow_mast_paths(),
+            "Best known proposal must be set to expected value"
+        );
+
+        // Mock that the mine loop updates its guessing status to work on this
+        // proposal, since mine-loop is not running in this test.
+        main_loop_handler
+            .global_state_lock
+            .set_mining_status_to_guessing(&proposal_0_5)
+            .await;
+
+        // Too small delta, don't inform mine loop.
+        main_loop_handler
+            .handle_peer_task_message(
+                PeerTaskToMain::BlockProposal(Box::new(proposal_0_55.clone())),
+                &mut mutable_main_loop_state,
+            )
+            .await
+            .unwrap();
+        assert!(
+            main_to_miner_rx.try_recv().is_err(),
+            "No message may be sent when delta is too small"
+        );
+        let BlockProposal::ForeignComposition(best_known_proposal1) = main_loop_handler
+            .global_state_lock
+            .lock_guard()
+            .await
+            .mining_state
+            .block_proposal
+            .clone()
+        else {
+            panic!("Block proposal must be known and foreign")
+        };
+        assert_eq!(
+            proposal_0_55.pow_mast_paths(),
+            best_known_proposal1.pow_mast_paths(),
+            "Best known proposal must be set despite mine loop not informed"
+        );
+
+        // Sufficient delta, must inform mine loop.
+        main_loop_handler
+            .handle_peer_task_message(
+                PeerTaskToMain::BlockProposal(Box::new(proposal_0_61.clone())),
+                &mut mutable_main_loop_state,
+            )
+            .await
+            .unwrap();
+        let MainToMiner::NewBlockProposal = main_to_miner_rx
+            .try_recv()
+            .expect("Block proposal warrants miner message")
+        else {
+            panic!("Expected new block proposal message bc delta is sufficient");
+        };
+        let BlockProposal::ForeignComposition(best_known_proposal2) = main_loop_handler
+            .global_state_lock
+            .lock_guard()
+            .await
+            .mining_state
+            .block_proposal
+            .clone()
+        else {
+            panic!("Block proposal must be known and foreign")
+        };
+        assert_eq!(
+            proposal_0_61.pow_mast_paths(),
+            best_known_proposal2.pow_mast_paths(),
+            "Best known proposal must be set to best-known value"
+        );
+
+        drop(main_loop_handler);
+        drop(main_to_miner_rx);
+    }
+
     mod bootstrapper_mode {
 
         use rand::Rng;

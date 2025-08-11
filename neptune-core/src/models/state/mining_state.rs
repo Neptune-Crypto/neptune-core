@@ -12,7 +12,10 @@ pub const MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED: usize = 10_000;
 
 #[derive(Debug, Default)]
 pub(crate) struct MiningState {
-    /// The block proposal to which guessers contribute proof-of-work. Can only be updated by
+    /// The most profitable block proposal seen on the network. But not
+    /// necessarily the one a guesser is guessing on as the proposal is only
+    /// changed when the delta in reward meets a threshold. Only updateable by
+    /// main loop.
     pub(crate) block_proposal: BlockProposal,
 
     /// The block proposals that were exported to external guessers. Not persisted. Only contains

@@ -24,7 +24,9 @@ pub(crate) enum MainToMiner {
 
     Shutdown,
 
-    /// Communicates to miner that it should work on a new block proposal
+    /// Communicates to miner that it should work on a new block proposal.
+    /// This message may only be sent when the delta in guesser fees between the
+    /// old proposal and the new proposal meets a threshold value.
     NewBlockProposal,
 
     /// Main has received a new block or block proposal, and the miner should

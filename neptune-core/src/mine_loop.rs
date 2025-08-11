@@ -48,7 +48,6 @@ use crate::models::channel::*;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -691,14 +690,8 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        let (is_connected, is_syncing, mining_status) = global_state_lock
-            .lock(|s| {
-                (
-                    !s.net.peer_map.is_empty(),
-                    s.net.sync_anchor.is_some(),
-                    s.mining_state.mining_status,
-                )
-            })
+        let (is_connected, is_syncing) = global_state_lock
+            .lock(|s| (!s.net.peer_map.is_empty(), s.net.sync_anchor.is_some()))
             .await;
         if !is_connected {
             const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
@@ -719,8 +712,7 @@ pub(crate) async fn mine(
             && cli_args.guess
             && proposal_meets_threshold
             && !is_syncing
-            && !pause_mine
-            && is_connected;
+            && !pause_mine;
         let guesser_task: Option<JoinHandle<()>> = if should_guess {
             let proposal = global_state_lock
                 .lock_guard()
@@ -730,12 +722,10 @@ pub(crate) async fn mine(
                 .expect("Block proposal must be present when guesser threshold is met")
                 .clone();
 
-            // Only apply state change if we were not already guessing.
-            if matches!(mining_status, MiningStatus::Inactive) {
-                global_state_lock
-                    .set_mining_status_to_guessing(&proposal)
-                    .await;
-            }
+            // Set guessing info on global state
+            global_state_lock
+                .set_mining_status_to_guessing(&proposal)
+                .await;
 
             let guesser_key = global_state_lock
                 .lock_guard()
@@ -1024,6 +1014,7 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
     use crate::models::state::mempool::upgrade_priority::UpgradePriority;
+    use crate::models::state::mining_status::MiningStatus;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::symmetric_key::SymmetricKey;

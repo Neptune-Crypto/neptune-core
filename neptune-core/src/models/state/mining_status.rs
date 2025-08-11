@@ -14,7 +14,7 @@ pub struct GuessingWorkInfo {
     num_inputs: usize,
     num_outputs: usize,
     total_coinbase: NativeCurrencyAmount,
-    total_guesser_fee: NativeCurrencyAmount,
+    pub(crate) total_guesser_fee: NativeCurrencyAmount,
 }
 
 impl GuessingWorkInfo {
