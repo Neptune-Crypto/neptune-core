@@ -4,8 +4,8 @@ use itertools::Itertools;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::api::export::Announcement;
-use crate::api::tx_initiation::transparent_input::TransparentInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transparent_input::TransparentInput;
 use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 
 /// A struct containing the UTXOs and all information needed to reproduce the

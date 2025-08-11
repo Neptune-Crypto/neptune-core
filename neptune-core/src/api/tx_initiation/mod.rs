@@ -76,5 +76,3 @@ pub(crate) mod test_util;
 
 // private worker
 mod private;
-pub mod transparent_input;
-pub mod transparent_transaction_details;
