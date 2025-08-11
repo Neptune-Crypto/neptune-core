@@ -99,6 +99,10 @@ pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3)
 
 pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
 
+/// Blocks with timestamps too far into the future are invalid. Reject blocks
+/// whose timestamp exceeds now with this value or more.
+pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
+
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
 pub enum BlockProof {
@@ -771,8 +775,6 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
-        const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
-
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
@@ -1193,7 +1195,6 @@ impl Block {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 pub(crate) mod tests {
     use macro_rules_attr::apply;
     use proptest::collection;
@@ -1243,12 +1244,6 @@ pub(crate) mod tests {
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
     impl Block {
-        pub(crate) fn with_difficulty(mut self, difficulty: Difficulty) -> Self {
-            self.kernel.header.difficulty = difficulty;
-            self.unset_digest();
-            self
-        }
-
         pub(crate) fn set_proof(&mut self, proof: BlockProof) {
             self.proof = proof;
             self.unset_digest();

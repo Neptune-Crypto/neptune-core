@@ -206,7 +206,7 @@ impl Chunk {
         let mut width = 0_usize;
         let indicated_length = (self.relative_indices[0] >> 20) & ((1 << 12) - 1);
 
-        #[allow(clippy::manual_div_ceil, reason = "approach tasm implementation")]
+        #[expect(clippy::manual_div_ceil, reason = "approach tasm implementation")]
         let indicated_packed_length = ((indicated_length + 1) * 12 + 31) / 32;
         if indicated_packed_length != u32::try_from(self.relative_indices.len()).unwrap() {
             return Err(ChunkUnpackError::InconsistentLength);

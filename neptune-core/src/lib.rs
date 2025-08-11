@@ -54,7 +54,6 @@ use anyhow::Context;
 use anyhow::Result;
 use chrono::DateTime;
 use chrono::Local;
-use chrono::NaiveDateTime;
 use chrono::Utc;
 use config_models::cli_args;
 use futures::future;
@@ -316,9 +315,9 @@ where
     T: TryInto<i64>,
     <T as TryInto<i64>>::Error: std::fmt::Debug,
 {
-    let naive = NaiveDateTime::from_timestamp_millis(timestamp.try_into().unwrap()).unwrap();
-    let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
-    DateTime::from(utc)
+    let millis: i64 = timestamp.try_into().unwrap();
+    let utc = DateTime::<Utc>::from_timestamp_millis(millis).expect("Invalid timestamp");
+    utc.with_timezone(&Local)
 }
 
 #[cfg(feature = "log-lock_events")]

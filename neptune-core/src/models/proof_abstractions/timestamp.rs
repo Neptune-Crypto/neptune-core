@@ -11,7 +11,6 @@ use std::time::UNIX_EPOCH;
 use arbitrary::Arbitrary;
 use chrono::DateTime;
 use chrono::Local;
-use chrono::NaiveDateTime;
 use chrono::Utc;
 use get_size2::GetSize;
 use num_traits::Zero;
@@ -231,14 +230,14 @@ impl Timestamp {
     }
 
     pub fn standard_format(&self) -> String {
-        let naive = NaiveDateTime::from_timestamp_millis(self.0.value().try_into().unwrap_or(0));
-        let Some(naive) = naive else {
+        let millis: i64 = self.0.value().try_into().unwrap_or(0);
+
+        let Some(utc) = DateTime::<Utc>::from_timestamp_millis(millis) else {
             return "Too far into the future".to_string();
         };
 
-        let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
-        let offset: DateTime<Local> = DateTime::from(utc);
-        offset.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)
+        utc.with_timezone(&Local)
+            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)
     }
 
     #[cfg(any(test, feature = "arbitrary-impls"))]

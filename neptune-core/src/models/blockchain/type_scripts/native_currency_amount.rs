@@ -558,7 +558,6 @@ pub mod neptune_arbitrary {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 pub(crate) mod tests {
     use std::cmp::max;
     use std::panic::catch_unwind;

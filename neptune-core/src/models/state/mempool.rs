@@ -70,9 +70,6 @@ use crate::models::state::mempool::upgrade_priority::UpgradePriority;
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
 
-// 5 minutes in secs
-pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
-
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 type LookupItem<'a> = (TransactionKernelId, &'a Transaction);
@@ -2411,7 +2408,6 @@ mod tests {
         }
     }
 
-    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod proof_quality_tests {
         use proptest::prop_assert;
         use proptest::prop_assert_eq;

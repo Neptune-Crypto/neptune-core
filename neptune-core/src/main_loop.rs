@@ -396,7 +396,7 @@ fn stay_in_sync_mode(
 
 impl MainLoopHandler {
     // todo: find a way to avoid triggering lint
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         incoming_peer_listener: TcpListener,
         global_state_lock: GlobalStateLock,
@@ -2251,7 +2251,6 @@ mod tests {
         }
     }
 
-    #[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
     mod sync_mode {
         use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
         use test_strategy::proptest;

@@ -40,6 +40,8 @@ jobs:
           --skip mine_20_blocks_in_40_seconds
           --skip hash_rate_independent_of_tx_size
           --skip blocks_with_0_to_10_inputs_and_successors_are_valid
+          --skip can_cancel_preprocess_within_one_second
+          --skip can_cancel_merkle_tree_construction_within_two_seconds
 
       - name: Upload coverage to coveralls.io
         uses: coverallsapp/github-action@v2
