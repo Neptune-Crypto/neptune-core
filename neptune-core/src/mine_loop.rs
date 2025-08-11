@@ -72,17 +72,18 @@ pub(crate) struct GuessingConfiguration {
 pub(crate) async fn compose_block_helper(
     latest_block: Block,
     global_state_lock: GlobalStateLock,
-    block_timestamp: Timestamp,
+    coinbase_timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(Block, Vec<ExpectedUtxo>)> {
     let (transaction, composer_utxos) = create_block_transaction(
         &latest_block,
         &global_state_lock,
-        block_timestamp,
+        coinbase_timestamp,
         job_options.clone(),
     )
     .await?;
 
+    let block_timestamp = transaction.kernel.timestamp;
     let compose_result = Block::compose(
         &latest_block,
         transaction,
