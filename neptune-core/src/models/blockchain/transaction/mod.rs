@@ -16,7 +16,7 @@ pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod transaction_proof;
 pub mod transparent_input;
-pub mod transparent_transaction_details;
+pub mod transparent_transaction_info;
 pub mod utxo;
 pub(crate) mod utxo_triple;
 pub mod validity;

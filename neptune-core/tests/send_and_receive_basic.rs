@@ -6,7 +6,7 @@ use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::SymmetricKey;
 use neptune_cash::api::export::Timestamp;
-use neptune_cash::api::export::TransparentTransactionDetails;
+use neptune_cash::api::export::TransparentTransactionInfo;
 use neptune_cash::api::export::TxProvingCapability;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
@@ -479,7 +479,7 @@ pub async fn alice_sends_transparent_transaction() -> anyhow::Result<()> {
     let mut validated_transparent_transaction_details_objects = vec![];
     for announcement in &tx_artifacts.transaction().kernel.announcements {
         if let Ok(transparent_transaction_details) =
-            TransparentTransactionDetails::try_from_announcement(announcement)
+            TransparentTransactionInfo::try_from_announcement(announcement)
         {
             if transparent_transaction_details.validate(&tx_artifacts.transaction().kernel) {
                 validated_transparent_transaction_details_objects
