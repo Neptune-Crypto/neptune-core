@@ -13,12 +13,12 @@ use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 /// [`AdditionRecord`]s for the transaction in which they are consumed and
 /// produced.
 #[derive(Debug, Clone, BFieldCodec)]
-pub struct TransparentTransactionDetails {
+pub struct TransparentTransactionInfo {
     pub inputs: Vec<TransparentInput>,
     pub outputs: Vec<UtxoTriple>,
 }
 
-impl TransparentTransactionDetails {
+impl TransparentTransactionInfo {
     /// Construct a new [`TransparentTransactionDetails`] object from the given
     /// inputs and outputs.
     pub fn new(inputs: Vec<TransparentInput>, outputs: Vec<UtxoTriple>) -> Self {

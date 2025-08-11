@@ -15,7 +15,7 @@ use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::TransparentInput;
-use crate::api::export::TransparentTransactionDetails;
+use crate::api::export::TransparentTransactionInfo;
 use crate::api::tx_initiation::error::CreateTxError;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::announcement::Announcement;
@@ -297,7 +297,7 @@ impl TransactionDetailsBuilder {
                 .map(UtxoTriple::from)
                 .collect::<Vec<_>>();
             let transparent_transaction_details =
-                TransparentTransactionDetails::new(transparent_inputs, transparent_outputs);
+                TransparentTransactionInfo::new(transparent_inputs, transparent_outputs);
             custom_announcements.push(transparent_transaction_details.to_announcement());
         }
 
