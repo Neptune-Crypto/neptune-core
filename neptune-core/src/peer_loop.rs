@@ -34,6 +34,7 @@ use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::block::FUTUREDATING_LIMIT;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionConfirmabilityError;
 use crate::models::blockchain::transaction::Transaction;
@@ -57,7 +58,6 @@ use crate::models::peer::SyncChallenge;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::block_proposal::BlockProposalRejectError;
-use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
@@ -1395,9 +1395,7 @@ impl PeerLoopHandler {
                 }
 
                 // 7. Ignore if transaction is too far into the future
-                if tx_timestamp
-                    > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
-                {
+                if tx_timestamp >= now + FUTUREDATING_LIMIT {
                     // TODO: Consider punishing here
                     warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
                     return Ok(KEEP_CONNECTION_ALIVE);

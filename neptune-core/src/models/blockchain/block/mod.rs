@@ -99,6 +99,10 @@ pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3)
 
 pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
 
+/// Blocks with timestamps too far into the future are invalid. Reject blocks
+/// whose timestamp exceeds now with this value or more.
+pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
+
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
 pub enum BlockProof {
@@ -771,8 +775,6 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
-        const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
-
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
