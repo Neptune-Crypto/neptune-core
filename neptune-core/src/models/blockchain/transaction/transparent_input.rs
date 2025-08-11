@@ -27,6 +27,7 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 ///    re-derive the absolute index set because that information is not known by
 ///    the transaction initiator.
 #[derive(Debug, Clone, BFieldCodec)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct TransparentInput {
     pub utxo: Utxo,
     pub aocl_leaf_index: u64,

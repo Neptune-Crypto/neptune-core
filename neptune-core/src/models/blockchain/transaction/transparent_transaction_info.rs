@@ -13,6 +13,7 @@ use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 /// [`AdditionRecord`]s for the transaction in which they are consumed and
 /// produced.
 #[derive(Debug, Clone, BFieldCodec)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct TransparentTransactionInfo {
     pub inputs: Vec<TransparentInput>,
     pub outputs: Vec<UtxoTriple>,
@@ -72,5 +73,95 @@ impl TransparentTransactionInfo {
             .all(|ais| absolute_index_sets_in_transaction.contains(ais));
 
         all_addition_records_are_present && all_absolute_index_sets_are_present
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+
+    use super::*;
+
+    impl From<&PrimitiveWitness> for TransparentTransactionInfo {
+        fn from(primitive_witness: &PrimitiveWitness) -> Self {
+            let transparent_inputs = primitive_witness
+                .input_utxos
+                .utxos
+                .iter()
+                .cloned()
+                .zip(primitive_witness.input_membership_proofs.iter().clone())
+                .map(|(utxo, msmp)| TransparentInput {
+                    utxo,
+                    aocl_leaf_index: msmp.aocl_leaf_index,
+                    sender_randomness: msmp.sender_randomness,
+                    receiver_preimage: msmp.receiver_preimage,
+                })
+                .collect_vec();
+            let transparent_outputs = primitive_witness
+                .output_utxos
+                .utxos
+                .iter()
+                .cloned()
+                .zip(primitive_witness.output_sender_randomnesses.iter().copied())
+                .zip(primitive_witness.output_receiver_digests.iter().copied())
+                .map(|((utxo, sender_randomness), receiver_digest)| UtxoTriple {
+                    utxo,
+                    sender_randomness,
+                    receiver_digest,
+                })
+                .collect_vec();
+            TransparentTransactionInfo::new(transparent_inputs, transparent_outputs)
+        }
+    }
+
+    #[proptest(cases = 10)]
+    fn correlated_transparent_transaction_info_validates(
+        #[strategy(0usize..5)] _num_inputs: usize,
+        #[strategy(0usize..5)] _num_outputs: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, 2))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let transparent_transaction_info = TransparentTransactionInfo::from(&primitive_witness);
+        let transaction_kernel = primitive_witness.kernel;
+        prop_assert!(transparent_transaction_info.validate(&transaction_kernel));
+    }
+
+    #[proptest(cases = 5)]
+    fn uncorrelated_transparent_transaction_info_does_not_validate(
+        #[strategy(0usize..5)] _num_inputs: usize,
+        #[filter(#_num_inputs + #_num_outputs >= 1)]
+        #[strategy(0usize..5)]
+        _num_outputs: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, 2))]
+        primitive_witness_a: PrimitiveWitness,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, 2))]
+        primitive_witness_b: PrimitiveWitness,
+    ) {
+        let transparent_transaction_info = TransparentTransactionInfo::from(&primitive_witness_a);
+        let transaction_kernel = primitive_witness_b.kernel;
+        prop_assert!(!transparent_transaction_info.validate(&transaction_kernel));
+    }
+
+    #[proptest(cases = 10)]
+    fn can_decode_announcement(
+        #[strategy(0usize..5)] _num_inputs: usize,
+        #[strategy(0usize..5)] _num_outputs: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, 2))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let transparent_transaction_info = TransparentTransactionInfo::from(&primitive_witness);
+        let announcement = transparent_transaction_info.to_announcement();
+        let info_again = TransparentTransactionInfo::try_from_announcement(&announcement).unwrap();
+        prop_assert_eq!(transparent_transaction_info, info_again);
+    }
+
+    #[proptest]
+    fn cannot_decode_arbitrary_announcement(#[strategy(arb())] announcement: Announcement) {
+        prop_assert!(TransparentTransactionInfo::try_from_announcement(&announcement).is_err());
     }
 }
