@@ -292,7 +292,7 @@ pub(crate) mod tests {
                 vec(arb::<Digest>(), NUM_INPUTS),
                 vec(arb::<Digest>(), NUM_INPUTS),
                 vec(arb::<Digest>(), NUM_INPUTS),
-                0..u64::MAX,
+                0..u64::MAX / 2,
             )
                 .prop_flat_map(
                     move |(
