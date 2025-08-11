@@ -16,7 +16,7 @@ often.
 | Error IDs | Snippet(s)                                                                                                                     |
 |----------:|:-------------------------------------------------------------------------------------------------------------------------------|
 |     0..10 | [`RemovalRecordsIntegrity`](models/blockchain/transaction/validity/removal_records_integrity.rs)                               |
-|    10..20 | [`AuditVmEndState`](models/proof_abstractions/tasm/audit_vm_end_state.rs)                                                      |
+|    10..20 | `AuditVmEndState` (now deleted)                                                                                                |
 |    20..30 | [`merge::AuthenticateCoinbaseFields`](models/blockchain/transaction/validity/tasm/merge/authenticate_coinbase_fields.rs)       |
 |    30..50 | [`NativeCurrency`](models/blockchain/type_scripts/native_currency.rs)                                                          |
 |    50..70 | [`SingleProof`](models/blockchain/transaction/validity/single_proof.rs)                                                        |

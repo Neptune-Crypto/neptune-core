@@ -559,7 +559,6 @@ impl MsMembershipProof {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 pub mod tests {
     use itertools::Either;
     use itertools::Itertools;

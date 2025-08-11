@@ -290,7 +290,6 @@ pub mod neptune_arbitrary {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 mod tests {
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use proptest::prelude::*;

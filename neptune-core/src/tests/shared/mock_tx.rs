@@ -200,8 +200,6 @@ pub(crate) async fn genesis_tx_with_proof_type(
 
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
 
-    // Clippy is wrong here. You can *not* eliminate the binding.
-    #[allow(clippy::let_and_return)]
     let transaction = bob
         .api()
         .tx_initiator_internal()

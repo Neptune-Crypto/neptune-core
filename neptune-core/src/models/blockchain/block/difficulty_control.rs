@@ -476,7 +476,6 @@ pub(crate) fn max_cumulative_pow_after(
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[allow(clippy::explicit_deref_methods)] // suppress clippy's bad autosuggestion
 mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;
@@ -487,9 +486,7 @@ mod tests {
     use num_traits::Zero;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
-    use proptest::test_runner::TestRng;
     use proptest_arbitrary_interop::arb;
-    use rand::Rng;
     use rand_distr::Bernoulli;
     use rand_distr::Distribution;
     use rand_distr::Geometric;
@@ -536,10 +533,9 @@ mod tests {
         difficulty: Difficulty,
         proving_time: f64,
         target_block_time: f64,
-        seed: [u8; 32],
     ) -> f64 {
         const CUTOFF_FACTOR: f64 = 128f64;
-        let mut rng = TestRng::from_seed(proptest::test_runner::RngAlgorithm::ChaCha, &seed);
+        let mut rng = aead::rand_core::OsRng;
         let mut block_time_so_far = proving_time;
         let window_duration = target_block_time * CUTOFF_FACTOR;
         let num_hashes_calculated_per_window = hash_rate * window_duration;
@@ -622,7 +618,6 @@ mod tests {
         ];
 
         // run simulation
-        let mut rng = rand::rng();
         let mut block_times = vec![];
         let mut difficulty = Difficulty::MINIMUM;
         let target_block_time = 600f64;
@@ -637,13 +632,8 @@ mod tests {
         {
             let hash_rate = 10f64.powf(log_hash_rate);
             for _ in 0..num_iterations {
-                let block_time = sample_block_time(
-                    hash_rate,
-                    difficulty,
-                    proving_time,
-                    target_block_time,
-                    rng.random(),
-                );
+                let block_time =
+                    sample_block_time(hash_rate, difficulty, proving_time, target_block_time);
                 block_times.push(block_time);
                 let old_timestamp = new_timestamp;
                 new_timestamp += Timestamp::seconds(block_time.round() as u64);
