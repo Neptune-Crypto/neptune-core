@@ -6,8 +6,8 @@ use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::SymmetricKey;
 use neptune_cash::api::export::Timestamp;
+use neptune_cash::api::export::TransparentTransactionDetails;
 use neptune_cash::api::export::TxProvingCapability;
-use neptune_cash::api::tx_initiation::transparent_transaction_details::TransparentTransactionDetails;
 use num_traits::ops::checked::CheckedSub;
 use num_traits::Zero;
 

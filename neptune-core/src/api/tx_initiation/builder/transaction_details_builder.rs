@@ -14,9 +14,9 @@ use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use tasm_lib::prelude::Digest;
 
+use crate::api::export::TransparentInput;
+use crate::api::export::TransparentTransactionDetails;
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::api::tx_initiation::transparent_input::TransparentInput;
-use crate::api::tx_initiation::transparent_transaction_details::TransparentTransactionDetails;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;

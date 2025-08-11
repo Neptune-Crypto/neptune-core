@@ -12,6 +12,8 @@ pub use crate::models::blockchain::transaction::announcement::Announcement;
 pub use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProof;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+pub use crate::models::blockchain::transaction::transparent_input::TransparentInput;
+pub use crate::models::blockchain::transaction::transparent_transaction_details::TransparentTransactionDetails;
 pub use crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof;
 pub use crate::models::blockchain::transaction::Transaction;
 pub use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
