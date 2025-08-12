@@ -43,7 +43,7 @@ use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::MainToPeerTask;
 
-pub(super) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
+pub(crate) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 
 /// Enumerates the types of 'proof upgrades' that can be done.
 ///
@@ -836,12 +836,9 @@ pub(super) async fn get_upgrade_task_from_mempool(
         .light_state()
         .mutator_set_accumulator_after()
         .expect("Block from state must have mutator set after");
-    let tip_height = global_state.chain.light_state().header().height;
-    let network = global_state.cli().network;
     let gobbling_fraction = global_state.gobbling_fraction();
     let min_gobbling_fee = global_state.min_gobbling_fee();
     let num_proofs_threshold = global_state.max_num_proofs();
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip_height);
 
     // Do we have any `ProofCollection`s?
     let proof_collection_job = if let Some((kernel, proof, upgrade_priority)) = global_state
@@ -878,44 +875,10 @@ pub(super) async fn get_upgrade_task_from_mempool(
     }
 
     // Do we have any unsynced single proofs, worthy of an update?
-    let update_job = if let Some((tx_kernel, single_proof, upgrade_priority)) =
-        global_state.mempool.preferred_update()
-    {
-        let gobbling_potential = NativeCurrencyAmount::zero();
-        let upgrade_incentive =
-            upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
-        if upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee) {
-            let old_msa_digest = tx_kernel.mutator_set_hash;
-            let Some((old_mutator_set, mutator_set_update)) = global_state
-                .chain
-                .archival_state_mut()
-                .old_mutator_set_and_mutator_set_update_to_tip(
-                    old_msa_digest,
-                    SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
-                )
-                .await
-            else {
-                error!(
-                    "Unsyncable single-proof backed transaction found in mempool. This should\
-                 not happen."
-                );
-                return None;
-            };
-            let job = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob {
-                old_kernel: tx_kernel.to_owned(),
-                old_single_proof: single_proof.to_owned(),
-                old_mutator_set,
-                mutator_set_update,
-                upgrade_incentive,
-                consensus_rule_set,
-            });
-            Some(job)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let update_job = global_state
+        .preferred_update_job_from_mempool(min_gobbling_fee)
+        .await;
+    let update_job = update_job.map(|x| UpgradeJob::UpdateMutatorSetData(x));
 
     // Can we merge two single proofs?
     let merge_job = if let Some((
