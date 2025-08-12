@@ -248,12 +248,10 @@ pub mod tests {
         /// the subset of rust that the tasm-lang compiler understands. To run this
         /// program, call [`Self::run_rust`], which spawns a new thread, boots the
         /// environment, and executes the program.
-        #[cfg(test)]
         fn source(&self);
 
         /// Run the source program natively in rust, but with the emulated TritonVM
         /// environment for input, output, nondeterminism, and program digest.
-        #[cfg(test)]
         fn run_rust(
             &self,
             input: &PublicInput,
@@ -277,7 +275,6 @@ pub mod tests {
         /// Use Triton VM to run the tasm code.
         ///
         /// Only used in tests, since in production, you always need the proofs.
-        #[cfg(test)]
         fn run_tasm(
             &self,
             input: &PublicInput,
@@ -317,7 +314,6 @@ pub mod tests {
         /// `Ok(())` iff the given input & non-determinism triggers the failure of
         /// either the instruction `assert` or `assert_vector`, and if that
         /// instruction's error ID is one of the expected error IDs.
-        #[cfg(test)]
         fn test_assertion_failure(
             &self,
             public_input: PublicInput,
@@ -499,6 +495,53 @@ pub mod tests {
         );
     }
 
+    #[test]
+    fn deterministic_proof_is_deterministic() {
+        let program = triton_program!(halt);
+        let claim = Claim::about_program(&program);
+        let nondeterminism = NonDeterminism::default();
+        let proof1 = produce_non_zk_deterministic_proof_for_test(
+            &claim,
+            program.clone(),
+            nondeterminism.clone(),
+        );
+        let proof2 = produce_non_zk_deterministic_proof_for_test(&claim, program, nondeterminism);
+        assert_eq!(proof1, proof2, "Deterministic proofs must be deterministic");
+    }
+
+    /// Do *not* under any circumstances use this function outside of tests,
+    /// since it will leak your secrets!
+    fn produce_non_zk_deterministic_proof_for_test(
+        claim: &Claim,
+        program: Program,
+        nondeterminism: NonDeterminism,
+    ) -> Proof {
+        // Produce deterministic proofs to ensure that proofs are the same over
+        // different test runs.
+        let stark_prover_seed: [u8; Digest::BYTES] = Tip5::hash(claim).into();
+        let stark_prover_seed: [u8; 32] = stark_prover_seed
+            .into_iter()
+            .take(32)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        let (aet, public_output) =
+            VM::trace_execution(program, (&claim.input).into(), nondeterminism.clone())
+                .expect("Cannot produce algebraic execution trace");
+        assert_eq!(
+            public_output, claim.output,
+            "Output from execution must match that in claim"
+        );
+
+        let stark = Stark::default();
+        let prover = Prover::new(stark)
+            .set_randomness_seed_which_may_break_zero_knowledge(stark_prover_seed);
+        prover
+            .prove(claim, &aet)
+            .expect("cannot produce proof")
+            .into()
+    }
+
     /// Call Triton VM prover to produce a proof and save it to disk.
     fn produce_and_save_proof(
         claim: &Claim,
@@ -511,9 +554,7 @@ pub mod tests {
             .unwrap_or_else(|_| panic!("cannot create '{}' directory", path.to_string_lossy()));
         path.push(Path::new(&name));
 
-        let proof: Proof = triton_vm::prove(Stark::default(), claim, program, nondeterminism)
-            .expect("cannot produce proof")
-            .into();
+        let proof = produce_non_zk_deterministic_proof_for_test(claim, program, nondeterminism);
 
         save_proof(&path, &proof);
         proof
