@@ -46,6 +46,7 @@ use num_traits::Zero;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tracing::debug;
+use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
@@ -77,6 +78,8 @@ use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::locks::tokio::AtomicRwReadGuard;
 use crate::locks::tokio::AtomicRwWriteGuard;
+use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+use crate::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -718,7 +721,6 @@ impl GlobalState {
             .await
     }
 
-    #[expect(dead_code, reason = "anticipate future fork")]
     pub(crate) fn consensus_rule_set(&self) -> ConsensusRuleSet {
         let tip_height = self.chain.light_state().header().height;
         ConsensusRuleSet::infer_from(self.cli().network, tip_height)
@@ -1946,6 +1948,58 @@ impl GlobalState {
 
     pub(crate) fn max_num_proofs(&self) -> usize {
         self.cli().max_num_proofs
+    }
+
+    /// Returns the most favorable transaction for proof updating from the
+    /// mempool. Returns a transaction that is not synced to the tip
+    /// such that the caller can make the transaction synced again.
+    ///
+    /// Favors transactions based on upgrade priority first, fee density
+    /// second.
+    ///
+    /// Needs mutable state access because of how the mutator set update value
+    /// is calculated. Does not actually mutate any state.
+    pub(crate) async fn preferred_update_job_from_mempool(
+        &mut self,
+        min_gobbling_fee: NativeCurrencyAmount,
+    ) -> Option<UpdateMutatorSetDataJob> {
+        if let Some((tx_kernel, single_proof, upgrade_priority)) = self.mempool.preferred_update() {
+            let gobbling_potential = NativeCurrencyAmount::zero();
+            let upgrade_incentive =
+                upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
+            if upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee) {
+                let old_msa_digest = tx_kernel.mutator_set_hash;
+                let Some((old_mutator_set, mutator_set_update)) = self
+                    .chain
+                    .archival_state_mut()
+                    .old_mutator_set_and_mutator_set_update_to_tip(
+                        old_msa_digest,
+                        SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+                    )
+                    .await
+                else {
+                    error!(
+                        "Unsyncable single-proof backed transaction found in mempool. This should\
+                 not happen."
+                    );
+                    return None;
+                };
+
+                let consensus_rule_set = self.consensus_rule_set();
+                return Some(UpdateMutatorSetDataJob::new(
+                    tx_kernel.to_owned(),
+                    single_proof.to_owned(),
+                    old_mutator_set,
+                    mutator_set_update,
+                    upgrade_incentive,
+                    consensus_rule_set,
+                ));
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
     }
 
     /// Remove one transaction from the mempool and notify wallet of changes.
