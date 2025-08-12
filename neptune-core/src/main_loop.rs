@@ -1020,12 +1020,6 @@ impl MainLoopHandler {
                 // To ensure atomicity, a write-lock must be held over global
                 // state while we check if this proposal is favorable.
                 let should_inform_own_miner = {
-                    if self.global_state_lock.cli().guess {
-                        info!("Received new favorable block proposal for mining operation.");
-                    } else {
-                        debug!("Received new favorable block proposal");
-                    }
-
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
                         block.header().prev_block_digest,
@@ -1051,6 +1045,11 @@ impl MainLoopHandler {
                 self.main_to_peer_broadcast(pmsg);
 
                 if should_inform_own_miner {
+                    if self.global_state_lock.cli().guess {
+                        info!("Received new favorable block proposal for mining operation.");
+                    } else {
+                        debug!("Received new favorable block proposal");
+                    }
                     self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
                 }
             }
@@ -1331,7 +1330,7 @@ impl MainLoopHandler {
             return Ok(());
         };
 
-        info!("Running sync");
+        debug!("Running sync");
 
         let (own_tip_hash, own_tip_height, own_cumulative_pow) = (
             global_state.chain.light_state().hash(),
