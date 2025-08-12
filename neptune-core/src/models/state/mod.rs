@@ -1963,43 +1963,40 @@ impl GlobalState {
         &mut self,
         min_gobbling_fee: NativeCurrencyAmount,
     ) -> Option<UpdateMutatorSetDataJob> {
-        if let Some((tx_kernel, single_proof, upgrade_priority)) = self.mempool.preferred_update() {
-            let gobbling_potential = NativeCurrencyAmount::zero();
-            let upgrade_incentive =
-                upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
-            if upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee) {
-                let old_msa_digest = tx_kernel.mutator_set_hash;
-                let Some((old_mutator_set, mutator_set_update)) = self
-                    .chain
-                    .archival_state_mut()
-                    .old_mutator_set_and_mutator_set_update_to_tip(
-                        old_msa_digest,
-                        SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
-                    )
-                    .await
-                else {
-                    error!(
-                        "Unsyncable single-proof backed transaction found in mempool. This should\
-                 not happen."
-                    );
-                    return None;
-                };
+        let (tx_kernel, single_proof, upgrade_priority) = self.mempool.preferred_update()?;
+        let gobbling_potential = NativeCurrencyAmount::zero();
+        let upgrade_incentive =
+            upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
+        if !upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee) {
+            return None;
+        }
 
-                let consensus_rule_set = self.consensus_rule_set();
-                return Some(UpdateMutatorSetDataJob::new(
-                    tx_kernel.to_owned(),
-                    single_proof.to_owned(),
-                    old_mutator_set,
-                    mutator_set_update,
-                    upgrade_incentive,
-                    consensus_rule_set,
-                ));
-            } else {
-                return None;
-            }
-        } else {
+        let old_msa_digest = tx_kernel.mutator_set_hash;
+        let Some((old_mutator_set, mutator_set_update)) = self
+            .chain
+            .archival_state_mut()
+            .old_mutator_set_and_mutator_set_update_to_tip(
+                old_msa_digest,
+                SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+            )
+            .await
+        else {
+            error!(
+                "Unsyncable single-proof backed transaction found in mempool. This should\
+                 not happen."
+            );
             return None;
         };
+
+        let consensus_rule_set = self.consensus_rule_set();
+        Some(UpdateMutatorSetDataJob::new(
+            tx_kernel.to_owned(),
+            single_proof.to_owned(),
+            old_mutator_set,
+            mutator_set_update,
+            upgrade_incentive,
+            consensus_rule_set,
+        ))
     }
 
     /// Remove one transaction from the mempool and notify wallet of changes.
@@ -4717,7 +4714,7 @@ mod tests {
                 // complicated by composer fees.
                 let (block_1_tx, _) = create_block_transaction_from(
                     &genesis_block,
-                    &charlie_state_lock,
+                    charlie_state_lock,
                     seven_months_post_launch,
                     (TritonVmJobPriority::Normal, None).into(),
                     TxMergeOrigin::ExplicitList(vec![Arc::into_inner(alice_to_bob_tx).unwrap()]),

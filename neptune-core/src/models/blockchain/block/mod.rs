@@ -1752,7 +1752,7 @@ pub(crate) mod tests {
             let job_options = TritonVmProofJobOptions::default();
             let (transaction, _) = create_block_transaction_from(
                 &genesis,
-                &alice,
+                alice.clone(),
                 plus_one_hour,
                 job_options.clone(),
                 TxMergeOrigin::ExplicitList(vec![]),

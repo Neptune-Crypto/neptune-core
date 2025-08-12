@@ -4852,7 +4852,7 @@ pub(crate) mod tests {
             // in mempool, alice does not. Alice composes block.
             let (block_transaction, _composer_utxos) = create_block_transaction(
                 &genesis_block,
-                &alice,
+                alice.clone(),
                 now,
                 TritonVmProofJobOptions::default(),
             )
@@ -4917,7 +4917,7 @@ pub(crate) mod tests {
             // composer rewards.
             let (some_other_transaction, _) = create_block_transaction(
                 &block_one,
-                &alice,
+                alice,
                 block_one.header().timestamp + Timestamp::minutes(10),
                 TritonVmProofJobOptions::default(),
             )

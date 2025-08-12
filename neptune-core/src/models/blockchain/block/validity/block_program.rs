@@ -471,7 +471,7 @@ pub(crate) mod tests {
             let predecessor = state.lock_guard().await.chain.light_state().to_owned();
             let (block_tx, _) = create_block_transaction_from(
                 &predecessor,
-                state,
+                state.clone(),
                 timestamp,
                 TritonVmProofJobOptions::default(),
                 TxMergeOrigin::ExplicitList(vec![tx]),

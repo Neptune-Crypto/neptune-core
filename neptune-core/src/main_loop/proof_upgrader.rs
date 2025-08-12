@@ -878,7 +878,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
     let update_job = global_state
         .preferred_update_job_from_mempool(min_gobbling_fee)
         .await;
-    let update_job = update_job.map(|x| UpgradeJob::UpdateMutatorSetData(x));
+    let update_job = update_job.map(UpgradeJob::UpdateMutatorSetData);
 
     // Can we merge two single proofs?
     let merge_job = if let Some((

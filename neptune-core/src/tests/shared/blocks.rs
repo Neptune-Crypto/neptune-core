@@ -239,7 +239,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
 
     let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
         &tip_block,
-        global_state_lock,
+        global_state_lock.clone(),
         timestamp,
         Default::default(),
     )
