@@ -272,6 +272,11 @@ impl Mempool {
                 continue;
             }
 
+            // Transactions with no inputs cannot be updated.
+            if candidate.transaction.kernel.inputs.is_empty() {
+                continue;
+            }
+
             let TransactionProof::SingleProof(single_proof) = &candidate.transaction.proof else {
                 continue;
             };
