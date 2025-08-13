@@ -17,6 +17,7 @@ use tasm_lib::triton_vm::error::InstructionError;
 use tokio::io::AsyncWriteExt;
 
 use crate::config_models::network::Network;
+use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
 use crate::job_queue::channels::JobCancelReceiver;
 use crate::job_queue::traits::Job;
 use crate::job_queue::JobCompletion;
@@ -33,9 +34,17 @@ use crate::models::proof_abstractions::Program;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::vm::VMState;
 
+/// Error code from the spawned prover process in the range 200-232 are reserved
+/// for communicating that the proof is too big. The error code returned is
+/// 200 + the encountered log2 padded height. So guaranteed to be in the range
+/// [200-232] where no common error codes live, from what I know.
+pub const PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE: i32 = 200;
+
 /// represents an error running a [ProverJob]
 #[derive(Debug, thiserror::Error)]
 pub enum ProverJobError {
+    /// Error code indicating that the processor table is too big. Does not
+    /// refer to the actual AET which may still exceed the user-defined limit.
     #[error("triton-vm program complexity limit exceeded. result: {result}, limit: {limit}")]
     ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
@@ -68,6 +77,11 @@ pub enum VmProcessError {
 
     #[error("proving process returned non-zero exit code: {0}")]
     NonZeroExitCode(i32),
+
+    /// Error code indicating that AET was generated and its padded height too
+    /// big.
+    #[error("triton-vm program complexity limit exceeded. result: {result}, limit: {limit}")]
+    ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
     // note: on unix an exit with no code indicates the process
     // ended because of a signal, but this is not the case in
@@ -111,12 +125,13 @@ impl From<Result<ProverProcessCompletion, VmProcessError>> for JobCompletion {
 
 pub(super) type ProverJobResult = JobResultWrapper<Result<Proof, ProverJobError>>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ProverJobSettings {
     pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
     pub(crate) network: Network,
     pub(crate) tx_proving_capability: TxProvingCapability,
     pub(crate) proof_type: TransactionProofType,
+    pub triton_vm_env_vars: TritonVmEnvVars,
 }
 
 #[cfg(test)]
@@ -127,6 +142,7 @@ impl Default for ProverJobSettings {
             network: Network::default(),
             tx_proving_capability: TxProvingCapability::SingleProof,
             proof_type: TxProvingCapability::SingleProof.into(),
+            triton_vm_env_vars: TritonVmEnvVars::default(),
         }
     }
 }
@@ -331,6 +347,8 @@ impl ProverJob {
                 serde_json::to_string(&self.claim)?,
                 serde_json::to_string(&self.program)?,
                 serde_json::to_string(&self.nondeterminism)?,
+                serde_json::to_string(&self.job_settings.max_log2_padded_height_for_proofs)?,
+                serde_json::to_string(&self.job_settings.triton_vm_env_vars)?,
             ];
 
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
@@ -368,7 +386,33 @@ impl ProverJob {
                         );
                         Ok(ProverProcessCompletion::Finished(proof))
                     }
-                    Some(code) => Err(VmProcessError::NonZeroExitCode(code)),
+                    Some(code) => {
+                        const LOG2_PADDED_HEIGHT_RANGE: i32 = 32;
+                        if (PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE
+                            ..=PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE
+                                + LOG2_PADDED_HEIGHT_RANGE)
+                            .contains(&code)
+                        {
+                            let limit = self
+                                .job_settings
+                                .max_log2_padded_height_for_proofs
+                                .expect(
+                                    "Must have max log2 padded height set if this error reported",
+                                )
+                                .into();
+                            let observed_log_padded_height = (code
+                                - PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE)
+                                .try_into()
+                                .unwrap();
+                            Err(VmProcessError::ProofComplexityLimitExceeded {
+                                limit,
+                                result: observed_log_padded_height,
+                            })
+                        } else {
+                            Err(VmProcessError::NonZeroExitCode(code))
+                        }
+
+                    }
 
                     None => Err(VmProcessError::NoExitCode),
                 }
