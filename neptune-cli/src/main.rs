@@ -154,6 +154,9 @@ enum Command {
         height: u64,
     },
 
+    /// get information about the current best block proposal
+    BestBlockProposal,
+
     /// retrieve confirmations
     Confirmations,
 
@@ -818,6 +821,13 @@ async fn main() -> Result<()> {
                 .block_digests_by_height(ctx, token, height.into())
                 .await??;
             println!("{}", digests.iter().join("\n"));
+        }
+        Command::BestBlockProposal => {
+            let best_proposal = client.best_proposal(ctx, token).await??;
+            match best_proposal {
+                Some(block_info) => println!("{block_info}"),
+                None => println!("Not found"),
+            }
         }
         Command::Confirmations => {
             let val = client.confirmations(ctx, token).await??;

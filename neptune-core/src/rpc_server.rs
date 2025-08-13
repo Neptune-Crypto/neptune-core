@@ -423,6 +423,11 @@ pub trait RPC {
     /// ```
     async fn block_height(token: rpc_auth::Token) -> RpcResult<BlockHeight>;
 
+    /// Return the guesser reward of the most favorable block proposal
+    ///
+    /// Returns None if no proposal is known building on the current tip.
+    async fn best_proposal(token: rpc_auth::Token) -> RpcResult<Option<BlockInfo>>;
+
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
     /// returns `Option<BlockHeight>`
@@ -2303,6 +2308,31 @@ impl RPC for NeptuneRPCServer {
             .height)
     }
 
+    async fn best_proposal(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Option<BlockInfo>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let tip_digest = state.chain.light_state().hash();
+        let proposal = &state.mining_state.block_proposal;
+
+        // Returning BlockInfo here is not completely kosher since a few fields
+        // don't make sense in this context. But it's a close fit.
+        Ok(proposal.map(|block| {
+            BlockInfo::new(
+                block,
+                state.chain.archival_state().genesis_block().hash(),
+                tip_digest,
+                vec![],
+                false,
+            )
+        }))
+    }
+
     // documented in trait. do not add doc-comment.
     async fn confirmations(
         self,
@@ -3961,6 +3991,7 @@ mod tests {
             .await;
         let _ = rpc_server.clone().own_instance_id(ctx, token).await;
         let _ = rpc_server.clone().block_height(ctx, token).await;
+        let _ = rpc_server.clone().best_proposal(ctx, token).await;
         let _ = rpc_server.clone().peer_info(ctx, token).await;
         let _ = rpc_server
             .clone()
@@ -4065,6 +4096,7 @@ mod tests {
             .clone()
             .upgrade(ctx, token, TransactionKernelId::default())
             .await;
+        let _ = rpc_server.clone().mempool_tx_ids(ctx, token).await;
 
         // let transaction_timestamp = network.launch_date();
         // let proving_capability = rpc_server.state.cli().proving_capability();
