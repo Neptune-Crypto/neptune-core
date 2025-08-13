@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::str::FromStr;
 
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -19,6 +20,14 @@ pub struct TransactionKernelId(Digest);
 impl Display for TransactionKernelId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.to_hex())
+    }
+}
+
+impl FromStr for TransactionKernelId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Digest::from_str(s)?))
     }
 }
 

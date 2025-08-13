@@ -18,6 +18,7 @@ use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
@@ -320,6 +321,12 @@ enum Command {
         outputs: Vec<TransactionOutput>,
         #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
+    },
+
+    /// Upgrade the specified transaction. Transaction must be either unsynced
+    /// or not have a Single Proof for this to work.
+    Upgrade {
+        tx_kernel_id: TransactionKernelId,
     },
 
     /// Sends a command to the client to delete all transactions from the
@@ -1157,6 +1164,15 @@ async fn main() -> Result<()> {
                     )?
                 }
                 Err(e) => eprintln!("{e}"),
+            }
+        }
+        Command::Upgrade { tx_kernel_id } => {
+            println!("Attempting to upgrade transaction {tx_kernel_id}");
+            let response = client.upgrade(ctx, token, tx_kernel_id).await??;
+            if response {
+                println!("Initiated upgrade of transaction {tx_kernel_id}");
+            } else {
+                println!("Found no transaction in need of upgrading");
             }
         }
         Command::ClearMempool => {
