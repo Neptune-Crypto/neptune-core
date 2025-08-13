@@ -1132,6 +1132,8 @@ pub trait RPC {
     // TODO: Change to return current size and max size
     async fn mempool_size(token: rpc_auth::Token) -> RpcResult<usize>;
 
+    async fn mempool_tx_ids(token: rpc_auth::Token) -> RpcResult<Vec<TransactionKernelId>>;
+
     /// Return info about the transactions in the mempool
     ///
     /// ```no_run
@@ -2788,6 +2790,25 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         Ok(self.state.lock_guard().await.mempool.get_size())
+    }
+
+    async fn mempool_tx_ids(
+        self,
+        _context: ::tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Vec<TransactionKernelId>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+        let txids: Vec<_> = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .fee_density_iter()
+            .map(|(kernel_id, _)| kernel_id)
+            .collect();
+
+        Ok(txids)
     }
 
     // documented in trait. do not add doc-comment.
