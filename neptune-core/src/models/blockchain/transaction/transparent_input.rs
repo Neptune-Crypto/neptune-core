@@ -7,6 +7,8 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::api::export::TxInput;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
 /// The key data from a transaction input that enables a transparent audit.
@@ -59,6 +61,15 @@ impl TransparentInput {
             self.aocl_leaf_index,
         )
     }
+
+    pub fn addition_record(&self) -> AdditionRecord {
+        commit(
+            Tip5::hash(&self.utxo),
+            self.sender_randomness,
+            self.receiver_preimage.hash(),
+        )
+    }
+}
 
 impl Distribution<TransparentInput> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> TransparentInput {
