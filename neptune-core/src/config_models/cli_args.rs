@@ -16,6 +16,7 @@ use sysinfo::System;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
@@ -130,6 +131,22 @@ pub struct Args {
     /// You should have plenty of cores and probably at least 128 GB of RAM.
     #[clap(long)]
     pub(crate) tx_proof_upgrading: bool,
+
+    /// Specify environment variables for Triton VM for a given (log2 of) the
+    /// padded height. Can be used to control the environment variables
+    /// `TVM_LDE_TRACE` and `RAYON_NUM_THREADS` as a function of the proof's
+    /// padded height. These environment variable affect Triton VM's performance
+    /// and RAM consumption. For very high padded heights, you can use this
+    /// value to guarantee that RAM consumption is limited such that the proof
+    /// can be produced. These environment variables are only seen by the
+    /// spawned Triton VM instances, not by neptune-core.
+    ///
+    /// Syntax: <log_2(padded height)>:'<key_0>=<value_0> <key_1>=<value_1> ...'
+    ///
+    /// Example:
+    /// --triton-vm-env-vars 24:"RAYON_NUM_THREADS=50 TVM_LDE_TRACE=no_cache",25:"RAYON_NUM_THREADS=20 TVM_LDE_TRACE=no_cache"
+    #[clap(long, default_value = "")]
+    pub triton_vm_env_vars: TritonVmEnvVars,
 
     /// Determines the fraction of the transaction fee consumed by this node as
     /// a reward either for upgrading transaction proofs. Ignored unless
@@ -312,7 +329,9 @@ pub struct Args {
     /// which is always a power of two. A basic proof has a complexity of 2^11.
     /// A powerful machine in 2024 with 128 CPU cores can handle a padded height of 2^23.
     ///
-    /// For such a machine, one would set a limit of 23.
+    /// This limit can be increased to 2^24 if the [Self::triton_vm_env_vars]
+    /// argument is used to decrease RAM consumption at these bigger proof
+    /// sizes.
     ///
     /// if the limit is reached while mining, a warning is logged and mining will pause.
     /// non-mining operations may panic and halt neptune-core
@@ -537,12 +556,7 @@ impl Args {
     ) -> TritonVmProofJobOptions {
         TritonVmProofJobOptions {
             job_priority,
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
-                network: self.network,
-                tx_proving_capability: self.proving_capability(),
-                proof_type: self.proving_capability().into(),
-            },
+            job_settings: ProverJobSettings::from(self),
             cancel_job_rx: None,
         }
     }
@@ -595,16 +609,24 @@ impl Args {
     }
 }
 
+impl From<&Args> for ProverJobSettings {
+    fn from(cli: &Args) -> Self {
+        let triton_vm_env_vars: TritonVmEnvVars = cli.triton_vm_env_vars.clone();
+        Self {
+            max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
+            network: cli.network,
+            tx_proving_capability: cli.proving_capability(),
+            proof_type: cli.proving_capability().into(),
+            triton_vm_env_vars,
+        }
+    }
+}
+
 impl From<&Args> for TritonVmProofJobOptions {
     fn from(cli: &Args) -> Self {
         Self {
             job_priority: Default::default(),
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
-                network: cli.network,
-                tx_proving_capability: cli.proving_capability(),
-                proof_type: cli.proving_capability().into(),
-            },
+            job_settings: ProverJobSettings::from(cli),
             cancel_job_rx: None,
         }
     }
