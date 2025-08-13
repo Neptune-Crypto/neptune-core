@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use itertools::Itertools;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -199,6 +201,31 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         );
         let node_index = shared_advanced::leaf_index_to_node_index(leaf_index);
         self.digests.get(node_index).await
+    }
+
+    /// Get a range of leafs from the MMR.
+    ///
+    /// # Panics
+    ///
+    ///  - If the range contains out-of-bound indices.
+    pub async fn get_leaf_range_inclusive_async(
+        &self,
+        leaf_index_range: RangeInclusive<u64>,
+    ) -> Vec<Digest> {
+        // Use debug-assert here to limit this lookup to *one* db-lookup in
+        // production. Otherwise, it would be two lookups.
+        debug_assert!(
+            *leaf_index_range.end() < self.num_leafs().await,
+            "Leaf index out-of-bounds. Got leaf index {} but num_leafs was {}",
+            leaf_index_range.end(),
+            self.num_leafs().await
+        );
+
+        let indices = leaf_index_range
+            .into_iter()
+            .map(shared_advanced::leaf_index_to_node_index)
+            .collect_vec();
+        self.digests.get_many(&indices).await
     }
 
     /// Get a leaf from the MMR, returns `None` if index is out of range.
