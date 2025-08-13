@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
+use rand::distr::{Distribution, StandardUniform};
+use rand::Rng;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::api::export::Announcement;
@@ -73,6 +75,16 @@ impl TransparentTransactionInfo {
             .all(|ais| absolute_index_sets_in_transaction.contains(ais));
 
         all_addition_records_are_present && all_absolute_index_sets_are_present
+    }
+}
+
+impl Distribution<TransparentTransactionInfo> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> TransparentTransactionInfo {
+        let num_inputs = rng.random_range(0..10);
+        let num_outputs = rng.random_range(0..10);
+        let inputs = (0..num_inputs).map(|_| rng.random()).collect_vec();
+        let outputs = (0..num_outputs).map(|_| rng.random()).collect_vec();
+        TransparentTransactionInfo { inputs, outputs }
     }
 }
 

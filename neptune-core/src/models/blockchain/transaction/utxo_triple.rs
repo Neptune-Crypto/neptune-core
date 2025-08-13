@@ -1,3 +1,6 @@
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -33,6 +36,16 @@ impl From<TxOutput> for UtxoTriple {
             utxo: value.utxo(),
             sender_randomness: value.sender_randomness(),
             receiver_digest: value.receiver_digest(),
+        }
+    }
+}
+
+impl Distribution<UtxoTriple> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> UtxoTriple {
+        UtxoTriple {
+            utxo: rng.random(),
+            sender_randomness: rng.random(),
+            receiver_digest: rng.random(),
         }
     }
 }

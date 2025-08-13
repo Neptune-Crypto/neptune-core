@@ -2,6 +2,9 @@
 //! consumption/reporting in block explorers, cli, dashboard, etc.
 
 use itertools::Itertools;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -106,5 +109,34 @@ impl BlockInfo {
     /// calculated reward amount.
     pub fn expected_coinbase_amount(&self) -> NativeCurrencyAmount {
         Block::block_subsidy(self.height)
+    }
+}
+
+impl Distribution<BlockInfo> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BlockInfo {
+        BlockInfo {
+            height: rng.random(),
+            size: rng.random_range(0..10),
+            digest: rng.random(),
+            prev_block_digest: rng.random(),
+            timestamp: rng.random(),
+            cumulative_proof_of_work: rng.random(),
+            difficulty: rng.random(),
+            num_inputs: rng.random_range(0..10),
+            num_outputs: rng.random_range(0..10),
+            num_announcements: rng.random_range(0..10),
+            coinbase_amount: NativeCurrencyAmount::from_nau(
+                (1i128 << rng.random_range(0..=8)) >> 1,
+            ),
+            fee: NativeCurrencyAmount::from_nau(
+                rng.random_range(0..NativeCurrencyAmount::MAX_NAU) >> 20,
+            ),
+            is_genesis: rng.random(),
+            is_tip: rng.random(),
+            is_canonical: rng.random(),
+            sibling_blocks: (0..rng.random_range(0..2))
+                .map(|_| rng.random())
+                .collect_vec(),
+        }
     }
 }

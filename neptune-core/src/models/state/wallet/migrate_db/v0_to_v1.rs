@@ -153,7 +153,6 @@ mod tests {
     use crate::database::storage::storage_schema::RustyKey;
     use crate::database::storage::storage_schema::RustyValue;
     use crate::database::NeptuneLevelDb;
-    use crate::models::blockchain::transaction::utxo::pseudorandom_utxo;
     use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
     use crate::models::state::Timestamp;
@@ -174,7 +173,7 @@ mod tests {
 
         // create a random schema v0 TxOutput
         let tx_output1 = migration::schema_v0::TxOutput {
-            utxo: pseudorandom_utxo(rand::random()),
+            utxo: rand::random(),
             sender_randomness: Digest::default(),
             receiver_digest: Digest::default(),
             notification_method: UtxoNotifyMethod::None,
