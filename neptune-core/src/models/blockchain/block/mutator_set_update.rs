@@ -30,6 +30,10 @@ impl MutatorSetUpdate {
         }
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.removals.is_empty() && self.additions.is_empty()
+    }
+
     /// Like `apply_to_accumulator` but does not verify that the removal records
     /// could be removed. In other words: This does not check if double spend is
     /// happening.
@@ -146,29 +150,5 @@ impl MutatorSetUpdate {
         }
 
         removal_records_are_valid
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use num_traits::Zero;
-
-    use super::*;
-
-    impl MutatorSetUpdate {
-        /// Return the number of removal records
-        pub(crate) fn num_removals(&self) -> usize {
-            self.removals.len()
-        }
-
-        /// Return the number of removal records
-        pub(crate) fn num_additions(&self) -> usize {
-            self.additions.len()
-        }
-
-        pub(crate) fn is_empty(&self) -> bool {
-            self.num_removals().is_zero() && self.num_additions().is_zero()
-        }
     }
 }

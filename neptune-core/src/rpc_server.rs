@@ -71,6 +71,7 @@ use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::main_loop::proof_upgrader::UpgradeJob;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -1725,6 +1726,18 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
+    /// Upgrade a proof for a transaction found in the mempool. If the
+    /// transaction cannot be in the mempool, or the transaction is not in need
+    /// of upgrading because it is already single proof-backed and synced, then
+    /// false is returned. Otherwise true is returned.
+    ///
+    /// No fees will be collected from the proof upgrading.
+    ///
+    /// Returns Ok(true) if a transaction for upgrading was found
+    /// Returns Ok(false) if no transaction for upgrading was found
+    /// Returns an error if something else failed.
+    async fn upgrade(token: rpc_auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
+
     /// upgrades a transaction's proof.
     ///
     /// ignored if the transaction is already upgraded to level of supplied
@@ -3106,6 +3119,91 @@ impl RPC for NeptuneRPCServer {
             .await?)
     }
 
+    async fn upgrade(
+        mut self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        tx_kernel_id: TransactionKernelId,
+    ) -> RpcResult<bool> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Does transaction exist and is it in need of upgrading?
+        let Some((tx, upgrade_priority)) = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .get_with_priority(tx_kernel_id)
+            .map(|(x, y)| (x.to_owned(), y))
+        else {
+            return Ok(false);
+        };
+
+        let current_msa = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("mutator set of tip must exist");
+        let is_synced = tx.kernel.mutator_set_hash == current_msa.hash();
+
+        let upgrade_job = match (&tx.proof, is_synced) {
+            (TransactionProof::SingleProof(_), true) => return Ok(false),
+            (TransactionProof::SingleProof(neptune_proof), false) => {
+                let gobbling_potential = NativeCurrencyAmount::zero();
+                let update_job = self
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .update_single_proof_job(
+                        tx.kernel,
+                        neptune_proof.to_owned(),
+                        upgrade_priority.incentive_given_gobble_potential(gobbling_potential),
+                    )
+                    .await?;
+                UpgradeJob::UpdateMutatorSetData(update_job)
+            }
+            (TransactionProof::ProofCollection(proof_collection), _) => {
+                // It doesn't matter if the proof collection is updated or not,
+                // since the later call to upgrade the transaction handles the
+                // case of unsynced single proof backed transactions.
+                let gobbling_potential = NativeCurrencyAmount::zero();
+                let raise_job = self
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .upgrade_proof_collection_job(
+                        tx.kernel,
+                        proof_collection.to_owned(),
+                        upgrade_priority.incentive_given_gobble_potential(gobbling_potential),
+                    )
+                    .await?;
+                UpgradeJob::ProofCollectionToSingleProof(raise_job)
+            }
+
+            // This implementation is not done because local transaction initiation
+            // should always produce proof collections or single proofs, and
+            // primitive witnesses may never be shared on the network. So it seems
+            // there is no use case for implementing this.
+            (TransactionProof::Witness(_), _) => {
+                error!("Can't upgrade primitive witnesses through this command.");
+                return Ok(false);
+            }
+        };
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::PerformTxProofUpgrade(Box::new(
+                upgrade_job,
+            )))
+            .await;
+
+        Ok(true)
+    }
+
     // documented in trait. do not add doc-comment.
     async fn upgrade_tx_proof(
         mut self,
@@ -3941,6 +4039,10 @@ mod tests {
                 ChangePolicy::ExactChange,
                 NativeCurrencyAmount::one_nau(),
             )
+            .await;
+        let _ = rpc_server
+            .clone()
+            .upgrade(ctx, token, TransactionKernelId::default())
             .await;
 
         // let transaction_timestamp = network.launch_date();

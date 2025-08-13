@@ -70,6 +70,7 @@ use super::peer::SyncChallenge;
 use super::peer::SyncChallengeResponse;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::api;
+use crate::api::export::NeptuneProof;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
@@ -78,13 +79,17 @@ use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::locks::tokio::AtomicRwReadGuard;
 use crate::locks::tokio::AtomicRwWriteGuard;
+use crate::main_loop::proof_upgrader::ProofCollectionToSingleProof;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::state::block_proposal::BlockProposalRejectError;
@@ -1951,19 +1956,25 @@ impl GlobalState {
     }
 
     /// Returns the most favorable transaction for proof updating from the
-    /// mempool. Returns a transaction that is not synced to the tip
-    /// such that the caller can make the transaction synced again.
+    /// mempool. Returns an upgrade job for a transaction that is not synced.
+    /// Does not perform the actual upgrade, only collects witness data required
+    /// to execute it.
     ///
     /// Favors transactions based on upgrade priority first, fee density
     /// second.
     ///
     /// Needs mutable state access because of how the mutator set update value
     /// is calculated. Does not actually mutate any state.
+    ///
+    /// Returns none if no transaction in the mempool is in need of upgrading
+    /// or if transaction in need of upgrading does not provide enough
+    /// incentive.
     pub(crate) async fn preferred_update_job_from_mempool(
         &mut self,
         min_gobbling_fee: NativeCurrencyAmount,
     ) -> Option<UpdateMutatorSetDataJob> {
-        let (tx_kernel, single_proof, upgrade_priority) = self.mempool.preferred_update()?;
+        let (old_kernel, old_proof, upgrade_priority) = self.mempool.preferred_update()?;
+
         let gobbling_potential = NativeCurrencyAmount::zero();
         let upgrade_incentive =
             upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
@@ -1971,32 +1982,13 @@ impl GlobalState {
             return None;
         }
 
-        let old_msa_digest = tx_kernel.mutator_set_hash;
-        let Some((old_mutator_set, mutator_set_update)) = self
-            .chain
-            .archival_state_mut()
-            .old_mutator_set_and_mutator_set_update_to_tip(
-                old_msa_digest,
-                SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
-            )
-            .await
-        else {
-            error!(
-                "Unsyncable single-proof backed transaction found in mempool. This should\
-                 not happen."
-            );
-            return None;
-        };
-
-        let consensus_rule_set = self.consensus_rule_set();
-        Some(UpdateMutatorSetDataJob::new(
-            tx_kernel.to_owned(),
-            single_proof.to_owned(),
-            old_mutator_set,
-            mutator_set_update,
+        self.update_single_proof_job(
+            old_kernel.to_owned(),
+            old_proof.to_owned(),
             upgrade_incentive,
-            consensus_rule_set,
-        ))
+        )
+        .await
+        .ok()
     }
 
     /// Remove one transaction from the mempool and notify wallet of changes.
@@ -2035,6 +2027,70 @@ impl GlobalState {
             .mempool
             .update_primitive_witness(transaction_id, new_primitive_witness);
         self.wallet_state.handle_mempool_events(events).await
+    }
+
+    pub(crate) async fn upgrade_proof_collection_job(
+        &mut self,
+        kernel: TransactionKernel,
+        proof: ProofCollection,
+        upgrade_incentive: UpgradeIncentive,
+    ) -> Result<ProofCollectionToSingleProof> {
+        let msa_lookup_result = self
+            .chain
+            .archival_state_mut()
+            .old_mutator_set_and_mutator_set_update_to_tip(
+                kernel.mutator_set_hash,
+                SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+            )
+            .await;
+
+        let Some((transaction_msa, _)) = msa_lookup_result else {
+            bail!("Could not find mutator set update for update job");
+        };
+
+        Ok(ProofCollectionToSingleProof::new(
+            kernel,
+            proof,
+            transaction_msa,
+            upgrade_incentive,
+        ))
+    }
+
+    /// Return the update job for the single proof-backed transaction that is
+    /// required to get the transaction back into a synced state.
+    ///
+    /// Does not perform any proof upgrading, only returns the witness data
+    /// required to construct a synced single proof.
+    pub(crate) async fn update_single_proof_job(
+        &mut self,
+        old_kernel: TransactionKernel,
+        old_proof: NeptuneProof,
+        upgrade_incentive: UpgradeIncentive,
+    ) -> Result<UpdateMutatorSetDataJob> {
+        let msa_lookup_result = self
+            .chain
+            .archival_state_mut()
+            .old_mutator_set_and_mutator_set_update_to_tip(
+                old_kernel.mutator_set_hash,
+                SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+            )
+            .await;
+
+        let Some((old_msa, mutator_set_update)) = msa_lookup_result else {
+            bail!("Could not find mutator set update for update job");
+        };
+
+        ensure!(!mutator_set_update.is_empty(), "No update needed");
+
+        let consensus_rule_set = self.consensus_rule_set();
+        Ok(UpdateMutatorSetDataJob::new(
+            old_kernel,
+            old_proof,
+            old_msa,
+            mutator_set_update,
+            upgrade_incentive,
+            consensus_rule_set,
+        ))
     }
 
     /// Read all blocks contained in the specified directory and store these to

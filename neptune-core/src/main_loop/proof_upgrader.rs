@@ -54,12 +54,7 @@ pub(crate) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 pub enum UpgradeJob {
     PrimitiveWitnessToProofCollection(PrimitiveWitnessToProofCollection),
     PrimitiveWitnessToSingleProof(PrimitiveWitnessToSingleProof),
-    ProofCollectionToSingleProof {
-        kernel: TransactionKernel,
-        proof: ProofCollection,
-        mutator_set: MutatorSetAccumulator,
-        upgrade_incentive: UpgradeIncentive,
-    },
+    ProofCollectionToSingleProof(ProofCollectionToSingleProof),
     Merge {
         left_kernel: TransactionKernel,
         single_proof_left: Proof,
@@ -70,6 +65,30 @@ pub enum UpgradeJob {
         upgrade_incentive: UpgradeIncentive,
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
+}
+
+#[derive(Clone, Debug)]
+pub struct ProofCollectionToSingleProof {
+    kernel: TransactionKernel,
+    proof: ProofCollection,
+    mutator_set: MutatorSetAccumulator,
+    upgrade_incentive: UpgradeIncentive,
+}
+
+impl ProofCollectionToSingleProof {
+    pub(crate) fn new(
+        kernel: TransactionKernel,
+        proof: ProofCollection,
+        mutator_set: MutatorSetAccumulator,
+        upgrade_incentive: UpgradeIncentive,
+    ) -> Self {
+        Self {
+            kernel,
+            proof,
+            mutator_set,
+            upgrade_incentive,
+        }
+    }
 }
 
 /// Task
@@ -260,10 +279,10 @@ impl UpgradeJob {
     /// network. This policy could be revised when proving gets faster.
     fn gobbling_fee(&self) -> NativeCurrencyAmount {
         match self {
-            UpgradeJob::ProofCollectionToSingleProof {
+            UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
                 upgrade_incentive: UpgradeIncentive::Gobble(amount),
                 ..
-            } => *amount,
+            }) => *amount,
             UpgradeJob::Merge {
                 upgrade_incentive: UpgradeIncentive::Gobble(amount),
                 ..
@@ -280,7 +299,10 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => {
                 pw_to_sp.primitive_witness.kernel.timestamp
             }
-            UpgradeJob::ProofCollectionToSingleProof { kernel, .. } => kernel.timestamp,
+            UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
+                kernel,
+                ..
+            }) => kernel.timestamp,
             UpgradeJob::Merge {
                 left_kernel,
                 right_kernel,
@@ -304,9 +326,10 @@ impl UpgradeJob {
                 // from this node.
                 UpgradeIncentive::Critical
             }
-            UpgradeJob::ProofCollectionToSingleProof {
-                upgrade_incentive, ..
-            } => *upgrade_incentive,
+            UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
+                upgrade_incentive,
+                ..
+            }) => *upgrade_incentive,
             UpgradeJob::Merge {
                 upgrade_incentive, ..
             } => *upgrade_incentive,
@@ -323,9 +346,10 @@ impl UpgradeJob {
     /// of length one.
     pub(super) fn affected_txids(&self) -> Vec<TransactionKernelId> {
         match self {
-            UpgradeJob::ProofCollectionToSingleProof { kernel, .. } => {
-                vec![kernel.txid()]
-            }
+            UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
+                kernel,
+                ..
+            }) => vec![kernel.txid()],
             UpgradeJob::Merge {
                 left_kernel,
                 right_kernel,
@@ -351,7 +375,10 @@ impl UpgradeJob {
             UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => {
                 pw_to_sp.primitive_witness.mutator_set_accumulator.clone()
             }
-            UpgradeJob::ProofCollectionToSingleProof { mutator_set, .. } => mutator_set.clone(),
+            UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
+                mutator_set,
+                ..
+            }) => mutator_set.clone(),
             UpgradeJob::Merge { mutator_set, .. } => mutator_set.clone(),
             UpgradeJob::UpdateMutatorSetData(update_mutator_set_data_job) => {
                 let mut new_msa = update_mutator_set_data_job.old_mutator_set.clone();
@@ -717,7 +744,11 @@ impl UpgradeJob {
         let gobble_shuffle_seed: [u8; 32] = rng.random();
 
         match self {
-            UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
+            UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
+                kernel,
+                proof,
+                ..
+            }) => {
                 let single_proof = TransactionProofBuilder::new()
                     .consensus_rule_set(consensus_rule_set)
                     .proof_collection(proof)
@@ -854,12 +885,13 @@ pub(super) async fn get_upgrade_task_from_mempool(
         let upgrade_incentive =
             upgrade_priority.incentive_given_gobble_potential(gobbling_potential);
         if upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee) {
-            let upgrade_job = UpgradeJob::ProofCollectionToSingleProof {
-                kernel: kernel.to_owned(),
-                proof: proof.to_owned(),
-                mutator_set: tip_mutator_set.clone(),
-                upgrade_incentive,
-            };
+            let upgrade_job =
+                UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
+                    kernel: kernel.to_owned(),
+                    proof: proof.to_owned(),
+                    mutator_set: tip_mutator_set.clone(),
+                    upgrade_incentive,
+                });
             Some(upgrade_job)
         } else {
             None
@@ -1047,7 +1079,11 @@ mod tests {
                 .mempool_insert(pc_tx_high_fee.clone().into(), UpgradePriority::Irrelevant)
                 .await;
             let job = get_upgrade_task_from_mempool(&mut rando).await.unwrap();
-            let UpgradeJob::ProofCollectionToSingleProof { kernel, .. } = job else {
+            let UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof {
+                kernel,
+                ..
+            }) = job
+            else {
                 panic!("Expected proof-collection to single-proof job");
             };
 

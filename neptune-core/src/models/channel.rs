@@ -7,6 +7,8 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
+use crate::main_loop::proof_upgrader::UpgradeJob;
+
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
@@ -210,6 +212,7 @@ pub(crate) struct ClaimUtxoData {
 #[derive(Clone, Debug, strum::Display)]
 pub enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),
+    PerformTxProofUpgrade(Box<UpgradeJob>),
     BroadcastMempoolTransactions,
     ClearMempool,
     ProofOfWorkSolution(Box<Block>),

@@ -10,7 +10,6 @@ use std::time::SystemTime;
 use anyhow::Result;
 use itertools::Itertools;
 use proof_upgrader::get_upgrade_task_from_mempool;
-use proof_upgrader::UpdateMutatorSetDataJob;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
 use rand::seq::IndexedRandom;
@@ -40,7 +39,6 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
@@ -535,35 +533,20 @@ impl MainLoopHandler {
                     old_kernel,
                     old_single_proof,
                 } => {
-                    let (msa_lookup_result, tip_height) = {
-                        let mut state = global_state_lock.lock_guard_mut().await;
-                        let msa_lookup_result = state
-                            .chain
-                            .archival_state_mut()
-                            .old_mutator_set_and_mutator_set_update_to_tip(
-                                old_kernel.mutator_set_hash,
-                                SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
-                            )
-                            .await;
-                        let tip_height = state.chain.light_state().header().height;
-
-                        (msa_lookup_result, tip_height)
-                    };
-                    let Some((old_mutator_set, mutator_set_update)) = msa_lookup_result else {
+                    let upgrade_incentive = UpgradeIncentive::Critical;
+                    let Ok(update_job) = global_state_lock
+                        .lock_guard_mut()
+                        .await
+                        .update_single_proof_job(
+                            old_kernel.to_owned(),
+                            old_single_proof.to_owned(),
+                            upgrade_incentive,
+                        )
+                        .await
+                    else {
                         result.push(MempoolUpdateJobResult::Failure(txid));
                         continue;
                     };
-                    let network = global_state_lock.cli().network;
-                    // let block_height = global_state_lock.
-                    let consensus_rule_set = ConsensusRuleSet::infer_from(network, tip_height);
-                    let update_job = UpdateMutatorSetDataJob::new(
-                        old_kernel.to_owned(),
-                        old_single_proof.to_owned(),
-                        old_mutator_set,
-                        mutator_set_update,
-                        UpgradeIncentive::Critical,
-                        consensus_rule_set,
-                    );
 
                     // No locks may be held here!
                     let upgrade_result = update_job
@@ -1832,11 +1815,11 @@ impl MainLoopHandler {
         match msg {
             RPCServerToMain::BroadcastTx(transaction) => {
                 debug!(
-                    "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
-                    transaction.kernel.inputs.len(),
-                    transaction.kernel.outputs.len(),
-                    transaction.kernel.mutator_set_hash
-                );
+                            "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
+                            transaction.kernel.inputs.len(),
+                            transaction.kernel.outputs.len(),
+                            transaction.kernel.mutator_set_hash
+                        );
 
                 // note: this Tx must already have been added to the mempool by
                 // sender.  This occurs in GlobalStateLock::record_transaction().
@@ -1887,6 +1870,29 @@ impl MainLoopHandler {
                 // do not shut down
                 Ok(false)
             }
+            RPCServerToMain::PerformTxProofUpgrade(upgrade_job) => {
+                let vm_job_queue = vm_job_queue();
+                let global_state_lock_clone = self.global_state_lock.clone();
+                let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
+                info!(
+                    "Attempting to upgrade transactions: {}",
+                    upgrade_job.affected_txids().iter().join(", ")
+                );
+                tokio::task::Builder::new()
+                    .name("proof_upgrader")
+                    .spawn(async move {
+                        upgrade_job
+                            .handle_upgrade(
+                                vm_job_queue,
+                                global_state_lock_clone,
+                                main_to_peer_broadcast_tx_clone,
+                            )
+                            .await
+                    })?;
+
+                Ok(false)
+            }
+
             RPCServerToMain::BroadcastMempoolTransactions => {
                 info!("Broadcasting transaction notifications for all shareable transactions in mempool");
                 let state = self.global_state_lock.lock_guard().await;
