@@ -1,6 +1,7 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
 use crate::config_models::network::Network;
+use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
@@ -62,6 +63,7 @@ pub struct TritonVmProofJobOptionsBuilder {
     network: Option<Network>,
     tx_proving_capability: Option<TxProvingCapability>,
     proof_type: Option<TransactionProofType>,
+    triton_vm_env_vars: TritonVmEnvVars,
 }
 
 impl TritonVmProofJobOptionsBuilder {
@@ -215,6 +217,7 @@ impl TritonVmProofJobOptionsBuilder {
             network,
             tx_proving_capability,
             proof_type,
+            triton_vm_env_vars,
         } = self;
 
         let job_priority = job_priority.unwrap_or_default();
@@ -227,6 +230,7 @@ impl TritonVmProofJobOptionsBuilder {
             network,
             tx_proving_capability,
             proof_type,
+            triton_vm_env_vars,
         };
 
         TritonVmProofJobOptions {

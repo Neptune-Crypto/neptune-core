@@ -3,11 +3,14 @@
 use std::io::BufRead;
 use std::io::Write;
 
+use neptune_cash::config_models::triton_vm_env_vars::TritonVmEnvVars;
+use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
+use tasm_lib::triton_vm::config::CacheDecision;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::prove;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
+use tasm_lib::triton_vm::vm::VM;
 use thread_priority::set_current_thread_priority;
 use thread_priority::ThreadPriority;
 use tracing::info;
@@ -25,9 +28,55 @@ fn main() {
     let program: Program = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
     let non_determinism: NonDeterminism =
         serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let default_stark: Stark = Stark::default();
+    let env_variables: TritonVmEnvVars =
+        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+    let stark: Stark = Stark::default();
 
-    let proof = prove(default_stark, &claim, program, non_determinism).unwrap();
+    let (aet, _) = VM::trace_execution(program, (&claim.input).into(), non_determinism).unwrap();
+    let log2_padded_height = aet.padded_height().ilog2();
+    let env_vars = env_variables.get(&(log2_padded_height as u8));
+
+    // Set environment variables for this spawned process only, does not apply
+    // globally. Documentation of `set_var` shows it's for the currently
+    // running process only.
+    // This is only intended to set two environment variables: TVM_LDE_TRACE and
+    // RAYON_NUM_THREADS, depending on the padded height of the algebraic
+    // execution trace.
+    if let Some(env_vars) = env_vars {
+        for (key, value) in env_vars {
+            // Use std error for debugging/log with parent process.
+            eprintln!("Setting env variable: {key}={value}");
+
+            // SAFETY:
+            // - "The exact requirement is: you must ensure that there are no
+            //   other threads concurrently writing or reading(!) the
+            //   environment through functions or global variables other than
+            //   the ones in this module." At this place, this program is
+            //   single-threaded. Generation of algebraic execution trace is
+            //   done, and proving hasn't started yet.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+
+            // In case Triton VM has already set the cache decision prior to
+            // the environment variable being set here, we override it through
+            // a publicly exposed function.
+            if key == "TVM_LDE_TRACE" {
+                let maybe_overwrite = value.to_ascii_lowercase();
+                let cache_lde_trace_overwrite = match maybe_overwrite.as_str() {
+                    "cache" => Some(CacheDecision::Cache),
+                    "no_cache" => Some(CacheDecision::NoCache),
+                    _ => None,
+                };
+                if let Some(cache_lde_trace_overwrite) = cache_lde_trace_overwrite {
+                    eprintln!("overwriting cache lde trace to: {cache_lde_trace_overwrite:?}");
+                    overwrite_lde_trace_caching_to(cache_lde_trace_overwrite);
+                }
+            }
+        }
+    }
+
+    let proof = stark.prove(&claim, &aet).unwrap();
     info!("triton-vm: completed proof");
 
     let as_bytes = bincode::serialize(&proof).unwrap();

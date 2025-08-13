@@ -17,6 +17,7 @@ use tasm_lib::triton_vm::error::InstructionError;
 use tokio::io::AsyncWriteExt;
 
 use crate::config_models::network::Network;
+use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
 use crate::job_queue::channels::JobCancelReceiver;
 use crate::job_queue::traits::Job;
 use crate::job_queue::JobCompletion;
@@ -111,12 +112,13 @@ impl From<Result<ProverProcessCompletion, VmProcessError>> for JobCompletion {
 
 pub(super) type ProverJobResult = JobResultWrapper<Result<Proof, ProverJobError>>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ProverJobSettings {
     pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
     pub(crate) network: Network,
     pub(crate) tx_proving_capability: TxProvingCapability,
     pub(crate) proof_type: TransactionProofType,
+    pub triton_vm_env_vars: TritonVmEnvVars,
 }
 
 #[cfg(test)]
@@ -127,6 +129,7 @@ impl Default for ProverJobSettings {
             network: Network::default(),
             tx_proving_capability: TxProvingCapability::SingleProof,
             proof_type: TxProvingCapability::SingleProof.into(),
+            triton_vm_env_vars: TritonVmEnvVars::default(),
         }
     }
 }
@@ -325,19 +328,22 @@ impl ProverJob {
         &self,
         mut rx: JobCancelReceiver,
     ) -> Result<ProverProcessCompletion, VmProcessError> {
+        use tokio::io::AsyncBufReadExt;
+
         // start child process
         let mut child = {
             let inputs = [
                 serde_json::to_string(&self.claim)?,
                 serde_json::to_string(&self.program)?,
                 serde_json::to_string(&self.nondeterminism)?,
+                serde_json::to_string(&self.job_settings.triton_vm_env_vars)?,
             ];
 
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
                 .kill_on_drop(true) // extra insurance.
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null()) // ignore stderr
+                .stderr(Stdio::piped())
                 .spawn()?;
 
             let mut child_stdin = child.stdin.take().ok_or(VmProcessError::StdinUnavailable)?;
@@ -352,6 +358,17 @@ impl ProverJob {
         };
 
         tracing::debug!("prover job started child process. id: {}", child_process_id);
+
+        // We use stderr for debugging purposes for the spawned process. This is
+        // logged on the `DEBUG` level.
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let mut reader = tokio::io::BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    tracing::debug!("[stderr from spawned process]: {}", line);
+                }
+            });
+        }
 
         // see <https://github.com/tokio-rs/tokio/discussions/7132>
         tokio::select! {
