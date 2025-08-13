@@ -7,10 +7,9 @@ use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
-use rand::rngs::StdRng;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
 use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -258,13 +257,13 @@ impl StdHash for Utxo {
     }
 }
 
-/// Generate a UTXO pseudorandomly, for testing purposes
-pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    Utxo::from((
-        rng.random(),
-        NativeCurrencyAmount::coins(rng.next_u32() % 42000000).to_native_coins(),
-    ))
+impl Distribution<Utxo> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Utxo {
+        Utxo::from((
+            rng.random(),
+            NativeCurrencyAmount::coins(rng.next_u32() % 42000000).to_native_coins(),
+        ))
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]

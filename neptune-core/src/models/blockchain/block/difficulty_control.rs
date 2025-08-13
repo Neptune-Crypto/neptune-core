@@ -13,6 +13,9 @@ use num_bigint::BigUint;
 use num_traits::FromPrimitive;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -197,6 +200,13 @@ where
     }
 }
 
+impl Distribution<Difficulty> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Difficulty {
+        let inner = rng.random();
+        Difficulty(inner)
+    }
+}
+
 const POW_NUM_LIMBS: usize = 6;
 
 /// Estimates how many guesses (or guess-equivalents, in case of time-memory
@@ -328,6 +338,13 @@ impl Ord for ProofOfWork {
 impl Display for ProofOfWork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", BigUint::from(*self))
+    }
+}
+
+impl Distribution<ProofOfWork> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ProofOfWork {
+        let inner = rng.random();
+        ProofOfWork(inner)
     }
 }
 

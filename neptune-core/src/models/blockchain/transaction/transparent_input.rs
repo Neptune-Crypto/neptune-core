@@ -1,3 +1,6 @@
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -55,5 +58,19 @@ impl TransparentInput {
             self.receiver_preimage,
             self.aocl_leaf_index,
         )
+    }
+
+impl Distribution<TransparentInput> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> TransparentInput {
+        let utxo = rng.random::<Utxo>();
+        let aocl_leaf_index = rng.random_range(0..(u64::MAX >> 1));
+        let sender_randomness = rng.random();
+        let receiver_preimage = rng.random();
+        TransparentInput {
+            utxo,
+            aocl_leaf_index,
+            sender_randomness,
+            receiver_preimage,
+        }
     }
 }
