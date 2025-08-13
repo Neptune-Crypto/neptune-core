@@ -618,6 +618,13 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockKernel>>;
 
+    /// Return a hash map of [`AdditionRecord`]s to AOCL leaf indices for the
+    /// outputs of a block, if it is known.
+    async fn addition_record_indices_for_block(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<HashMap<AdditionRecord, Option<u64>>>>;
+
     /// Return the announements contained in a specified block.
     ///
     /// Returns `None` if the selected block could not be found, otherwise
@@ -2462,6 +2469,30 @@ impl RPC for NeptuneRPCServer {
         let block_kernel = block.map(|block| block.kernel.clone());
 
         Ok(block_kernel)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn addition_record_indices_for_block(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<HashMap<AdditionRecord, Option<u64>>>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+
+        let addition_records_dictionary = state
+            .chain
+            .archival_state()
+            .get_addition_record_indices_for_block(digest)
+            .await;
+
+        Ok(addition_records_dictionary)
     }
 
     // documented in trait. do not add doc-comment.
