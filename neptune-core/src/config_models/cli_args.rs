@@ -144,7 +144,7 @@ pub struct Args {
     /// Syntax: <log_2(padded height)>:'<key_0>=<value_0> <key_1>=<value_1> ...'
     ///
     /// Example:
-    /// --triton-vm-env-vars 24:"RAYON_NUM_THREADS=50 TVM_LDE_TRACE=no_cache",25:"RAYON_NUM_THREADS=20 TVM_LDE_TRACE=no_cache"
+    ///  --triton-vm-env-vars='24:"RAYON_NUM_THREADS=90 TVM_LDE_TRACE=no_cache",25:"RAYON_NUM_THREADS=45 TVM_LDE_TRACE=no_cache"'
     #[clap(long, default_value = "")]
     pub triton_vm_env_vars: TritonVmEnvVars,
 
