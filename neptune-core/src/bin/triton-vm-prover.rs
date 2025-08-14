@@ -14,8 +14,6 @@ use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::VM;
 use thread_priority::set_current_thread_priority;
 use thread_priority::ThreadPriority;
-use tracing::info;
-use tracing::warn;
 
 fn main() {
     // run with a low priority so that neptune-core can remain responsive.
@@ -39,8 +37,12 @@ fn main() {
     let (aet, _) = VM::trace_execution(program, (&claim.input).into(), non_determinism).unwrap();
     let log2_padded_height = aet.padded_height().ilog2() as u8;
 
+    // Use std-err for logging purposes since spawner (caller) doesn't get the
+    // log outputs but can capture std-err.
+    eprintln!("actual log2 padded height for proof: {log2_padded_height}");
+
     if max_log2_padded_height.is_some_and(|max| log2_padded_height > max) {
-        warn!(
+        eprintln!(
             "Canceling prover because padded height exceeds max value of {}",
             max_log2_padded_height.unwrap()
         );
@@ -61,7 +63,7 @@ fn main() {
     // execution trace.
     if let Some(env_vars) = env_vars {
         for (key, value) in env_vars {
-            info!("Setting env variable for Triton VM: {key}={value}");
+            eprintln!("Setting env variable for Triton VM: {key}={value}");
 
             // SAFETY:
             // - "The exact requirement is: you must ensure that there are no
@@ -85,7 +87,7 @@ fn main() {
                     _ => None,
                 };
                 if let Some(cache_lde_trace_overwrite) = cache_lde_trace_overwrite {
-                    info!("overwriting cache lde trace to: {cache_lde_trace_overwrite:?}");
+                    eprintln!("overwriting cache lde trace to: {cache_lde_trace_overwrite:?}");
                     overwrite_lde_trace_caching_to(cache_lde_trace_overwrite);
                 }
             }
@@ -93,7 +95,7 @@ fn main() {
     }
 
     let proof = stark.prove(&claim, &aet).unwrap();
-    info!("triton-vm: completed proof");
+    eprintln!("triton-vm: completed proof");
 
     let as_bytes = bincode::serialize(&proof).unwrap();
     let mut stdout = std::io::stdout();

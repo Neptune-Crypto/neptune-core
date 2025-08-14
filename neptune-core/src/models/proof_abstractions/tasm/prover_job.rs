@@ -341,6 +341,9 @@ impl ProverJob {
         &self,
         mut rx: JobCancelReceiver,
     ) -> Result<ProverProcessCompletion, VmProcessError> {
+        use tokio::io::AsyncBufReadExt;
+        use tokio::io::BufReader;
+
         // start child process
         let mut child = {
             let inputs = [
@@ -355,7 +358,7 @@ impl ProverJob {
                 .kill_on_drop(true) // extra insurance.
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null()) // ignore stderr
+                .stderr(Stdio::piped())
                 .spawn()?;
 
             let mut child_stdin = child.stdin.take().ok_or(VmProcessError::StdinUnavailable)?;
@@ -370,6 +373,16 @@ impl ProverJob {
         };
 
         tracing::debug!("prover job started child process. id: {}", child_process_id);
+
+        // Use std err of spawned process for debugging purposes.
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    tracing::debug!("[triton-vm prover]: {line}");
+                }
+            });
+        }
 
         // see <https://github.com/tokio-rs/tokio/discussions/7132>
         tokio::select! {
