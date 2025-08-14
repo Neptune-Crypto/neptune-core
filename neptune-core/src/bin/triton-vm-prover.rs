@@ -9,29 +9,20 @@ use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
 use tasm_lib::triton_vm::config::CacheDecision;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::VM;
 use thread_priority::set_current_thread_priority;
 use thread_priority::ThreadPriority;
 
-fn main() {
-    // run with a low priority so that neptune-core can remain responsive.
-    //
-    // todo: we could accept a thread-prioritycli param (0..100) and
-    //       pass it with ThreadPriority::CrossPlatform(x).
-    set_current_thread_priority(ThreadPriority::Min).unwrap();
-
-    let stdin = std::io::stdin();
-    let mut iterator = stdin.lock().lines();
-    let claim: Claim = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let program: Program = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let non_determinism: NonDeterminism =
-        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let max_log2_padded_height: Option<u8> =
-        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
-    let env_variables: TritonVmEnvVars =
-        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+fn execute(
+    claim: Claim,
+    program: Program,
+    non_determinism: NonDeterminism,
+    max_log2_padded_height: Option<u8>,
+    env_vars: TritonVmEnvVars,
+) -> Proof {
     let stark: Stark = Stark::default();
 
     let (aet, _) = VM::trace_execution(program, (&claim.input).into(), non_determinism).unwrap();
@@ -53,7 +44,7 @@ fn main() {
         );
     }
 
-    let env_vars = env_variables.get(&log2_padded_height);
+    let env_vars = env_vars.get(&log2_padded_height);
 
     // Set environment variables for this spawned process only, does not apply
     // globally. Documentation of `set_var` shows it's for the currently
@@ -94,7 +85,34 @@ fn main() {
         }
     }
 
-    let proof = stark.prove(&claim, &aet).unwrap();
+    stark.prove(&claim, &aet).unwrap()
+}
+
+fn main() {
+    // run with a low priority so that neptune-core can remain responsive.
+    //
+    // todo: we could accept a thread-prioritycli param (0..100) and
+    //       pass it with ThreadPriority::CrossPlatform(x).
+    set_current_thread_priority(ThreadPriority::Min).unwrap();
+
+    let stdin = std::io::stdin();
+    let mut iterator = stdin.lock().lines();
+    let claim: Claim = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+    let program: Program = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+    let non_determinism: NonDeterminism =
+        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+    let max_log2_padded_height: Option<u8> =
+        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+    let env_variables: TritonVmEnvVars =
+        serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
+
+    let proof = execute(
+        claim,
+        program,
+        non_determinism,
+        max_log2_padded_height,
+        env_variables,
+    );
     eprintln!("triton-vm: completed proof");
 
     let as_bytes = bincode::serialize(&proof).unwrap();
@@ -108,9 +126,28 @@ fn main() {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use tasm_lib::triton_vm::isa::triton_asm;
+    use tasm_lib::triton_vm::{self, isa::triton_asm};
 
     use super::*;
+
+    #[test]
+    fn make_halt_proof() {
+        let program = triton_asm!(halt);
+        let program = Program::new(&program);
+        let claim = Claim::about_program(&program);
+        let non_determinism = NonDeterminism::default();
+        let max_log2_padded_height = None;
+        let env_vars = TritonVmEnvVars::default();
+        let proof = execute(
+            claim.clone(),
+            program,
+            non_determinism,
+            max_log2_padded_height,
+            env_vars,
+        );
+
+        assert!(triton_vm::verify(Stark::default(), &claim, &proof));
+    }
 
     #[test]
     fn halt_program() {
