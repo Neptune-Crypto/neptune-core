@@ -162,6 +162,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         info!("Successfully imported {num_blocks_read} blocks.");
     }
 
+    if !cli_args.triton_vm_env_vars.is_empty() {
+        info!(
+            "Triton VM environment variables set to: {}",
+            cli_args.triton_vm_env_vars
+        );
+    }
+
     // Check if we need to restore the wallet database, and if so, do it.
     info!("Checking if we need to restore UTXOs");
     global_state_lock

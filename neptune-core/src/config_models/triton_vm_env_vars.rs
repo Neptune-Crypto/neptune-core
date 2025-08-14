@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str::FromStr;
 
 use serde::Deserialize;
@@ -8,6 +9,36 @@ use serde::Serialize;
 /// the Triton VM proving process for proofs of this size.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TritonVmEnvVars(HashMap<u8, Vec<(String, String)>>);
+
+impl Display for TritonVmEnvVars {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.is_empty() {
+            return write!(f, "TritonVmEnvVars: {{}}");
+        }
+
+        writeln!(f, "TritonVmEnvVars: {{")?;
+        let mut heights: Vec<&u8> = self.0.keys().collect();
+        heights.sort(); // Sort keys for consistent output
+
+        for (i, height) in heights.iter().enumerate() {
+            let vars = self.0.get(height).unwrap();
+            if vars.is_empty() {
+                writeln!(f, " log2 padded Height {}: {{}}", height)?;
+            } else {
+                writeln!(f, " log2 padded Height {}: {{", height)?;
+                for (j, (key, value)) in vars.iter().enumerate() {
+                    let comma = if j == vars.len() - 1 { "" } else { "," };
+                    writeln!(f, "    {} = {}{}", key, value, comma)?;
+                }
+                writeln!(f, "}}")?;
+            }
+            if i < heights.len() - 1 {
+                writeln!(f)?;
+            }
+        }
+        write!(f, "}}")
+    }
+}
 
 impl FromStr for TritonVmEnvVars {
     type Err = String;
