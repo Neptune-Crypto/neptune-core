@@ -32,6 +32,7 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
 use crate::job_queue::errors::JobHandleError;
+use crate::main_loop::proof_upgrader::UpgradeJob;
 use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
@@ -48,7 +49,6 @@ use crate::models::channel::*;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -77,7 +77,7 @@ pub(crate) async fn compose_block_helper(
 ) -> Result<(Block, Vec<ExpectedUtxo>)> {
     let (transaction, composer_utxos) = create_block_transaction(
         &latest_block,
-        &global_state_lock,
+        global_state_lock,
         coinbase_timestamp,
         job_options.clone(),
     )
@@ -498,6 +498,7 @@ pub(super) fn prepare_coinbase_transaction_stateless(
 /// Enumerates origins of transactions to be merged into a block transaction.
 ///
 /// In the general case, this is (just) the mempool.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TxMergeOrigin {
     Mempool,
     #[cfg(test)]
@@ -509,7 +510,7 @@ pub(crate) enum TxMergeOrigin {
 /// "sender randomness" used in the coinbase transaction.
 pub(crate) async fn create_block_transaction(
     predecessor_block: &Block,
-    global_state_lock: &GlobalStateLock,
+    global_state_lock: GlobalStateLock,
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
 ) -> Result<(BlockTransaction, Vec<ExpectedUtxo>)> {
@@ -527,7 +528,7 @@ pub(crate) async fn create_block_transaction(
 ///  - If predecessor has a negative transaction fee
 pub(crate) async fn create_block_transaction_from(
     predecessor_block: &Block,
-    global_state_lock: &GlobalStateLock,
+    mut global_state_lock: GlobalStateLock,
     timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
@@ -565,7 +566,7 @@ pub(crate) async fn create_block_transaction_from(
 
     // Get most valuable transactions from mempool.
     let max_num_mergers = global_state_lock.cli().max_num_compose_mergers.get();
-    let mut transactions_to_merge = match tx_merge_origin {
+    let mut transactions_to_merge = match &tx_merge_origin {
         TxMergeOrigin::Mempool => global_state_lock
             .lock_guard()
             .await
@@ -575,12 +576,55 @@ pub(crate) async fn create_block_transaction_from(
                 Some(max_num_mergers),
             ),
         #[cfg(test)]
-        TxMergeOrigin::ExplicitList(transactions) => transactions,
+        TxMergeOrigin::ExplicitList(transactions) => transactions.to_owned(),
     };
+
+    // If no updated single-proof transaction were found in the mempool, try
+    // to find one that's not updated, since updating this is faster than
+    // producing a new single proof-backed transaction.
+    let proof_job_options = TritonVmProofJobOptionsBuilder::new()
+        .template(&job_options)
+        .proof_type(TransactionProofType::SingleProof)
+        .build();
+    if transactions_to_merge.is_empty() && tx_merge_origin == TxMergeOrigin::Mempool {
+        info!("No synced single-proof tx found for merge looking for one to update");
+        let min_gobbling_fee = NativeCurrencyAmount::zero();
+        let update_job = global_state_lock
+            .lock_guard_mut()
+            .await
+            .preferred_update_job_from_mempool(min_gobbling_fee)
+            .await;
+        let update_job = update_job.map(UpgradeJob::UpdateMutatorSetData);
+        if let Some(update_job) = update_job {
+            let wallet_entropy = global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .wallet_entropy
+                .clone();
+            let notification_policy = global_state_lock.cli().fee_notification;
+            if let Ok((updated_tx, _)) = update_job
+                .upgrade(
+                    vm_job_queue.clone(),
+                    proof_job_options.clone(),
+                    &wallet_entropy,
+                    block_height,
+                    notification_policy,
+                )
+                .await
+            {
+                info!("Successfully updated transaction for merge");
+                transactions_to_merge = vec![updated_tx];
+            }
+        } else {
+            info!("No suitable transaction found for updating.");
+        }
+    }
 
     // If necessary, populate list with nop-tx.
     // Guarantees that some merge happens in below loop, which sets merge-bit.
     if transactions_to_merge.is_empty() {
+        info!("Creating nop transaction to set merge bit through a merge");
         let nop = TransactionDetails::nop(
             predecessor_block_ms,
             timestamp,
@@ -588,16 +632,11 @@ pub(crate) async fn create_block_transaction_from(
         );
         let nop = PrimitiveWitness::from_transaction_details(&nop);
 
-        let options = TritonVmProofJobOptionsBuilder::new()
-            .template(&job_options)
-            .proof_type(TransactionProofType::SingleProof)
-            .build();
-
         let proof = TransactionProofBuilder::new()
             .consensus_rule_set(consensus_rule_set)
             .primitive_witness_ref(&nop)
             .job_queue(vm_job_queue.clone())
-            .proof_job_options(options)
+            .proof_job_options(proof_job_options)
             .build()
             .await?;
         let nop = Transaction {
@@ -691,14 +730,8 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        let (is_connected, is_syncing, mining_status) = global_state_lock
-            .lock(|s| {
-                (
-                    !s.net.peer_map.is_empty(),
-                    s.net.sync_anchor.is_some(),
-                    s.mining_state.mining_status,
-                )
-            })
+        let (is_connected, is_syncing) = global_state_lock
+            .lock(|s| (!s.net.peer_map.is_empty(), s.net.sync_anchor.is_some()))
             .await;
         if !is_connected {
             const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
@@ -711,41 +744,29 @@ pub(crate) async fn mine(
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
 
-        let maybe_proposal = global_state_lock
+        let proposal_meets_threshold = global_state_lock
             .lock_guard()
             .await
-            .mining_state
-            .block_proposal
-            .clone();
-        let guess = cli_args.guess;
-
+            .current_block_proposal_meets_threshold();
         let should_guess = !wait_for_confirmation
-            && guess
-            && maybe_proposal.is_some()
+            && cli_args.guess
+            && proposal_meets_threshold
             && !is_syncing
-            && !pause_mine
-            && is_connected;
-
-        // if start_guessing is true, then we are in a state change from
-        // inactive state to guessing state.
-        //
-        // if start_guessing is false and should_guess is true then we
-        // have already been guessing and are restarting with new params.
-        let start_guessing = matches!(
-            (mining_status, should_guess),
-            (MiningStatus::Inactive, true)
-        );
-
-        if start_guessing {
-            let proposal = maybe_proposal.unwrap(); // is_some() verified above
-            global_state_lock
-                .set_mining_status_to_guessing(proposal)
-                .await;
-        }
-
+            && !pause_mine;
         let guesser_task: Option<JoinHandle<()>> = if should_guess {
-            // safe because above `is_some`
-            let proposal = maybe_proposal.unwrap();
+            let proposal = global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .block_proposal
+                .expect("Block proposal must be present when guesser threshold is met")
+                .clone();
+
+            // Set guessing info on global state
+            global_state_lock
+                .set_mining_status_to_guessing(&proposal)
+                .await;
+
             let guesser_key = global_state_lock
                 .lock_guard()
                 .await
@@ -758,7 +779,7 @@ pub(crate) async fn mine(
                 .await;
             let guesser_task = guess_nonce(
                 network,
-                proposal.to_owned(),
+                proposal,
                 latest_block_header,
                 guesser_tx,
                 GuessingConfiguration {
@@ -1033,11 +1054,13 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
     use crate::models::state::mempool::upgrade_priority::UpgradePriority;
+    use crate::models::state::mining_status::MiningStatus;
     use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::tests::shared::blocks::fake_deterministic_successor;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
@@ -1184,6 +1207,123 @@ pub(crate) mod tests {
         tock
     }
 
+    async fn make_transaction(
+        send_amount: NativeCurrencyAmount,
+        state: &GlobalStateLock,
+        timestamp: Timestamp,
+    ) -> Transaction {
+        let mut rng = StdRng::seed_from_u64(u64::from_str_radix("2350404", 6).unwrap());
+
+        let key = state
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_entropy
+            .nth_generation_spending_key_for_tests(0);
+        let output_to_alice = TxOutput::offchain_native_currency(
+            send_amount,
+            rng.random(),
+            key.to_address().into(),
+            false,
+        );
+        let config = TxCreationConfig::default()
+            .recover_change_off_chain(key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof);
+        let consensus_rule_set = state.lock_guard().await.consensus_rule_set();
+        let tx_from_alice = state
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                vec![output_to_alice].into(),
+                NativeCurrencyAmount::coins(1),
+                timestamp,
+                config,
+                consensus_rule_set,
+            )
+            .await
+            .unwrap()
+            .transaction;
+
+        tx_from_alice.into()
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn can_make_block_transaction_from_outdated_single_proof() {
+        // scenario: Alice has an outdated transaction in her mempool which she
+        // must use to create a block transaction by first updating the
+        // transaction and then merging it into the coinbase transaction.
+        let network = Network::Main;
+        let mut alice = mock_genesis_global_state(
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+
+        // Insert transaction into mempool
+        let genesis_block = Block::genesis(network);
+        let now = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        let amt_to_alice = NativeCurrencyAmount::coins(4);
+        let tx_from_alice = make_transaction(amt_to_alice, &alice, now).await;
+        alice
+            .lock_guard_mut()
+            .await
+            .mempool_insert(tx_from_alice.clone(), UpgradePriority::Irrelevant)
+            .await;
+
+        // Update state with block that does not include mempool-transaction
+        let block1 = fake_deterministic_successor(&genesis_block, network).await;
+        alice.set_new_tip(block1.clone()).await.unwrap();
+
+        assert!(
+            alice
+                .lock_guard_mut()
+                .await
+                .mempool
+                .preferred_update()
+                .is_some(),
+            "Must have unsynced tx in mempool"
+        );
+        assert!(
+            alice
+                .lock_guard_mut()
+                .await
+                .mempool
+                .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, None)
+                .is_empty(),
+            "May not have synced tx in mempool"
+        );
+
+        // Create block transaction for block 2 and verify that Alice's non-
+        // synced transaction gets picked up -- by the way of an update followed
+        // by a merge with the coinbase transaction.
+        let now = now + Timestamp::hours(1);
+        let (block2_tx, _) = create_block_transaction_from(
+            &block1,
+            alice,
+            now,
+            TritonVmProofJobOptions::default_with_network(network),
+            TxMergeOrigin::Mempool,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            tx_from_alice.kernel.inputs.iter().all(|y| block2_tx
+                .kernel
+                .inputs
+                .iter()
+                .any(|x| x.absolute_indices == y.absolute_indices)),
+            "All inputs from Alice's transaction must be present block transaction"
+        );
+        assert_eq!(
+            1,
+            block2_tx.kernel.inputs.len(),
+            "Block tx must have exactly one input from Alice's tx"
+        );
+    }
+
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
@@ -1209,37 +1349,8 @@ pub(crate) mod tests {
             "Assumed to be premine-recipient"
         );
 
-        let mut rng = StdRng::seed_from_u64(u64::from_str_radix("2350404", 6).unwrap());
-
-        let alice_key = alice
-            .lock_guard()
-            .await
-            .wallet_state
-            .wallet_entropy
-            .nth_generation_spending_key_for_tests(0);
         let amt_to_alice = NativeCurrencyAmount::coins(4);
-        let output_to_alice = TxOutput::offchain_native_currency(
-            amt_to_alice,
-            rng.random(),
-            alice_key.to_address().into(),
-            false,
-        );
-        let config = TxCreationConfig::default()
-            .recover_change_off_chain(alice_key.into())
-            .with_prover_capability(TxProvingCapability::SingleProof);
-        let tx_from_alice = alice
-            .api()
-            .tx_initiator_internal()
-            .create_transaction(
-                vec![output_to_alice].into(),
-                NativeCurrencyAmount::coins(1),
-                now,
-                config,
-                consensus_rule_set,
-            )
-            .await
-            .unwrap()
-            .transaction;
+        let tx_from_alice = make_transaction(amt_to_alice, &alice, now).await;
 
         let mut cli = cli_args::Args::default();
         for guesser_fee_fraction in [0f64, 0.5, 1.0] {
@@ -1254,7 +1365,7 @@ pub(crate) mod tests {
             let (transaction_empty_mempool, coinbase_utxo_info) = {
                 create_block_transaction(
                     &genesis_block,
-                    &alice,
+                    alice.clone(),
                     now,
                     TritonVmProofJobOptions::default_with_network(network),
                 )
@@ -1312,7 +1423,7 @@ pub(crate) mod tests {
             {
                 let mut alice_gsm = alice.lock_guard_mut().await;
                 alice_gsm
-                    .mempool_insert((*tx_from_alice).clone(), UpgradePriority::Critical)
+                    .mempool_insert(tx_from_alice.clone(), UpgradePriority::Critical)
                     .await;
                 assert_eq!(1, alice_gsm.mempool.len());
             }
@@ -1321,7 +1432,7 @@ pub(crate) mod tests {
             let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
                 create_block_transaction(
                     &genesis_block,
-                    &alice,
+                    alice.clone(),
                     now,
                     (TritonVmJobPriority::Normal, None).into(),
                 )
@@ -2080,7 +2191,7 @@ pub(crate) mod tests {
             job_options.cancel_job_rx = Some(cancel_job_rx);
             create_block_transaction_from(
                 &genesis_block,
-                &gsl,
+                gsl.clone(),
                 Timestamp::now(),
                 job_options,
                 TxMergeOrigin::Mempool,

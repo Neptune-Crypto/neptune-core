@@ -181,7 +181,7 @@ pub(crate) mod tests {
         let tx_many_outputs = tx_with_n_outputs(me.clone(), num_outputs, timestamp).await;
         let (block_tx, _) = create_block_transaction_from(
             &current_tip,
-            &me,
+            me,
             timestamp,
             TritonVmProofJobOptions::default(),
             TxMergeOrigin::ExplicitList(vec![tx_many_outputs]),

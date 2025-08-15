@@ -71,6 +71,7 @@ use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::main_loop::proof_upgrader::UpgradeJob;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -421,6 +422,11 @@ pub trait RPC {
     /// # }
     /// ```
     async fn block_height(token: rpc_auth::Token) -> RpcResult<BlockHeight>;
+
+    /// Return the guesser reward of the most favorable block proposal
+    ///
+    /// Returns None if no proposal is known building on the current tip.
+    async fn best_proposal(token: rpc_auth::Token) -> RpcResult<Option<BlockInfo>>;
 
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
@@ -1131,6 +1137,8 @@ pub trait RPC {
     // TODO: Change to return current size and max size
     async fn mempool_size(token: rpc_auth::Token) -> RpcResult<usize>;
 
+    async fn mempool_tx_ids(token: rpc_auth::Token) -> RpcResult<Vec<TransactionKernelId>>;
+
     /// Return info about the transactions in the mempool
     ///
     /// ```no_run
@@ -1725,6 +1733,18 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
+    /// Upgrade a proof for a transaction found in the mempool. If the
+    /// transaction cannot be in the mempool, or the transaction is not in need
+    /// of upgrading because it is already single proof-backed and synced, then
+    /// false is returned. Otherwise true is returned.
+    ///
+    /// No fees will be collected from the proof upgrading.
+    ///
+    /// Returns Ok(true) if a transaction for upgrading was found
+    /// Returns Ok(false) if no transaction for upgrading was found
+    /// Returns an error if something else failed.
+    async fn upgrade(token: rpc_auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
+
     /// upgrades a transaction's proof.
     ///
     /// ignored if the transaction is already upgraded to level of supplied
@@ -2252,7 +2272,7 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let listen_port = self.state.cli().own_listen_port();
-        let listen_for_peers_ip = self.state.cli().listen_addr;
+        let listen_for_peers_ip = self.state.cli().peer_listen_addr;
         Ok(listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port)))
     }
 
@@ -2286,6 +2306,31 @@ impl RPC for NeptuneRPCServer {
             .kernel
             .header
             .height)
+    }
+
+    async fn best_proposal(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Option<BlockInfo>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let tip_digest = state.chain.light_state().hash();
+        let proposal = &state.mining_state.block_proposal;
+
+        // Returning BlockInfo here is not completely kosher since a few fields
+        // don't make sense in this context. But it's a close fit.
+        Ok(proposal.map(|block| {
+            BlockInfo::new(
+                block,
+                state.chain.archival_state().genesis_block().hash(),
+                tip_digest,
+                vec![],
+                false,
+            )
+        }))
     }
 
     // documented in trait. do not add doc-comment.
@@ -2777,6 +2822,25 @@ impl RPC for NeptuneRPCServer {
         Ok(self.state.lock_guard().await.mempool.get_size())
     }
 
+    async fn mempool_tx_ids(
+        self,
+        _context: ::tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Vec<TransactionKernelId>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+        let txids: Vec<_> = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .fee_density_iter()
+            .map(|(kernel_id, _)| kernel_id)
+            .collect();
+
+        Ok(txids)
+    }
+
     // documented in trait. do not add doc-comment.
     async fn history(
         self,
@@ -3104,6 +3168,91 @@ impl RPC for NeptuneRPCServer {
             .tx_sender_mut()
             .send(outputs, change_policy, fee, Timestamp::now())
             .await?)
+    }
+
+    async fn upgrade(
+        mut self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        tx_kernel_id: TransactionKernelId,
+    ) -> RpcResult<bool> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Does transaction exist and is it in need of upgrading?
+        let Some((tx, upgrade_priority)) = self
+            .state
+            .lock_guard()
+            .await
+            .mempool
+            .get_with_priority(tx_kernel_id)
+            .map(|(x, y)| (x.to_owned(), y))
+        else {
+            return Ok(false);
+        };
+
+        let current_msa = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("mutator set of tip must exist");
+        let is_synced = tx.kernel.mutator_set_hash == current_msa.hash();
+
+        let upgrade_job = match (&tx.proof, is_synced) {
+            (TransactionProof::SingleProof(_), true) => return Ok(false),
+            (TransactionProof::SingleProof(neptune_proof), false) => {
+                let gobbling_potential = NativeCurrencyAmount::zero();
+                let update_job = self
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .update_single_proof_job(
+                        tx.kernel,
+                        neptune_proof.to_owned(),
+                        upgrade_priority.incentive_given_gobble_potential(gobbling_potential),
+                    )
+                    .await?;
+                UpgradeJob::UpdateMutatorSetData(update_job)
+            }
+            (TransactionProof::ProofCollection(proof_collection), _) => {
+                // It doesn't matter if the proof collection is updated or not,
+                // since the later call to upgrade the transaction handles the
+                // case of unsynced single proof backed transactions.
+                let gobbling_potential = NativeCurrencyAmount::zero();
+                let raise_job = self
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .upgrade_proof_collection_job(
+                        tx.kernel,
+                        proof_collection.to_owned(),
+                        upgrade_priority.incentive_given_gobble_potential(gobbling_potential),
+                    )
+                    .await?;
+                UpgradeJob::ProofCollectionToSingleProof(raise_job)
+            }
+
+            // This implementation is not done because local transaction initiation
+            // should always produce proof collections or single proofs, and
+            // primitive witnesses may never be shared on the network. So it seems
+            // there is no use case for implementing this.
+            (TransactionProof::Witness(_), _) => {
+                error!("Can't upgrade primitive witnesses through this command.");
+                return Ok(false);
+            }
+        };
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::PerformTxProofUpgrade(Box::new(
+                upgrade_job,
+            )))
+            .await;
+
+        Ok(true)
     }
 
     // documented in trait. do not add doc-comment.
@@ -3842,6 +3991,7 @@ mod tests {
             .await;
         let _ = rpc_server.clone().own_instance_id(ctx, token).await;
         let _ = rpc_server.clone().block_height(ctx, token).await;
+        let _ = rpc_server.clone().best_proposal(ctx, token).await;
         let _ = rpc_server.clone().peer_info(ctx, token).await;
         let _ = rpc_server
             .clone()
@@ -3942,6 +4092,11 @@ mod tests {
                 NativeCurrencyAmount::one_nau(),
             )
             .await;
+        let _ = rpc_server
+            .clone()
+            .upgrade(ctx, token, TransactionKernelId::default())
+            .await;
+        let _ = rpc_server.clone().mempool_tx_ids(ctx, token).await;
 
         // let transaction_timestamp = network.launch_date();
         // let proving_capability = rpc_server.state.cli().proving_capability();
@@ -4755,13 +4910,13 @@ mod tests {
             )
             .await;
             let bob_token = cookie_token(&bob).await;
-            assert!(!bob
-                .state
-                .lock_guard()
-                .await
-                .mining_state
-                .block_proposal
-                .is_some());
+            assert!(
+                matches!(
+                    bob.state.lock_guard().await.mining_state.block_proposal,
+                    BlockProposal::None
+                ),
+                "Test assumption: no block proposal known"
+            );
             let accepted = bob
                 .clone()
                 .provide_pow_solution(context::current(), bob_token, random(), random())

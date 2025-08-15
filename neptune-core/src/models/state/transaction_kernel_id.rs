@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::str::FromStr;
 
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -19,6 +20,14 @@ pub struct TransactionKernelId(Digest);
 impl Display for TransactionKernelId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.to_hex())
+    }
+}
+
+impl FromStr for TransactionKernelId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Digest::try_from_hex(s)?))
     }
 }
 
@@ -97,6 +106,7 @@ impl TransactionKernel {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use super::*;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -123,5 +133,13 @@ mod tests {
             Transaction::new_with_primitive_witness_ms_data(to_be_updated, additions, removals);
 
         assert_eq!(tx_id_original, updated.kernel.txid());
+    }
+
+    #[test]
+    fn transaction_kernel_id_from_hex() {
+        assert!(TransactionKernelId::from_str(
+            "04e19a9adfefa811f68d8de45da6412d0d73368159a119af97cfd38da6cfc55ae7c6ba403b9c8b52"
+        )
+        .is_ok());
     }
 }

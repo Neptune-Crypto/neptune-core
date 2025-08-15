@@ -272,6 +272,11 @@ impl Mempool {
                 continue;
             }
 
+            // Transactions with no inputs cannot be updated.
+            if candidate.transaction.kernel.inputs.is_empty() {
+                continue;
+            }
+
             let TransactionProof::SingleProof(single_proof) = &candidate.transaction.proof else {
                 continue;
             };
@@ -399,6 +404,18 @@ impl Mempool {
         self.tx_dictionary
             .get(&transaction_id)
             .map(|x| &x.transaction)
+    }
+
+    /// get transaction from mempool, with its associated upgrade priority.
+    ///
+    /// Computes in O(1) from HashMap
+    pub(crate) fn get_with_priority(
+        &self,
+        transaction_id: TransactionKernelId,
+    ) -> Option<(&Transaction, UpgradePriority)> {
+        self.tx_dictionary
+            .get(&transaction_id)
+            .map(|x| (&x.transaction, x.upgrade_priority))
     }
 
     /// get mutable reference to a transaction from mempool

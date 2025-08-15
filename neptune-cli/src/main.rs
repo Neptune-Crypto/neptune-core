@@ -18,6 +18,7 @@ use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
+use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
@@ -153,6 +154,9 @@ enum Command {
         height: u64,
     },
 
+    /// get information about the current best block proposal
+    BestBlockProposal,
+
     /// retrieve confirmations
     Confirmations,
 
@@ -230,6 +234,9 @@ enum Command {
 
     /// retrieve size of mempool in bytes (in RAM)
     MempoolSize,
+
+    /// list mempool transaction IDs
+    ListMempoolTransactionIds,
 
     /******** BLOCKCHAIN STATISTICS ********/
     /// Show block intervals in milliseconds, in reverse chronological order.
@@ -320,6 +327,12 @@ enum Command {
         outputs: Vec<TransactionOutput>,
         #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
+    },
+
+    /// Upgrade the specified transaction. Transaction must be either unsynced
+    /// or not have a Single Proof for this to work.
+    Upgrade {
+        tx_kernel_id: TransactionKernelId,
     },
 
     /// Sends a command to the client to delete all transactions from the
@@ -809,6 +822,13 @@ async fn main() -> Result<()> {
                 .await??;
             println!("{}", digests.iter().join("\n"));
         }
+        Command::BestBlockProposal => {
+            let best_proposal = client.best_proposal(ctx, token).await??;
+            match best_proposal {
+                Some(block_info) => println!("{block_info}"),
+                None => println!("Not found"),
+            }
+        }
         Command::Confirmations => {
             let val = client.confirmations(ctx, token).await??;
             match val {
@@ -896,6 +916,10 @@ async fn main() -> Result<()> {
         Command::MempoolSize => {
             let size_in_bytes: usize = client.mempool_size(ctx, token).await??;
             println!("{size_in_bytes} bytes");
+        }
+        Command::ListMempoolTransactionIds => {
+            let txids = client.mempool_tx_ids(ctx, token).await??;
+            println!("{}", txids.iter().join("\n"));
         }
 
         /******** BLOCKCHAIN STATISTICS ********/
@@ -1157,6 +1181,15 @@ async fn main() -> Result<()> {
                     )?
                 }
                 Err(e) => eprintln!("{e}"),
+            }
+        }
+        Command::Upgrade { tx_kernel_id } => {
+            println!("Attempting to upgrade transaction {tx_kernel_id}");
+            let response = client.upgrade(ctx, token, tx_kernel_id).await??;
+            if response {
+                println!("Initiated upgrade of transaction {tx_kernel_id}");
+            } else {
+                println!("Found no transaction in need of upgrading");
             }
         }
         Command::ClearMempool => {

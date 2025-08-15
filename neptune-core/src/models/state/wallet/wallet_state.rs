@@ -4616,6 +4616,7 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+        use crate::main_loop::proof_upgrader::ProofCollectionToSingleProof;
         use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::main_loop::proof_upgrader::UpgradeJob;
         use crate::main_loop::upgrade_incentive::UpgradeIncentive;
@@ -4850,15 +4851,16 @@ pub(crate) mod tests {
             let mut rando =
                 mock_genesis_global_state(2, rando_wallet_secret.clone(), rando_cli_args).await;
             let upgrade_incentive = UpgradeIncentive::Gobble(fee);
-            let upgrade_job_one = UpgradeJob::ProofCollectionToSingleProof {
-                kernel: proof_collection_transaction.kernel.clone(),
-                proof: proof_collection_transaction
-                    .proof
-                    .clone()
-                    .into_proof_collection(),
-                mutator_set: genesis_block.mutator_set_accumulator_after().unwrap(),
-                upgrade_incentive,
-            };
+            let upgrade_job_one =
+                UpgradeJob::ProofCollectionToSingleProof(ProofCollectionToSingleProof::new(
+                    proof_collection_transaction.kernel.clone(),
+                    proof_collection_transaction
+                        .proof
+                        .clone()
+                        .into_proof_collection(),
+                    genesis_block.mutator_set_accumulator_after().unwrap(),
+                    upgrade_incentive,
+                ));
             let (channel_to_nowhere_one, nowhere_one) =
                 broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
             upgrade_job_one
@@ -4879,7 +4881,7 @@ pub(crate) mod tests {
             // in mempool, alice does not. Alice composes block.
             let (block_transaction, _composer_utxos) = create_block_transaction(
                 &genesis_block,
-                &alice,
+                alice.clone(),
                 now,
                 TritonVmProofJobOptions::default(),
             )
@@ -4944,7 +4946,7 @@ pub(crate) mod tests {
             // composer rewards.
             let (some_other_transaction, _) = create_block_transaction(
                 &block_one,
-                &alice,
+                alice,
                 block_one.header().timestamp + Timestamp::minutes(10),
                 TritonVmProofJobOptions::default(),
             )

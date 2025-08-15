@@ -162,6 +162,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         info!("Successfully imported {num_blocks_read} blocks.");
     }
 
+    if !cli_args.triton_vm_env_vars.is_empty() {
+        info!(
+            "Triton VM environment variables set to: {}",
+            cli_args.triton_vm_env_vars
+        );
+    }
+
     // Check if we need to restore the wallet database, and if so, do it.
     info!("Checking if we need to restore UTXOs");
     global_state_lock
@@ -173,9 +180,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
 
     // Bind socket to port on this machine, to handle incoming connections from peers
     let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
-        let ret = TcpListener::bind((cli_args.listen_addr, incoming_peer_listener))
+        let ret = TcpListener::bind((cli_args.peer_listen_addr, incoming_peer_listener))
            .await
-           .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, incoming_peer_listener))?;
+           .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.peer_listen_addr, incoming_peer_listener))?;
         info!("Now listening for incoming peer-connections");
         ret
     } else {

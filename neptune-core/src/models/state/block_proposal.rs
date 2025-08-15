@@ -33,19 +33,11 @@ impl BlockProposal {
         Self::None
     }
 
-    pub(crate) fn is_some(&self) -> bool {
-        !self.is_none()
-    }
-
-    pub(crate) fn is_none(&self) -> bool {
-        matches!(self, BlockProposal::None)
-    }
-
-    pub(crate) fn unwrap(&self) -> &Block {
+    pub(crate) fn expect(&self, msg: &str) -> &Block {
         match self {
             BlockProposal::OwnComposition((block, _)) => block,
             BlockProposal::ForeignComposition(block) => block,
-            BlockProposal::None => panic!("Called unwrap on a BlockProposal value which was None"),
+            BlockProposal::None => panic!("{msg}"),
         }
     }
 

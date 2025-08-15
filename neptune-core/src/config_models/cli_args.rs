@@ -16,6 +16,7 @@ use sysinfo::System;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
+use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
@@ -131,6 +132,22 @@ pub struct Args {
     #[clap(long)]
     pub(crate) tx_proof_upgrading: bool,
 
+    /// Specify environment variables for Triton VM for a given (log2 of) the
+    /// padded height. Can be used to control the environment variables
+    /// `TVM_LDE_TRACE` and `RAYON_NUM_THREADS` as a function of the proof's
+    /// padded height. These environment variable affect Triton VM's performance
+    /// and RAM consumption. For very high padded heights, you can use this
+    /// value to guarantee that RAM consumption is limited such that the proof
+    /// can be produced. These environment variables are only seen by the
+    /// spawned Triton VM instances, not by neptune-core.
+    ///
+    /// Syntax: <log_2(padded height)>:'<key_0>=<value_0> <key_1>=<value_1> ...'
+    ///
+    /// Example:
+    ///  --triton-vm-env-vars='24:"RAYON_NUM_THREADS=90 TVM_LDE_TRACE=no_cache",25:"RAYON_NUM_THREADS=45 TVM_LDE_TRACE=no_cache"'
+    #[clap(long, default_value = "")]
+    pub triton_vm_env_vars: TritonVmEnvVars,
+
     /// Determines the fraction of the transaction fee consumed by this node as
     /// a reward either for upgrading transaction proofs. Ignored unless
     /// proof upgrading is activated.
@@ -158,6 +175,39 @@ pub struct Args {
     #[clap(long, default_value = "1")]
     pub(crate) max_num_compose_mergers: NonZero<usize>,
 
+    /// By default, a composer will share block proposals with all peers. If
+    /// this flag is set, the composer will *not* share their block proposals.
+    #[clap(long)]
+    pub(crate) secret_compositions: bool,
+
+    /// Regulates the fraction of the block subsidy that a composer sends to the
+    /// guesser.
+    /// Value must be between 0 and 1.
+    ///
+    /// The remainder goes to the composer. This flag is ignored if the
+    /// `compose` flag is not set.
+    #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
+    pub(crate) guesser_fraction: f64,
+
+    /// The minimum fraction that a guesser will require from the composer
+    /// before they start guessing. Block proposals with a guesser fraction
+    /// below this number will not cause guessing to start.
+    ///
+    /// Only applies to external block proposals. Own block proposals will
+    /// always be guessed on if both composition and guessing is set.
+    #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
+    pub(crate) minimum_guesser_fraction: f64,
+
+    /// If guessing has already started, and a new proposal comes in, the new
+    /// proposal will be guessed on only if it exceeds the previous proposal
+    /// with this fraction. Ideally this fraction should be set to the value of
+    /// 1 - BTI' / (BTI' - PPT), where BTI' is block target interval minus
+    /// proving time minus preprocessing time, and PPT is preprocessing time.
+    /// This value will optimize guesser rewards. On a Threadrippper 7995wx this
+    /// value is 16.7 %. On weaker CPUs, this value should be set higher.
+    #[clap(long, default_value = "0.17", value_parser = fraction_validator)]
+    pub(crate) minimum_guesser_improvement_fraction: f64,
+
     /// Whether to engage in guess-nonce-and-hash, which is the 3rd step in
     /// three-step mining. If this flag is set and the `compose` flag is not
     /// set, then the client will rely on block proposals from other nodes. In
@@ -167,19 +217,6 @@ pub struct Args {
     /// always guess on their own block proposal.
     #[clap(long)]
     pub(crate) guess: bool,
-
-    /// By default, a composer will share block proposals with all peers. If
-    /// this flag is set, the composer will *not* share their block proposals.
-    #[clap(long)]
-    pub(crate) secret_compositions: bool,
-
-    /// Regulates the fraction of the block subsidy that goes to the guesser.
-    /// Value must be between 0 and 1.
-    ///
-    /// The remainder goes to the composer. This flag is ignored if the
-    /// `compose` flag is not set.
-    #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
-    pub(crate) guesser_fraction: f64,
 
     /// Set the number of threads to use while guessing. When no value is set,
     /// the number is set to the number of available cores.
@@ -232,7 +269,7 @@ pub struct Args {
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
-    pub listen_addr: IpAddr,
+    pub peer_listen_addr: IpAddr,
 
     /// Maximum number of blocks that the client can catch up to without going
     /// into sync mode.
@@ -292,7 +329,9 @@ pub struct Args {
     /// which is always a power of two. A basic proof has a complexity of 2^11.
     /// A powerful machine in 2024 with 128 CPU cores can handle a padded height of 2^23.
     ///
-    /// For such a machine, one would set a limit of 23.
+    /// This limit can be increased to 2^24 if the [Self::triton_vm_env_vars]
+    /// argument is used to decrease RAM consumption at these bigger proof
+    /// sizes.
     ///
     /// if the limit is reached while mining, a warning is logged and mining will pause.
     /// non-mining operations may panic and halt neptune-core
@@ -517,12 +556,7 @@ impl Args {
     ) -> TritonVmProofJobOptions {
         TritonVmProofJobOptions {
             job_priority,
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
-                network: self.network,
-                tx_proving_capability: self.proving_capability(),
-                proof_type: self.proving_capability().into(),
-            },
+            job_settings: ProverJobSettings::from(self),
             cancel_job_rx: None,
         }
     }
@@ -575,16 +609,24 @@ impl Args {
     }
 }
 
+impl From<&Args> for ProverJobSettings {
+    fn from(cli: &Args) -> Self {
+        let triton_vm_env_vars: TritonVmEnvVars = cli.triton_vm_env_vars.clone();
+        Self {
+            max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
+            network: cli.network,
+            tx_proving_capability: cli.proving_capability(),
+            proof_type: cli.proving_capability().into(),
+            triton_vm_env_vars,
+        }
+    }
+}
+
 impl From<&Args> for TritonVmProofJobOptions {
     fn from(cli: &Args) -> Self {
         Self {
             job_priority: Default::default(),
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
-                network: cli.network,
-                tx_proving_capability: cli.proving_capability(),
-                proof_type: cli.proving_capability().into(),
-            },
+            job_settings: ProverJobSettings::from(cli),
             cancel_job_rx: None,
         }
     }
@@ -632,7 +674,7 @@ mod tests {
         assert_eq!(9799, default_args.rpc_port);
         assert_eq!(
             IpAddr::from(Ipv6Addr::UNSPECIFIED),
-            default_args.listen_addr
+            default_args.peer_listen_addr
         );
         assert_eq!(1, default_args.max_num_compose_mergers.get());
     }

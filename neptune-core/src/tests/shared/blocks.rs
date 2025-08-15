@@ -1,4 +1,6 @@
+use rand::rngs::StdRng;
 use rand::Rng;
+use rand::SeedableRng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first;
 use tasm_lib::twenty_first::bfe;
@@ -237,7 +239,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
 
     let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
         &tip_block,
-        global_state_lock,
+        global_state_lock.clone(),
         timestamp,
         Default::default(),
     )
@@ -273,6 +275,28 @@ pub(crate) fn invalid_empty_block_with_proof_size(
     )));
 
     block
+}
+
+pub(crate) async fn invalid_empty_block1_with_guesser_fraction(
+    network: Network,
+    guesser_fraction: f64,
+) -> Block {
+    let genesis = Block::genesis(network);
+    let mut rng: StdRng = SeedableRng::seed_from_u64(222555000140);
+    let guesser_receiver = GenerationReceivingAddress::derive_from_seed(rng.random());
+
+    make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction(
+        &genesis,
+        vec![],
+        vec![],
+        None,
+        GenerationSpendingKey::derive_from_seed(rng.random()),
+        rng.random(),
+        (guesser_fraction, guesser_receiver.into()),
+        network,
+    )
+    .await
+    .0
 }
 
 pub(crate) fn invalid_empty_block(predecessor: &Block, network: Network) -> Block {

@@ -136,11 +136,6 @@ statrs = "0.18.0"
 test-strategy = "0.3"
 tokio-test = "0.4"
 
-[dev-dependencies.cargo-husky]
-version = "1"
-default-features = false
-features = ["user-hooks"]
-
 [[bin]]
 name = "neptune-core"
 path = "src/main.rs"

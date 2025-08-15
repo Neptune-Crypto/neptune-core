@@ -22,6 +22,7 @@ use neptune_cash::models::state::wallet::wallet_file::WalletFileContext;
 use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 pub struct GenesisNode {
@@ -51,16 +52,37 @@ impl GenesisNode {
     }
 
     /// provides default neptune-core cli arguments for typical integration tests.
-    pub fn default_args() -> Args {
-        Self::default_args_with_network(Network::RegTest)
+    pub async fn default_args() -> Args {
+        Self::default_args_with_network(Network::RegTest).await
     }
 
-    pub fn default_args_with_network(network: Network) -> Args {
+    pub async fn default_args_with_network(network: Network) -> Args {
         let mut args = Args::default();
         args.network = network;
 
-        // ensure we bind to localhost so windows firewall does not prevent/block
-        args.listen_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        // ensure we bind to localhost so windows firewall does not
+        // prevent/block. Let OS pick peer and RPC port to avoid collissions
+        // in case of multithreaded test runs.
+        {
+            let peer_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("Must be able to get socket on local host");
+            let peer_port = peer_listener
+                .local_addr()
+                .expect("Must be able to get socket on local host")
+                .port();
+            args.peer_listen_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+            args.peer_port = peer_port;
+
+            let rpc_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("Must be able to get socket on local host");
+            let rpc_port = rpc_listener
+                .local_addr()
+                .expect("Must be able to get socket on local host")
+                .port();
+            args.rpc_port = rpc_port;
+        }
 
         // we default proving capability to primitive-witness as lowest common
         // denominator and because otherwise dev machines often miss this case.
@@ -76,7 +98,7 @@ impl GenesisNode {
     }
 
     pub async fn default_args_with_network_and_devnet_wallet(network: Network) -> Args {
-        let cli_args = Self::default_args_with_network(network);
+        let cli_args = Self::default_args_with_network(network).await;
         let data_directory =
             DataDirectory::get(cli_args.data_dir.clone(), cli_args.network).unwrap();
         DataDirectory::create_dir_if_not_exists(&data_directory.root_dir_path())
@@ -182,7 +204,11 @@ impl GenesisNode {
         num_nodes: u8,
         base_args: Option<Args>,
     ) -> anyhow::Result<[Self; N]> {
-        let base_args = base_args.unwrap_or_else(Self::default_args);
+        let base_args = if let Some(base_args) = base_args {
+            base_args
+        } else {
+            Self::default_args().await
+        };
         Self::start_nodes(Self::instance_args_for_cluster(
             cluster_id, num_nodes, base_args,
         ))
@@ -238,7 +264,7 @@ impl GenesisNode {
     ///
     /// note: no dummy components are used.
     pub async fn start_default_node() -> anyhow::Result<Self> {
-        Self::start_node(Self::default_args()).await
+        Self::start_node(Self::default_args().await).await
     }
 
     /// waits until node has a peer connected or timeout occurs.
@@ -348,8 +374,16 @@ impl GenesisNode {
     ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
         loop {
-            if let Some(tx) = self.gsl.lock_guard().await.mempool.get(txid) {
-                if tx.is_confirmable_relative_to(mutator_set) {
+            {
+                if self
+                    .gsl
+                    .lock_guard()
+                    .await
+                    .mempool
+                    .get(txid)
+                    .expect("Referenced tx must be in mempool")
+                    .is_confirmable_relative_to(mutator_set)
+                {
                     break;
                 }
             }
