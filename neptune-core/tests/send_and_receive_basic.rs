@@ -134,7 +134,7 @@ pub async fn alice_sends_to_bob(
     logging::tracing_logger();
     let timeout_secs = 5;
 
-    let mut base_args = GenesisNode::default_args();
+    let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability = Some(proving_capability);
 
     // alice and bob start 2 peer cluster (regtest)

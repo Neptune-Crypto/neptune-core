@@ -34,7 +34,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
         TxProvingCapability::ProofCollection,
         TxProvingCapability::SingleProof,
     ] {
-        let mut cli_args = GenesisNode::default_args();
+        let mut cli_args = GenesisNode::default_args().await;
         cli_args.tx_proving_capability = Some(tx_proving_capability);
 
         // random ports to prevent multiple test runs from using same
@@ -128,7 +128,9 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             .mine_blocks_to_wallet(1, mine_mempool_txs)
             .await
             .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
+
         let tip = alice.gsl.lock_guard().await.chain.light_state().clone();
         assert_eq!(
             BlockHeight::from(3u64),
@@ -137,7 +139,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
         );
 
         let tip_msa = tip.mutator_set_accumulator_after().unwrap();
-        let tx_upgrade_timeout_secs = 450;
+        let tx_upgrade_timeout_secs = 15;
         alice
             .wait_until_tx_in_mempool_confirmable(
                 tx_artifacts.transaction().txid(),
