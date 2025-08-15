@@ -16,6 +16,48 @@ use tasm_lib::triton_vm::vm::VM;
 use thread_priority::set_current_thread_priority;
 use thread_priority::ThreadPriority;
 
+// TODO: Replace by value exposed in Triton VM
+const LDE_TRACE_ENV_VAR: &str = "TVM_LDE_TRACE";
+
+fn set_environment_variables(env_vars: &[(String, String)]) {
+    // Set environment variables for this spawned process only, does not apply
+    // globally. Documentation of `set_var` shows it's for the currently
+    // running process only.
+    // This is only intended to set two environment variables: TVM_LDE_TRACE and
+    // RAYON_NUM_THREADS, depending on the padded height of the algebraic
+    // execution trace.
+    for (key, value) in env_vars {
+        eprintln!("Setting env variable for Triton VM: {key}={value}");
+
+        // SAFETY:
+        // - "The exact requirement is: you must ensure that there are no
+        //   other threads concurrently writing or reading(!) the
+        //   environment through functions or global variables other than
+        //   the ones in this module." At this place, this program is
+        //   single-threaded. Generation of algebraic execution trace is
+        //   done, and proving hasn't started yet.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+
+        // In case Triton VM has already set the cache decision prior to
+        // the environment variable being set here, we override it through
+        // a publicly exposed function.
+        if key == LDE_TRACE_ENV_VAR {
+            let maybe_overwrite = value.to_ascii_lowercase();
+            let cache_lde_trace_overwrite = match maybe_overwrite.as_str() {
+                "cache" => Some(CacheDecision::Cache),
+                "no_cache" => Some(CacheDecision::NoCache),
+                _ => None,
+            };
+            if let Some(cache_lde_trace_overwrite) = cache_lde_trace_overwrite {
+                eprintln!("overwriting cache lde trace to: {cache_lde_trace_overwrite:?}");
+                overwrite_lde_trace_caching_to(cache_lde_trace_overwrite);
+            }
+        }
+    }
+}
+
 fn execute(
     claim: Claim,
     program: Program,
@@ -44,46 +86,12 @@ fn execute(
         );
     }
 
-    let env_vars = env_vars.get(&log2_padded_height);
+    let env_vars = env_vars
+        .get(&log2_padded_height)
+        .map(|x| x.to_owned())
+        .unwrap_or_default();
 
-    // Set environment variables for this spawned process only, does not apply
-    // globally. Documentation of `set_var` shows it's for the currently
-    // running process only.
-    // This is only intended to set two environment variables: TVM_LDE_TRACE and
-    // RAYON_NUM_THREADS, depending on the padded height of the algebraic
-    // execution trace.
-    if let Some(env_vars) = env_vars {
-        for (key, value) in env_vars {
-            eprintln!("Setting env variable for Triton VM: {key}={value}");
-
-            // SAFETY:
-            // - "The exact requirement is: you must ensure that there are no
-            //   other threads concurrently writing or reading(!) the
-            //   environment through functions or global variables other than
-            //   the ones in this module." At this place, this program is
-            //   single-threaded. Generation of algebraic execution trace is
-            //   done, and proving hasn't started yet.
-            unsafe {
-                std::env::set_var(key, value);
-            }
-
-            // In case Triton VM has already set the cache decision prior to
-            // the environment variable being set here, we override it through
-            // a publicly exposed function.
-            if key == "TVM_LDE_TRACE" {
-                let maybe_overwrite = value.to_ascii_lowercase();
-                let cache_lde_trace_overwrite = match maybe_overwrite.as_str() {
-                    "cache" => Some(CacheDecision::Cache),
-                    "no_cache" => Some(CacheDecision::NoCache),
-                    _ => None,
-                };
-                if let Some(cache_lde_trace_overwrite) = cache_lde_trace_overwrite {
-                    eprintln!("overwriting cache lde trace to: {cache_lde_trace_overwrite:?}");
-                    overwrite_lde_trace_caching_to(cache_lde_trace_overwrite);
-                }
-            }
-        }
-    }
+    set_environment_variables(&env_vars);
 
     stark.prove(&claim, &aet).unwrap()
 }
@@ -119,8 +127,6 @@ fn main() {
     let mut stdout = std::io::stdout();
     stdout.write_all(&as_bytes).unwrap();
     stdout.flush().unwrap();
-
-    //    std::thread::sleep(std::time::Duration::from_secs(1));
 }
 
 #[cfg(test)]
@@ -129,6 +135,43 @@ mod tests {
     use tasm_lib::triton_vm::{self, isa::triton_asm};
 
     use super::*;
+
+    #[test]
+    fn setting_tvm_env_vars_works() {
+        let program = triton_asm!(halt);
+        let program = Program::new(&program);
+        let claim = Claim::about_program(&program);
+        let non_determinism = NonDeterminism::default();
+        let max_log2_padded_height = None;
+        let mut env_vars = TritonVmEnvVars::default();
+        env_vars.insert(
+            8,
+            vec![
+                (LDE_TRACE_ENV_VAR.to_owned(), "no_cache".to_owned()),
+                ("RAYON_NUM_THREADS".to_owned(), "3".to_owned()),
+            ],
+        );
+
+        let proof = execute(
+            claim.clone(),
+            program,
+            non_determinism,
+            max_log2_padded_height,
+            env_vars,
+        );
+
+        assert!(triton_vm::verify(Stark::default(), &claim, &proof));
+
+        // Verify that env variables were actually set
+        assert_eq!(
+            "no_cache",
+            std::env::var(LDE_TRACE_ENV_VAR).expect("Env variable for LDE trace must be set")
+        );
+        assert_eq!(
+            "3",
+            std::env::var("RAYON_NUM_THREADS").expect("Env variable for num threads must be set")
+        );
+    }
 
     #[test]
     fn make_halt_proof() {

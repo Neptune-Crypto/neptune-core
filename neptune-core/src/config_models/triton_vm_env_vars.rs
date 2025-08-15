@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::str::FromStr;
 
 use serde::Deserialize;
@@ -9,6 +11,20 @@ use serde::Serialize;
 /// the Triton VM proving process for proofs of this size.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TritonVmEnvVars(HashMap<u8, Vec<(String, String)>>);
+
+impl Deref for TritonVmEnvVars {
+    type Target = HashMap<u8, Vec<(String, String)>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for TritonVmEnvVars {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 impl Display for TritonVmEnvVars {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -88,20 +104,6 @@ impl FromStr for TritonVmEnvVars {
         }
 
         Ok(TritonVmEnvVars(map))
-    }
-}
-
-impl TritonVmEnvVars {
-    pub fn get(&self, log2_padded_height: &u8) -> Option<&Vec<(String, String)>> {
-        self.0.get(log2_padded_height)
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 }
 
