@@ -60,7 +60,7 @@ impl GenesisNode {
         args.network = network;
 
         // ensure we bind to localhost so windows firewall does not prevent/block
-        args.listen_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        args.peer_listen_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
         // we default proving capability to primitive-witness as lowest common
         // denominator and because otherwise dev machines often miss this case.

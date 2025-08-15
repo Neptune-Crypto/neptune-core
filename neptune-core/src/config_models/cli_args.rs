@@ -269,7 +269,7 @@ pub struct Args {
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
-    pub listen_addr: IpAddr,
+    pub peer_listen_addr: IpAddr,
 
     /// Maximum number of blocks that the client can catch up to without going
     /// into sync mode.
@@ -674,7 +674,7 @@ mod tests {
         assert_eq!(9799, default_args.rpc_port);
         assert_eq!(
             IpAddr::from(Ipv6Addr::UNSPECIFIED),
-            default_args.listen_addr
+            default_args.peer_listen_addr
         );
         assert_eq!(1, default_args.max_num_compose_mergers.get());
     }

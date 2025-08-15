@@ -2272,7 +2272,7 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let listen_port = self.state.cli().own_listen_port();
-        let listen_for_peers_ip = self.state.cli().listen_addr;
+        let listen_for_peers_ip = self.state.cli().peer_listen_addr;
         Ok(listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port)))
     }
 
