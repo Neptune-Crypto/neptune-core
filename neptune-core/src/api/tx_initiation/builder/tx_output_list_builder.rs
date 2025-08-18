@@ -7,6 +7,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::api::export::Timestamp;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -35,6 +36,10 @@ pub enum OutputFormat {
         UtxoNotificationMedium,
     ),
 
+    /// specify a receiving address, amount, and optionally, a release date for
+    /// time-locking the output
+    AddressAndAmountAndMaybeReleaseDate(ReceivingAddress, NativeCurrencyAmount, Option<Timestamp>),
+
     /// specify utxo and receiving address
     AddressAndUtxo(ReceivingAddress, Utxo),
 
@@ -51,6 +56,7 @@ impl OutputFormat {
         match self {
             Self::AddressAndAmount(_, amt) => *amt,
             Self::AddressAndAmountAndMedium(_, amt, _) => *amt,
+            Self::AddressAndAmountAndMaybeReleaseDate(_, amt, _) => *amt,
             Self::AddressAndUtxo(_, u) => u.get_native_currency_amount(),
             Self::AddressAndUtxoAndMedium(_, u, _) => u.get_native_currency_amount(),
             Self::TxOutput(to) => to.native_currency_amount(),
@@ -255,6 +261,32 @@ impl TxOutputListBuilder {
                         self.owned_utxo_notification_medium,
                         self.unowned_utxo_notification_medium,
                     )
+                }
+
+                OutputFormat::AddressAndAmountAndMaybeReleaseDate(
+                    address,
+                    amt,
+                    maybe_release_date,
+                ) => {
+                    let sender_randomness = wallet_entropy
+                        .generate_sender_randomness(block_height, address.privacy_digest());
+
+                    // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
+                    // based on whether the address belongs to our wallet or not
+                    let mut tx_output = TxOutput::auto(
+                        wallet_state,
+                        address,
+                        amt,
+                        sender_randomness,
+                        self.owned_utxo_notification_medium,
+                        self.unowned_utxo_notification_medium,
+                    );
+
+                    if let Some(release_date) = maybe_release_date {
+                        tx_output = tx_output.with_time_lock(release_date);
+                    }
+
+                    tx_output
                 }
 
                 OutputFormat::AddressAndAmountAndMedium(address, amt, medium) => {
