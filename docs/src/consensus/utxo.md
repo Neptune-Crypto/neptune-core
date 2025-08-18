@@ -2,7 +2,7 @@
 
 A UTXO is a collection of coins owned by some person in between two transactions, along with a set of conditions under which it can be spent. Every UTXO is generated as an output of a transaction and is consumed as an input of a transaction.
 
-A UTXO can be *lockable* or *lock-free*. Lockable and lock-free UTXOs are stored in different data structures, the [Mutator Set](./mutator-set.md) and an [MMR](./mmr.md) respectively. Consequently, lockable UTXOs undergo mixing whereas lock-free UTXOs are traceable by design. Another difference is that lockable UTXOs have lock scripts whereas lock-free UTXOs do not.
+A UTXO can be *lockable* or *lock-free*. Lockable and lock-free UTXOs are stored in different data structures, the [Mutator Set](./mutator-set.md) and an [MMR](./mmr.md) respectively. Consequently, lockable UTXOs undergo mixing whereas lock-free UTXOs are traceable by design. Another difference is that lockable UTXOs have lock scripts whereas lock-free UTXOs do not. (Note: lock-free UTXOs are not supported yet; they are including here as a wishlist feature.)
 
 A coin consists of state and a type script hash. A UTXO can have multiple coins, but for every type script hash it can have at most one. The state of a coin can be any string of `BFieldElement`s; it relies on the type script for interpretation.
 
