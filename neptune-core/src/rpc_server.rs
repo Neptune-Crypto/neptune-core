@@ -1748,22 +1748,6 @@ pub trait RPC {
     /// Returns an error if something else failed.
     async fn upgrade(token: rpc_auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
 
-    /// upgrades a transaction's proof.
-    ///
-    /// ignored if the transaction is already upgraded to level of supplied
-    /// proof (or higher)
-    ///
-    /// experimental and untested!  do not use yet!!!
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::upgrade_tx_proof()]
-    async fn upgrade_tx_proof(
-        token: rpc_auth::Token,
-        transaction_id: TransactionKernelId,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<()>;
-
     /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
@@ -3256,25 +3240,6 @@ impl RPC for NeptuneRPCServer {
             .await;
 
         Ok(true)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn upgrade_tx_proof(
-        mut self,
-        _ctx: context::Context,
-        token: rpc_auth::Token,
-        transaction_id: TransactionKernelId,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<()> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api_mut()
-            .tx_initiator_mut()
-            .upgrade_tx_proof(transaction_id, transaction_proof)
-            .await?)
     }
 
     // documented in trait. do not add doc-comment.

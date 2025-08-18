@@ -441,18 +441,6 @@ impl Mempool {
             .map(|x| (&x.transaction, x.upgrade_priority))
     }
 
-    /// get mutable reference to a transaction from mempool
-    ///
-    /// Computes in O(1) from HashMap
-    pub(crate) fn get_mut(
-        &mut self,
-        transaction_id: TransactionKernelId,
-    ) -> Option<&mut Transaction> {
-        self.tx_dictionary
-            .get_mut(&transaction_id)
-            .map(|x| &mut x.transaction)
-    }
-
     /// Returns the list of transactions already in the mempool that a
     /// transaction conflicts with.
     ///
@@ -1218,6 +1206,17 @@ mod tests {
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+
+    impl Mempool {
+        /// get mutable reference to a transaction from mempool
+        ///
+        /// Computes in O(1) from HashMap
+        fn get_mut(&mut self, transaction_id: TransactionKernelId) -> Option<&mut Transaction> {
+            self.tx_dictionary
+                .get_mut(&transaction_id)
+                .map(|x| &mut x.transaction)
+        }
+    }
 
     #[apply(shared_tokio_runtime)]
     pub async fn insert_then_get_then_remove_then_get() {
