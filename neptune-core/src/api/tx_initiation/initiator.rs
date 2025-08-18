@@ -22,13 +22,11 @@ use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPol
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
@@ -205,68 +203,6 @@ impl TransactionInitiator {
             "transaction accepted for sending!  recorded tx and initiated broadcast sequence:\n{}",
             tx.details
         );
-
-        Ok(())
-    }
-
-    /// upgrades a transaction's proof in the mempool.
-    ///
-    /// ignored if the transaction is already upgraded to level of supplied
-    /// proof (or higher)
-    ///
-    /// note: experimental and untested!  do not use yet!
-    ///
-    /// note: if the node is upgrading the transaction to use a
-    /// `ProofCollection`, this will return a TxNotInMempool error.  (That
-    /// behavior should change in the future.)
-    pub async fn upgrade_tx_proof(
-        &mut self,
-        transaction_id: TransactionKernelId,
-        transaction_proof: TransactionProof,
-    ) -> Result<(), error::UpgradeProofError> {
-        let network = self.global_state_lock.cli().network;
-        let mut gsm = self.global_state_lock.lock_guard_mut().await;
-        let block_height = gsm.chain.light_state().header().height;
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-
-        let Some(tx) = gsm.mempool.get_mut(transaction_id) else {
-            return Err(error::UpgradeProofError::TxNotInMempool);
-        };
-
-        let new = TransactionProofType::from(&transaction_proof);
-        let old = TransactionProofType::from(&tx.proof);
-
-        if new <= old {
-            return Err(error::UpgradeProofError::ProofNotAnUpgrade);
-        }
-
-        // tbd: how long does this verify take?   If too slow,
-        // we could obtain tx with a read-lock first, verify,
-        // then obtain again with write-lock to mutate it.
-        if !transaction_proof
-            .verify(tx.kernel.mast_hash(), network, consensus_rule_set)
-            .await
-        {
-            return Err(error::UpgradeProofError::InvalidProof);
-        }
-
-        // mutate
-        tx.proof = transaction_proof;
-
-        drop(gsm);
-
-        // tbd: do we need to remove this tx from mempool and re-add
-        // in order to trigger necessary events?
-
-        // todo: Inform all peers about our hard work
-        // for this, we need to hold the channel sender.
-        // but it is not presently available in GlobalStateLock.
-        // So we need to figure out how best do this.
-        // main_to_peer_channel
-        //     .send(MainToPeerTask::TransactionNotification(
-        //         (&upgraded).try_into().unwrap(),
-        //     ))
-        //     .unwrap();
 
         Ok(())
     }
