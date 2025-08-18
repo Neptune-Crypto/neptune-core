@@ -61,6 +61,16 @@ impl OutputFormat {
 
     // ##multicoin## : maybe something like
     // pub fn amount(&self, coint: Coin) -> CoinAmount;
+
+    pub fn address(&self) -> &ReceivingAddress {
+        match self {
+            OutputFormat::AddressAndAmount(ra, _) => ra,
+            OutputFormat::AddressAndAmountAndMedium(ra, _, _) => ra,
+            OutputFormat::AddressAndAmountAndMaybeReleaseDate(ra, _, _) => ra,
+            OutputFormat::AddressAndUtxo(ra, _) => ra,
+            OutputFormat::AddressAndUtxoAndMedium(ra, _, _) => ra,
+        }
+    }
 }
 
 impl From<(ReceivingAddress, NativeCurrencyAmount)> for OutputFormat {
@@ -228,11 +238,11 @@ impl TxOutputListBuilder {
 
         // Convert outputs.  [address:amount] --> TxOutputList
         let outputs = self.outputs.into_iter().map(|output_type| {
+            let sender_randomness = wallet_entropy
+                .generate_sender_randomness(block_height, output_type.address().privacy_digest());
+
             match output_type {
                 OutputFormat::AddressAndAmount(address, amt) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
-
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
                     TxOutput::auto(
@@ -250,9 +260,6 @@ impl TxOutputListBuilder {
                     amt,
                     maybe_release_date,
                 ) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
-
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
                     let mut tx_output = TxOutput::auto(
@@ -272,8 +279,6 @@ impl TxOutputListBuilder {
                 }
 
                 OutputFormat::AddressAndAmountAndMedium(address, amt, medium) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
                     let utxo = Utxo::new_native_currency(address.lock_script_hash(), amt);
                     let owned = wallet_state.can_unlock(&utxo);
 
@@ -281,9 +286,6 @@ impl TxOutputListBuilder {
                 }
 
                 OutputFormat::AddressAndUtxo(address, utxo) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
-
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
                     TxOutput::auto_utxo(
@@ -297,8 +299,6 @@ impl TxOutputListBuilder {
                 }
 
                 OutputFormat::AddressAndUtxoAndMedium(address, utxo, medium) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
                     let owned = wallet_state.can_unlock(&utxo);
 
                     match medium {
