@@ -45,9 +45,6 @@ pub enum OutputFormat {
 
     /// specify utxo, receiving address, and a utxo-notification-medium
     AddressAndUtxoAndMedium(ReceivingAddress, Utxo, UtxoNotificationMedium),
-
-    /// specify a [TxOutput]
-    TxOutput(TxOutput),
 }
 
 impl OutputFormat {
@@ -59,7 +56,6 @@ impl OutputFormat {
             Self::AddressAndAmountAndMaybeReleaseDate(_, amt, _) => *amt,
             Self::AddressAndUtxo(_, u) => u.get_native_currency_amount(),
             Self::AddressAndUtxoAndMedium(_, u, _) => u.get_native_currency_amount(),
-            Self::TxOutput(to) => to.native_currency_amount(),
         }
     }
 
@@ -100,12 +96,6 @@ impl From<(ReceivingAddress, Utxo)> for OutputFormat {
 impl From<(ReceivingAddress, Utxo, UtxoNotificationMedium)> for OutputFormat {
     fn from(v: (ReceivingAddress, Utxo, UtxoNotificationMedium)) -> Self {
         Self::AddressAndUtxoAndMedium(v.0, v.1, v.2)
-    }
-}
-
-impl From<TxOutput> for OutputFormat {
-    fn from(v: TxOutput) -> Self {
-        Self::TxOutput(v)
     }
 }
 
@@ -211,12 +201,6 @@ impl TxOutputListBuilder {
         self
     }
 
-    /// add an output, as [TxOutput]
-    pub fn tx_output(mut self, tx_output: TxOutput) -> Self {
-        self.outputs.push(OutputFormat::TxOutput(tx_output));
-        self
-    }
-
     /// build the list of [TxOutput], with [StateLock]
     ///
     /// note: if you already acquired a read-lock or write-lock over
@@ -245,8 +229,6 @@ impl TxOutputListBuilder {
         // Convert outputs.  [address:amount] --> TxOutputList
         let outputs = self.outputs.into_iter().map(|output_type| {
             match output_type {
-                OutputFormat::TxOutput(o) => o,
-
                 OutputFormat::AddressAndAmount(address, amt) => {
                     let sender_randomness = wallet_entropy
                         .generate_sender_randomness(block_height, address.privacy_digest());
