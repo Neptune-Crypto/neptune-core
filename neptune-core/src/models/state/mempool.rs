@@ -131,7 +131,7 @@ struct MempoolTransaction {
 /// transactions. However, a and b are kept around in a cache that's not
 /// considered a part of the mempool as they will not e.g. be returned for block
 /// construction. The cache is only used to avoid dropping transaction a if b is
-/// mined instead of c. See [`MergeInputCache`] for a more detailed explanation.
+/// mined instead of c. See `MergeInputCache` for a more detailed explanation.
 ///
 /// The mempool returns a list of events which should be handled by associated
 /// wallets to see unconfirmed balance updates. So all functions that can
@@ -512,7 +512,7 @@ impl Mempool {
             .iter()
             .map(|x| x.absolute_indices)
             .collect();
-        for old_tx_input in existing_tx.inputs.iter() {
+        for old_tx_input in &existing_tx.inputs {
             if !new_txs_inputs.contains(&old_tx_input.absolute_indices) {
                 return false;
             }
@@ -632,7 +632,7 @@ impl Mempool {
         let mut events = vec![];
         let new_tx_has_higher_proof_quality =
             new_tx_has_higher_proof_quality(&new_tx.transaction, &conflicts);
-        let min_fee_of_conflicts = conflicts.iter().map(|(_, tx)| tx.fee_density()).min();
+        let min_fee_of_conflicts = conflicts.values().map(|tx| tx.fee_density()).min();
         let conflicts = conflicts
             .into_iter()
             .map(|x| (x.0, x.1.proof.as_single_proof()))
@@ -1080,12 +1080,14 @@ impl Mempool {
         // You have to dereference before calling `get_size` here, otherwise
         // you get the size of the pointer.
         while (*self).get_size() > self.max_total_size {
-            let dominated_by_cache = self.merge_input_cache.get_size() * 2 > (*self).get_size();
+            const MAX_SIZE_OF_CACHE_FACTOR: usize = 3;
+            let dominated_by_cache =
+                self.merge_input_cache.get_size() * MAX_SIZE_OF_CACHE_FACTOR > (*self).get_size();
             if dominated_by_cache {
-                if self.merge_input_cache.pop_front().is_none() {
-                    // Panic here to avoid ending up in an infinite loop.
-                    panic!("Dominated by cache but cannot remove element");
-                }
+                assert!(
+                    self.merge_input_cache.pop_front().is_some(),
+                    "Dominated by cache but cannot remove element"
+                );
             } else {
                 let Some((removed, _)) = self.pop_min() else {
                     error!("Mempool is empty but exceeds max allowed size");

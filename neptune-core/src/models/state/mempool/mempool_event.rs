@@ -60,8 +60,8 @@ impl MempoolEvent {
 
         removed
             .into_values()
-            .map(|kernel| Self::RemoveTx(kernel))
-            .chain(added.into_values().map(|kernel| Self::AddTx(kernel)))
+            .map(Self::RemoveTx)
+            .chain(added.into_values().map(Self::AddTx))
             .collect()
     }
 }
