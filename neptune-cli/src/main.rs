@@ -1,3 +1,5 @@
+mod parser;
+
 use std::io;
 use std::io::stdout;
 use std::io::Write;
@@ -46,15 +48,10 @@ use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
 
+use crate::parser::beneficiary::Beneficiary;
+
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
-
-// for parsing SendToMany <output> arguments.
-#[derive(Debug, Clone)]
-struct TransactionOutput {
-    address: String,
-    amount: NativeCurrencyAmount,
-}
 
 /// represents data format of input to claim-utxo
 #[derive(Debug, Clone, Subcommand)]
@@ -82,46 +79,6 @@ struct UtxoTransferEntry {
 impl UtxoTransferEntry {
     fn data_format() -> String {
         "neptune-utxo-transfer-v1.0".to_string()
-    }
-}
-
-/// We impl FromStr deserialization so that clap can parse the --outputs arg of
-/// send-to-many command.
-///
-/// We do not bother with serialization via `impl Display` because that is
-/// not presently needed and would just be unused code.
-impl FromStr for TransactionOutput {
-    type Err = anyhow::Error;
-
-    /// parses address:amount into TransactionOutput{address, amount}
-    ///
-    /// This is used by the outputs arg of send-to-many command.
-    /// Usage looks like:
-    ///
-    ///     <OUTPUTS>...  format: address:amount address:amount ...
-    ///
-    /// So each output is space delimited and the two fields are
-    /// colon delimited.
-    ///
-    /// This format was chosen because it should be simple for humans
-    /// to generate on the command-line.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split(':').collect::<Vec<_>>();
-        ensure!(parts.len() == 2, "Invalid transaction output. Missing “:”");
-
-        Ok(Self {
-            address: parts[0].to_string(),
-            amount: NativeCurrencyAmount::coins_from_str(parts[1])?,
-        })
-    }
-}
-
-impl TransactionOutput {
-    pub fn to_output_format(&self, network: Network) -> Result<OutputFormat> {
-        Ok(OutputFormat::AddressAndAmount(
-            ReceivingAddress::from_bech32m(&self.address, network)?,
-            self.amount,
-        ))
     }
 }
 
@@ -327,7 +284,7 @@ enum Command {
     SendToMany {
         /// format: address:amount address:amount ...
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
-        outputs: Vec<TransactionOutput>,
+        outputs: Vec<Beneficiary>,
         #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
     },
