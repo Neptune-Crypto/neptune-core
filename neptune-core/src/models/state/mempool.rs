@@ -448,7 +448,7 @@ impl Mempool {
     fn transaction_conflicts_with(
         &self,
         transaction: &Transaction,
-    ) -> Vec<(TransactionKernelId, &Transaction)> {
+    ) -> HashMap<TransactionKernelId, &Transaction> {
         // This check could be made a lot more efficient, for example with an invertible Bloom filter
         let tx_sbf_indices: HashSet<_> = transaction
             .kernel
@@ -457,11 +457,12 @@ impl Mempool {
             .map(|x| x.absolute_indices.to_array())
             .collect();
 
-        let mut conflict_txs_in_mempool = vec![];
+        let mut conflict_txs_in_mempool = HashMap::new();
         for (txid, tx) in &self.tx_dictionary {
             for mempool_tx_input in &tx.transaction.kernel.inputs {
                 if tx_sbf_indices.contains(&mempool_tx_input.absolute_indices.to_array()) {
-                    conflict_txs_in_mempool.push((*txid, &tx.transaction));
+                    conflict_txs_in_mempool.insert(*txid, &tx.transaction);
+                    break;
                 }
             }
         }
@@ -548,9 +549,9 @@ impl Mempool {
         new_tx: Transaction,
         priority: UpgradePriority,
     ) -> Vec<MempoolEvent> {
-        fn new_tx_should_replace_conflicts(
+        fn new_tx_has_higher_proof_quality(
             new_tx: &Transaction,
-            conflicts: &[(TransactionKernelId, &Transaction)],
+            conflicts: &HashMap<TransactionKernelId, &Transaction>,
         ) -> bool {
             match &new_tx.proof {
                 TransactionProof::Witness(witness) => {
@@ -607,8 +608,10 @@ impl Mempool {
 
         // Do not insert an existing transaction again, if its an exact copy.
         let txid = new_tx.txid();
-        if conflicts.contains(&(txid, &new_tx)) {
-            return vec![];
+        if let Some(existing_tx) = conflicts.get(&txid) {
+            if **existing_tx == new_tx {
+                return vec![];
+            }
         }
 
         // Ensure we never throw away a primitive witness if we have one. This
@@ -628,8 +631,8 @@ impl Mempool {
 
         let mut events = vec![];
         let new_tx_has_higher_proof_quality =
-            new_tx_should_replace_conflicts(&new_tx.transaction, &conflicts);
-        let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
+            new_tx_has_higher_proof_quality(&new_tx.transaction, &conflicts);
+        let min_fee_of_conflicts = conflicts.iter().map(|(_, tx)| tx.fee_density()).min();
         let conflicts = conflicts
             .into_iter()
             .map(|x| (x.0, x.1.proof.as_single_proof()))
@@ -639,9 +642,9 @@ impl Mempool {
             let should_replace_conflict = new_tx_has_higher_proof_quality || better_fee_density;
             if should_replace_conflict {
                 for (conflicting_txid, single_proof) in conflicts {
-                    let e = self
-                        .remove(conflicting_txid)
-                        .expect("Reported conflict must exist");
+                    let e = self.remove(conflicting_txid).unwrap_or_else(|| {
+                        panic!("Reported conflict {conflicting_txid} must exist")
+                    });
                     let MempoolEvent::RemoveTx(removed) = &e else {
                         panic!("remove must return remove event");
                     };
