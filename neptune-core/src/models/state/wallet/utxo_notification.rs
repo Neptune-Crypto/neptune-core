@@ -41,7 +41,8 @@ impl UtxoNotifyMethod {
 }
 
 /// The payload of a UTXO notification, containing all information necessary
-/// to claim it, provided access to the associated spending key.
+/// to claim it, provided that the decryptor already has access to the
+/// associated spending key.
 ///
 /// future work:
 /// we should consider adding functionality that would facilitate passing

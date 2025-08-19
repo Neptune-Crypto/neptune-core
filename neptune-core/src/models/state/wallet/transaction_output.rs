@@ -401,7 +401,7 @@ impl TxOutput {
         self.receiver_digest
     }
 
-    /// retrieve announcement, if any
+    /// Retrieve on-chain UTXO notification announcement, if any.
     pub fn announcement(&self) -> Option<Announcement> {
         match &self.notification_method {
             UtxoNotifyMethod::None => None,
@@ -546,7 +546,8 @@ impl TxOutputList {
         self.addition_records_iter().into_iter().collect()
     }
 
-    /// Returns all announcement for this TxOutputList
+    /// Return all on-chain UTXO notification announcement for this
+    /// [`TxOutputList`].
     pub(crate) fn announcements(&self) -> Vec<Announcement> {
         let mut announcements = vec![];
         for tx_output in &self.0 {
