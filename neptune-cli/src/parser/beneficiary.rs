@@ -24,10 +24,10 @@ impl Beneficiary {
     pub(crate) fn to_output_format(&self, network: Network) -> Result<OutputFormat, anyhow::Error> {
         let address = ReceivingAddress::from_bech32m(&self.address, network)?;
         if let Some(release_date) = self.release_date {
-            Ok(OutputFormat::AddressAndAmountAndMaybeReleaseDate(
+            Ok(OutputFormat::AddressAndAmountAndReleaseDate(
                 address,
                 self.amount,
-                Some(release_date),
+                release_date,
             ))
         } else {
             Ok(OutputFormat::AddressAndAmount(address, self.amount))

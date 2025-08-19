@@ -36,9 +36,9 @@ pub enum OutputFormat {
         UtxoNotificationMedium,
     ),
 
-    /// specify a receiving address, amount, and optionally, a release date for
-    /// time-locking the output
-    AddressAndAmountAndMaybeReleaseDate(ReceivingAddress, NativeCurrencyAmount, Option<Timestamp>),
+    /// specify a receiving address, amount, and a release date for time-locking
+    /// the output
+    AddressAndAmountAndReleaseDate(ReceivingAddress, NativeCurrencyAmount, Timestamp),
 
     /// specify utxo and receiving address
     AddressAndUtxo(ReceivingAddress, Utxo),
@@ -53,7 +53,7 @@ impl OutputFormat {
         match self {
             Self::AddressAndAmount(_, amt) => *amt,
             Self::AddressAndAmountAndMedium(_, amt, _) => *amt,
-            Self::AddressAndAmountAndMaybeReleaseDate(_, amt, _) => *amt,
+            Self::AddressAndAmountAndReleaseDate(_, amt, _) => *amt,
             Self::AddressAndUtxo(_, u) => u.get_native_currency_amount(),
             Self::AddressAndUtxoAndMedium(_, u, _) => u.get_native_currency_amount(),
         }
@@ -66,7 +66,7 @@ impl OutputFormat {
         match self {
             OutputFormat::AddressAndAmount(ra, _) => ra,
             OutputFormat::AddressAndAmountAndMedium(ra, _, _) => ra,
-            OutputFormat::AddressAndAmountAndMaybeReleaseDate(ra, _, _) => ra,
+            OutputFormat::AddressAndAmountAndReleaseDate(ra, _, _) => ra,
             OutputFormat::AddressAndUtxo(ra, _) => ra,
             OutputFormat::AddressAndUtxoAndMedium(ra, _, _) => ra,
         }
@@ -255,27 +255,18 @@ impl TxOutputListBuilder {
                     )
                 }
 
-                OutputFormat::AddressAndAmountAndMaybeReleaseDate(
-                    address,
-                    amt,
-                    maybe_release_date,
-                ) => {
+                OutputFormat::AddressAndAmountAndReleaseDate(address, amt, release_date) => {
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
-                    let mut tx_output = TxOutput::auto(
+                    TxOutput::auto(
                         wallet_state,
                         address,
                         amt,
                         sender_randomness,
                         self.owned_utxo_notification_medium,
                         self.unowned_utxo_notification_medium,
-                    );
-
-                    if let Some(release_date) = maybe_release_date {
-                        tx_output = tx_output.with_time_lock(release_date);
-                    }
-
-                    tx_output
+                    )
+                    .with_time_lock(release_date)
                 }
 
                 OutputFormat::AddressAndAmountAndMedium(address, amt, medium) => {
