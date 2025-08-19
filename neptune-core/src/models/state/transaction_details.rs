@@ -318,7 +318,7 @@ impl TransactionDetails {
     }
 
     pub fn primitive_witness(&self) -> PrimitiveWitness {
-        self.into()
+        PrimitiveWitness::from_transaction_details(self)
     }
 
     /// Assemble the transaction kernel corresponding to this
