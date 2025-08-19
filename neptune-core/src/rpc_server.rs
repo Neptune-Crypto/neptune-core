@@ -1743,6 +1743,20 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
+    /// Like `send` but the resulting transaction is *transparent*. No privacy.
+    ///
+    /// Specifically, the resulting transaction contains announcements that
+    /// themselves contain the raw UTXOs and commitment randomnesses. This
+    /// info suffices to derive the addition records and removal records,
+    /// thereby exposing not just the amounts but also the origins and
+    /// destinations of the transfer.
+    async fn send_transparent(
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TxCreationArtifacts>;
+
     /// Upgrade a proof for a transaction found in the mempool. If the
     /// transaction cannot be in the mempool, or the transaction is not in need
     /// of upgrading because it is already single proof-backed and synced, then
@@ -3185,6 +3199,26 @@ impl RPC for NeptuneRPCServer {
             .api_mut()
             .tx_sender_mut()
             .send(outputs, change_policy, fee, Timestamp::now())
+            .await?)
+    }
+
+    // documented in trait. do not add doc-commtn.
+    async fn send_transparent(
+        mut self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TxCreationArtifacts> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api_mut()
+            .tx_initiator_mut()
+            .send_transparent(outputs, change_policy, fee, Timestamp::now())
             .await?)
     }
 

@@ -289,6 +289,20 @@ enum Command {
         fee: NativeCurrencyAmount,
     },
 
+    /// Like `SendToMany` but the resulting transaction will be *transparent*.
+    /// No privacy.
+    ///
+    /// Specifically, the transaction will include announcements that expose the
+    /// raw UTXOs and all commitment randomness. This information suffices to
+    /// track amounts as well as origins and destinations.
+    SendTransparent {
+        /// format: address:amount address:amount ...
+        #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
+        outputs: Vec<Beneficiary>,
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
+        fee: NativeCurrencyAmount,
+    },
+
     /// Upgrade the specified transaction. Transaction must be either unsynced
     /// or not have a Single Proof for this to work.
     Upgrade {
@@ -1144,6 +1158,38 @@ async fn main() -> Result<()> {
                         tx_artifacts.all_offchain_notifications(),
                         None, // todo:  parse receiver tags from cmd-line.
                     )?
+                }
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+        Command::SendTransparent { outputs, fee } => {
+            let parsed_outputs = outputs
+                .into_iter()
+                .map(|o| o.to_output_format(network))
+                .collect::<Result<Vec<_>>>()?;
+
+            let res = client
+                .send_transparent(
+                    ctx,
+                    token,
+                    parsed_outputs,
+                    ChangePolicy::recover_to_next_unused_key(
+                        KeyType::Symmetric,
+                        UtxoNotificationMedium::OnChain,
+                    ),
+                    fee,
+                )
+                .await?;
+            match res {
+                Ok(tx_artifacts) => {
+                    println!(
+                        "Successfully created transparent transaction: {}",
+                        tx_artifacts.transaction().txid()
+                    );
+
+                    // no need to process UTXO notifications:
+                    // all outputs (change included) generate *on-chain*
+                    // notifications
                 }
                 Err(e) => eprintln!("{e}"),
             }
