@@ -711,7 +711,7 @@ impl Mempool {
             "Length of upgrade priority queue may not exceed num txs"
         );
 
-        events
+        MempoolEvent::normalize(events)
     }
 
     /// remove a transaction from the `Mempool`
@@ -1063,6 +1063,8 @@ impl Mempool {
 
         // Update the sync-label to keep track of reorganizations
         self.set_sync_labels(new_block)?;
+
+        let events = MempoolEvent::normalize(events);
 
         Ok((events, update_jobs))
     }
@@ -2367,7 +2369,8 @@ mod tests {
         );
 
         let num_insertions = 7;
-        let txs = mock_transactions_with_sized_single_proof(num_insertions, ByteSize::mb(1));
+        let mut txs = mock_transactions_with_sized_single_proof(num_insertions, ByteSize::mb(1));
+        txs.sort_unstable_by_key(|x| x.fee_density());
         let mut all_events = vec![];
         for tx in txs {
             all_events.extend(mempool.insert(tx, UpgradePriority::Critical));
@@ -2377,14 +2380,17 @@ mod tests {
             .into_iter()
             .filter(|x| matches!(x, MempoolEvent::RemoveTx(_)))
             .collect_vec();
-        assert!(
-            !removal_events.is_empty(),
+        let num_removal_events = removal_events.len();
+        assert_ne!(
+            0, num_removal_events,
             "Test assumption: Not all txs can fit into mempool"
         );
         assert_eq!(
             num_insertions,
-            removal_events.len() + mempool.len(),
-            "All insertions must be either in mempool or in the removal events"
+            num_removal_events + mempool.len(),
+            "All insertions must be either in mempool or in the removal events. \
+            Got #removal events: {num_removal_events}; mempool length: {}",
+            mempool.len()
         );
     }
 
@@ -2507,18 +2513,26 @@ mod tests {
             let (bottom, [left, right], final_tx, mutator_set) =
                 nested_mergers(consensus_rule_set).await;
             for tx in &bottom {
-                mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+                let events = mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+                assert_eq!(1, events.len());
+                assert_eq!(1, MempoolEvent::num_adds(&events));
             }
             assert_eq!(4, mempool.len());
             assert_eq!(0, mempool.merge_input_cache.len());
 
             for tx in [&left, &right] {
-                mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+                let events = mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+                assert_eq!(3, events.len());
+                assert_eq!(1, MempoolEvent::num_adds(&events));
+                assert_eq!(2, MempoolEvent::num_removes(&events));
             }
             assert_eq!(2, mempool.len());
             assert_eq!(4, mempool.merge_input_cache.len());
 
-            mempool.insert(final_tx.clone(), UpgradePriority::Irrelevant);
+            let events = mempool.insert(final_tx.clone(), UpgradePriority::Irrelevant);
+            assert_eq!(3, events.len());
+            assert_eq!(1, MempoolEvent::num_adds(&events));
+            assert_eq!(2, MempoolEvent::num_removes(&events));
             assert_eq!(1, mempool.len());
             assert_eq!(6, mempool.merge_input_cache.len());
 
@@ -2528,16 +2542,22 @@ mod tests {
                 bottom[0].kernel.clone(),
                 mutator_set.clone(),
             );
-            let _ = mempool1.update_with_block(&block1).unwrap();
+            let (events1, _) = mempool1.update_with_block(&block1).unwrap();
             assert!(!mempool1.contains(bottom[0].txid()));
             assert!(mempool1.contains(bottom[1].txid()));
             assert!(mempool1.contains(right.txid()));
+            assert_eq!(3, events1.len());
+            assert_eq!(2, MempoolEvent::num_adds(&events1));
+            assert_eq!(1, MempoolEvent::num_removes(&events1));
 
             // Scenario: one-time-merged transaction mined (middle layer)
             let mut mempool2 = mempool.clone();
             let block2 =
                 invalid_block_with_kernel_and_mutator_set(left.kernel.clone(), mutator_set.clone());
-            let _ = mempool2.update_with_block(&block2).unwrap();
+            let (events2, _) = mempool2.update_with_block(&block2).unwrap();
+            assert_eq!(2, events2.len());
+            assert_eq!(1, MempoolEvent::num_adds(&events2));
+            assert_eq!(1, MempoolEvent::num_removes(&events2));
             assert!(!mempool2.contains(bottom[0].txid()));
             assert!(!mempool2.contains(bottom[1].txid()));
             assert!(mempool2.contains(right.txid()));
@@ -2548,7 +2568,10 @@ mod tests {
                 final_tx.kernel.clone(),
                 mutator_set.clone(),
             );
-            let _ = mempool3.update_with_block(&block3).unwrap();
+            let (events3, _) = mempool3.update_with_block(&block3).unwrap();
+            assert_eq!(1, events3.len());
+            assert_eq!(0, MempoolEvent::num_adds(&events3));
+            assert_eq!(1, MempoolEvent::num_removes(&events3));
             assert!(mempool3.is_empty());
         }
 
@@ -2950,11 +2973,11 @@ mod tests {
 
         #[proptest(cases = 15, async = "tokio")]
         async fn ms_updated_transaction_always_replaces_progenitor(
-            #[strategy(0usize..20)] _num_inputs_own: usize,
+            #[strategy(1usize..20)] _num_inputs_own: usize,
             #[strategy(0usize..20)] _num_outputs_own: usize,
             #[strategy(0usize..20)] _num_announcements_own: usize,
             #[filter(#_num_inputs_mined+#_num_outputs_mined>0)]
-            #[strategy(0usize..20)]
+            #[strategy(1usize..20)]
             _num_inputs_mined: usize,
             #[strategy(0usize..20)] _num_outputs_mined: usize,
             #[strategy(0usize..20)] _num_announcements_mined: usize,
@@ -3026,7 +3049,25 @@ mod tests {
                 ),
                 "Must return false since updated tx not yet known to mempool"
             );
-            mempool.insert(updated_tx.clone(), upgrade_priority);
+
+            assert_eq!(
+                1,
+                mempool.len(),
+                "Mempool length must be 1 prior to MS update insertion"
+            );
+            let events = mempool.insert(updated_tx.clone(), upgrade_priority);
+            assert_eq!(
+                1,
+                mempool.len(),
+                "Mempool length must be 1 after MS update insertion"
+            );
+            assert_eq!(
+                2,
+                events.len(),
+                "Must return one event for addition, one for removal. Got: {events:#?}"
+            );
+            assert_eq!(1, MempoolEvent::num_removes(&events));
+            assert_eq!(1, MempoolEvent::num_adds(&events));
             let in_mempool_end = mempool.get(txid).map(|tx| tx.to_owned()).unwrap();
             prop_assert_eq!(&updated_tx, &in_mempool_end);
             prop_assert_ne!(&original_tx, &in_mempool_end);

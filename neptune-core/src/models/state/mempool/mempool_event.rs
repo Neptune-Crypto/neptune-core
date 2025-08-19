@@ -1,5 +1,10 @@
+use std::collections::HashMap;
+
+use tasm_lib::prelude::Digest;
+
 use crate::api::export::TransactionKernelId;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 
 /// Represents a mempool state change.
 ///
@@ -7,6 +12,8 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MempoolEvent {
     /// a transaction was added to the mempool
+    // TODO: Consider adding proof type here in case any subscriber could use
+    // that.
     AddTx(TransactionKernel),
 
     /// a transaction was removed from the mempool
@@ -16,6 +23,63 @@ pub enum MempoolEvent {
     ///
     /// (kernel-ID, Tx after mutator-set updated)
     UpdateTxMutatorSet(TransactionKernelId, TransactionKernel),
+}
+
+impl MempoolEvent {
+    fn kernel_mast_hash(&self) -> Digest {
+        match self {
+            MempoolEvent::AddTx(transaction_kernel) => transaction_kernel.mast_hash(),
+            MempoolEvent::RemoveTx(transaction_kernel) => transaction_kernel.mast_hash(),
+            MempoolEvent::UpdateTxMutatorSet(_, new_kernel) => new_kernel.mast_hash(),
+        }
+    }
+
+    /// Remove pairs of the form (add, remove) referring to the same
+    /// transaction.
+    ///
+    /// Shortens the list of [`MempoolEvent`]s such that pairs of events
+    /// referring to the same transaction first being added, and then removed
+    /// are eliminated from the list.
+    pub(super) fn normalize(events: Vec<Self>) -> Vec<Self> {
+        let mut added = HashMap::new();
+        let mut removed = HashMap::new();
+        let mut updated = HashMap::new();
+        for event in events {
+            // We use kernel MAST hash as hash map key because we want two
+            // events if an insertion is used for updating a mutator set.
+            let tx_key = event.kernel_mast_hash();
+            match event {
+                MempoolEvent::AddTx(transaction_kernel) => {
+                    if removed.contains_key(&tx_key) {
+                        removed.remove(&tx_key);
+                    } else {
+                        added.insert(tx_key, transaction_kernel);
+                    }
+                }
+                MempoolEvent::RemoveTx(transaction_kernel) => {
+                    if added.contains_key(&tx_key) {
+                        added.remove(&tx_key);
+                    } else {
+                        removed.insert(tx_key, transaction_kernel);
+                    }
+                }
+                MempoolEvent::UpdateTxMutatorSet(_, transaction_kernel) => {
+                    updated.insert(tx_key, transaction_kernel);
+                }
+            }
+        }
+
+        removed
+            .into_values()
+            .map(|kernel| Self::RemoveTx(kernel))
+            .chain(added.into_values().map(|kernel| Self::AddTx(kernel)))
+            .chain(
+                updated
+                    .into_values()
+                    .map(|kernel| Self::UpdateTxMutatorSet(kernel.txid(), kernel)),
+            )
+            .collect()
+    }
 }
 
 #[cfg(test)]
