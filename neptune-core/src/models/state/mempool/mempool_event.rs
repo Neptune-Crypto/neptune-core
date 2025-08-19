@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use tasm_lib::prelude::Digest;
 
-use crate::api::export::TransactionKernelId;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 
@@ -18,11 +17,6 @@ pub enum MempoolEvent {
 
     /// a transaction was removed from the mempool
     RemoveTx(TransactionKernel),
-
-    /// the mutator-set of a transaction was updated in the mempool.
-    ///
-    /// (kernel-ID, Tx after mutator-set updated)
-    UpdateTxMutatorSet(TransactionKernelId, TransactionKernel),
 }
 
 impl MempoolEvent {
@@ -30,7 +24,6 @@ impl MempoolEvent {
         match self {
             MempoolEvent::AddTx(transaction_kernel) => transaction_kernel.mast_hash(),
             MempoolEvent::RemoveTx(transaction_kernel) => transaction_kernel.mast_hash(),
-            MempoolEvent::UpdateTxMutatorSet(_, new_kernel) => new_kernel.mast_hash(),
         }
     }
 
@@ -43,7 +36,6 @@ impl MempoolEvent {
     pub(super) fn normalize(events: Vec<Self>) -> Vec<Self> {
         let mut added = HashMap::new();
         let mut removed = HashMap::new();
-        let mut updated = HashMap::new();
         for event in events {
             // We use kernel MAST hash as hash map key because we want two
             // events if an insertion is used for updating a mutator set.
@@ -63,9 +55,6 @@ impl MempoolEvent {
                         removed.insert(tx_key, transaction_kernel);
                     }
                 }
-                MempoolEvent::UpdateTxMutatorSet(_, transaction_kernel) => {
-                    updated.insert(tx_key, transaction_kernel);
-                }
             }
         }
 
@@ -73,11 +62,6 @@ impl MempoolEvent {
             .into_values()
             .map(|kernel| Self::RemoveTx(kernel))
             .chain(added.into_values().map(|kernel| Self::AddTx(kernel)))
-            .chain(
-                updated
-                    .into_values()
-                    .map(|kernel| Self::UpdateTxMutatorSet(kernel.txid(), kernel)),
-            )
             .collect()
     }
 }

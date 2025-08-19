@@ -1301,7 +1301,7 @@ mod tests {
         new_block: &Block,
         old_mutator_set: &MutatorSetAccumulator,
         network: Network,
-    ) -> Vec<MempoolEvent> {
+    ) {
         let mut updated_txs = vec![];
         let mutator_set_update = new_block.mutator_set_update().unwrap();
         for job in update_jobs {
@@ -1353,7 +1353,6 @@ mod tests {
             }
         }
 
-        let mut events = vec![];
         for (new_tx, new_pw) in updated_txs {
             let txid = new_tx.kernel.txid();
             let tx = mempool.get_mut(txid).unwrap();
@@ -1361,10 +1360,7 @@ mod tests {
             if let Some(new_pw) = new_pw {
                 mempool.update_primitive_witness(txid, new_pw);
             }
-            events.push(MempoolEvent::UpdateTxMutatorSet(txid, new_tx.kernel));
         }
-
-        events
     }
 
     /// Update all single-proof backed transactions in the mempool.
