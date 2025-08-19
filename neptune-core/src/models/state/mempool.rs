@@ -471,38 +471,35 @@ impl Mempool {
 
     /// Returns `true` iff the new transaction is a merge of two transactions
     /// with the existing mempool transaction as one of its inputs.
-    fn preserve_merge_input(
-        new_tx: &Transaction,
-        existing_tx: &Transaction,
-    ) -> Option<(TransactionKernel, NeptuneProof)> {
+    fn preserve_merge_input(new_tx: &Transaction, existing_tx: &TransactionKernel) -> bool {
         // early return for faster common case handling where new tx is not
         // a merge of existing tx.
-        if !(new_tx.proof.is_single_proof() && existing_tx.proof.is_single_proof()) {
-            return None;
+        if !new_tx.proof.is_single_proof() {
+            return false;
         }
 
         // Merge outputs are guaranteed to have merge bit set
         if !new_tx.kernel.merge_bit {
-            return None;
+            return false;
         }
 
         // merge output cannot have fewer inputs/outputs/announcements than
         // the two transaction it was merged from.
-        if new_tx.kernel.inputs.len() < existing_tx.kernel.inputs.len() {
-            return None;
+        if new_tx.kernel.inputs.len() < existing_tx.inputs.len() {
+            return false;
         }
 
-        if new_tx.kernel.outputs.len() < existing_tx.kernel.outputs.len() {
-            return None;
+        if new_tx.kernel.outputs.len() < existing_tx.outputs.len() {
+            return false;
         }
 
-        if new_tx.kernel.announcements.len() < existing_tx.kernel.announcements.len() {
-            return None;
+        if new_tx.kernel.announcements.len() < existing_tx.announcements.len() {
+            return false;
         }
 
         // Merge result cannot have timestamp prior to its input transactions.
-        if new_tx.kernel.timestamp < existing_tx.kernel.timestamp {
-            return None;
+        if new_tx.kernel.timestamp < existing_tx.timestamp {
+            return false;
         }
 
         // If the inputs to the existing tx is a true subset of the new tx, then
@@ -514,9 +511,9 @@ impl Mempool {
             .iter()
             .map(|x| x.absolute_indices)
             .collect();
-        for old_tx_input in existing_tx.kernel.inputs.iter() {
+        for old_tx_input in existing_tx.inputs.iter() {
             if !new_txs_inputs.contains(&old_tx_input.absolute_indices) {
-                return None;
+                return false;
             }
         }
 
@@ -524,18 +521,14 @@ impl Mempool {
         // exactly the same input, output, and announcement set. We don't care
         // about preserving inputs to such mergers, so we require that at least
         // one of those sets have increased in size.
-        if new_tx.kernel.inputs.len() == existing_tx.kernel.inputs.len()
-            && new_tx.kernel.outputs.len() == existing_tx.kernel.outputs.len()
-            && new_tx.kernel.announcements.len() == existing_tx.kernel.announcements.len()
+        if new_tx.kernel.inputs.len() == existing_tx.inputs.len()
+            && new_tx.kernel.outputs.len() == existing_tx.outputs.len()
+            && new_tx.kernel.announcements.len() == existing_tx.announcements.len()
         {
-            return None;
+            return false;
         }
 
-        let TransactionProof::SingleProof(proof_existing_tx) = &existing_tx.proof else {
-            panic!("Transaction proof must be of type single proof");
-        };
-
-        Some((existing_tx.kernel.clone(), proof_existing_tx.to_owned()))
+        true
     }
 
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
@@ -637,33 +630,40 @@ impl Mempool {
         let new_tx_has_higher_proof_quality =
             new_tx_should_replace_conflicts(&new_tx.transaction, &conflicts);
         let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
-        let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
+        let conflicts = conflicts
+            .into_iter()
+            .map(|x| (x.0, x.1.proof.as_single_proof()))
+            .collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
             let better_fee_density = min_fee_of_conflicting_tx < new_tx.transaction.fee_density();
             let should_replace_conflict = new_tx_has_higher_proof_quality || better_fee_density;
             if should_replace_conflict {
-                for conflicting_txid in conflicts {
-                    if let Some(e) = self.remove(conflicting_txid) {
-                        let MempoolEvent::RemoveTx(removed) = &e else {
-                            panic!("remove must return remove event");
-                        };
+                for (conflicting_txid, single_proof) in conflicts {
+                    let e = self
+                        .remove(conflicting_txid)
+                        .expect("Reported conflict must exist");
+                    let MempoolEvent::RemoveTx(removed) = &e else {
+                        panic!("remove must return remove event");
+                    };
 
-                        // Conditionally store existing transaction in conflict
-                        // cache.
-                        if let Some((old_kernel, old_proof)) =
-                            Self::preserve_merge_input(&new_tx.transaction, removed)
-                        {
+                    // Conditionally store existing transaction in conflict
+                    // cache.
+                    if let Some(old_proof) = single_proof {
+                        if Self::preserve_merge_input(&new_tx.transaction, removed) {
                             let upgrade_priority = self
                                 .upgrade_priorities
                                 .get(&conflicting_txid)
                                 .map(|x| *x.1)
                                 .unwrap_or_default();
-                            self.merge_input_cache
-                                .insert(old_kernel, old_proof, upgrade_priority);
+                            self.merge_input_cache.insert(
+                                removed.to_owned(),
+                                old_proof,
+                                upgrade_priority,
+                            );
                         }
-
-                        events.push(e);
                     }
+
+                    events.push(e);
                 }
             } else {
                 // If new transaction has a lower fee density than the one previous seen,
@@ -679,7 +679,7 @@ impl Mempool {
         // Insert the new transaction
         self.fee_densities
             .push(txid, new_tx.transaction.fee_density());
-        events.push(MempoolEvent::AddTx(new_tx.transaction.clone()));
+        events.push(MempoolEvent::AddTx(new_tx.transaction.kernel.clone()));
         self.tx_dictionary.insert(txid, new_tx);
         if !priority.is_irrelevant() {
             self.upgrade_priorities.push(txid, priority);
@@ -719,7 +719,7 @@ impl Mempool {
             self.fee_densities.remove(&transaction_id);
             self.upgrade_priorities.remove(&transaction_id);
             debug_assert_eq!(self.tx_dictionary.len(), self.fee_densities.len());
-            MempoolEvent::RemoveTx(tx.transaction)
+            MempoolEvent::RemoveTx(tx.transaction.kernel)
         })
     }
 
@@ -841,7 +841,7 @@ impl Mempool {
 
                 debug_assert_eq!(self.tx_dictionary.len(), self.fee_densities.len());
 
-                let event = MempoolEvent::RemoveTx(tx.transaction);
+                let event = MempoolEvent::RemoveTx(tx.transaction.kernel);
 
                 return Some((event, fee_density));
             }
@@ -1242,7 +1242,10 @@ mod tests {
         assert!(!mempool.contains(transaction_digests[1]));
 
         let remove_event = mempool.remove(transaction_digests[0]);
-        assert_eq!(Some(MempoolEvent::RemoveTx(txs[0].clone())), remove_event);
+        assert_eq!(
+            Some(MempoolEvent::RemoveTx(txs[0].kernel.clone())),
+            remove_event
+        );
         for tx_id in &transaction_digests {
             assert!(!mempool.contains(*tx_id));
         }
@@ -1353,7 +1356,7 @@ mod tests {
             if let Some(new_pw) = new_pw {
                 mempool.update_primitive_witness(txid, new_pw);
             }
-            events.push(MempoolEvent::UpdateTxMutatorSet(txid, new_tx));
+            events.push(MempoolEvent::UpdateTxMutatorSet(txid, new_tx.kernel));
         }
 
         events

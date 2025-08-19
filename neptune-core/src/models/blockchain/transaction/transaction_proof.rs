@@ -90,6 +90,16 @@ impl TransactionProof {
         }
     }
 
+    /// Convert a transaction proof into a Triton VM proof, if the transaction
+    /// is single proof backed. Otherwise returns `None`.
+    pub(crate) fn as_single_proof(&self) -> Option<NeptuneProof> {
+        match self {
+            TransactionProof::Witness(_) => None,
+            TransactionProof::ProofCollection(_) => None,
+            TransactionProof::SingleProof(neptune_proof) => Some(neptune_proof.to_owned()),
+        }
+    }
+
     /// Convert a transaction proof into a primitive witness
     ///
     /// # Panics

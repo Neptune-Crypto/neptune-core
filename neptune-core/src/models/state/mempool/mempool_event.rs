@@ -1,4 +1,5 @@
-use crate::api::export::{Transaction, TransactionKernelId};
+use crate::api::export::TransactionKernelId;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 
 /// Represents a mempool state change.
 ///
@@ -6,15 +7,15 @@ use crate::api::export::{Transaction, TransactionKernelId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MempoolEvent {
     /// a transaction was added to the mempool
-    AddTx(Transaction),
+    AddTx(TransactionKernel),
 
     /// a transaction was removed from the mempool
-    RemoveTx(Transaction),
+    RemoveTx(TransactionKernel),
 
     /// the mutator-set of a transaction was updated in the mempool.
     ///
     /// (kernel-ID, Tx after mutator-set updated)
-    UpdateTxMutatorSet(TransactionKernelId, Transaction),
+    UpdateTxMutatorSet(TransactionKernelId, TransactionKernel),
 }
 
 #[cfg(test)]
