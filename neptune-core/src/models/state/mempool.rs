@@ -679,11 +679,15 @@ impl Mempool {
             }
         }
 
-        // Insert the new transaction
+        // Insert the new transaction, if transaction with this txid already
+        // existed, add the implied removal to events list.
         self.fee_densities
             .push(txid, new_tx.transaction.fee_density());
         events.push(MempoolEvent::AddTx(new_tx.transaction.kernel.clone()));
-        self.tx_dictionary.insert(txid, new_tx);
+        if let Some(removed) = self.tx_dictionary.insert(txid, new_tx) {
+            events.push(MempoolEvent::RemoveTx(removed.transaction.kernel));
+        }
+
         if !priority.is_irrelevant() {
             self.upgrade_priorities.push(txid, priority);
         }
@@ -2971,7 +2975,7 @@ mod tests {
 
         #[proptest(cases = 15, async = "tokio")]
         async fn ms_updated_transaction_always_replaces_progenitor(
-            #[strategy(1usize..20)] _num_inputs_own: usize,
+            #[strategy(0usize..20)] _num_inputs_own: usize,
             #[strategy(0usize..20)] _num_outputs_own: usize,
             #[strategy(0usize..20)] _num_announcements_own: usize,
             #[filter(#_num_inputs_mined+#_num_outputs_mined>0)]
