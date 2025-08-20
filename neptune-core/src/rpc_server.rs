@@ -3049,7 +3049,12 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.api().tx_initiator().spendable_inputs().await)
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .spendable_inputs(Timestamp::now())
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
@@ -3067,7 +3072,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api()
             .tx_initiator()
-            .select_spendable_inputs(policy, spend_amount)
+            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
             .await
             .into())
     }

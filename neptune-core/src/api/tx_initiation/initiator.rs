@@ -55,12 +55,12 @@ impl TransactionInitiator {
     /// returns all spendable inputs in the wallet.
     ///
     /// the order of inputs is undefined.
-    pub async fn spendable_inputs(&self) -> TxInputList {
+    pub async fn spendable_inputs(&self, timestamp: Timestamp) -> TxInputList {
         // sadly we have to collect here because we can't hold ref after lock guard is dropped.
         self.global_state_lock
             .lock_guard()
             .await
-            .wallet_spendable_inputs(Timestamp::now())
+            .wallet_spendable_inputs(timestamp)
             .await
             .into_iter()
             .into()
@@ -75,9 +75,10 @@ impl TransactionInitiator {
         &self,
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
+        timestamp: Timestamp,
     ) -> impl IntoIterator<Item = TxInput> {
         TxInputListBuilder::new()
-            .spendable_inputs(self.spendable_inputs().await.into())
+            .spendable_inputs(self.spendable_inputs(timestamp).await.into())
             .policy(policy)
             .spend_amount(spend_amount)
             .build()
@@ -292,7 +293,7 @@ impl TransactionInitiator {
         let spend_amount = tx_outputs.total_native_coins() + fee;
         let policy = InputSelectionPolicy::Random;
         let tx_inputs = self
-            .select_spendable_inputs(policy, spend_amount)
+            .select_spendable_inputs(policy, spend_amount, timestamp)
             .await
             .into_iter()
             .collect::<Vec<_>>();

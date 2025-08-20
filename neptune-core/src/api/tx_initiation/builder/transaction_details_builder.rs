@@ -186,9 +186,12 @@ impl TransactionDetailsBuilder {
         // ##multicoin## : do we need a change amount for each Coin?
         let change_amount = total_unlocked_amount
             .checked_sub(&total_outbound_amount)
-            .ok_or(CreateTxError::InsufficientFunds {
-                requested: total_outbound_amount,
-                available: total_unlocked_amount,
+            .ok_or_else(|| {
+                tracing::error!("Attempt to build transaction failed due to insufficient funds. requested: {}, versus available: {}", total_outbound_amount, total_unlocked_amount);
+                CreateTxError::InsufficientFunds {
+                    requested: total_outbound_amount,
+                    available: total_unlocked_amount,
+                }
             })?;
 
         // ##multicoin## : do we need a change output for each Coin?
