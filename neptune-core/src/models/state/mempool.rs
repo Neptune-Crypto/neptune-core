@@ -230,30 +230,32 @@ impl Mempool {
     /// Check if mempool contains the specified transaction with a higher
     /// proof quality.
     ///
-    /// Returns true if transaction is already known *and* if the proof quality
-    /// contained in the mempool is higher than the argument. Returns false if
-    /// the transaction represents a mutator set update, since the mempool
-    /// should probably be updated with this new (updated) transaction.
-    pub(crate) fn contains_with_higher_proof_quality(
+    /// Returns true if the new transaction is either not known, or if it is
+    /// known but has a higher proof quality than the one already in the
+    /// mempool. Synced transactions (with up-to-date mutator sets) are
+    /// considered of higher quality than unsynced transactions.
+    pub(crate) fn new_transaction_has_higher_proof_quality(
         &self,
         new_tx_txid: TransactionKernelId,
         new_tx_proof_quality: TransactionProofQuality,
         new_tx_mutator_set_hash: Digest,
     ) -> bool {
-        if let Some(tx) = self.tx_dictionary.get(&new_tx_txid) {
-            match tx.transaction.proof.proof_quality() {
+        if let Some(existing_tx) = self.tx_dictionary.get(&new_tx_txid) {
+            match existing_tx.transaction.proof.proof_quality() {
                 Ok(mempool_proof_quality) => {
                     if mempool_proof_quality > new_tx_proof_quality {
                         // New tx has lower proof quality.
-                        true
+                        false
                     } else if mempool_proof_quality == new_tx_proof_quality {
-                        // New tx has same proof quality. If new tx has
-                        // different mutator set, assume new tx represents a
-                        // mutator set update.
-                        tx.transaction.kernel.mutator_set_hash == new_tx_mutator_set_hash
+                        // New tx has same proof quality. Check if new tx
+                        // represents a valid mutator set, if it does, return
+                        // true as the new transaction is more likely to be
+                        // included in a block when it's synced.
+                        existing_tx.transaction.kernel.mutator_set_hash != self.tip_mutator_set_hash
+                            && new_tx_mutator_set_hash == self.tip_mutator_set_hash
                     } else {
                         // New tx has higher proof quality.
-                        false
+                        true
                     }
                 }
                 Err(_) => {
@@ -263,16 +265,17 @@ impl Mempool {
                     // with an associated proof is queried. That probably shouldn't
                     // happen. Only if two nodes share the same secret key can
                     // this happen, in which case, we want to accept the new
-                    // transaction, so we return false here.
+                    // transaction, so we return true here.
                     error!(
                         "Failed to read proof quality for tx in mempool. txid: {}",
                         new_tx_txid
                     );
-                    false
+                    true
                 }
             }
         } else {
-            false
+            // Return true if transaction is not known to the mempool
+            true
         }
     }
 
@@ -549,47 +552,48 @@ impl Mempool {
         new_tx: Transaction,
         priority: UpgradePriority,
     ) -> Vec<MempoolEvent> {
-        fn new_tx_has_higher_proof_quality(
+        fn new_tx_has_higher_proof_quality_than_conflicts(
             new_tx: &Transaction,
             conflicts: &HashMap<TransactionKernelId, &Transaction>,
+            current_msa_hash: Digest,
         ) -> bool {
             match &new_tx.proof {
                 TransactionProof::Witness(witness) => {
                     // A primitive witness backed transaction *can* replace
                     // another transaction, if the other transaction is also
                     // primitive witness backed, *and* it is synced against a
-                    // different mutator set, in which case we assume the new
-                    // transaction is the result of a mutator set update.
-                    conflicts.iter().all(|(_, tx)| {
-                        matches!(&tx.proof, TransactionProof::Witness(_))
-                            && tx.kernel.mutator_set_hash != witness.kernel.mutator_set_hash
+                    // the current mutator set, and the previous one is not.
+                    conflicts.iter().all(|(_, existing_tx)| {
+                        matches!(&existing_tx.proof, TransactionProof::Witness(_))
+                            && existing_tx.kernel.mutator_set_hash != current_msa_hash
+                            && witness.kernel.mutator_set_hash == current_msa_hash
                     })
                 }
                 TransactionProof::ProofCollection(_) => {
                     // A ProofCollection backed transaction will always replace
-                    // primitive witness backed transaction, and will replace
+                    // a primitive witness backed transaction, and will replace
                     // other proof collection backed transaction if the mutator
-                    // set is different, as that is assumed to correspond to a
-                    // mutator set update.
+                    // set is updated, and the old transaction does not have an
+                    // updated mutator set.
                     conflicts
                         .iter()
                         .any(|x| matches!(&x.1.proof, TransactionProof::Witness(_)))
-                        || conflicts.iter().all(|(_, tx)| {
-                            matches!(&tx.proof, TransactionProof::ProofCollection(_))
-                                && tx.kernel.mutator_set_hash != new_tx.kernel.mutator_set_hash
+                        || conflicts.iter().all(|(_, existing_tx)| {
+                            matches!(&existing_tx.proof, TransactionProof::ProofCollection(_))
+                                && existing_tx.kernel.mutator_set_hash != current_msa_hash
+                                && new_tx.kernel.mutator_set_hash == current_msa_hash
                         })
                 }
                 TransactionProof::SingleProof(_) => {
                     // A SingleProof-backed transaction kicks out conflicts if
                     // a) any conflicts are not SingleProof, or
                     // b) the conflict (as there can be only one) has the same
-                    //    txk-id, which indicates mutator set update. In this
-                    //    case, we just assume that the new transaction has a
-                    //    newer mutator set, because you cannot update back in
-                    //    time.
+                    //    txk-id, which indicates mutator set update, and the
+                    //    new transaction has an updated mutator set hash.
                     conflicts.iter().any(|(conflicting_txkid, conflicting_tx)| {
                         !matches!(&conflicting_tx.proof, TransactionProof::SingleProof(_))
                             || *conflicting_txkid == new_tx.kernel.txid()
+                                && new_tx.kernel.mutator_set_hash == current_msa_hash
                     })
                 }
             }
@@ -630,8 +634,11 @@ impl Mempool {
         };
 
         let mut events = vec![];
-        let new_tx_has_higher_proof_quality =
-            new_tx_has_higher_proof_quality(&new_tx.transaction, &conflicts);
+        let new_tx_has_higher_proof_quality = new_tx_has_higher_proof_quality_than_conflicts(
+            &new_tx.transaction,
+            &conflicts,
+            self.tip_mutator_set_hash,
+        );
         let min_fee_of_conflicts = conflicts.values().map(|tx| tx.fee_density()).min();
         let conflicts = conflicts
             .into_iter()
@@ -3031,25 +3038,28 @@ mod tests {
             // First insert original transaction, then updated which should
             // always replace the original transaction, regardless of its size.
             prop_assert!(
-                !mempool.contains_with_higher_proof_quality(
+                mempool.new_transaction_has_higher_proof_quality(
                     txid,
                     original_tx.proof.proof_quality().unwrap(),
                     original_tx.kernel.mutator_set_hash
                 ),
-                "Must return false since tx not known"
+                "Must return true since tx not known"
             );
             mempool.insert(original_tx.clone(), upgrade_priority);
             let in_mempool_start = mempool.get(txid).map(|tx| tx.to_owned()).unwrap();
             prop_assert_eq!(&original_tx, &in_mempool_start);
             prop_assert_ne!(&updated_tx, &in_mempool_start);
 
+            // Mock that the new transaction is synced to the tip.
+            mempool.tip_mutator_set_hash = updated_tx.kernel.mutator_set_hash;
+
             prop_assert!(
-                !mempool.contains_with_higher_proof_quality(
+                mempool.new_transaction_has_higher_proof_quality(
                     txid,
                     updated_tx.proof.proof_quality().unwrap(),
                     updated_tx.kernel.mutator_set_hash
                 ),
-                "Must return false since updated tx not yet known to mempool"
+                "Must return true since updated tx not yet known to mempool"
             );
 
             assert_eq!(
@@ -3074,12 +3084,12 @@ mod tests {
             prop_assert_eq!(&updated_tx, &in_mempool_end);
             prop_assert_ne!(&original_tx, &in_mempool_end);
             prop_assert!(
-                mempool.contains_with_higher_proof_quality(
+                !mempool.new_transaction_has_higher_proof_quality(
                     txid,
                     updated_tx.proof.proof_quality().unwrap(),
                     updated_tx.kernel.mutator_set_hash
                 ),
-                "Must return true after insertion of updated tx"
+                "Must return false after insertion of updated tx"
             );
         }
     }
