@@ -282,10 +282,12 @@ enum Command {
 
     /// send a payment to one or more recipients
     SendToMany {
+        #[clap(long, value_parser, required = false)]
+        file: Option<PathBuf>,
         /// format: address:amount address:amount ...
-        #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
+        #[clap(value_parser, num_args = 0.., value_delimiter = ' ')]
         outputs: Vec<Beneficiary>,
-        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
+        #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
     },
 
@@ -296,10 +298,12 @@ enum Command {
     /// raw UTXOs and all commitment randomness. This information suffices to
     /// track amounts as well as origins and destinations.
     SendTransparent {
+        #[clap(long, value_parser, required = false)]
+        file: Option<PathBuf>,
         /// format: address:amount address:amount ...
-        #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
+        #[clap(value_parser, num_args = 0.., value_delimiter = ' ')]
         outputs: Vec<Beneficiary>,
-        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
+        #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
     },
 
@@ -1127,11 +1131,31 @@ async fn main() -> Result<()> {
                 Some(receiver_tag),
             )?
         }
-        Command::SendToMany { outputs, fee } => {
-            let parsed_outputs = outputs
-                .into_iter()
-                .map(|o| o.to_output_format(network))
-                .collect::<Result<Vec<_>>>()?;
+        Command::SendToMany { file, outputs, fee } => {
+            let parsed_outputs = if let Some(filename) = file {
+                if !outputs.is_empty() {
+                    bail!("specify raw outputs or a file to read them from but not both");
+                }
+                let s = std::fs::read_to_string(filename)?;
+                println!("read file: {s}");
+                let mut beneficiaries = vec![];
+                for chunk in s.split_whitespace() {
+                    let beneficiary = Beneficiary::from_str(chunk)?;
+                    beneficiaries.push(beneficiary);
+                }
+                beneficiaries
+                    .into_iter()
+                    .map(|beneficiary| beneficiary.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                if outputs.is_empty() {
+                    bail!("must specify at least one beneficiary");
+                }
+                outputs
+                    .into_iter()
+                    .map(|o| o.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            };
 
             let res = client
                 .send(
@@ -1162,11 +1186,30 @@ async fn main() -> Result<()> {
                 Err(e) => eprintln!("{e}"),
             }
         }
-        Command::SendTransparent { outputs, fee } => {
-            let parsed_outputs = outputs
-                .into_iter()
-                .map(|o| o.to_output_format(network))
-                .collect::<Result<Vec<_>>>()?;
+        Command::SendTransparent { file, outputs, fee } => {
+            let parsed_outputs = if let Some(filename) = file {
+                if !outputs.is_empty() {
+                    bail!("specify raw outputs or a file to read them from but not both");
+                }
+                let s = std::fs::read_to_string(filename)?;
+                let mut beneficiaries = vec![];
+                for chunk in s.split_whitespace() {
+                    let beneficiary = Beneficiary::from_str(chunk)?;
+                    beneficiaries.push(beneficiary);
+                }
+                beneficiaries
+                    .into_iter()
+                    .map(|beneficiary| beneficiary.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                if outputs.is_empty() {
+                    bail!("must specify at least one beneficiary");
+                }
+                outputs
+                    .into_iter()
+                    .map(|o| o.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            };
 
             let res = client
                 .send_transparent(
