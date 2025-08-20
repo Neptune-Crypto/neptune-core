@@ -277,7 +277,7 @@ enum Command {
 
     /******** PEER INTERACTIONS ********/
     /// Broadcast transaction notifications for all transactions in mempool.
-    BroadCastMempoolTransactions,
+    BroadcastMempoolTransactions,
 
     /******** CHANGE STATE ********/
     /// shutdown neptune-core
@@ -1056,7 +1056,7 @@ async fn main() -> Result<()> {
         }
 
         /******** PEER INTERACTIONS ********/
-        Command::BroadCastMempoolTransactions => {
+        Command::BroadcastMempoolTransactions => {
             println!("Broadcasting transaction-notifications for all transactions in mempool.");
             client.broadcast_all_mempool_txs(ctx, token).await??;
         }
