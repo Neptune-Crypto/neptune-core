@@ -18,7 +18,17 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 ///
 /// See [Transaction](super::Transaction).
 #[derive(
-    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, TasmObject,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    GetSize,
+    BFieldCodec,
+    Default,
+    TasmObject,
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct Announcement {

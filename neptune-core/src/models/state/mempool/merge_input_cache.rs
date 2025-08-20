@@ -4,6 +4,8 @@ use crate::models::state::UpgradePriority;
 use get_size2::GetSize;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 /// A transaction that was input to a merge of two transactions. In other words:
 /// either a or b in the operation merge(a, b) -> c, where a, b, and c are all
@@ -31,25 +33,30 @@ pub(super) struct MergeInputCacheElement {
 /// mined in case the winning composer ignored the c transaction, or the c
 /// transaction came in too late.
 #[derive(Debug, GetSize, Default)]
-#[cfg_attr(test, derive(Clone))] // *never* use Clone outside of tests
+// *never* use Clone outside of tests as only one instance of the mempool cache
+// should ever be needed by the aplication. Also: This cache can have a size in
+// the gigabytes so any application logic cloning it would have terrible
+// performance.
+#[cfg_attr(test, derive(Clone))]
 pub(super) struct MergeInputCache {
     elements: VecDeque<MergeInputCacheElement>,
 }
 
+impl Deref for MergeInputCache {
+    type Target = VecDeque<MergeInputCacheElement>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.elements
+    }
+}
+
+impl DerefMut for MergeInputCache {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.elements
+    }
+}
+
 impl MergeInputCache {
-    #[cfg(test)]
-    pub(super) fn len(&self) -> usize {
-        self.elements.len()
-    }
-
-    pub(super) fn is_empty(&self) -> bool {
-        self.elements.is_empty()
-    }
-
-    pub(super) fn pop_front(&mut self) -> Option<MergeInputCacheElement> {
-        self.elements.pop_front()
-    }
-
     pub(super) fn insert(
         &mut self,
         tx_kernel: TransactionKernel,

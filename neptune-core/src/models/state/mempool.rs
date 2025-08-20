@@ -109,13 +109,13 @@ struct MempoolTransaction {
 /// reorganization has occurred), and b) because single-proof backed
 /// transactions are more likely to be picked for inclusion in the next block.
 ///
-/// The mempool also keeps a view of how the "upgrade priorities" of
-/// transactions, from the perspective the the caller inserting the transaction.
-/// However, this value is not used to determine which transactions gets to stay
-/// in the mempool in the case of a full mempool, since such a value is
-/// subjective, and a goal is to have different nodes running with the same
-/// mempool policy to agree on the content of the mempool at any time, up to
-/// networking conditions.
+/// The mempool also keeps a view of the "upgrade priorities" of transactions,
+/// from the perspective the the caller inserting the transaction. However, this
+/// value is not used to determine which transactions gets to stay in the
+/// mempool in the case of a full mempool, since such a value is subjective,
+/// and a goal is to have different nodes running with the same mempool policy
+/// to agree on the content of the mempool at any time, up to networking
+/// conditions.
 ///
 /// The mempool does not attempt to confirm validity or confirmability of its
 /// transactions, that must be handled by the caller. It does, however,
@@ -138,7 +138,11 @@ struct MempoolTransaction {
 /// return events should be invoked from a context where listeners (like
 /// wallets) can be informed.
 #[derive(Debug, GetSize)]
-#[cfg_attr(test, derive(Clone))] // *never* use Clone outside of tests
+// *never* use Clone outside of tests as only one instance of the mempool should
+// ever be needed by the aplication. Also: The mempool can have a size in the
+// gigabytes so any application logic cloning it should have terrible
+// performance.
+#[cfg_attr(test, derive(Clone))]
 pub struct Mempool {
     /// Maximum size this data structure may take up in memory. In bytes.
     max_total_size: usize,
@@ -473,68 +477,6 @@ impl Mempool {
         conflict_txs_in_mempool
     }
 
-    /// Returns `true` iff the new transaction is a merge of two transactions
-    /// with the existing mempool transaction as one of its inputs.
-    fn preserve_merge_input(new_tx: &Transaction, existing_tx: &TransactionKernel) -> bool {
-        // early return for faster common case handling where new tx is not
-        // a merge of existing tx.
-        if !new_tx.proof.is_single_proof() {
-            return false;
-        }
-
-        // Merge outputs are guaranteed to have merge bit set
-        if !new_tx.kernel.merge_bit {
-            return false;
-        }
-
-        // merge output cannot have fewer inputs/outputs/announcements than
-        // the two transaction it was merged from.
-        if new_tx.kernel.inputs.len() < existing_tx.inputs.len() {
-            return false;
-        }
-
-        if new_tx.kernel.outputs.len() < existing_tx.outputs.len() {
-            return false;
-        }
-
-        if new_tx.kernel.announcements.len() < existing_tx.announcements.len() {
-            return false;
-        }
-
-        // Merge result cannot have timestamp prior to its input transactions.
-        if new_tx.kernel.timestamp < existing_tx.timestamp {
-            return false;
-        }
-
-        // If the inputs to the existing tx is a true subset of the new tx, then
-        // the new tx is assumed to be the output of a merge with the existing
-        // tx as one of its inputs.
-        let new_txs_inputs: HashSet<_> = new_tx
-            .kernel
-            .inputs
-            .iter()
-            .map(|x| x.absolute_indices)
-            .collect();
-        for old_tx_input in &existing_tx.inputs {
-            if !new_txs_inputs.contains(&old_tx_input.absolute_indices) {
-                return false;
-            }
-        }
-
-        // If a transaction has been merged with a nop transaction, it'll have
-        // exactly the same input, output, and announcement set. We don't care
-        // about preserving inputs to such mergers, so we require that at least
-        // one of those sets have increased in size.
-        if new_tx.kernel.inputs.len() == existing_tx.inputs.len()
-            && new_tx.kernel.outputs.len() == existing_tx.outputs.len()
-            && new_tx.kernel.announcements.len() == existing_tx.announcements.len()
-        {
-            return false;
-        }
-
-        true
-    }
-
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
     /// the transaction.
     ///
@@ -659,7 +601,12 @@ impl Mempool {
                     // Conditionally store existing transaction in conflict
                     // cache.
                     if let Some(old_proof) = single_proof {
-                        if Self::preserve_merge_input(&new_tx.transaction, removed) {
+                        if new_tx.transaction.proof.is_single_proof()
+                            && TransactionKernel::have_merge_relationship(
+                                &new_tx.transaction.kernel,
+                                removed,
+                            )
+                        {
                             let upgrade_priority = self
                                 .upgrade_priorities
                                 .get(&conflicting_txid)
