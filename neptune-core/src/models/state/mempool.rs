@@ -1470,6 +1470,98 @@ mod tests {
         (((left, right), merged), mutator_set)
     }
 
+    /// Return a tree of transactions, where the parents are defined as the
+    /// merger of the children. All three layers are returned.
+    ///
+    ///       final_tx
+    ///      /      \
+    ///   left      right
+    ///   /  \      /  \
+    /// tx0  tx1  tx0  tx1
+    async fn nested_mergers(
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> (
+        [Transaction; 4],
+        [Transaction; 2],
+        Transaction,
+        MutatorSetAccumulator,
+    ) {
+        let mut test_runner = TestRunner::deterministic();
+        let txs: [PrimitiveWitness; 4] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                (2, 2, 2),
+                (3, 3, 3),
+                (4, 4, 4),
+                (5, 5, 5),
+            ])
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        let mutator_set = txs[0].mutator_set_accumulator.clone();
+        let mut single_proofs = vec![];
+        for tx in &txs {
+            single_proofs.push(
+                produce_single_proof(
+                    tx,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmJobPriority::default().into(),
+                    consensus_rule_set,
+                )
+                .await
+                .unwrap(),
+            )
+        }
+
+        let txs: [Transaction; 4] = txs
+            .into_iter()
+            .zip_eq(single_proofs)
+            .map(|(pw, sp)| Transaction {
+                kernel: pw.kernel,
+                proof: TransactionProof::SingleProof(sp),
+            })
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        let shuffle_seed = arb::<[u8; 32]>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let left = Transaction::merge_with(
+            txs[0].clone(),
+            txs[1].clone(),
+            shuffle_seed,
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+        let right = Transaction::merge_with(
+            txs[2].clone(),
+            txs[3].clone(),
+            shuffle_seed,
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+        let final_tx = Transaction::merge_with(
+            left.clone(),
+            right.clone(),
+            shuffle_seed,
+            TritonVmJobQueue::get_instance(),
+            TritonVmJobPriority::default().into(),
+            consensus_rule_set,
+        )
+        .await
+        .unwrap();
+
+        (txs, [left, right], final_tx, mutator_set)
+    }
+
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn get_densest_transactions_no_tx_cap() {
@@ -1998,6 +2090,51 @@ mod tests {
             "Merge input cache must contain two entries after the merger of the\
              two transactions in mempool was inserted."
         );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn mempool_insertion_is_stable_on_mergers() {
+        // Ensure that the mempool state does not change once all
+        // transactions in a merge tree has been seen by the mempool.
+        let consensus_rule_set = ConsensusRuleSet::Reboot;
+        let network = Network::Main;
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::SingleProof,
+            &Block::genesis(network),
+        );
+        let (bottom, middle, final_tx, _) = nested_mergers(consensus_rule_set).await;
+
+        for tx in bottom.clone() {
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+        }
+        for tx in middle.clone() {
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+        }
+
+        let final_txid = final_tx.txid();
+        mempool.insert(final_tx.clone(), UpgradePriority::Irrelevant);
+        assert!(mempool.contains(final_txid));
+        assert_eq!(1, mempool.len());
+
+        // Insert all transactions again and verify that nothing happens
+        for tx in bottom.clone() {
+            let events = mempool.insert(tx, UpgradePriority::Irrelevant);
+            assert_eq!(0, events.len());
+            assert!(mempool.contains(final_txid));
+            assert_eq!(1, mempool.len());
+        }
+        for tx in middle.clone() {
+            let events = mempool.insert(tx, UpgradePriority::Irrelevant);
+            assert_eq!(0, events.len());
+            assert!(mempool.contains(final_txid));
+            assert_eq!(1, mempool.len());
+        }
+        let events = mempool.insert(final_tx, UpgradePriority::Irrelevant);
+        assert_eq!(0, events.len());
+        assert!(mempool.contains(final_txid));
+        assert_eq!(1, mempool.len());
     }
 
     #[traced_test]
@@ -2582,98 +2719,6 @@ mod tests {
             assert_eq!(0, MempoolEvent::num_adds(&events3));
             assert_eq!(1, MempoolEvent::num_removes(&events3));
             assert!(mempool3.is_empty());
-        }
-
-        /// Return a tree of transactions, where the parents are defined as the
-        /// merger of the children. All three layers are returned.
-        ///
-        ///       final_tx
-        ///      /      \
-        ///   left      right
-        ///   /  \      /  \
-        /// tx0  tx1  tx0  tx1
-        async fn nested_mergers(
-            consensus_rule_set: ConsensusRuleSet,
-        ) -> (
-            [Transaction; 4],
-            [Transaction; 2],
-            Transaction,
-            MutatorSetAccumulator,
-        ) {
-            let mut test_runner = TestRunner::deterministic();
-            let txs: [PrimitiveWitness; 4] =
-                PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
-                    (2, 2, 2),
-                    (3, 3, 3),
-                    (4, 4, 4),
-                    (5, 5, 5),
-                ])
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-
-            let mutator_set = txs[0].mutator_set_accumulator.clone();
-            let mut single_proofs = vec![];
-            for tx in &txs {
-                single_proofs.push(
-                    produce_single_proof(
-                        tx,
-                        TritonVmJobQueue::get_instance(),
-                        TritonVmJobPriority::default().into(),
-                        consensus_rule_set,
-                    )
-                    .await
-                    .unwrap(),
-                )
-            }
-
-            let txs: [Transaction; 4] = txs
-                .into_iter()
-                .zip_eq(single_proofs)
-                .map(|(pw, sp)| Transaction {
-                    kernel: pw.kernel,
-                    proof: TransactionProof::SingleProof(sp),
-                })
-                .collect_vec()
-                .try_into()
-                .unwrap();
-
-            let shuffle_seed = arb::<[u8; 32]>()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            let left = Transaction::merge_with(
-                txs[0].clone(),
-                txs[1].clone(),
-                shuffle_seed,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
-            let right = Transaction::merge_with(
-                txs[2].clone(),
-                txs[3].clone(),
-                shuffle_seed,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
-            let final_tx = Transaction::merge_with(
-                left.clone(),
-                right.clone(),
-                shuffle_seed,
-                TritonVmJobQueue::get_instance(),
-                TritonVmJobPriority::default().into(),
-                consensus_rule_set,
-            )
-            .await
-            .unwrap();
-
-            (txs, [left, right], final_tx, mutator_set)
         }
     }
 
