@@ -1497,6 +1497,9 @@ pub trait RPC {
     /// mempool.
     async fn broadcast_all_mempool_txs(token: rpc_auth::Token) -> RpcResult<()>;
 
+    /// Broadcast running node's current favorable block proposal.
+    async fn broadcast_block_proposal(token: rpc_auth::Token) -> RpcResult<()>;
+
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
@@ -3688,6 +3691,22 @@ impl RPC for NeptuneRPCServer {
         let _ = self
             .rpc_server_to_main_tx
             .send(RPCServerToMain::BroadcastMempoolTransactions)
+            .await;
+
+        Ok(())
+    }
+
+    async fn broadcast_block_proposal(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::BroadcastBlockProposal)
             .await;
 
         Ok(())

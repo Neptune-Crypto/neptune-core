@@ -214,6 +214,7 @@ pub enum RPCServerToMain {
     BroadcastTx(Arc<Transaction>),
     PerformTxProofUpgrade(Box<UpgradeJob>),
     BroadcastMempoolTransactions,
+    BroadcastBlockProposal,
     ClearMempool,
     ProofOfWorkSolution(Box<Block>),
     Shutdown,

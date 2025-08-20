@@ -1925,6 +1925,23 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
+            RPCServerToMain::BroadcastBlockProposal => {
+                let pmsg = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .mining_state
+                    .block_proposal
+                    .map(|proposal| MainToPeerTask::BlockProposalNotification(proposal.into()));
+                if let Some(pmsg) = pmsg {
+                    info!("Broadcasting block proposal notification to all peers.");
+                    self.main_to_peer_broadcast(pmsg);
+                } else {
+                    info!("Was asked to broadcast block proposal but none is known.");
+                }
+
+                Ok(false)
+            }
             RPCServerToMain::ClearMempool => {
                 info!("Clearing mempool");
                 self.global_state_lock

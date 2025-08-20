@@ -279,6 +279,9 @@ enum Command {
     /// Broadcast transaction notifications for all transactions in mempool.
     BroadcastMempoolTransactions,
 
+    /// Broadcast a block proposal notification
+    BroadcastBlockProposal,
+
     /******** CHANGE STATE ********/
     /// shutdown neptune-core
     Shutdown,
@@ -1059,6 +1062,11 @@ async fn main() -> Result<()> {
         Command::BroadcastMempoolTransactions => {
             println!("Broadcasting transaction-notifications for all transactions in mempool.");
             client.broadcast_all_mempool_txs(ctx, token).await??;
+        }
+
+        Command::BroadcastBlockProposal => {
+            println!("Broadcasting block proposal notifications if any is known.");
+            client.broadcast_block_proposal(ctx, token).await??;
         }
 
         /******** CHANGE STATE ********/
