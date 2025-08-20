@@ -1895,26 +1895,34 @@ impl MainLoopHandler {
 
             RPCServerToMain::BroadcastMempoolTransactions => {
                 info!("Broadcasting transaction notifications for all shareable transactions in mempool");
-                let state = self.global_state_lock.lock_guard().await;
-                let txs = state.mempool.fee_density_iter().collect_vec();
-                for (txid, _) in txs {
-                    // Since a read-lock is held over global state, the
-                    // transaction must exist in the mempool.
-                    let tx = state
-                        .mempool
-                        .get(txid)
-                        .expect("Transaction from iter must exist in mempool");
-                    let notification = TransactionNotification::try_from(tx);
-                    match notification {
-                        Ok(notification) => {
-                            let pmsg = MainToPeerTask::TransactionNotification(notification);
-                            self.main_to_peer_broadcast(pmsg);
-                        }
-                        Err(error) => {
-                            warn!("{error}");
-                        }
-                    };
+
+                let mut notifications = vec![];
+                {
+                    let state = self.global_state_lock.lock_guard().await;
+                    for (txid, _) in state.mempool.fee_density_iter() {
+                        // Since a read-lock is held over global state, the
+                        // transaction must exist in the mempool.
+                        let tx = state
+                            .mempool
+                            .get(txid)
+                            .expect("Transaction from iter must exist in mempool");
+                        let notification = TransactionNotification::try_from(tx);
+                        match notification {
+                            Ok(notification) => {
+                                let pmsg = MainToPeerTask::TransactionNotification(notification);
+                                notifications.push(pmsg);
+                            }
+                            Err(error) => {
+                                warn!("{error}");
+                            }
+                        };
+                    }
                 }
+
+                for notification in notifications {
+                    self.main_to_peer_broadcast(notification);
+                }
+
                 Ok(false)
             }
             RPCServerToMain::ClearMempool => {
