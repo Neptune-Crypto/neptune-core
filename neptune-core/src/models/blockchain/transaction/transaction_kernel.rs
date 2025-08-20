@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
@@ -154,6 +155,75 @@ impl TransactionKernel {
         }
 
         Ok(())
+    }
+
+    /// Returns `true` iff the "output" transaction kernel is a merged
+    /// transaction that has the "input" transaction as one of its inputs. In
+    /// other  words, if there exists an X that is not a nop transaction such
+    /// that (input, X) -> output is a valid merge of two transactions this
+    /// function returns true.
+    ///
+    /// The caller must verify that the associated transaction proofs are of
+    /// type single proof, as only single proof-backed transactions can be
+    /// merged.
+    pub(crate) fn have_merge_relationship(output: &Self, input: &Self) -> bool {
+        // Merge outputs are guaranteed to have merge bit set
+        if !output.merge_bit {
+            return false;
+        }
+
+        // merge output cannot have fewer inputs/outputs/announcements than
+        // the two transaction it was merged from.
+        if output.inputs.len() < input.inputs.len() {
+            return false;
+        }
+
+        if output.outputs.len() < input.outputs.len() {
+            return false;
+        }
+
+        if output.announcements.len() < input.announcements.len() {
+            return false;
+        }
+
+        // Merge result cannot have timestamp prior to its input transactions.
+        if output.timestamp < input.timestamp {
+            return false;
+        }
+
+        // At least one of the fields, inputs/outputs/announcements must have
+        // grown in a proper (i.e. non-nop) merge.
+        if output.inputs.len() == input.inputs.len()
+            && output.outputs.len() == input.outputs.len()
+            && output.announcements.len() == input.announcements.len()
+        {
+            return false;
+        }
+
+        // Inputs/outputs/announcements for existing transaction must all be
+        // subsets of new transaction in case of merge.
+        let new_txs_outputs: HashSet<_> = output.outputs.clone().into_iter().collect();
+        for old_tx_output in &input.outputs {
+            if !new_txs_outputs.contains(old_tx_output) {
+                return false;
+            }
+        }
+
+        let new_txs_inputs: HashSet<_> = output.inputs.iter().map(|x| x.absolute_indices).collect();
+        for old_tx_input in &input.inputs {
+            if !new_txs_inputs.contains(&old_tx_input.absolute_indices) {
+                return false;
+            }
+        }
+
+        let new_txs_announcements: HashSet<_> = output.announcements.clone().into_iter().collect();
+        for old_tx_announcement in &input.announcements {
+            if !new_txs_announcements.contains(old_tx_announcement) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
