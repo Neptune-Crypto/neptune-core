@@ -1296,7 +1296,7 @@ impl PeerLoopHandler {
                     .lock_guard()
                     .await
                     .mempool
-                    .new_transaction_has_higher_proof_quality(
+                    .accept_transaction(
                         transaction.kernel.txid(),
                         transaction.proof.proof_quality()?,
                         transaction.kernel.mutator_set_hash,
@@ -1421,7 +1421,7 @@ impl PeerLoopHandler {
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
                     let state = self.global_state_lock.lock_guard().await;
-                    let accept_tx = state.mempool.new_transaction_has_higher_proof_quality(
+                    let accept_tx = state.mempool.accept_transaction(
                         tx_notification.txid,
                         tx_notification.proof_quality,
                         tx_notification.mutator_set_hash,

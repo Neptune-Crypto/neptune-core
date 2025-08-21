@@ -1,11 +1,11 @@
+use crate::api::export::TransactionKernelId;
 use crate::models::state::NeptuneProof;
 use crate::models::state::TransactionKernel;
 use crate::models::state::UpgradePriority;
 use get_size2::GetSize;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::ops::Deref;
-use std::ops::DerefMut;
 
 /// A transaction that was input to a merge of two transactions. In other words:
 /// either a or b in the operation merge(a, b) -> c, where a, b, and c are all
@@ -39,35 +39,56 @@ pub(super) struct MergeInputCacheElement {
 // performance.
 #[cfg_attr(test, derive(Clone))]
 pub(super) struct MergeInputCache {
-    elements: VecDeque<MergeInputCacheElement>,
-}
+    tx_dictionary: HashMap<TransactionKernelId, MergeInputCacheElement>,
 
-impl Deref for MergeInputCache {
-    type Target = VecDeque<MergeInputCacheElement>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.elements
-    }
-}
-
-impl DerefMut for MergeInputCache {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.elements
-    }
+    insertion_order: VecDeque<TransactionKernelId>,
 }
 
 impl MergeInputCache {
+    pub(super) fn contains(&self, txid: &TransactionKernelId) -> bool {
+        self.tx_dictionary.contains_key(txid)
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.tx_dictionary.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.tx_dictionary.len()
+    }
+
+    pub(super) fn pop_oldest(&mut self) -> Option<MergeInputCacheElement> {
+        let oldest = self.insertion_order.pop_front();
+        oldest.map(|txid| {
+            self.tx_dictionary
+                .remove(&txid)
+                .expect("fields must be in sync")
+        })
+    }
+
     pub(super) fn insert(
         &mut self,
         tx_kernel: TransactionKernel,
         single_proof: NeptuneProof,
         upgrade_priority: UpgradePriority,
     ) {
-        self.elements.push_back(MergeInputCacheElement {
+        let txid = tx_kernel.txid();
+        let cache_element = MergeInputCacheElement {
             tx_kernel,
             single_proof,
             upgrade_priority,
-        });
+        };
+        let existing = self.tx_dictionary.insert(txid, cache_element);
+
+        if existing.is_none() {
+            self.insertion_order.push_back(txid);
+        }
+        assert_eq!(
+            self.tx_dictionary.len(),
+            self.insertion_order.len(),
+            "fields must agree on lengths"
+        );
     }
 
     /// Update the merge cache with a new block. Returns the transactions that
@@ -80,7 +101,11 @@ impl MergeInputCache {
         block_bf_set_union: &HashSet<u128>,
     ) -> Vec<MergeInputCacheElement> {
         let mut ret = vec![];
-        while let Some(elem) = self.elements.pop_front() {
+        while let Some(txid) = self.insertion_order.pop_front() {
+            let elem = self
+                .tx_dictionary
+                .remove(&txid)
+                .expect("Reported element must exist");
             let transaction_index_sets: HashSet<_> = elem
                 .tx_kernel
                 .inputs
