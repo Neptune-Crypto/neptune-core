@@ -474,6 +474,9 @@ pub(crate) fn max_cumulative_pow_after(
     })
 }
 
+#[cfg(test)] // TODO add arbitrary-impl feature too
+proptest::prop_compose! {pub fn difficulty_testlimited() (inner in 0..crate::tests::shared::blocks::DIFFICULTY_LIMIT) -> Difficulty {Difficulty::from(inner)}}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -488,8 +491,6 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use rand::distr::Distribution;
-    use rand::{distr::Bernoulli, Rng};
-    use rand_distr::Geometric;
     use test_strategy::proptest;
 
     use super::*;
@@ -535,7 +536,7 @@ mod tests {
         target_block_time: f64,
     ) -> f64 {
         const CUTOFF_FACTOR: f64 = 128f64;
-        let mut rng = aead::rand_core::OsRng;
+        let mut rng = rand::rng();
         let mut block_time_so_far = proving_time;
         let window_duration = target_block_time * CUTOFF_FACTOR;
         let num_hashes_calculated_per_window = hash_rate * window_duration;
@@ -552,7 +553,7 @@ mod tests {
             let log_prob_collective_failure = log_prob_failure * num_hashes_calculated_per_window;
             let prob_collective_success = -log_prob_collective_failure.exp_m1(); // 1-e^x
 
-            let success = Bernoulli::new(prob_collective_success)
+            let success = rand::distr::Bernoulli::new(prob_collective_success)
                 .unwrap()
                 .sample(&mut rng);
 
@@ -565,7 +566,7 @@ mod tests {
 
             // else, determine time spent hashing
             // reject samples that exceed window bounds
-            let distribution = Geometric::new(p).unwrap();
+            let distribution = rand_distr::Geometric::new(p).unwrap();
             let mut num_hashes = 1u64 + distribution.sample(&mut rng);
             let mut time_spent_guessing = (num_hashes as f64) / hash_rate;
             while time_spent_guessing > window_duration {

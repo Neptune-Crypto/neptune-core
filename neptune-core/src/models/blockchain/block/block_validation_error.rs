@@ -137,8 +137,8 @@ mod tests {
     #[test]
     fn errs() {
         let singlecase_config = Config {
-            rng_seed: proptest::test_runner::RngSeed::Fixed(0), // @skaunov am not sure it's beneficial to be deterministic here, but it does no damage
-            cases: 1, // note that standard "256" gets a particular difficult block to mine
+            rng_seed: proptest::test_runner::RngSeed::Fixed(0),
+            cases: 1,
             ..Config::default()
         };
 
