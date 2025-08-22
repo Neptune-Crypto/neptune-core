@@ -76,7 +76,7 @@ mod migration {
 
         use crate::models::blockchain::transaction::utxo::Utxo;
         use crate::models::state::wallet::sent_transaction::AoclLeafIndex;
-        use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
+        use crate::models::state::wallet::utxo_notification::UtxoNotificationMethod;
         use crate::models::state::NativeCurrencyAmount;
         use crate::models::state::Timestamp;
 
@@ -86,7 +86,7 @@ mod migration {
             pub utxo: Utxo,
             pub sender_randomness: Digest,
             pub receiver_digest: Digest,
-            pub(crate) notification_method: UtxoNotifyMethod,
+            pub(crate) notification_method: UtxoNotificationMethod,
             pub owned: bool,
         }
 
@@ -153,9 +153,8 @@ mod tests {
     use crate::database::storage::storage_schema::RustyKey;
     use crate::database::storage::storage_schema::RustyValue;
     use crate::database::NeptuneLevelDb;
-    use crate::models::blockchain::transaction::utxo::pseudorandom_utxo;
     use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
-    use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMethod;
     use crate::models::state::Timestamp;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
@@ -174,10 +173,10 @@ mod tests {
 
         // create a random schema v0 TxOutput
         let tx_output1 = migration::schema_v0::TxOutput {
-            utxo: pseudorandom_utxo(rand::random()),
+            utxo: rand::random(),
             sender_randomness: Digest::default(),
             receiver_digest: Digest::default(),
-            notification_method: UtxoNotifyMethod::None,
+            notification_method: UtxoNotificationMethod::None,
             owned: false,
         };
         // create a 2nd v0 output, with owned set to true.

@@ -7,6 +7,7 @@ use crate::models::state::wallet::address::ReceivingAddress;
 
 /// Enumerates the medium of exchange for UTXO-notifications.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, clap::ValueEnum)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub enum UtxoNotificationMedium {
     /// The UTXO notification should be sent on-chain
     #[default]
@@ -20,7 +21,7 @@ pub enum UtxoNotificationMedium {
 /// to encrypt this information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
-pub(crate) enum UtxoNotifyMethod {
+pub(crate) enum UtxoNotificationMethod {
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain(ReceivingAddress),
 
@@ -31,7 +32,7 @@ pub(crate) enum UtxoNotifyMethod {
     None,
 }
 
-impl UtxoNotifyMethod {
+impl UtxoNotificationMethod {
     pub(crate) fn new(medium: UtxoNotificationMedium, address: ReceivingAddress) -> Self {
         match medium {
             UtxoNotificationMedium::OnChain => Self::OnChain(address),
@@ -41,7 +42,8 @@ impl UtxoNotifyMethod {
 }
 
 /// The payload of a UTXO notification, containing all information necessary
-/// to claim it, provided access to the associated spending key.
+/// to claim it, provided that the decryptor already has access to the
+/// associated spending key.
 ///
 /// future work:
 /// we should consider adding functionality that would facilitate passing

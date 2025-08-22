@@ -6,7 +6,7 @@ use std::ops::DerefMut;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::utxo_notification::UtxoNotifyMethod;
+use super::utxo_notification::UtxoNotificationMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -33,7 +33,7 @@ pub struct TxOutput {
     utxo: Utxo,
     sender_randomness: Digest,
     receiver_digest: Digest,
-    notification_method: UtxoNotifyMethod,
+    notification_method: UtxoNotificationMethod,
 
     /// Indicates if this client can unlock the UTXO
     owned: bool,
@@ -103,7 +103,7 @@ impl TxOutput {
         utxo: Utxo,
         sender_randomness: Digest,
         receiver_digest: Digest,
-        notification_method: UtxoNotifyMethod,
+        notification_method: UtxoNotificationMethod,
         owned: bool,
         is_change: bool,
     ) -> Self {
@@ -183,13 +183,13 @@ impl TxOutput {
         let receiver_digest = address.privacy_digest();
         let notification_method = if has_matching_spending_key {
             match owned_utxo_notify_medium {
-                UtxoNotificationMedium::OnChain => UtxoNotifyMethod::OnChain(address),
-                UtxoNotificationMedium::OffChain => UtxoNotifyMethod::OffChain(address),
+                UtxoNotificationMedium::OnChain => UtxoNotificationMethod::OnChain(address),
+                UtxoNotificationMedium::OffChain => UtxoNotificationMethod::OffChain(address),
             }
         } else {
             match unowned_utxo_notify_medium {
-                UtxoNotificationMedium::OnChain => UtxoNotifyMethod::OnChain(address),
-                UtxoNotificationMedium::OffChain => UtxoNotifyMethod::OffChain(address),
+                UtxoNotificationMedium::OnChain => UtxoNotificationMethod::OnChain(address),
+                UtxoNotificationMedium::OffChain => UtxoNotificationMethod::OffChain(address),
             }
         };
 
@@ -223,7 +223,7 @@ impl TxOutput {
             utxo,
             sender_randomness,
             receiver_digest: privacy_digest,
-            notification_method: UtxoNotifyMethod::None,
+            notification_method: UtxoNotificationMethod::None,
             owned,
             is_change: false,
         }
@@ -242,7 +242,7 @@ impl TxOutput {
             utxo,
             sender_randomness,
             receiver_digest: privacy_digest,
-            notification_method: UtxoNotifyMethod::None,
+            notification_method: UtxoNotificationMethod::None,
             owned: true,
             is_change: true,
         }
@@ -260,7 +260,7 @@ impl TxOutput {
             utxo,
             sender_randomness,
             receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            notification_method: UtxoNotificationMethod::OnChain(receiving_address),
             owned,
             is_change: false,
         }
@@ -278,7 +278,7 @@ impl TxOutput {
             utxo,
             sender_randomness,
             receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
+            notification_method: UtxoNotificationMethod::OffChain(receiving_address),
             owned,
             is_change: false,
         }
@@ -297,7 +297,7 @@ impl TxOutput {
             utxo,
             sender_randomness,
             receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            notification_method: UtxoNotificationMethod::OnChain(receiving_address),
             owned,
             is_change: false,
         }
@@ -315,7 +315,7 @@ impl TxOutput {
             utxo,
             sender_randomness,
             receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+            notification_method: UtxoNotificationMethod::OnChain(receiving_address),
             owned: true,
             is_change: true,
         }
@@ -348,7 +348,7 @@ impl TxOutput {
     ) -> Self {
         let receiver_digest = receiving_address.privacy_digest();
         let utxo = Utxo::new_native_currency(receiving_address.lock_script_hash(), amount);
-        let notify_method = UtxoNotifyMethod::new(notification_medium, receiving_address);
+        let notify_method = UtxoNotificationMethod::new(notification_medium, receiving_address);
         Self {
             utxo,
             sender_randomness,
@@ -371,7 +371,7 @@ impl TxOutput {
             utxo,
             sender_randomness,
             receiver_digest: receiving_address.privacy_digest(),
-            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
+            notification_method: UtxoNotificationMethod::OffChain(receiving_address),
             owned: true,
             is_change: true,
         }
@@ -386,7 +386,10 @@ impl TxOutput {
     }
 
     pub fn is_offchain(&self) -> bool {
-        matches!(self.notification_method, UtxoNotifyMethod::OffChain(_))
+        matches!(
+            self.notification_method,
+            UtxoNotificationMethod::OffChain(_)
+        )
     }
 
     pub(crate) fn utxo(&self) -> Utxo {
@@ -401,12 +404,12 @@ impl TxOutput {
         self.receiver_digest
     }
 
-    /// retrieve announcement, if any
+    /// Retrieve on-chain UTXO notification announcement, if any.
     pub fn announcement(&self) -> Option<Announcement> {
         match &self.notification_method {
-            UtxoNotifyMethod::None => None,
-            UtxoNotifyMethod::OffChain(_) => None,
-            UtxoNotifyMethod::OnChain(receiving_address) => {
+            UtxoNotificationMethod::None => None,
+            UtxoNotificationMethod::OffChain(_) => None,
+            UtxoNotificationMethod::OnChain(receiving_address) => {
                 let notification_payload = self.notification_payload();
                 Some(receiving_address.generate_announcement(notification_payload))
             }
@@ -418,8 +421,8 @@ impl TxOutput {
         network: Network,
     ) -> Option<(String, ReceivingAddress)> {
         match &self.notification_method {
-            UtxoNotifyMethod::OnChain(_) => None,
-            UtxoNotifyMethod::OffChain(receiving_address) => {
+            UtxoNotificationMethod::OnChain(_) => None,
+            UtxoNotificationMethod::OffChain(receiving_address) => {
                 let notification_payload = self.notification_payload();
 
                 Some((
@@ -427,7 +430,7 @@ impl TxOutput {
                     receiving_address.to_owned(),
                 ))
             }
-            UtxoNotifyMethod::None => None,
+            UtxoNotificationMethod::None => None,
         }
     }
 
@@ -546,7 +549,8 @@ impl TxOutputList {
         self.addition_records_iter().into_iter().collect()
     }
 
-    /// Returns all announcement for this TxOutputList
+    /// Return all on-chain UTXO notification announcement for this
+    /// [`TxOutputList`].
     pub(crate) fn announcements(&self) -> Vec<Announcement> {
         let mut announcements = vec![];
         for tx_output in &self.0 {
@@ -656,7 +660,11 @@ impl TxOutputList {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
     use rand::Rng;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::config_models::cli_args;
@@ -665,6 +673,8 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::KeyType;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMethod;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
@@ -740,7 +750,10 @@ mod tests {
             );
 
             assert!(
-                matches!(tx_output.notification_method, UtxoNotifyMethod::OnChain(_)),
+                matches!(
+                    tx_output.notification_method,
+                    UtxoNotificationMethod::OnChain(_)
+                ),
                 "Not owned UTXOs are, currently, always transmitted on-chain"
             );
             assert_eq!(tx_output.sender_randomness(), sender_randomness);
@@ -804,11 +817,11 @@ mod tests {
             match owned_utxo_notification_medium {
                 UtxoNotificationMedium::OnChain => assert!(matches!(
                     tx_output.notification_method,
-                    UtxoNotifyMethod::OnChain(_)
+                    UtxoNotificationMethod::OnChain(_)
                 )),
                 UtxoNotificationMedium::OffChain => assert!(matches!(
                     tx_output.notification_method,
-                    UtxoNotifyMethod::OffChain(_)
+                    UtxoNotificationMethod::OffChain(_)
                 )),
             };
 
@@ -855,4 +868,76 @@ mod tests {
             assert_eq!(v2, v2_again);
         }
     */
+
+    #[proptest]
+    fn with_timelock_ensures_max_time_lock_is_present(
+        #[strategy(0i128..(i128::MAX>>4))] amount: i128,
+        #[strategy(arb::<Digest>())] sender_randomness: Digest,
+        #[strategy(arb::<Digest>())] receiver_digest: Digest,
+        #[strategy(arb())] notification_medium: UtxoNotificationMedium,
+        #[strategy(arb())] address_seed: Digest,
+        #[strategy(arb())] no_method: bool,
+        #[strategy(arb())] owned: bool,
+        #[strategy(arb())] is_change: bool,
+        #[strategy(arb())] lock_script_hash: Digest,
+        #[strategy(1755871369000_u64..2755871369000)] unix_timestamp: u64,
+    ) {
+        let address = GenerationReceivingAddress::derive_from_seed(address_seed);
+        let notification_method = if no_method {
+            UtxoNotificationMethod::None
+        } else {
+            match notification_medium {
+                UtxoNotificationMedium::OnChain => UtxoNotificationMethod::OnChain(address.into()),
+                UtxoNotificationMedium::OffChain => {
+                    UtxoNotificationMethod::OffChain(address.into())
+                }
+            }
+        };
+
+        let amount = NativeCurrencyAmount::from_nau(amount);
+        let utxo = Utxo::new_native_currency(lock_script_hash, amount);
+
+        let tx_output = TxOutput {
+            utxo,
+            sender_randomness,
+            receiver_digest,
+            notification_method,
+            owned,
+            is_change,
+        };
+
+        // Fresh TxOutput has no time-lock
+        prop_assert!(tx_output.utxo().release_date().is_none());
+
+        // TxOutput with time-lock has given time-lock
+        let release_date = Timestamp::millis(unix_timestamp);
+        let tx_output_with_time_lock = tx_output.with_time_lock(release_date);
+        prop_assert_eq!(
+            Some(release_date),
+            tx_output_with_time_lock.utxo().release_date()
+        );
+
+        // Using with_time_lock with earlier release date has no effect
+        let earlier_release_date = release_date - Timestamp::days(1);
+        let tx_output_with_time_lock_to_earlier_release_date = tx_output_with_time_lock
+            .clone()
+            .with_time_lock(earlier_release_date);
+        prop_assert_eq!(
+            Some(release_date),
+            tx_output_with_time_lock_to_earlier_release_date
+                .utxo()
+                .release_date()
+        );
+
+        // Using with_time_lock with later release date sets the release date
+        let later_release_date = release_date + Timestamp::days(1);
+        let tx_output_with_time_lock_to_later_release_date =
+            tx_output_with_time_lock.with_time_lock(later_release_date);
+        prop_assert_eq!(
+            Some(later_release_date),
+            tx_output_with_time_lock_to_later_release_date
+                .utxo()
+                .release_date()
+        );
+    }
 }

@@ -618,6 +618,13 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockKernel>>;
 
+    /// Return a hash map of [`AdditionRecord`]s to AOCL leaf indices for the
+    /// outputs of a block, if it is known.
+    async fn addition_record_indices_for_block(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<HashMap<AdditionRecord, Option<u64>>>>;
+
     /// Return the announements contained in a specified block.
     ///
     /// Returns `None` if the selected block could not be found, otherwise
@@ -1736,6 +1743,20 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
+    /// Like `send` but the resulting transaction is *transparent*. No privacy.
+    ///
+    /// Specifically, the resulting transaction contains announcements that
+    /// themselves contain the raw UTXOs and commitment randomnesses. This
+    /// info suffices to derive the addition records and removal records,
+    /// thereby exposing not just the amounts but also the origins and
+    /// destinations of the transfer.
+    async fn send_transparent(
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TxCreationArtifacts>;
+
     /// Upgrade a proof for a transaction found in the mempool. If the
     /// transaction cannot be in the mempool, or the transaction is not in need
     /// of upgrading because it is already single proof-backed and synced, then
@@ -2465,6 +2486,30 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn addition_record_indices_for_block(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<HashMap<AdditionRecord, Option<u64>>>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+
+        let addition_records_dictionary = state
+            .chain
+            .archival_state()
+            .get_addition_record_indices_for_block(digest)
+            .await;
+
+        Ok(addition_records_dictionary)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn announcements_in_block(
         self,
         _context: tarpc::context::Context,
@@ -3004,7 +3049,12 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.api().tx_initiator().spendable_inputs().await)
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .spendable_inputs(Timestamp::now())
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
@@ -3022,7 +3072,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api()
             .tx_initiator()
-            .select_spendable_inputs(policy, spend_amount)
+            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
             .await
             .into())
     }
@@ -3154,6 +3204,26 @@ impl RPC for NeptuneRPCServer {
             .api_mut()
             .tx_sender_mut()
             .send(outputs, change_policy, fee, Timestamp::now())
+            .await?)
+    }
+
+    // documented in trait. do not add doc-commtn.
+    async fn send_transparent(
+        mut self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TxCreationArtifacts> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api_mut()
+            .tx_initiator_mut()
+            .send_transparent(outputs, change_policy, fee, Timestamp::now())
             .await?)
     }
 

@@ -34,7 +34,7 @@ use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationMethod;
 use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
@@ -603,7 +603,7 @@ impl UpgradeJob {
     fn gobbler_notification_method_with_receiver_preimage(
         own_wallet_entropy: &WalletEntropy,
         notification_policy: FeeNotificationPolicy,
-    ) -> (UtxoNotifyMethod, Digest) {
+    ) -> (UtxoNotificationMethod, Digest) {
         let gobble_beneficiary_key = match notification_policy {
             FeeNotificationPolicy::OffChain => {
                 SpendingKey::from(own_wallet_entropy.nth_symmetric_key(0))
@@ -620,13 +620,13 @@ impl UpgradeJob {
 
         let fee_notification_method = match notification_policy {
             FeeNotificationPolicy::OffChain => {
-                UtxoNotifyMethod::OffChain(gobble_beneficiary_address)
+                UtxoNotificationMethod::OffChain(gobble_beneficiary_address)
             }
             FeeNotificationPolicy::OnChainSymmetric => {
-                UtxoNotifyMethod::OnChain(gobble_beneficiary_address)
+                UtxoNotificationMethod::OnChain(gobble_beneficiary_address)
             }
             FeeNotificationPolicy::OnChainGeneration => {
-                UtxoNotifyMethod::OnChain(gobble_beneficiary_address)
+                UtxoNotificationMethod::OnChain(gobble_beneficiary_address)
             }
         };
 

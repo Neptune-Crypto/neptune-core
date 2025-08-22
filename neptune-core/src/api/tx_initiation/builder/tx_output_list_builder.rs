@@ -7,6 +7,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::api::export::Timestamp;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -35,14 +36,15 @@ pub enum OutputFormat {
         UtxoNotificationMedium,
     ),
 
+    /// specify a receiving address, amount, and a release date for time-locking
+    /// the output
+    AddressAndAmountAndReleaseDate(ReceivingAddress, NativeCurrencyAmount, Timestamp),
+
     /// specify utxo and receiving address
     AddressAndUtxo(ReceivingAddress, Utxo),
 
     /// specify utxo, receiving address, and a utxo-notification-medium
     AddressAndUtxoAndMedium(ReceivingAddress, Utxo, UtxoNotificationMedium),
-
-    /// specify a [TxOutput]
-    TxOutput(TxOutput),
 }
 
 impl OutputFormat {
@@ -51,14 +53,24 @@ impl OutputFormat {
         match self {
             Self::AddressAndAmount(_, amt) => *amt,
             Self::AddressAndAmountAndMedium(_, amt, _) => *amt,
+            Self::AddressAndAmountAndReleaseDate(_, amt, _) => *amt,
             Self::AddressAndUtxo(_, u) => u.get_native_currency_amount(),
             Self::AddressAndUtxoAndMedium(_, u, _) => u.get_native_currency_amount(),
-            Self::TxOutput(to) => to.native_currency_amount(),
         }
     }
 
     // ##multicoin## : maybe something like
     // pub fn amount(&self, coint: Coin) -> CoinAmount;
+
+    pub fn address(&self) -> &ReceivingAddress {
+        match self {
+            OutputFormat::AddressAndAmount(ra, _) => ra,
+            OutputFormat::AddressAndAmountAndMedium(ra, _, _) => ra,
+            OutputFormat::AddressAndAmountAndReleaseDate(ra, _, _) => ra,
+            OutputFormat::AddressAndUtxo(ra, _) => ra,
+            OutputFormat::AddressAndUtxoAndMedium(ra, _, _) => ra,
+        }
+    }
 }
 
 impl From<(ReceivingAddress, NativeCurrencyAmount)> for OutputFormat {
@@ -94,12 +106,6 @@ impl From<(ReceivingAddress, Utxo)> for OutputFormat {
 impl From<(ReceivingAddress, Utxo, UtxoNotificationMedium)> for OutputFormat {
     fn from(v: (ReceivingAddress, Utxo, UtxoNotificationMedium)) -> Self {
         Self::AddressAndUtxoAndMedium(v.0, v.1, v.2)
-    }
-}
-
-impl From<TxOutput> for OutputFormat {
-    fn from(v: TxOutput) -> Self {
-        Self::TxOutput(v)
     }
 }
 
@@ -205,12 +211,6 @@ impl TxOutputListBuilder {
         self
     }
 
-    /// add an output, as [TxOutput]
-    pub fn tx_output(mut self, tx_output: TxOutput) -> Self {
-        self.outputs.push(OutputFormat::TxOutput(tx_output));
-        self
-    }
-
     /// build the list of [TxOutput], with [StateLock]
     ///
     /// note: if you already acquired a read-lock or write-lock over
@@ -238,13 +238,11 @@ impl TxOutputListBuilder {
 
         // Convert outputs.  [address:amount] --> TxOutputList
         let outputs = self.outputs.into_iter().map(|output_type| {
+            let sender_randomness = wallet_entropy
+                .generate_sender_randomness(block_height, output_type.address().privacy_digest());
+
             match output_type {
-                OutputFormat::TxOutput(o) => o,
-
                 OutputFormat::AddressAndAmount(address, amt) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
-
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
                     TxOutput::auto(
@@ -257,9 +255,21 @@ impl TxOutputListBuilder {
                     )
                 }
 
+                OutputFormat::AddressAndAmountAndReleaseDate(address, amt, release_date) => {
+                    // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
+                    // based on whether the address belongs to our wallet or not
+                    TxOutput::auto(
+                        wallet_state,
+                        address,
+                        amt,
+                        sender_randomness,
+                        self.owned_utxo_notification_medium,
+                        self.unowned_utxo_notification_medium,
+                    )
+                    .with_time_lock(release_date)
+                }
+
                 OutputFormat::AddressAndAmountAndMedium(address, amt, medium) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
                     let utxo = Utxo::new_native_currency(address.lock_script_hash(), amt);
                     let owned = wallet_state.can_unlock(&utxo);
 
@@ -267,9 +277,6 @@ impl TxOutputListBuilder {
                 }
 
                 OutputFormat::AddressAndUtxo(address, utxo) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
-
                     // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
                     // based on whether the address belongs to our wallet or not
                     TxOutput::auto_utxo(
@@ -283,8 +290,6 @@ impl TxOutputListBuilder {
                 }
 
                 OutputFormat::AddressAndUtxoAndMedium(address, utxo, medium) => {
-                    let sender_randomness = wallet_entropy
-                        .generate_sender_randomness(block_height, address.privacy_digest());
                     let owned = wallet_state.can_unlock(&utxo);
 
                     match medium {
