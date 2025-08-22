@@ -11,8 +11,8 @@ use crate::models::blockchain::transaction::transparent_input::TransparentInput;
 use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 
 /// A struct containing the UTXOs and all information needed to reproduce the
-/// [`RemovalRecord`]s (or at least, the [`AbsoluteIndexSet`]s) and the
-/// [`AdditionRecord`]s for the transaction in which they are consumed and
+/// `RemovalRecord`s (or at least, the `AbsoluteIndexSet`s) and the
+/// `AdditionRecord`s for the transaction in which they are consumed and
 /// produced.
 #[derive(Debug, Clone, BFieldCodec)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -22,13 +22,13 @@ pub struct TransparentTransactionInfo {
 }
 
 impl TransparentTransactionInfo {
-    /// Construct a new [`TransparentTransactionDetails`] object from the given
+    /// Construct a new `TransparentTransactionDetails` object from the given
     /// inputs and outputs.
     pub fn new(inputs: Vec<TransparentInput>, outputs: Vec<UtxoTriple>) -> Self {
         Self { inputs, outputs }
     }
 
-    /// Convert the [`TransparentTransactionDetails`] object into an
+    /// Convert the `TransparentTransactionDetails` object into an
     /// [`Announcement`].
     pub fn to_announcement(&self) -> Announcement {
         Announcement {
@@ -37,18 +37,18 @@ impl TransparentTransactionInfo {
     }
 
     /// Try and interpret the [`Announcement`] as a
-    /// [`TransparentTransactionDetails`].
+    /// `TransparentTransactionDetails`.
     pub fn try_from_announcement(
         announcement: &Announcement,
     ) -> Result<Self, <Self as BFieldCodec>::Error> {
         Ok(*Self::decode(&announcement.message)?)
     }
 
-    /// Validate the [`TransparentTransactionDetails`] relative to a given
+    /// Validate the `TransparentTransactionDetails` relative to a given
     /// [`TransactionKernel`].
     ///
-    /// Specifically, verify that all the associated [`AdditionRecord`]s and
-    /// [`AbsoluteIndexSet`]s induced by the [`TransparentTransactionDetails`]
+    /// Specifically, verify that all the associated `AdditionRecord`s and
+    /// `AbsoluteIndexSet`s induced by the `TransparentTransactionDetails`
     /// are present in the [`TransactionKernel`].
     pub fn validate(&self, transaction_kernel: &TransactionKernel) -> bool {
         let addition_records_from_self = self

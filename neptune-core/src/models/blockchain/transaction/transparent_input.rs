@@ -14,19 +14,18 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 /// The key data from a transaction input that enables a transparent audit.
 ///
 /// Specifically, this struct contains enough data to re-derive the
-/// [`AbsoluteIndexSet`] without the target chunks. This information uniquely
+/// `AbsoluteIndexSet` without the target chunks. This information uniquely
 /// identifies the UTXO. Furthermore, it contains the UTXO in plaintext, which
 /// in particular lays bare the amounts if native currency coins are involved.
 ///
 /// See also:
-///  - [`UnlockedUtxo`](crate::models::state::wallet::unlocked_utxo::UnlockedUtxo)
-///    -- also contains lock script and witness and mutator set membership
-///    proof;
+///  - `UnlockedUtxo` -- also contains lock script and witness and mutator set
+///    membership proof;
 ///  - [`TxInput`] -- newtype wrapper around `UnlockedUtxo`;
-///  - [`ExpectedUtxo`](crate::models::state::wallet::expected_utxo::ExpectedUtxo)
-///    -- contains data for receiving and monitoring received UTXOs;
-///  - [`IncomingUtxo`](crate::models::state::wallet::incoming_utxo::IncomingUtxo)
-///    -- contains extra data and does not store the AOCL leaf index;
+///  - `ExpectedUtxo` -- contains data for receiving and monitoring received
+///    UTXOs;
+///  - `IncomingUtxo` -- contains extra data and does not store the AOCL leaf
+///    index;
 ///  - [`UtxoTriple`](crate::models::blockchain::transaction::utxo_triple::UtxoTriple)
 ///    -- output counterpart to this struct, does not contain info needed to
 ///    re-derive the absolute index set because that information is not known by

@@ -21,7 +21,7 @@ pub enum UtxoNotificationMedium {
 /// to encrypt this information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
-pub(crate) enum UtxoNotifyMethod {
+pub(crate) enum UtxoNotificationMethod {
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain(ReceivingAddress),
 
@@ -32,7 +32,7 @@ pub(crate) enum UtxoNotifyMethod {
     None,
 }
 
-impl UtxoNotifyMethod {
+impl UtxoNotificationMethod {
     pub(crate) fn new(medium: UtxoNotificationMedium, address: ReceivingAddress) -> Self {
         match medium {
             UtxoNotificationMedium::OnChain => Self::OnChain(address),
