@@ -7,6 +7,7 @@ use crate::models::state::wallet::address::ReceivingAddress;
 
 /// Enumerates the medium of exchange for UTXO-notifications.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, clap::ValueEnum)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub enum UtxoNotificationMedium {
     /// The UTXO notification should be sent on-chain
     #[default]

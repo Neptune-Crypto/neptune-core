@@ -657,7 +657,11 @@ impl TxOutputList {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest_arbitrary_interop::arb;
     use rand::Rng;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::config_models::cli_args;
@@ -666,6 +670,8 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::KeyType;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
@@ -856,4 +862,74 @@ mod tests {
             assert_eq!(v2, v2_again);
         }
     */
+
+    #[proptest]
+    fn with_timelock_ensures_max_time_lock_is_present(
+        #[strategy(0i128..(i128::MAX>>4))] amount: i128,
+        #[strategy(arb::<Digest>())] sender_randomness: Digest,
+        #[strategy(arb::<Digest>())] receiver_digest: Digest,
+        #[strategy(arb())] notification_medium: UtxoNotificationMedium,
+        #[strategy(arb())] address_seed: Digest,
+        #[strategy(arb())] no_method: bool,
+        #[strategy(arb())] owned: bool,
+        #[strategy(arb())] is_change: bool,
+        #[strategy(arb())] lock_script_hash: Digest,
+        #[strategy(1755871369000_u64..2755871369000)] unix_timestamp: u64,
+    ) {
+        let address = GenerationReceivingAddress::derive_from_seed(address_seed);
+        let notification_method = if no_method {
+            UtxoNotifyMethod::None
+        } else {
+            match notification_medium {
+                UtxoNotificationMedium::OnChain => UtxoNotifyMethod::OnChain(address.into()),
+                UtxoNotificationMedium::OffChain => UtxoNotifyMethod::OffChain(address.into()),
+            }
+        };
+
+        let amount = NativeCurrencyAmount::from_nau(amount);
+        let utxo = Utxo::new_native_currency(lock_script_hash, amount);
+
+        let tx_output = TxOutput {
+            utxo,
+            sender_randomness,
+            receiver_digest,
+            notification_method,
+            owned,
+            is_change,
+        };
+
+        // Fresh TxOutput has no time-lock
+        prop_assert!(tx_output.utxo().release_date().is_none());
+
+        // TxOutput with time-lock has given time-lock
+        let release_date = Timestamp::millis(unix_timestamp);
+        let tx_output_with_time_lock = tx_output.with_time_lock(release_date);
+        prop_assert_eq!(
+            Some(release_date),
+            tx_output_with_time_lock.utxo().release_date()
+        );
+
+        // Using with_time_lock with earlier release date has no effect
+        let earlier_release_date = release_date - Timestamp::days(1);
+        let tx_output_with_time_lock_to_earlier_release_date = tx_output_with_time_lock
+            .clone()
+            .with_time_lock(earlier_release_date);
+        prop_assert_eq!(
+            Some(release_date),
+            tx_output_with_time_lock_to_earlier_release_date
+                .utxo()
+                .release_date()
+        );
+
+        // Using with_time_lock with later release date sets the release date
+        let later_release_date = release_date + Timestamp::days(1);
+        let tx_output_with_time_lock_to_later_release_date =
+            tx_output_with_time_lock.with_time_lock(later_release_date);
+        prop_assert_eq!(
+            Some(later_release_date),
+            tx_output_with_time_lock_to_later_release_date
+                .utxo()
+                .release_date()
+        );
+    }
 }
