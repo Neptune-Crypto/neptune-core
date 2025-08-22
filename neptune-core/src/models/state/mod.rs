@@ -3311,36 +3311,32 @@ mod tests {
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let sender_randomness: Digest = rng.random();
-        let tx_outputs_for_alice = vec![
-            TxOutput::onchain_native_currency(
+        let tx_outputs = |amts: Vec<NativeCurrencyAmount>, receiver: ReceivingAddress| {
+            amts.into_iter()
+                .map(|amt| {
+                    TxOutput::onchain_native_currency(
+                        amt,
+                        sender_randomness,
+                        receiver.clone(),
+                        false,
+                    )
+                })
+                .collect_vec()
+        };
+        let tx_outputs_for_alice = tx_outputs(
+            vec![
                 NativeCurrencyAmount::coins(1),
-                sender_randomness,
-                alice_spending_key.to_address().into(),
-                false,
-            ),
-            TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(2),
-                sender_randomness,
-                alice_spending_key.to_address().into(),
-                false,
-            ),
-        ];
-
-        // Two outputs for Bob
-        let tx_outputs_for_bob = vec![
-            TxOutput::onchain_native_currency(
+            ],
+            alice_spending_key.to_address().into(),
+        );
+        let tx_outputs_for_bob = tx_outputs(
+            vec![
                 NativeCurrencyAmount::coins(3),
-                sender_randomness,
-                bob_spending_key.to_address().into(),
-                false,
-            ),
-            TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(4),
-                sender_randomness,
-                bob_spending_key.to_address().into(),
-                false,
-            ),
-        ];
+            ],
+            bob_spending_key.to_address().into(),
+        );
 
         let fee = NativeCurrencyAmount::one_nau();
         let genesis_key = premine_receiver
@@ -3367,17 +3363,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let tx_to_alice_and_bob: Transaction = artifacts_alice_and_bob.transaction.into();
         assert_eq!(
             tx_outputs_for_alice_and_bob.len() + 1,
             artifacts_alice_and_bob.details.tx_outputs.len(),
             "Expected change output to genesis receiver"
         );
-        let change_output = (*artifacts_alice_and_bob.details.tx_outputs)
-            .clone()
-            .pop()
-            .unwrap();
 
+        let tx_to_alice_and_bob: Transaction = artifacts_alice_and_bob.transaction.into();
         assert!(
             tx_to_alice_and_bob
                 .is_valid(network, consensus_rule_set)
@@ -3387,6 +3379,10 @@ mod tests {
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after().unwrap(),));
 
         // Expect change output
+        let change_output = (*artifacts_alice_and_bob.details.tx_outputs)
+            .clone()
+            .pop()
+            .unwrap();
         premine_receiver
             .global_state_lock
             .lock_guard_mut()
@@ -3508,9 +3504,9 @@ mod tests {
                 .await
                 .synced_unspent_available_amount(in_seven_months)
         );
-        // TODO: No idea why this isn't working.
+        // TODO: No idea why this isn't working. It's off by 1 NAU?
         // {
-        //     let expected = NativeCurrencyAmount::coins(110);
+        //     let expected = NativeCurrencyAmount::coins(74);
         //     let got = premine_receiver
         //         .lock_guard()
         //         .await
@@ -3519,30 +3515,19 @@ mod tests {
         //         .synced_unspent_available_amount(in_seven_months);
         //     assert_eq!(
         //         expected, got,
-        //         "premine receiver's balance should be 110: mining reward + premine - sent - fee + fee. Expected: {expected:?}\nGot: {got}"
+        //         "premine receiver's balance should be 74: mining reward / 2 + premine - sent - fee + fee. Expected: {expected:?}\nGot: {got}"
         //     );
         // }
 
         // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
-        let tx_outputs_from_alice = vec![
-            TxOutput::onchain_native_currency(
+        let tx_outputs_from_alice = tx_outputs(
+            vec![
                 NativeCurrencyAmount::coins(1),
-                rng.random(),
-                genesis_spending_key.to_address().into(),
-                false,
-            ),
-            TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(1),
-                rng.random(),
-                genesis_spending_key.to_address().into(),
-                false,
-            ),
-        ];
-        // About prover capability: we need `SingleProof` transactions for the
-        // miner to merge them later. The thing being tested here is that the
-        // state is being updated correctly with new blocks; not the
-        // use-`ProofCollection`-instead-of-`SingleProof` functionality.
-        // Weaker machines need to use the proof server.
+            ],
+            genesis_spending_key.to_address().into(),
+        );
+
         let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_spending_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
@@ -3570,26 +3555,15 @@ mod tests {
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after().unwrap(),));
 
         // make bob's transaction
-        let tx_outputs_from_bob = vec![
-            TxOutput::onchain_native_currency(
+        let tx_outputs_from_bob = tx_outputs(
+            vec![
                 NativeCurrencyAmount::coins(2),
-                rng.random(),
-                genesis_spending_key.to_address().into(),
-                false,
-            ),
-            TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(2),
-                rng.random(),
-                genesis_spending_key.to_address().into(),
-                false,
-            ),
-            TxOutput::onchain_native_currency(
                 NativeCurrencyAmount::coins(2),
-                rng.random(),
-                genesis_spending_key.to_address().into(),
-                false,
-            ),
-        ];
+            ],
+            genesis_spending_key.to_address().into(),
+        );
+
         let config_bob = TxCreationConfig::default()
             .recover_change_off_chain(bob_spending_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof);
