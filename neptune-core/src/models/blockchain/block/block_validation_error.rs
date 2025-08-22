@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     use proptest::prelude::{Just, Strategy};
     use proptest::prop_assert_eq;
-    use proptest::test_runner::Config;
+    use proptest::test_runner::RngSeed;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::{prelude::BFieldElement, proof::Claim};
     use tasm_lib::twenty_first::bfe;
@@ -135,12 +135,12 @@ mod tests {
         ) -> (crate::models::blockchain::block::Block, Timestamp, Randomness<2, 2>) {(b, Timestamp(bfe![ts]), rness)}
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_mutator_set_update_integrity_error_fails(
-        #[strategy(setup())] (mut b_prev, ts, rness): (Block, Timestamp, Digest),
-        #[strategy(arb::<AdditionRecord>())] record_addition_an: AdditionRecord,
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+        #[strategy(arb())] record_addition_an: AdditionRecord,
     ) {
-
+        let (mut b_prev, ts, rness) = s;
         let result = {
             let b_new = fake_valid_successor_for_tests(
                 &b_prev,
@@ -154,7 +154,7 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::MutatorSetUpdateIntegrity, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::MutatorSetUpdateIntegrity, result.err().unwrap());
     }
 
     #[proptest(async = "tokio", cases = 1)]
