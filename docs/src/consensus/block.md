@@ -24,7 +24,7 @@ Besides the kernel, blocks also contain proofs. The block proof is a STARK proof
 
 ## Validity
 
-**Note:** this section describes two distinct things. First is the validity rules for blocks on the presently deployed network. Second is the validity rules as they are intended to be on some future fork, for instance the one that introduces succinctness.
+**Note:** this section describes two distinct things. First is the validity rules for blocks currently in effect on the network. Second is the validity rules as they are intended to be after some consensus rule change, for instance the one that introduces [succinctness](succinctness.md).
 
 A block is *valid* if (any of):
  - ***a)*** it is the genesis block
@@ -36,6 +36,8 @@ A block is *valid* if (any of):
 The genesis block is hardcoded in the source code, see `genesis_block` in `block/mod.rs`.
 
 ### B: Incremental Validity
+
+The term "incremental validity" reflects the relativity of the predicate: a block can only be incrementally valid *relative to* a predecessor block that is assumed to be valid.
 
 A block is incrementally valid, relative to a predecessor block, iff (all of):
 
@@ -51,12 +53,12 @@ A block is incrementally valid, relative to a predecessor block, iff (all of):
      - a) The block appendix contains the expected claims. At present, the list of expected claims contains only one item: the claim that the block's transaction is valid.
      - b) The block appendix does not contain too many claims. The limit is 500.
      - c) The block proof is of the right type, namely `SingleProof`. (This variant lives on `BlockProof` and is distinct from the like-named variant living on `TransactionProof`.) The alternatives are `Genesis` and `Invalid`.
-     - d) The proof passes Triton VM verification. The input for the claim is the block mast hash; the output is all appendices; and the program is the `BlockProgram`. The `BlockProgram` merely proves the integral verification of all claims in the appendix.
+     - d) The proof passes Triton VM verification. The input for the claim is the block mast hash; the output is the (concatenation of) hashes of claims in the appendix; and the program is the `BlockProgram`. The `BlockProgram` merely proves the integral verification of all claims in the appendix.
      - e) The block does not exceed the maximum size, which is set to 1'000'000 `BFieldElement`s, or 8 MB.
  2. The block's transaction is correct, specifically (all of):
      - a) The removal records can be *unpacked*. Phrased differently, failure to unpack the removal records results in a format error.
      - b) All removal records must be *removable* from the mutator set as it was after the predecessor block.
-     - c) All removal records must be unique.
+     - c) The absolute index sets of all removal records must be unique.
      - d) The transaction, along with the block's guesser fee addition records, gives rise to a valid mutator set update. This step can fail, for instance, if the transaction fee is negative.
      - e) This mutator set update can be applied to the mutator set as it was after the previous block.
      - f) The transaction timestamp does not exceed the block timestamp.
