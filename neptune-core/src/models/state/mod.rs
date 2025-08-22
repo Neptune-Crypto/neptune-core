@@ -2215,6 +2215,7 @@ mod tests {
     use wallet::wallet_entropy::WalletEntropy;
 
     use super::*;
+    use crate::api::export::ReceivingAddress;
     use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;

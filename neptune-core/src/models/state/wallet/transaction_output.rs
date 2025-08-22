@@ -40,57 +40,6 @@ pub struct TxOutput {
     is_change: bool,
 }
 
-// fix for issue #552.
-//
-// The TxOutput struct gets stored in the wallet database. (via
-// SpentTransaction)  As such, any field changes must be versioned somehow.
-//
-// Going from v1 to v2 (of the struct), we want the new is_changed field to
-// use the value of the owned field from v1.
-//
-// We create a TxOutputVersioned struct to represent the structs fields in
-// different logical versions and instruct serde how to convert between the
-// two.
-//
-// This provides DB migration/compat for DBs created with commits prior to
-// 69e2867106fe727665fd74e21a0b3e309d160d5d and/or version 0.2.2.
-//
-// See:
-//   https://github.com/Neptune-Crypto/neptune-core/issues/552
-/*
-mod fix_552 {
-    use super::*;
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub(super) struct TxOutputVersioned {
-        // these fields were in "v1".
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiver_digest: Digest,
-        notification_method: UtxoNotifyMethod,
-        owned: bool,
-
-        // this field is new in "v2".
-        // skip field if non-existing and default to None.
-        #[serde(skip, default)]
-        is_change: Option<bool>,
-    }
-
-    impl From<TxOutputVersioned> for TxOutput {
-        fn from(v1: TxOutputVersioned) -> Self {
-            Self {
-                utxo: v1.utxo,
-                sender_randomness: v1.sender_randomness,
-                receiver_digest: v1.receiver_digest,
-                notification_method: v1.notification_method,
-                owned: v1.owned,
-                is_change: v1.is_change.unwrap_or(v1.owned), // default is_changed to owned (v1)
-            }
-        }
-    }
-}
-*/
-
 impl TxOutput {
     fn addition_record(&self) -> AdditionRecord {
         UtxoTriple::from(self.clone()).addition_record()
@@ -836,38 +785,6 @@ mod tests {
             assert_eq!(tx_output.utxo(), utxo);
         }
     }
-    /*
-        #[apply(shared_tokio_runtime)]
-        async fn test_tx_output_upgrade_serialization() {
-            #[serde(Serialize)]
-            struct TxOutputV1 {
-                utxo: Utxo,
-                sender_randomness: Digest,
-                receiver_digest: Digest,
-                notification_method: UtxoNotifyMethod,
-                owned: bool,
-            }
-
-            let v1 = TxOutputV1 {
-                utxo: Utxo::random(),
-                sender_randomness: Digest::default(),
-                receiver_digest: Digest::default(),
-                notification_method: Default::default(),
-                owned: true,
-            };
-
-            let serialized_v1 = bincode_serialize(&v1).unwrap();
-
-            let v2 = bincode_deserialize(&serialized_v1).unwrap();
-
-            assert_eq!(v2.is_change, v1.owned);
-
-            let serialized_v2 = bincode_serialize(&v2).unwrap();
-            let v2_again = bincode_deserialize(&serialized_v2).unwrap();
-
-            assert_eq!(v2, v2_again);
-        }
-    */
 
     #[proptest]
     fn with_timelock_ensures_max_time_lock_is_present(
