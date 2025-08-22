@@ -106,6 +106,7 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::{prelude::BFieldElement, proof::Claim};
     use tasm_lib::twenty_first::bfe;
+    use test_strategy::proptest;
 
     use crate::api::export::{NativeCurrencyAmount, NeptuneProof, Network, Timestamp};
     use crate::models::blockchain::block::block_appendix::{BlockAppendix, MAX_NUM_CLAIMS};
@@ -134,607 +135,344 @@ mod tests {
         ) -> (crate::models::blockchain::block::Block, Timestamp, Randomness<2, 2>) {(b, Timestamp(bfe![ts]), rness)}
     }
 
-    #[test]
-    fn errs() {
-        let singlecase_config = Config {
-            rng_seed: proptest::test_runner::RngSeed::Fixed(0),
-            cases: 1,
-            ..Config::default()
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_mutator_set_update_integrity_error_fails(
+        #[strategy(setup())] (mut b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(arb::<AdditionRecord>())] record_addition_an: AdditionRecord,
+    ) {
+
+        let result = {
+            let b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
+
+            b_prev.kernel.body.mutator_set_accumulator.add(&record_addition_an);
+            b_prev.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_prev.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
+
+            b_new.validate(&b_prev, ts, Network::Main).await
         };
+        assert_eq!(BlockValidationError::MutatorSetUpdateIntegrity, result.err().unwrap());
+    }
 
-        // let mut err_checking = BlockValidationError::MutatorSetUpdateImpossible;
-        /* > @skaunov:
-        Is that ok two identical addition records in a tx kernel proxy doesn't trigger a validation error (at least up to the digests  comparison for integrity)? I mean I can imagine some deduplication under the hood hence asking. I thought it's the simplest way to hit BlockValidationError::MutatorSetUpdateImpossible (renamed a bit); but maybe there's a better path to it?
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_negative_coinbase_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+    ) {
 
-        > @sword-smith:
-        There might be an error wrt. mutator set update that cannot be reached.
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
 
-        > @sword-smith:
-        I'm not sure it's possible to hit the `BlockValidationError::MutatorSetUpdatePossible` error.
-        */
-
-        // err_checking = BlockValidationError::ProofValidity;
-        /* @skaunov, [12.07.2025 18:30]
-        >> ... So, you already did the negative test for this case back than: `block_with_invalid_proof_fails` it is, am I correct?
-
-        @sword-smith, [15.07.2025 20:02]
-        > Yeah. I added that negative test. */
-        // proptest::proptest!(
-        //     deterministic,
-        //     |((b_prev, ts, rness) in n_strategy(), proof in arb::<NeptuneProof>(),
-        //     tx_kernel in crate::tests::shared::strategies::txkernel::default(true))|
-        //     {
-        //         // fake_block_successor_with_merged_tx
-
-        //         // let t = crate::tests::tokio_runtime().block_on(async {
-        //         //     let mut b_new = crate::tests::shared::blocks::fake_valid_block_from_tx_for_tests(
-        //         //         Network::Main,
-        //         //         &b_prev,
-        //         //         Transaction{kernel: tx_kernel, proof: TransactionProof::SingleProof(proof.clone())},
-        //         //         rness.bytes_arr[0],
-        //         //     ).await;
-        //         //     dbg!(b_new.proof);
-        //         //     b_new.proof = super::super::BlockProof::SingleProof(dbg!(proof));
-        //         //     b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body()));
-        //         //     b_new.validate(&b_prev, ts, Network::Main).await
-        //         // });
-
-        //         let t = crate::tests::tokio_runtime().block_on(async {
-        //             let mut b_new = fake_valid_successor_for_tests(
-        //                 &b_prev,
-        //                 ts,
-        //                 rness,
-        //                 Network::Main,
-        //             ).await;
-        //             // dbg!(b_new.proof);
-        //             b_new.proof = super::super::BlockProof::SingleProof(Proof::invalid());
-        //             // b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body()));
-        //             b_new.validate(&b_prev, ts, Network::Main).await
-        //         });
-        //         prop_assert_eq![BlockValidationError::ProofValidity, t.err().unwrap()];
-        //     }
-        // );
-
-        let mut err_checking = BlockValidationError::MutatorSetUpdateIntegrity;
-        proptest::proptest!(singlecase_config, |((mut b_prev, ts, rness) in setup(), record_addition_an in arb::<AdditionRecord>())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
-
-                b_prev.kernel.body.mutator_set_accumulator.add(&record_addition_an);
-                b_prev.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_prev.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
-
-        // err_checking = BlockValidationError::RemovalRecordsValidity;
-        // proptest::proptest!(
-        //     deterministic,
-        //     |(
-        //         // (
-        //         //     absolute_indices, target_chunks,
-        //             (mut b_prev, ts, rness)
-        //         // )
-        //         in n_strategy(),
-        //         // .prop_filter("need at least one RR for `BlockValidationError::RemovalRecordsValidity`", |(b_prev, ..)| b_prev.mutator_set_accumulator_after().unwrap().get_batch_index() > 0)
-        //         // .prop_flat_map(|(b_prev, ts, rness)| {
-        //         //     // due to currently defaulting the mutator set this is just `0` currently btw, but this approach should be working for the other stuff too
-        //         //     let i = b_prev.mutator_set_accumulator_after().unwrap().get_batch_index();
-        //         //     (
-        //         //         crate::util_types::mutator_set::removal_record::tests::propcompose_absindset_with_limit(i),
-        //         //         crate::util_types::mutator_set::chunk_dictionary::tests::propcompose_chunkdict_with_leafs_limit(i),
-        //         //         Just((b_prev, ts, rness)),
-        //         //     )
-        //         // }),
-        //         // msa_an in arb::<MutatorSetAccumulator>()
-        //         rr in arb::<crate::util_types::mutator_set::removal_record::RemovalRecord>()
-        //     )|
-        //     {
-        //         // let mut b_new =
-        //         // crate::tests::shared::blocks::invalid_block_with_transaction(
-        //         // crate::tests::tokio_runtime().block_on(
-
-        //             // dbg!("`fake_valid_successor_for_tests`");
-        //             // fake_valid_successor_for_tests(
-        //             //     &b_prev,
-        //             //     ts,
-        //             //     rness,
-        //             //     Network::Main,
-        //             // )
-
-        //             // crate::tests::shared::blocks::fake_valid_block_proposal_from_tx(
-        //                 // Network::Main,
-        //                 // &b_prev,
-        //                 // crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash_and_timestamp(
-        //                 //     vec![crate::util_types::mutator_set::removal_record::RemovalRecord{
-        //                 //         absolute_indices,
-        //                 //         target_chunks
-        //                 //     }], vec![],
-        //                 //     b_prev.mutator_set_accumulator_after().unwrap().hash(),
-        //                 //     ts,
-        //                 // )
-        //             // )
-        //         // );
-
-        //         // prop_assume!({
-        //         //     let prev_msa = &b_prev.mutator_set_accumulator_after().unwrap();
-        //         //     // prev_msa. &&
-
-        //         //     dbg!(b_new.kernel.body.transaction_kernel.inputs.len());
-        //         //     b_new.kernel.body.transaction_kernel.inputs.iter().any(
-        //         //         |removal_record| !prev_msa.can_remove(removal_record)
-        //         //     )
-        //         // });
-
-        //         let t = crate::tests::tokio_runtime().block_on(async {
-        //             b_prev.kernel.body.mutator_set_accumulator.remove(rr);
-
-        //             let mut b_new = fake_valid_successor_for_tests(
-        //                 &b_prev,
-        //                 ts,
-        //                 rness,
-        //                 Network::Main,
-        //             ).await;
-
-        //             // dbg!("&msa_an");
-        //             // b_new.kernel.body.mutator_set_accumulator = msa_an;
-        //             // dbg!("claim(s) update");
-        //             // b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body()));
-
-        //             dbg!("`.validate`");
-        //             b_new.validate(&b_prev, ts, Network::Main).await
-        //         });
-        //         prop_assert_eq![err, t.err().unwrap()];
-        //     }
-        // );
-        /* feels like primitive witness guards again `RemovalRecordsValidity` so even producing a block body such that a new block validation would go this far is not possible with the tools we have for normal/good block production */
-
-        // err_checking = BlockValidationError::TooManyAnnouncements;
-        // Not reachable without moving a #submethod from `.validate`. See #625 for the details.
-        // proptest::proptest!(
-        //     singlecase_config,
-        //     |((b_prev, ts, rness) in n_strategy())|
-        //     {
-        //         let t = crate::tests::tokio_runtime().block_on(async {
-        //             let mut b_new = fake_valid_successor_for_tests(
-        //                 &b_prev,
-        //                 ts,
-        //                 rness,
-        //                 Network::Main,
-        //             ).await;
-
-        //             let mut tx_kernel_many_announcements = TransactionKernelProxy::from(
-        //                 b_new
-        //                     .kernel
-        //                     .body
-        //                     .transaction_kernel
-        //                     .clone(),
-        //             );
-        //             tx_kernel_many_announcements.inputs = Vec::new();
-        //             tx_kernel_many_announcements.public_announcements = vec![
-        //                 crate::models::blockchain::transaction::announcement::Announcement::default();
-        //                 super::super::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS + 1
-        //             ];
-        //             b_new.kernel.body.transaction_kernel =
-        //                 tx_kernel_many_announcements.into_kernel();
-        //             b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-        //             cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
-
-        //             b_new.validate_limit_announcements(
-        //                 // &b_prev, ts, Network::Main
-        //             )
-        //             // .await
-        //         });
-        //         prop_assert_eq![err, t.err().unwrap()];
-        //     }
-        // );
-
-        // err_checking = BlockValidationError::TooManyOutputs;
-        // #submethod
-        // proptest::proptest!(
-        //     singlecase_config,
-        //     |((b_prev, ts, rness) in n_strategy(), record_addition_an in arb::<AdditionRecord>())|
-        //     {
-        //         let t = crate::tests::tokio_runtime().block_on(async {
-        //             let mut b_new = fake_valid_successor_for_tests(
-        //                 &b_prev,
-        //                 ts,
-        //                 rness,
-        //                 Network::Main,
-        //             ).await;
-
-        //             let mut tx_kernel_many_outputs = TransactionKernelProxy::from(
-        //                 b_new.kernel.body.transaction_kernel.clone(),
-        //             );
-        //             tx_kernel_many_outputs.inputs = Vec::new();
-        //             tx_kernel_many_outputs.outputs = vec![
-        //                 record_addition_an;
-        //                 1 + MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1
-        //             ];
-        //             b_new.kernel.body.transaction_kernel =
-        //                 tx_kernel_many_outputs.into_kernel();
-        //             b_new.kernel.appendix =
-        //                 BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-        //             cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
-
-        //             b_new.validate_limit_outputs(
-        //                 // &b_prev, ts, Network::Main
-        //             )
-        //             // .await
-        //         });
-        //         prop_assert_eq![err, t.err().unwrap()];
-        //     }
-        // );
-
-        // err_checking = BlockValidationError::TooManyInputs;
-        // #submethod
-        // proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in n_strategy())|
-        // {
-        //     let t = crate::tests::tokio_runtime().block_on(async {
-        //         let mut b_new = fake_valid_successor_for_tests(
-        //             &b_prev,
-        //             ts,
-        //             rness,
-        //             Network::Main,
-        //         ).await;
-
-        //         let mut tx_kernel_many_inputs = TransactionKernelProxy::from(
-        //             b_new.kernel.body.transaction_kernel.clone(),
-        //         );
-        //         // Create fake removal records (don't need to be valid since check happens early)
-        //         let fake_removal_records: Vec<_> = (0..=MAX_NUM_INPUTS_OUTPUTS_PUB_ANNOUNCEMENTS_AFTER_HF_1)
-        //             .map(|i| {
-        //                 let mut indices = [0u128; crate::util_types::mutator_set::shared::NUM_TRIALS as usize];
-        //                 indices[0] = i as u128;
-        //                 crate::util_types::mutator_set::removal_record::RemovalRecord {
-        //                     absolute_indices: crate::util_types::mutator_set::removal_record::AbsoluteIndexSet::new(&indices),
-        //                     target_chunks: Default::default(),
-        //                 }
-        //             })
-        //             .collect();
-        //         tx_kernel_many_inputs.inputs = fake_removal_records;
-        //         tx_kernel_many_inputs.outputs = vec![];
-        //         tx_kernel_many_inputs.public_announcements = vec![];
-        //         b_new.kernel.body.transaction_kernel =
-        //             tx_kernel_many_inputs.into_kernel();
-        //         b_new.kernel.appendix =
-        //             BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-        //         cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
-
-        //         b_new.validate_limit_inputs(
-        //             // &b_prev, ts, Network::Main
-        //         )
-        //         // .await
-        //     });
-        //     prop_assert_eq![err, t.err().unwrap()];
-        // });
-
-        err_checking = BlockValidationError::NegativeCoinbase;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
-
-                if let Some(coinbase_the) = b_new.kernel.body.transaction_kernel.coinbase {
-                    let mut tx_kernel_neg_coinbase = TransactionKernelProxy::from(
-                        b_new.kernel.body.transaction_kernel.clone(),
-                    );
-                    if !coinbase_the.is_negative() {
-                        tx_kernel_neg_coinbase.coinbase = Some(-NativeCurrencyAmount::one_nau());
-
-                        b_new.kernel.body.transaction_kernel =
-                            tx_kernel_neg_coinbase.into_kernel();
-                        b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-                        cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
-                    }
-                } else {panic![]}
-
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
-
-        err_checking = BlockValidationError::CoinbaseTooBig;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
-
-                let mut tx_kernel_big_coinbase = TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
-                tx_kernel_big_coinbase.coinbase = Some(
-                    NativeCurrencyAmount::one_nau() + Block::block_subsidy(b_new.header().height),
+            if let Some(coinbase_the) = b_new.kernel.body.transaction_kernel.coinbase {
+                let mut tx_kernel_neg_coinbase = TransactionKernelProxy::from(
+                    b_new.kernel.body.transaction_kernel.clone(),
                 );
-                b_new.kernel.body.transaction_kernel =
-                    tx_kernel_big_coinbase.into_kernel();
+                if !coinbase_the.is_negative() {
+                    tx_kernel_neg_coinbase.coinbase = Some(-NativeCurrencyAmount::one_nau());
+
+                    b_new.kernel.body.transaction_kernel =
+                        tx_kernel_neg_coinbase.into_kernel();
+                    b_new.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
+                    cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+                }
+            } else {panic!()}
+
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::NegativeCoinbase, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_coinbase_too_big_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+    ) {
+
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
+
+            let mut tx_kernel_big_coinbase = TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
+            tx_kernel_big_coinbase.coinbase = Some(
+                NativeCurrencyAmount::one_nau() + Block::block_subsidy(b_new.header().height),
+            );
+            b_new.kernel.body.transaction_kernel =
+                tx_kernel_big_coinbase.into_kernel();
+            b_new.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
+            cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::CoinbaseTooBig, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_appendix_too_large_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+    ) {
+
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
+
+            let mut large_claims = b_new.kernel.appendix._claims().clone();
+            large_claims.append(&mut vec![Claim::new(Default::default()); MAX_NUM_CLAIMS]);
+            b_new.kernel.appendix = BlockAppendix::new(large_claims);
+
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::AppendixTooLarge, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_transaction_timestamp_error_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(#ts.0.value()..=BFieldElement::MAX)] ts_kernel: u64,
+    ) {
+
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
+
+            let mut tx_kernel_ts = TransactionKernelProxy::from(
+                b_new.kernel.body.transaction_kernel.clone(),
+            );
+            tx_kernel_ts.timestamp = Timestamp(bfe![ts_kernel]);
+            tx_kernel_ts.inputs = Vec::new();
+            b_new.kernel.body.transaction_kernel = tx_kernel_ts.into_kernel();
+            b_new.kernel.appendix =
+                BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
+            cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::TransactionTimestamp, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_negative_fee_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+    ) {
+
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
+
+            if !b_new.kernel.body.transaction_kernel.fee.is_negative() {
+                let mut tx_kernel_fee_neg =
+                    TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
+                tx_kernel_fee_neg.fee = -NativeCurrencyAmount::one_nau();
+                b_new.kernel.body.transaction_kernel = tx_kernel_fee_neg.into_kernel();
                 b_new.kernel.appendix =
                     BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
                 cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
-
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
-
-        err_checking = BlockValidationError::AppendixTooLarge;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
-
-                let mut large_claims = b_new.kernel.appendix._claims().clone();
-                large_claims.append(&mut vec![Claim::new(Default::default()); MAX_NUM_CLAIMS]);
-                b_new.kernel.appendix = BlockAppendix::new(large_claims);
-
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
-
-        err_checking = BlockValidationError::TransactionTimestamp;
-        proptest::proptest!(
-            singlecase_config,
-            |((ts_kernel, (b_prev, ts, rness)) in setup().prop_flat_map(|prev| (prev.1.0.value()..=BFieldElement::MAX, Just(prev))))| {
-                let t = crate::tests::tokio_runtime().block_on(async {
-                    let mut b_new = fake_valid_successor_for_tests(
-                        &b_prev,
-                        ts,
-                        rness,
-                        Network::Main,
-                    ).await;
-
-                    let mut tx_kernel_ts = TransactionKernelProxy::from(
-                        b_new.kernel.body.transaction_kernel.clone(),
-                    );
-                    tx_kernel_ts.timestamp = Timestamp(bfe![ts_kernel]);
-                    tx_kernel_ts.inputs = Vec::new();
-                    b_new.kernel.body.transaction_kernel = tx_kernel_ts.into_kernel();
-                    b_new.kernel.appendix =
-                        BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-                    cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
-
-                    b_new.validate(&b_prev, ts, Network::Main).await
-                });
-                prop_assert_eq![err_checking, t.err().unwrap()];
             }
-        );
 
-        err_checking = BlockValidationError::NegativeFee;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::NegativeFee, result.err().unwrap());
+    }
 
-                if !b_new.kernel.body.transaction_kernel.fee.is_negative() {
-                    let mut tx_kernel_fee_neg =
-                        TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
-                    tx_kernel_fee_neg.fee = -NativeCurrencyAmount::one_nau();
-                    b_new.kernel.body.transaction_kernel = tx_kernel_fee_neg.into_kernel();
-                    b_new.kernel.appendix =
-                        BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-                    cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
-                }
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_proof_quality_error_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+    ) {
 
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
 
-        /* @skaunov am not sure if adding testing utils to test double spending
-        would enable testing this with the whole `validate`, but it's something to try too */
-        // err_checking = BlockValidationError::RemovalRecordsUniqueness;
-        // #submethod
-        // proptest::proptest!(
-        //     singlecase_config,
-        //     |((b_prev, ts, rness) in n_strategy(), rr in arb::<crate::util_types::mutator_set::removal_record::RemovalRecord>())|
-        //     {
-        //         let t = crate::tests::tokio_runtime().block_on(async {
-        //             let mut b_new = fake_valid_successor_for_tests(
-        //                 &b_prev,
-        //                 ts,
-        //                 rness,
-        //                 Network::Main,
-        //             ).await;
+            b_new.proof = BlockProof::Invalid;
 
-        //             let mut tx_kernel_dup =
-        //                 TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
-        //             tx_kernel_dup.inputs.push(rr.clone());
-        //             tx_kernel_dup.inputs.push(rr);
-        //             b_new.kernel.body.transaction_kernel = tx_kernel_dup.into_kernel();
-        //             b_new.kernel.appendix =
-        //                 BlockAppendix::new(BlockAppendix::consensus_claims(b_new.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
-        //             cache_true_claim(BlockProgram::claim(b_new.body(), &b_new.kernel.appendix)).await;
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::ProofQuality, result.err().unwrap());
+    }
 
-        //             b_new.validate_rr_uniqueness(
-        //                 // &b_prev, ts, Network::Main
-        //             )
-        //             // .await
-        //         });
-        //         prop_assert_eq![err, t.err().unwrap()];
-        //     }
-        // );
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_max_size_error_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+    ) {
 
-        err_checking = BlockValidationError::ProofQuality;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
+                &b_prev,
+                ts,
+                rness,
+                Network::Main,
+            ).await;
 
-                b_new.proof = BlockProof::Invalid;
+            b_new.proof = BlockProof::SingleProof(NeptuneProof::from(vec![
+                Default::default();
+                1 + ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height).max_block_size()
+            ]));
 
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::MaxSize, result.err().unwrap());
+    }
 
-        err_checking = BlockValidationError::MaxSize;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, rness) in setup())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_appendix_missing_claim_fails(
+        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
+    ) {
 
-                b_new.proof = BlockProof::SingleProof(NeptuneProof::from(vec![
-                    Default::default();
-                    1 + ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height).max_block_size()
-                ]));
+        let result = crate::tests::shared::blocks::invalid_empty_block(&b_prev, Network::Main).validate(&b_prev, ts, Network::Main).await;
+        assert_eq!(BlockValidationError::AppendixMissingClaim, result.err().unwrap());
+    }
 
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_future_dating_fails(
+        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
+        #[strategy(#ts.0.value() + 1288490188500000u64..=BFieldElement::MAX)] ts_f: u64,
+    ) {
 
-        err_checking = BlockValidationError::AppendixMissingClaim;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, _) in setup())|
-        {
-            let t = crate::tests::tokio_runtime().block_on(
-                crate::tests::shared::blocks::invalid_empty_block(&b_prev, Network::Main).validate(&b_prev, ts, Network::Main)
+        let result = {
+            let mut b_new = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
+                &b_prev, ts, Network::Main,
             );
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
-
-        err_checking = BlockValidationError::FutureDating;
-        proptest::proptest!(singlecase_config, |((ts_f, (b_prev, ts, _)) in setup().prop_flat_map(|prev| ((prev.1.0.value() + 1288490188500000u64)..=BFieldElement::MAX, Just(prev))))|
-        {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
-                    &b_prev, ts, Network::Main,
-                );
-                b_new.kernel.header.timestamp = Timestamp(bfe![ts_f]);
-                b_new.kernel.header.difficulty = if Block::should_reset_difficulty(
-                    Network::Main,
+            b_new.kernel.header.timestamp = Timestamp(bfe![ts_f]);
+            b_new.kernel.header.difficulty = if Block::should_reset_difficulty(
+                Network::Main,
+                b_new.header().timestamp,
+                b_prev.header().timestamp,
+            ) {Network::Main.genesis_difficulty()} else {
+                difficulty_control(
                     b_new.header().timestamp,
                     b_prev.header().timestamp,
-                ) {Network::Main.genesis_difficulty()} else {
-                    difficulty_control(
-                        b_new.header().timestamp,
-                        b_prev.header().timestamp,
-                        b_prev.header().difficulty,
-                        Network::Main.target_block_interval(),
-                        b_prev.header().height,
-                    )
-                };
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+                    b_prev.header().difficulty,
+                    Network::Main.target_block_interval(),
+                    b_prev.header().height,
+                )
+            };
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::FutureDating, result.err().unwrap());
+    }
 
-        err_checking = BlockValidationError::CumulativeProofOfWork;
-        proptest::proptest!(singlecase_config, |(
-            (b_prev, ts, _) in setup(),
-            cumul in arb::<difficulty_control::ProofOfWork>()
-        )| {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
-                    &b_prev, ts, Network::Main,
-                );
-                b_new.kernel.header.cumulative_proof_of_work = cumul;
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_cumulative_proof_of_work_error_fails(
+        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
+        #[strategy(arb::<difficulty_control::ProofOfWork>())] cumul: difficulty_control::ProofOfWork,
+    ) {
 
-        err_checking = BlockValidationError::Difficulty;
-        proptest::proptest!(singlecase_config, |(
-            (b_prev, ts, rness) in setup(),
-            d in arb::<difficulty_control::Difficulty>(),
-        )| {
-            let t = crate::tests::tokio_runtime().block_on(async {
-                let mut b_new = fake_valid_successor_for_tests(
-                    &b_prev,
-                    ts,
-                    rness,
-                    Network::Main,
-                ).await;
-
-                b_new.kernel.header.difficulty = d;
-
-                b_new.validate(&b_prev, ts, Network::Main).await
-            });
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
-
-        err_checking = BlockValidationError::MinimumBlockTime;
-        proptest::proptest!(singlecase_config, |((b_prev, ts, _) in setup(), ts_small in 0..60u64)|
-        {
-            let t = crate::tests::tokio_runtime().block_on(
-                crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
-                    &b_prev, b_prev.kernel.header.timestamp + Timestamp(bfe![ts_small]), Network::Main,
-                ).validate(&b_prev, ts, Network::Main)
+        let result = {
+            let mut b_new = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
+                &b_prev, ts, Network::Main,
             );
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+            b_new.kernel.header.cumulative_proof_of_work = cumul;
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::CumulativeProofOfWork, result.err().unwrap());
+    }
 
-        err_checking = BlockValidationError::BlockMmrUpdate;
-        proptest::proptest!(singlecase_config, |(b_prev in block_with_arbkernel(), mut b_new in block_with_arbkernel(),)|
-        {
-            b_new.kernel.header.height = b_prev.kernel.header.height + 1;
-            b_new.kernel.header.prev_block_digest = b_prev.hash();
-            let t = crate::tests::tokio_runtime().block_on(b_new.validate(
-                &b_prev,
-                b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                Network::Main
-            ));
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_difficulty_error_fails(
+        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(arb::<difficulty_control::Difficulty>())] d: difficulty_control::Difficulty,
+    ) {
 
-        err_checking = BlockValidationError::PrevBlockDigest;
-        proptest::proptest!(singlecase_config, |(b_prev in block_with_arbkernel(), mut b_new in block_with_arbkernel(),)|
-        {
-            b_new.kernel.header.height = b_prev.kernel.header.height + 1;
-            let t = crate::tests::tokio_runtime().block_on(b_new.validate(
+        let result = {
+            let mut b_new = fake_valid_successor_for_tests(
                 &b_prev,
-                b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                Network::Main
-            ));
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+                ts,
+                rness,
+                Network::Main,
+            ).await;
 
-        err_checking = BlockValidationError::BlockHeight;
-        proptest::proptest!(singlecase_config, |(b_prev in block_with_arbkernel(), b_new in block_with_arbkernel(),)|
-        {
-            proptest::prop_assume!(b_new.kernel.header.height != b_prev.kernel.header.height);
-            let t = crate::tests::tokio_runtime().block_on(b_new.validate(
-                &b_prev,
-                b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
-                Network::Main
-            ));
-            prop_assert_eq![err_checking, t.err().unwrap()];
-        });
+            b_new.kernel.header.difficulty = d;
+
+            b_new.validate(&b_prev, ts, Network::Main).await
+        };
+        assert_eq!(BlockValidationError::Difficulty, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_minimum_block_time_error_fails(
+        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
+        #[strategy(0..60u64)] ts_small: u64,
+    ) {
+
+        let result = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
+            &b_prev, b_prev.kernel.header.timestamp + Timestamp(bfe![ts_small]), Network::Main,
+        ).validate(&b_prev, ts, Network::Main).await;
+        assert_eq!(BlockValidationError::MinimumBlockTime, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_block_mmr_update_error_fails(
+        #[strategy(block_with_arbkernel())] b_prev: Block,
+        #[strategy(block_with_arbkernel())] mut b_new: Block,
+    ) {
+
+        b_new.kernel.header.height = b_prev.kernel.header.height + 1;
+        b_new.kernel.header.prev_block_digest = b_prev.hash();
+        let result = b_new.validate(
+            &b_prev,
+            b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
+            Network::Main
+        ).await;
+        assert_eq!(BlockValidationError::BlockMmrUpdate, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_prev_block_digest_error_fails(
+        #[strategy(block_with_arbkernel())] b_prev: Block,
+        #[strategy(block_with_arbkernel())] mut b_new: Block,
+    ) {
+
+        b_new.kernel.header.height = b_prev.kernel.header.height + 1;
+        let result = b_new.validate(
+            &b_prev,
+            b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
+            Network::Main
+        ).await;
+        assert_eq!(BlockValidationError::PrevBlockDigest, result.err().unwrap());
+    }
+
+    #[proptest(async = "tokio", cases = 1)]
+    async fn block_with_block_height_error_fails(
+        #[strategy(block_with_arbkernel())] b_prev: Block,
+        #[strategy(block_with_arbkernel())] mut b_new: Block,
+    ) {
+
+        // Ensure the height is different from predecessor + 1
+        if b_new.kernel.header.height == b_prev.kernel.header.height + 1 {
+            b_new.kernel.header.height = b_prev.kernel.header.height + 2;
+        }
+
+        let result = b_new.validate(
+            &b_prev,
+            b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
+            Network::Main
+        ).await;
+        assert_eq!(BlockValidationError::BlockHeight, result.err().unwrap());
     }
 }
