@@ -116,13 +116,13 @@ impl Distribution<BlockInfo> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BlockInfo {
         BlockInfo {
             height: rng.random(),
-            size: rng.random_range(0..10),
+            size: rng.random_range(100_000..1_000_000),
             digest: rng.random(),
             prev_block_digest: rng.random(),
             timestamp: rng.random(),
             cumulative_proof_of_work: rng.random(),
             difficulty: rng.random(),
-            num_inputs: rng.random_range(0..10),
+            num_inputs: rng.random_range(0..30),
             num_outputs: rng.random_range(0..10),
             num_announcements: rng.random_range(0..10),
             coinbase_amount: NativeCurrencyAmount::from_nau(

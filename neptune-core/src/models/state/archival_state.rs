@@ -779,11 +779,11 @@ impl ArchivalState {
 
     /// Return parent of tip block. Returns `None` iff tip is genesis block.
     pub(crate) async fn get_tip_parent(&self) -> Option<Block> {
-        let tip_index_value = self
+        let tip_digest = self
             .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
-            .await?;
-        let tip_digest: Digest = tip_index_value.as_tip_digest();
+            .await?
+            .as_tip_digest();
         let tip_header = self
             .get_block_record(tip_digest)
             .await
@@ -895,7 +895,7 @@ impl ArchivalState {
                 );
             }
 
-            // No block record and not genesis block => nothing we can do
+            // No block record and not genesis block => block not known
             return None;
         };
 
@@ -921,19 +921,21 @@ impl ArchivalState {
             )
         }
         // If the block is not canonical, we get the addition records from the
-        // block itself.
+        // block itself. The AOC leaf indices (the values in the returned hash
+        // map) will be set to `None` because AOCL leaf indices are only defined
+        // for confirmed outputs.
         else {
-            let block = match self.get_block_from_block_record(block_record).await {
-                Ok(b) => b,
-                Err(e) => {
+            let block = self
+                .get_block_from_block_record(block_record)
+                .await
+                .unwrap_or_else(|e| {
                     panic!("could not read block from database: {e}");
-                }
-            };
+                });
             let transaction_addition_records = block.body().transaction_kernel.outputs.clone();
-            let guesser_addition_records = match block.guesser_fee_addition_records() {
-                Ok(gfar) => gfar,
-                Err(e) => panic!("stored block is invalid: {e}"),
-            };
+            let guesser_addition_records =
+                block.guesser_fee_addition_records().unwrap_or_else(|e| {
+                    panic!("stored block is invalid: {e}");
+                });
             Some(
                 transaction_addition_records
                     .into_iter()

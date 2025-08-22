@@ -591,7 +591,6 @@ pub async fn alice_sends_time_locked_funds() -> anyhow::Result<()> {
     // when that is fixed, this line should be removed.
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-    // alice checks that payment is reflected in her unconfirmed wallet balance
     let alice_balances_before_send = alice.gsl.api().wallet().balances(Timestamp::now()).await;
     tracing::info!(
         "alice balances before send:\n{}",

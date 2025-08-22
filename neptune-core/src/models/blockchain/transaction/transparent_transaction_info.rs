@@ -62,9 +62,15 @@ impl TransparentTransactionInfo {
             .map(|transparent_input| transparent_input.absolute_index_set())
             .collect_vec();
 
+        let addition_records_in_transaction = transaction_kernel
+            .outputs
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
         let all_addition_records_are_present = addition_records_from_self
             .iter()
-            .all(|ar| transaction_kernel.outputs.contains(ar));
+            .all(|ar| addition_records_in_transaction.contains(ar));
+
         let absolute_index_sets_in_transaction = transaction_kernel
             .inputs
             .iter()
