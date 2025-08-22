@@ -13,7 +13,7 @@
 // being considered as “code under test.” Most prominently, the annotation
 // should be added to every `#[cfg(test)]` module. Since the “coverage”
 // feature is enable only conditionally, the annotation to use is:
-// #[cfg_attr(coverage_nightly, coverage(off))]
+// `#[cfg_attr(coverage_nightly, coverage(off))]`.
 //
 // See also:
 // - https://github.com/Neptune-Crypto/neptune-core/issues/570

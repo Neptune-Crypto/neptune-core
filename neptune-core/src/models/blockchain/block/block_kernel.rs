@@ -13,7 +13,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 
 /// The kernel of a block contains all data that is not proof data
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
-// #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct BlockKernel {
     pub header: BlockHeader,
     pub body: BlockBody,
