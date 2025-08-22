@@ -43,7 +43,7 @@ In addition to verifying the inequality between the block hash and the target, v
 
 ## Block Rewards
 
-In the beginning of Neptune Cash's life, every block is allowed to mint a certain number of Neptune Coins. This number is known as the *block subsidy*. The initial subsidy is set to `INITIAL_BLOCK_SUBSIDY = 128`. This subsidy is halved automatically every `BLOCKS_PER_GENERATION = 160815` blocks , which corresponds to approximately three years. On the rebooted network, the first generation consists of only 39505 blocks, accounting for the 21310 blocks that were mined on the legacy network.
+In the beginning of Neptune Cash's life, every block is allowed to mint a certain number of Neptune Coins. This number is known as the *block subsidy*. The initial subsidy is set to `INITIAL_BLOCK_SUBSIDY = 128`. This subsidy is halved automatically every `BLOCKS_PER_GENERATION = 160815` blocks , which corresponds to approximately three years. On the rebooted network, the first generation consists of only 139505 blocks, accounting for the 21310 blocks that were mined on the legacy network.
 
 Half of the block subsidy is time-locked for `MINING_REWARD_TIME_LOCK_PERIOD = 3` years; and the other half is liquid immediately.
 
