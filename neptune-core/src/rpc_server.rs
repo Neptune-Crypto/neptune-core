@@ -623,7 +623,7 @@ pub trait RPC {
     async fn addition_record_indices_for_block(
         token: rpc_auth::Token,
         block_selector: BlockSelector,
-    ) -> RpcResult<Option<HashMap<AdditionRecord, Option<u64>>>>;
+    ) -> RpcResult<Vec<(AdditionRecord, Option<u64>)>>;
 
     /// Return the announements contained in a specified block.
     ///
@@ -2491,20 +2491,23 @@ impl RPC for NeptuneRPCServer {
         _: context::Context,
         token: rpc_auth::Token,
         block_selector: BlockSelector,
-    ) -> RpcResult<Option<HashMap<AdditionRecord, Option<u64>>>> {
+    ) -> RpcResult<Vec<(AdditionRecord, Option<u64>)>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
         let Some(digest) = block_selector.as_digest(&state).await else {
-            return Ok(None);
+            return Ok(vec![]);
         };
 
         let addition_records_dictionary = state
             .chain
             .archival_state()
             .get_addition_record_indices_for_block(digest)
-            .await;
+            .await
+            .into_iter()
+            .flatten()
+            .collect_vec();
 
         Ok(addition_records_dictionary)
     }
