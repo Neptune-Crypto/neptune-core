@@ -24,6 +24,7 @@ use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPol
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
+use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::Transaction;
