@@ -157,10 +157,11 @@ mod tests {
         prop_assert_eq!(BlockValidationError::MutatorSetUpdateIntegrity, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_negative_coinbase_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -186,13 +187,14 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::NegativeCoinbase, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::NegativeCoinbase, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_coinbase_too_big_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -214,13 +216,14 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::CoinbaseTooBig, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::CoinbaseTooBig, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_appendix_too_large_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -236,14 +239,15 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::AppendixTooLarge, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::AppendixTooLarge, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_transaction_timestamp_error_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
-        #[strategy(#ts.0.value()..=BFieldElement::MAX)] ts_kernel: u64,
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+        #[strategy(#s.1.0.value()..=BFieldElement::MAX)] ts_kernel: u64,
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -265,13 +269,14 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::TransactionTimestamp, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::TransactionTimestamp, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_negative_fee_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -293,13 +298,14 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::NegativeFee, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::NegativeFee, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_proof_quality_error_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -313,13 +319,14 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::ProofQuality, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::ProofQuality, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_max_size_error_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -336,23 +343,25 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::MaxSize, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::MaxSize, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_appendix_missing_claim_fails(
-        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     ) {
+        let (b_prev, ts, _) = s;
 
         let result = crate::tests::shared::blocks::invalid_empty_block(&b_prev, Network::Main).validate(&b_prev, ts, Network::Main).await;
-        assert_eq!(BlockValidationError::AppendixMissingClaim, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::AppendixMissingClaim, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_future_dating_fails(
-        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
-        #[strategy(#ts.0.value() + 1288490188500000u64..=BFieldElement::MAX)] ts_f: u64,
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+        #[strategy(#s.1.0.value() + 1288490188500000u64..=BFieldElement::MAX)] ts_f: u64,
     ) {
+        let (b_prev, ts, _) = s;
 
         let result = {
             let mut b_new = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
@@ -374,14 +383,15 @@ mod tests {
             };
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::FutureDating, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::FutureDating, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_cumulative_proof_of_work_error_fails(
-        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
-        #[strategy(arb::<difficulty_control::ProofOfWork>())] cumul: difficulty_control::ProofOfWork,
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+        #[strategy(arb())] cumul: difficulty_control::ProofOfWork,
     ) {
+        let (b_prev, ts, _) = s;
 
         let result = {
             let mut b_new = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
@@ -390,14 +400,15 @@ mod tests {
             b_new.kernel.header.cumulative_proof_of_work = cumul;
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::CumulativeProofOfWork, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::CumulativeProofOfWork, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_difficulty_error_fails(
-        #[strategy(setup())] (b_prev, ts, rness): (Block, Timestamp, Digest),
-        #[strategy(arb::<difficulty_control::Difficulty>())] d: difficulty_control::Difficulty,
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+        #[strategy(arb())] d: difficulty_control::Difficulty,
     ) {
+        let (b_prev, ts, rness) = s;
 
         let result = {
             let mut b_new = fake_valid_successor_for_tests(
@@ -411,22 +422,23 @@ mod tests {
 
             b_new.validate(&b_prev, ts, Network::Main).await
         };
-        assert_eq!(BlockValidationError::Difficulty, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::Difficulty, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_minimum_block_time_error_fails(
-        #[strategy(setup())] (b_prev, ts, _): (Block, Timestamp, Digest),
+        #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
         #[strategy(0..60u64)] ts_small: u64,
     ) {
+        let (b_prev, ts, _) = s;
 
         let result = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
             &b_prev, b_prev.kernel.header.timestamp + Timestamp(bfe![ts_small]), Network::Main,
         ).validate(&b_prev, ts, Network::Main).await;
-        assert_eq!(BlockValidationError::MinimumBlockTime, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::MinimumBlockTime, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_block_mmr_update_error_fails(
         #[strategy(block_with_arbkernel())] b_prev: Block,
         #[strategy(block_with_arbkernel())] mut b_new: Block,
@@ -439,10 +451,10 @@ mod tests {
             b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
             Network::Main
         ).await;
-        assert_eq!(BlockValidationError::BlockMmrUpdate, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::BlockMmrUpdate, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_prev_block_digest_error_fails(
         #[strategy(block_with_arbkernel())] b_prev: Block,
         #[strategy(block_with_arbkernel())] mut b_new: Block,
@@ -454,10 +466,10 @@ mod tests {
             b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
             Network::Main
         ).await;
-        assert_eq!(BlockValidationError::PrevBlockDigest, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::PrevBlockDigest, result.err().unwrap());
     }
 
-    #[proptest(async = "tokio", cases = 1)]
+    #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_block_height_error_fails(
         #[strategy(block_with_arbkernel())] b_prev: Block,
         #[strategy(block_with_arbkernel())] mut b_new: Block,
@@ -473,6 +485,6 @@ mod tests {
             b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
             Network::Main
         ).await;
-        assert_eq!(BlockValidationError::BlockHeight, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::BlockHeight, result.err().unwrap());
     }
 }
