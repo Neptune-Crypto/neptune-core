@@ -474,9 +474,6 @@ pub(crate) fn max_cumulative_pow_after(
     })
 }
 
-#[cfg(test)] // TODO add arbitrary-impl feature too
-proptest::prop_compose! {pub fn difficulty_testlimited() (inner in 0..crate::tests::shared::blocks::DIFFICULTY_LIMIT) -> Difficulty {Difficulty::from(inner)}}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

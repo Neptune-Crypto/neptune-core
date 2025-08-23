@@ -12,8 +12,6 @@ use crate::util_types::mutator_set::removal_record::chunk::Chunk;
 use crate::util_types::mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-// pub use crate::models::blockchain::block::tests::strategies as block;
-pub use crate::models::blockchain::block::difficulty_control::difficulty_testlimited;
 pub use crate::models::blockchain::block::tests::arbitrary_kernel as block_with_arbkernel;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 

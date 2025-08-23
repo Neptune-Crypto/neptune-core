@@ -100,7 +100,7 @@ impl From<RemovalRecordListUnpackError> for BlockValidationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::{Just, Strategy};
+    use proptest::prelude::Just;
     use proptest::prop_assert_eq;
     use proptest::test_runner::RngSeed;
     use proptest_arbitrary_interop::arb;
@@ -110,7 +110,7 @@ mod tests {
 
     use crate::api::export::{NativeCurrencyAmount, NeptuneProof, Network, Timestamp};
     use crate::models::blockchain::block::block_appendix::{BlockAppendix, MAX_NUM_CLAIMS};
-    use crate::models::blockchain::block::difficulty_control;
+    use crate::models::blockchain::block::difficulty_control::{self, Difficulty};
     use crate::models::blockchain::block::validity::block_program::BlockProgram;
     use crate::models::blockchain::block::{Block, BlockProof};
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
@@ -123,16 +123,17 @@ mod tests {
     proptest::prop_compose! {
         fn setup() (
             rness in arb::<Randomness<2, 2>>(),
-            b in block_with_arbkernel().prop_filter(
-                "`.difficulty` is a divisor down the line",
-                |b| num_bigint::BigUint::ZERO != b.header().difficulty.into()
-            )
+            d in 1..crate::tests::shared::blocks::DIFFICULTY_LIMIT,
+            b in block_with_arbkernel()
         ) (
             ts in (
                 Timestamp::hours(1) + b.kernel.header.timestamp
             ).0.value()..=BFieldElement::MAX,
-            rness in Just(rness), b in Just(b),
-        ) -> (crate::models::blockchain::block::Block, Timestamp, Randomness<2, 2>) {(b, Timestamp(bfe![ts]), rness)}
+            rness in Just(rness), mut b in Just(b), difficulty in Just(d)
+        ) -> (crate::models::blockchain::block::Block, Timestamp, Randomness<2, 2>) {
+            b.kernel.header.difficulty = Difficulty::from(difficulty);
+            (b, Timestamp(bfe![ts]), rness)
+        }
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -141,20 +142,23 @@ mod tests {
         #[strategy(arb())] record_addition_an: AdditionRecord,
     ) {
         let (mut b_prev, ts, rness) = s;
-        let result = {
-            let b_new = fake_valid_successor_for_tests(
-                &b_prev,
-                ts,
-                rness,
-                Network::Main,
-            ).await;
+        let b_new = fake_valid_successor_for_tests(
+            &b_prev,
+            ts,
+            rness,
+            Network::Main,
+        ).await;
 
-            b_prev.kernel.body.mutator_set_accumulator.add(&record_addition_an);
-            b_prev.kernel.appendix = BlockAppendix::new(BlockAppendix::consensus_claims(b_prev.body(), ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height)));
+        b_prev.kernel.body.mutator_set_accumulator.add(&record_addition_an);
+        b_prev.kernel.appendix = BlockAppendix::new(
+            BlockAppendix::consensus_claims(b_prev.body(), 
+            ConsensusRuleSet::infer_from(Network::Main, b_prev.header().height))
+        );
 
-            b_new.validate(&b_prev, ts, Network::Main).await
-        };
-        prop_assert_eq!(BlockValidationError::MutatorSetUpdateIntegrity, result.err().unwrap());
+        prop_assert_eq!(
+            BlockValidationError::MutatorSetUpdateIntegrity, 
+            b_new.validate(&b_prev, ts, Network::Main).await.err().unwrap()
+        );
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -373,7 +377,7 @@ mod tests {
                 b_new.header().timestamp,
                 b_prev.header().timestamp,
             ) {Network::Main.genesis_difficulty()} else {
-                difficulty_control(
+                difficulty_control::difficulty_control(
                     b_new.header().timestamp,
                     b_prev.header().timestamp,
                     b_prev.header().difficulty,
@@ -406,23 +410,20 @@ mod tests {
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_difficulty_error_fails(
         #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
-        #[strategy(arb())] d: difficulty_control::Difficulty,
+        #[strategy(arb())] d: Difficulty,
     ) {
         let (b_prev, ts, rness) = s;
 
-        let result = {
-            let mut b_new = fake_valid_successor_for_tests(
-                &b_prev,
-                ts,
-                rness,
-                Network::Main,
-            ).await;
+        let mut b_new = fake_valid_successor_for_tests(
+            &b_prev,
+            ts,
+            rness,
+            Network::Main,
+        ).await;
 
-            b_new.kernel.header.difficulty = d;
+        b_new.kernel.header.difficulty = d;
 
-            b_new.validate(&b_prev, ts, Network::Main).await
-        };
-        prop_assert_eq!(BlockValidationError::Difficulty, result.err().unwrap());
+        prop_assert_eq!(BlockValidationError::Difficulty, b_new.validate(&b_prev, ts, Network::Main).await.err().unwrap());
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -432,10 +433,12 @@ mod tests {
     ) {
         let (b_prev, ts, _) = s;
 
-        let result = crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
-            &b_prev, b_prev.kernel.header.timestamp + Timestamp(bfe![ts_small]), Network::Main,
-        ).validate(&b_prev, ts, Network::Main).await;
-        prop_assert_eq!(BlockValidationError::MinimumBlockTime, result.err().unwrap());
+        prop_assert_eq!(
+            BlockValidationError::MinimumBlockTime, 
+            crate::tests::shared::blocks::invalid_empty_block_with_timestamp(
+                &b_prev, b_prev.kernel.header.timestamp + Timestamp(bfe![ts_small]), Network::Main,
+            ).validate(&b_prev, ts, Network::Main).await.err().unwrap()
+        );
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -446,12 +449,11 @@ mod tests {
 
         b_new.kernel.header.height = b_prev.kernel.header.height + 1;
         b_new.kernel.header.prev_block_digest = b_prev.hash();
-        let result = b_new.validate(
+        prop_assert_eq!(BlockValidationError::BlockMmrUpdate, b_new.validate(
             &b_prev,
             b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
             Network::Main
-        ).await;
-        prop_assert_eq!(BlockValidationError::BlockMmrUpdate, result.err().unwrap());
+        ).await.err().unwrap());
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
@@ -461,30 +463,24 @@ mod tests {
     ) {
 
         b_new.kernel.header.height = b_prev.kernel.header.height + 1;
-        let result = b_new.validate(
+        prop_assert_eq!(BlockValidationError::PrevBlockDigest, b_new.validate(
             &b_prev,
             b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
             Network::Main
-        ).await;
-        prop_assert_eq!(BlockValidationError::PrevBlockDigest, result.err().unwrap());
+        ).await.err().unwrap());
     }
 
     #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
     async fn block_with_block_height_error_fails(
         #[strategy(block_with_arbkernel())] b_prev: Block,
-        #[strategy(block_with_arbkernel())] mut b_new: Block,
+        #[strategy(block_with_arbkernel())] b_new: Block,
     ) {
+        proptest::prop_assume!(b_new.kernel.header.height.value() != 1 + b_prev.kernel.header.height.value());
 
-        // Ensure the height is different from predecessor + 1
-        if b_new.kernel.header.height == b_prev.kernel.header.height + 1 {
-            b_new.kernel.header.height = b_prev.kernel.header.height + 2;
-        }
-
-        let result = b_new.validate(
+        prop_assert_eq!(BlockValidationError::BlockHeight, b_new.validate(
             &b_prev,
             b_prev.kernel.header.timestamp + Timestamp(bfe![60]),
             Network::Main
-        ).await;
-        prop_assert_eq!(BlockValidationError::BlockHeight, result.err().unwrap());
+        ).await.err().unwrap());
     }
 }

@@ -1323,23 +1323,19 @@ pub(crate) mod tests {
     prop_compose! {
         /// Relies on the private fields hence is here for re-export via `tests::shared::strategies`.
         pub fn arbitrary_kernel() (
-            mut header in arb::<BlockHeader>(),
+            header in arb::<BlockHeader>(),
             transaction_kernel in crate::tests::shared::strategies::txkernel::default(true),
             lock_free_mmr_accumulator in arb::<MmrAccumulator>(),
             block_mmr_accumulator in arb::<MmrAccumulator>(),
             appendix in arb::<BlockAppendix>(),
             mutator_set_accumulator in arb::<MutatorSetAccumulator>(),
-            difficulty in difficulty_control::difficulty_testlimited()
-        ) -> Block {
-            header.difficulty = difficulty;
-            Block{
-                kernel: BlockKernel{ header, body: BlockBody::new(
-                    transaction_kernel, mutator_set_accumulator, lock_free_mmr_accumulator, block_mmr_accumulator
-                ), appendix },
-                proof: Default::default(),
-                digest: Default::default()
-            }
-        }
+        ) -> Block {Block{
+            kernel: BlockKernel{ header, body: BlockBody::new(
+                transaction_kernel, mutator_set_accumulator, lock_free_mmr_accumulator, block_mmr_accumulator
+            ), appendix },
+            proof: Default::default(),
+            digest: Default::default()
+        }}
     }
 
     #[test]
