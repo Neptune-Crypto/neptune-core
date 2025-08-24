@@ -134,7 +134,7 @@ rayon = "1.10"
 statrs = "0.18.0"
 test-strategy = "0.3"
 tokio-test = "0.4"
-# strum = {version = "*", features = ["derive"]}
+strum = {version = "*", features = ["derive"]} # it's already in the dependencies via `tasm-lib`
 
 [[bin]]
 name = "neptune-core"
