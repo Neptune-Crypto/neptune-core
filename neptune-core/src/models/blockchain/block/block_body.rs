@@ -156,6 +156,19 @@ impl MastHash for BlockBody {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            transaction_kernel: u.arbitrary()?,
+            mutator_set_accumulator: u.arbitrary()?,
+            lock_free_mmr_accumulator: u.arbitrary()?,
+            block_mmr_accumulator: u.arbitrary()?,
+            merkle_tree: OnceLock::new(), // always empty in fuzzing
+        })
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

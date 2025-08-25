@@ -82,7 +82,7 @@ pub fn receiver_identifier_from_announcement(announcement: &Announcement) -> Res
 /// encoding is injective but not uniform-to-uniform.
 pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
     let mut padded_bytes = bytes.to_vec();
-    while padded_bytes.len() % 8 != 0 {
+    while !padded_bytes.len().is_multiple_of(8) {
         padded_bytes.push(0u8);
     }
     let mut bfes = vec![BFieldElement::new(bytes.len() as u64)];

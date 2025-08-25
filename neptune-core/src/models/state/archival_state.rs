@@ -2938,7 +2938,7 @@ pub(super) mod tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio")]
     async fn find_canonical_block_with_input_genesis_block_test(
-        #[strategy(crate::util_types::mutator_set::removal_record::propcompose_absindset())]
+        #[strategy(crate::tests::shared::strategies::absindset())]
         random_index_set: AbsoluteIndexSet,
     ) {
         let network = Network::Main;
