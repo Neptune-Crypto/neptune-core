@@ -1122,7 +1122,8 @@ impl Block {
         Ok(guesser_reward.to_nau_f64() / block_subsidy.to_nau_f64())
     }
 
-    /// The amount rewarded to the guesser who finds a valid nonce for this block.
+    /// The amount rewarded to the guesser who finds a valid nonce for this
+    ///  block.
     pub(crate) fn total_guesser_reward(
         &self,
     ) -> Result<NativeCurrencyAmount, BlockValidationError> {

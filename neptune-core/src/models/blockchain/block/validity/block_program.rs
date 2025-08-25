@@ -28,9 +28,9 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::verifier::verify;
 
 /// Verifies that all claims listed in the appendix are true.
 ///
@@ -58,7 +58,7 @@ impl BlockProgram {
         let proof_clone = proof.clone();
 
         debug!("** Calling triton_vm::verify to verify block proof ...");
-        let verdict = proof_abstractions::verifier::verify(claim, proof_clone, network).await;
+        let verdict = verify(claim, proof_clone, network).await;
         debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}.");
 
         verdict

@@ -51,7 +51,7 @@ impl BlockAppendix {
         block_body: &BlockBody,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Vec<Claim> {
-        // Add more claims here when softforking.ion::HardFork2 as usize }>;
+        // Add more claims here when softforking.
         let tx_is_valid = Self::transaction_validity_claim(
             block_body.transaction_kernel.mast_hash(),
             consensus_rule_set,

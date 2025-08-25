@@ -61,7 +61,6 @@ impl HasDiscriminant for BlockBodyField {
 // We likewise skip the field for `BFieldCodec`, and `GetSize` because there
 // exist no impls for `OnceLock<_>` so derive fails.
 #[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize, TasmObject)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm. The inputs
@@ -154,6 +153,19 @@ impl MastHash for BlockBody {
                 twenty_first::prelude::MerkleTree::par_new(&digests).unwrap()
             })
             .clone()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            transaction_kernel: u.arbitrary()?,
+            mutator_set_accumulator: u.arbitrary()?,
+            lock_free_mmr_accumulator: u.arbitrary()?,
+            block_mmr_accumulator: u.arbitrary()?,
+            merkle_tree: OnceLock::new(), // always empty in fuzzing
+        })
     }
 }
 

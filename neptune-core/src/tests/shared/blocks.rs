@@ -47,7 +47,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-pub const DIFFICULTY_LIMIT: u32 = 1_000_000_000;
+pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
 
 /// Create an invalid block with the provided transaction kernel, using the
 /// provided mutator set as the predessor block's mutator set. Invalid block in
@@ -445,7 +445,7 @@ pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
     let difficulty = predecessor.header().difficulty;
     println!("Trying to guess for difficulty: {difficulty}");
     assert!(
-        difficulty < Difficulty::from(DIFFICULTY_LIMIT),
+        difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
         "Don't use high difficulty in test"
     );
     let target = difficulty.target();
