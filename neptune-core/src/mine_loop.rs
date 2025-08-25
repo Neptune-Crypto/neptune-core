@@ -1063,6 +1063,7 @@ pub(crate) mod tests {
     use crate::tests::shared::blocks::fake_deterministic_successor;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
+    use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
@@ -1128,7 +1129,7 @@ pub(crate) mod tests {
                 .map(|_| pseudorandom_addition_record(rng.random()))
                 .collect_vec();
             (
-                crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash(
+                make_mock_block_transaction_with_mutator_set_hash(
                     vec![],
                     outputs,
                     previous_block

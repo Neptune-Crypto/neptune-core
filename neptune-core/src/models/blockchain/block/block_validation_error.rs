@@ -5,7 +5,6 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 ///
 /// Conversely, defines what it means for a block to be "valid".
 #[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
-// #[cfg_attr(test, derive(strum::VariantArray))]
 pub enum BlockValidationError {
     // 0. `previous_block` is consistent with current block
     ///   0.a) Block height is previous plus one
