@@ -1393,13 +1393,13 @@ impl WalletState {
             )
         }
 
-        let tx_kernel = new_block.kernel.body.transaction_kernel.clone();
+        let tx_kernel = &new_block.kernel.body.transaction_kernel;
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
-            self.scan_for_spent_utxos(&tx_kernel).await;
+            self.scan_for_spent_utxos(tx_kernel).await;
 
         let onchain_received_outputs = self
-            .scan_for_utxos_announced_to_known_keys(&tx_kernel)
+            .scan_for_utxos_announced_to_known_keys(tx_kernel)
             .collect_vec(); // drop immutable borrow of self, for (maybe) bumping below
 
         let outputs_recovered_through_scan_mode = self.recover_by_scanning(new_block).await;
