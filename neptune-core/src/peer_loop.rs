@@ -1290,13 +1290,13 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 4. If transaction is already known, ignore.
-                if self
+                // 4. Check if transaction is already known.
+                if !self
                     .global_state_lock
                     .lock_guard()
                     .await
                     .mempool
-                    .contains_with_higher_proof_quality(
+                    .accept_transaction(
                         transaction.kernel.txid(),
                         transaction.proof.proof_quality()?,
                         transaction.kernel.mutator_set_hash,
@@ -1421,13 +1421,12 @@ impl PeerLoopHandler {
                     // 1. Ignore if we already know this transaction, and
                     // the proof quality is not higher than what we already know.
                     let state = self.global_state_lock.lock_guard().await;
-                    let transaction_of_same_or_higher_proof_quality_is_known =
-                        state.mempool.contains_with_higher_proof_quality(
-                            tx_notification.txid,
-                            tx_notification.proof_quality,
-                            tx_notification.mutator_set_hash,
-                        );
-                    if transaction_of_same_or_higher_proof_quality_is_known {
+                    let accept_tx = state.mempool.accept_transaction(
+                        tx_notification.txid,
+                        tx_notification.proof_quality,
+                        tx_notification.mutator_set_hash,
+                    );
+                    if !accept_tx {
                         debug!("transaction with same or higher proof quality was already known");
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }

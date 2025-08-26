@@ -130,10 +130,10 @@ jobs:
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       - name: "Update RUSTFLAGS with --cfg tokio_unstable (Linux/MacOS)"
-        if: ${{runner.os != 'Windows'}}
+        if: "runner.os != 'Windows'"
         run: "echo RUSTFLAGS=\"$RUSTFLAGS --cfg tokio_unstable\" >> \"$GITHUB_ENV\""
       - name: "Update RUSTFLAGS with --cfg tokio_unstable (Windows)"
-        if: ${{runner.os == 'Windows'}}$
+        if: "runner.os == 'Windows'"
         run: "echo \"RUSTFLAGS=$Env:RUSTFLAGS --cfg tokio_unstable\" >> $Env:GITHUB_ENV"
         shell: "pwsh"
       - name: Install dist

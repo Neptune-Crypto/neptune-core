@@ -529,29 +529,6 @@ impl<T> DerefMut for AtomicMutexGuard<'_, T> {
     }
 }
 
-/*
-note: commenting until async-traits are supported in stable rust.
-      It is supposed to be available in 1.75.0 on Dec 28, 2023.
-      See: https://releases.rs/docs/1.75.0/
-impl<T> Atomic<T> for AtomicMutex<T> {
-    #[inline]
-    async fn lock<R, F>(&self, f: F) -> R
-    where
-        F: FnOnce(&T) -> R,
-    {
-        AtomicMutex::<T>:.lock(self, f).await
-    }
-
-    #[inline]
-    async fn lock_mut<R, F>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut T) -> R,
-    {
-        AtomicMutex::<T>:.lock_mut(self, f).await
-    }
-}
-*/
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

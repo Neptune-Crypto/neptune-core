@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 
@@ -611,14 +612,7 @@ impl ArchivalState {
             None => return None,
         };
 
-        let tip_block_record: BlockRecord = self
-            .block_index_db
-            .get(BlockIndexKey::Block(tip_digest))
-            .await
-            .unwrap()
-            .as_block_record();
-
-        Some(tip_block_record)
+        self.get_block_record(tip_digest).await
     }
 
     /// Return the latest block that was stored to disk. If no block has been stored to disk, i.e.
@@ -655,12 +649,7 @@ impl ArchivalState {
             .map(|record| record.as_tip_digest())
         {
             Some(tip_digest) => {
-                let record = self
-                    .block_index_db
-                    .get(BlockIndexKey::Block(tip_digest))
-                    .await
-                    .unwrap()
-                    .as_block_record();
+                let record = self.get_block_record(tip_digest).await.unwrap();
                 (record, tip_digest)
             }
             None => {
@@ -700,12 +689,7 @@ impl ArchivalState {
                 .ammr()
                 .get_leaf_async(new_guess_height.into())
                 .await;
-            record = self
-                .block_index_db
-                .get(BlockIndexKey::Block(block_hash))
-                .await
-                .unwrap()
-                .as_block_record();
+            record = self.get_block_record(block_hash).await.unwrap();
         }
     }
 
@@ -798,14 +782,13 @@ impl ArchivalState {
         let tip_digest = self
             .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
-            .await?;
-        let tip_digest: Digest = tip_digest.as_tip_digest();
+            .await?
+            .as_tip_digest();
         let tip_header = self
-            .block_index_db
-            .get(BlockIndexKey::Block(tip_digest))
+            .get_block_record(tip_digest)
             .await
-            .map(|x| x.as_block_record().block_header)
-            .expect("Indicated block must exist in block record");
+            .map(|record| record.block_header)
+            .expect("tip must have block record");
 
         let parent = self
             .get_block(tip_header.prev_block_digest)
@@ -849,13 +832,25 @@ impl ArchivalState {
             })
     }
 
-    // Return the block with a given block digest, iff it's available in state somewhere.
-    pub(crate) async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
-        let maybe_record: Option<BlockRecord> = self
-            .block_index_db
+    /// Get the block record from the block digest, if it is stored.
+    ///
+    /// Note that the genesis block is not stored, and so does not have a block
+    /// record.
+    async fn get_block_record(&self, block_digest: Digest) -> Option<BlockRecord> {
+        self.block_index_db
             .get(BlockIndexKey::Block(block_digest))
             .await
-            .map(|x| x.as_block_record());
+            .map(|x| x.as_block_record())
+    }
+
+    /// Return the block as identified by its digest.
+    ///
+    /// Return:
+    ///  - `Ok(Some(block))` in case of success.
+    ///  - `Ok(None)` if the block does not live in archival state.
+    ///  - `Err(_)` if there was a problem reading from archival state.
+    pub(crate) async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
+        let maybe_record = self.get_block_record(block_digest).await;
         let Some(record) = maybe_record else {
             let maybe_genesis_block =
                 (self.genesis_block.hash() == block_digest).then_some(*self.genesis_block.clone());
@@ -866,6 +861,89 @@ impl ArchivalState {
         let block = self.get_block_from_block_record(record).await?;
 
         Ok(Some(block))
+    }
+
+    /// Returns a [`HashMap`] of [`AdditionRecord`] to [`Option`] of AOCL leaf
+    /// index (`u64`) for all outputs in a given block. If the block is not
+    /// canonical, the indices are all `None`, and conversely, if the block is
+    /// canonical then the indices point into the current mutator set AOCL.
+    /// If the block does not live in the archival state, return `None`.
+    ///
+    /// # Panics
+    ///
+    ///  - If the block is not canonical, was stored, and reading it from disk
+    ///    fails.
+    ///  - If the block is not canonical, was stored, and is invalid.
+    pub(crate) async fn get_addition_record_indices_for_block(
+        &self,
+        block_digest: Digest,
+    ) -> Option<HashMap<AdditionRecord, Option<u64>>> {
+        let maybe_block_record = self.get_block_record(block_digest).await;
+
+        let Some(block_record) = maybe_block_record else {
+            // If genesis, get the addition records from there
+            if block_digest == self.genesis_block().hash() {
+                return Some(
+                    self.genesis_block()
+                        .body()
+                        .transaction_kernel()
+                        .outputs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ar)| (*ar, Some(i as u64)))
+                        .collect::<HashMap<_, _>>(),
+                );
+            }
+
+            // No block record and not genesis block => block not known
+            return None;
+        };
+
+        // In the common case, the block is canonical, and then it is faster to
+        // read the addition records from the archival mutator set.
+        let block_is_canonical = self.block_belongs_to_canonical_chain(block_digest).await;
+        if block_is_canonical {
+            let aocl_leaf_indices = block_record.min_aocl_index..=block_record.max_aocl_index();
+            let addition_records = self
+                .archival_mutator_set
+                .ams()
+                .aocl
+                .get_leaf_range_inclusive_async(aocl_leaf_indices.clone())
+                .await;
+            Some(
+                addition_records
+                    .into_iter()
+                    .map(|digest| AdditionRecord {
+                        canonical_commitment: digest,
+                    })
+                    .zip(aocl_leaf_indices.into_iter().map(Some))
+                    .collect::<HashMap<_, _>>(),
+            )
+        }
+        // If the block is not canonical, we get the addition records from the
+        // block itself. The AOC leaf indices (the values in the returned hash
+        // map) will be set to `None` because AOCL leaf indices are only defined
+        // for confirmed outputs.
+        else {
+            let block = self
+                .get_block_from_block_record(block_record)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("could not read block from database: {e}");
+                });
+            let transaction_addition_records = block.body().transaction_kernel.outputs.clone();
+            let guesser_addition_records =
+                block.guesser_fee_addition_records().unwrap_or_else(|e| {
+                    panic!("stored block is invalid: {e}");
+                });
+            Some(
+                transaction_addition_records
+                    .into_iter()
+                    .chain(guesser_addition_records)
+                    .map(|ar| (ar, None))
+                    .collect::<HashMap<_, _>>(),
+            )
+        }
     }
 
     /// Return the digests of the known blocks at a specific height
@@ -2548,6 +2626,90 @@ pub(super) mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
+    async fn test_get_addition_record_indices() {
+        let mut rng = rand::rng();
+        let network = Network::Main;
+        let mut archival_state = make_test_archival_state(network).await;
+
+        // Digest::default ==> no block found
+        assert!(archival_state
+            .get_addition_record_indices_for_block(Digest::default())
+            .await
+            .is_none());
+
+        // genesis digest ==> matches expectation
+        let genesis_block = *archival_state.genesis_block.clone();
+        let genesis_addition_records = genesis_block.mutator_set_update().unwrap().additions;
+        let genesis_addition_record_indices = genesis_addition_records
+            .into_iter()
+            .enumerate()
+            .map(|(i, ar)| (ar, Some(i as u64)))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            genesis_addition_record_indices,
+            archival_state
+                .get_addition_record_indices_for_block(genesis_block.hash())
+                .await
+                .unwrap()
+        );
+
+        // Remainder of this test: mine two blocks, 1a and 1b. Set tip to 1a
+        // then to 1b. Check expectations.
+
+        // mine block 1a
+        let own_wallet = WalletEntropy::new_random();
+        let own_key = own_wallet.nth_generation_spending_key_for_tests(0);
+        let (block_1a, _) =
+            make_mock_block(&genesis_block.clone(), None, own_key, rng.random(), network).await;
+
+        // apply block 1a
+        archival_state.write_block_as_tip(&block_1a).await.unwrap();
+        archival_state.append_to_archival_block_mmr(&block_1a).await;
+        archival_state.update_mutator_set(&block_1a).await.unwrap();
+
+        // mine block 1b
+        let (block_1b, _) =
+            make_mock_block(&genesis_block.clone(), None, own_key, rng.random(), network).await;
+
+        // apply block 1b
+        archival_state.write_block_as_tip(&block_1b).await.unwrap();
+        archival_state.append_to_archival_block_mmr(&block_1b).await;
+        archival_state.update_mutator_set(&block_1b).await.unwrap();
+
+        // check expectations for 1a
+        let addition_records_1a = block_1a.mutator_set_update().unwrap().additions;
+        let addition_record_indices_1a = addition_records_1a
+            .into_iter()
+            .map(|ar| (ar, None))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            addition_record_indices_1a,
+            archival_state
+                .get_addition_record_indices_for_block(block_1a.hash())
+                .await
+                .unwrap()
+        );
+
+        // check expectations for 1b
+        let num_addition_records_before =
+            genesis_block.mutator_set_update().unwrap().additions.len();
+        let addition_records_1b = block_1b.mutator_set_update().unwrap().additions;
+        let addition_record_indices_1b = addition_records_1b
+            .into_iter()
+            .enumerate()
+            .map(|(i, ar)| (ar, Some((i + num_addition_records_before) as u64)))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            addition_record_indices_1b,
+            archival_state
+                .get_addition_record_indices_for_block(block_1b.hash())
+                .await
+                .unwrap()
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_genesis() {
         let network = Network::Main;
         let mut archival_state = make_test_archival_state(network).await;
@@ -2776,7 +2938,7 @@ pub(super) mod tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio")]
     async fn find_canonical_block_with_input_genesis_block_test(
-        #[strategy(crate::util_types::mutator_set::removal_record::propcompose_absindset())]
+        #[strategy(crate::tests::shared::strategies::absindset())]
         random_index_set: AbsoluteIndexSet,
     ) {
         let network = Network::Main;
@@ -3616,11 +3778,9 @@ pub(super) mod tests {
 
         // Verify that `Block` is stored correctly
         let actual_block: BlockRecord = archival_state
-            .block_index_db
-            .get(BlockIndexKey::Block(mock_block_1.hash()))
+            .get_block_record(mock_block_1.hash())
             .await
-            .unwrap()
-            .as_block_record();
+            .unwrap();
 
         assert_eq!(mock_block_1.kernel.header, actual_block.block_header);
         assert_eq!(
@@ -3706,11 +3866,9 @@ pub(super) mod tests {
 
         // Verify that `Block` is stored correctly
         let actual_block_record_2: BlockRecord = archival_state
-            .block_index_db
-            .get(BlockIndexKey::Block(mock_block_2.hash()))
+            .get_block_record(mock_block_2.hash())
             .await
-            .unwrap()
-            .as_block_record();
+            .unwrap();
 
         assert_eq!(
             mock_block_2.kernel.header,
@@ -3809,12 +3967,7 @@ pub(super) mod tests {
 
             for block in &blocks {
                 let block_digest = block.hash();
-                let stored_record = archival_state
-                    .block_index_db
-                    .get(BlockIndexKey::Block(block_digest))
-                    .await
-                    .unwrap()
-                    .as_block_record();
+                let stored_record = archival_state.get_block_record(block_digest).await.unwrap();
                 assert_eq!(
                     block.hash(),
                     BlockHeaderWithBlockHashWitness::new(

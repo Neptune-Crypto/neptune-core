@@ -10,6 +10,9 @@ use get_size2::GetSize;
 use num_traits::ConstZero;
 use num_traits::One;
 use num_traits::Zero;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -153,6 +156,13 @@ impl PartialOrd for BlockHeight {
 impl Display for BlockHeight {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", u64::from(self.0))
+    }
+}
+
+impl Distribution<BlockHeight> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BlockHeight {
+        let height = rng.random::<BFieldElement>();
+        BlockHeight::new(height)
     }
 }
 

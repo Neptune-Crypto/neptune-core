@@ -1,3 +1,5 @@
+mod parser;
+
 use std::io;
 use std::io::stdout;
 use std::io::Write;
@@ -46,15 +48,10 @@ use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
 
+use crate::parser::beneficiary::Beneficiary;
+
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
-
-// for parsing SendToMany <output> arguments.
-#[derive(Debug, Clone)]
-struct TransactionOutput {
-    address: String,
-    amount: NativeCurrencyAmount,
-}
 
 /// represents data format of input to claim-utxo
 #[derive(Debug, Clone, Subcommand)]
@@ -82,46 +79,6 @@ struct UtxoTransferEntry {
 impl UtxoTransferEntry {
     fn data_format() -> String {
         "neptune-utxo-transfer-v1.0".to_string()
-    }
-}
-
-/// We impl FromStr deserialization so that clap can parse the --outputs arg of
-/// send-to-many command.
-///
-/// We do not bother with serialization via `impl Display` because that is
-/// not presently needed and would just be unused code.
-impl FromStr for TransactionOutput {
-    type Err = anyhow::Error;
-
-    /// parses address:amount into TransactionOutput{address, amount}
-    ///
-    /// This is used by the outputs arg of send-to-many command.
-    /// Usage looks like:
-    ///
-    ///     <OUTPUTS>...  format: address:amount address:amount ...
-    ///
-    /// So each output is space delimited and the two fields are
-    /// colon delimited.
-    ///
-    /// This format was chosen because it should be simple for humans
-    /// to generate on the command-line.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split(':').collect::<Vec<_>>();
-        ensure!(parts.len() == 2, "Invalid transaction output. Missing “:”");
-
-        Ok(Self {
-            address: parts[0].to_string(),
-            amount: NativeCurrencyAmount::coins_from_str(parts[1])?,
-        })
-    }
-}
-
-impl TransactionOutput {
-    pub fn to_output_format(&self, network: Network) -> Result<OutputFormat> {
-        Ok(OutputFormat::AddressAndAmount(
-            ReceivingAddress::from_bech32m(&self.address, network)?,
-            self.amount,
-        ))
     }
 }
 
@@ -277,7 +234,10 @@ enum Command {
 
     /******** PEER INTERACTIONS ********/
     /// Broadcast transaction notifications for all transactions in mempool.
-    BroadCastMempoolTransactions,
+    BroadcastMempoolTransactions,
+
+    /// Broadcast a block proposal notification
+    BroadcastBlockProposal,
 
     /******** CHANGE STATE ********/
     /// shutdown neptune-core
@@ -322,10 +282,28 @@ enum Command {
 
     /// send a payment to one or more recipients
     SendToMany {
+        #[clap(long, value_parser, required = false)]
+        file: Option<PathBuf>,
         /// format: address:amount address:amount ...
-        #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
-        outputs: Vec<TransactionOutput>,
-        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
+        #[clap(value_parser, num_args = 0.., value_delimiter = ' ')]
+        outputs: Vec<Beneficiary>,
+        #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
+        fee: NativeCurrencyAmount,
+    },
+
+    /// Like `SendToMany` but the resulting transaction will be *transparent*.
+    /// No privacy.
+    ///
+    /// Specifically, the transaction will include announcements that expose the
+    /// raw UTXOs and all commitment randomness. This information suffices to
+    /// track amounts as well as origins and destinations.
+    SendTransparent {
+        #[clap(long, value_parser, required = false)]
+        file: Option<PathBuf>,
+        /// format: address:amount address:amount ...
+        #[clap(value_parser, num_args = 0.., value_delimiter = ' ')]
+        outputs: Vec<Beneficiary>,
+        #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
     },
 
@@ -1056,9 +1034,14 @@ async fn main() -> Result<()> {
         }
 
         /******** PEER INTERACTIONS ********/
-        Command::BroadCastMempoolTransactions => {
+        Command::BroadcastMempoolTransactions => {
             println!("Broadcasting transaction-notifications for all transactions in mempool.");
             client.broadcast_all_mempool_txs(ctx, token).await??;
+        }
+
+        Command::BroadcastBlockProposal => {
+            println!("Broadcasting block proposal notifications if any is known.");
+            client.broadcast_block_proposal(ctx, token).await??;
         }
 
         /******** CHANGE STATE ********/
@@ -1148,11 +1131,31 @@ async fn main() -> Result<()> {
                 Some(receiver_tag),
             )?
         }
-        Command::SendToMany { outputs, fee } => {
-            let parsed_outputs = outputs
-                .into_iter()
-                .map(|o| o.to_output_format(network))
-                .collect::<Result<Vec<_>>>()?;
+        Command::SendToMany { file, outputs, fee } => {
+            let parsed_outputs = if let Some(filename) = file {
+                if !outputs.is_empty() {
+                    bail!("specify raw outputs or a file to read them from but not both");
+                }
+                let s = std::fs::read_to_string(filename)?;
+                println!("read file: {s}");
+                let mut beneficiaries = vec![];
+                for chunk in s.split_whitespace() {
+                    let beneficiary = Beneficiary::from_str(chunk)?;
+                    beneficiaries.push(beneficiary);
+                }
+                beneficiaries
+                    .into_iter()
+                    .map(|beneficiary| beneficiary.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                if outputs.is_empty() {
+                    bail!("must specify at least one beneficiary");
+                }
+                outputs
+                    .into_iter()
+                    .map(|o| o.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            };
 
             let res = client
                 .send(
@@ -1179,6 +1182,57 @@ async fn main() -> Result<()> {
                         tx_artifacts.all_offchain_notifications(),
                         None, // todo:  parse receiver tags from cmd-line.
                     )?
+                }
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+        Command::SendTransparent { file, outputs, fee } => {
+            let parsed_outputs = if let Some(filename) = file {
+                if !outputs.is_empty() {
+                    bail!("specify raw outputs or a file to read them from but not both");
+                }
+                let s = std::fs::read_to_string(filename)?;
+                let mut beneficiaries = vec![];
+                for chunk in s.split_whitespace() {
+                    let beneficiary = Beneficiary::from_str(chunk)?;
+                    beneficiaries.push(beneficiary);
+                }
+                beneficiaries
+                    .into_iter()
+                    .map(|beneficiary| beneficiary.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                if outputs.is_empty() {
+                    bail!("must specify at least one beneficiary");
+                }
+                outputs
+                    .into_iter()
+                    .map(|o| o.to_output_format(network))
+                    .collect::<Result<Vec<_>>>()?
+            };
+
+            let res = client
+                .send_transparent(
+                    ctx,
+                    token,
+                    parsed_outputs,
+                    ChangePolicy::recover_to_next_unused_key(
+                        KeyType::Symmetric,
+                        UtxoNotificationMedium::OnChain,
+                    ),
+                    fee,
+                )
+                .await?;
+            match res {
+                Ok(tx_artifacts) => {
+                    println!(
+                        "Successfully created transparent transaction: {}",
+                        tx_artifacts.transaction().txid()
+                    );
+
+                    // no need to process UTXO notifications:
+                    // all outputs (change included) generate *on-chain*
+                    // notifications
                 }
                 Err(e) => eprintln!("{e}"),
             }

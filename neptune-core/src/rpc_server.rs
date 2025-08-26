@@ -618,6 +618,13 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockKernel>>;
 
+    /// Return a hash map of [`AdditionRecord`]s to AOCL leaf indices for the
+    /// outputs of a block, if it is known.
+    async fn addition_record_indices_for_block(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Vec<(AdditionRecord, Option<u64>)>>;
+
     /// Return the announements contained in a specified block.
     ///
     /// Returns `None` if the selected block could not be found, otherwise
@@ -1497,6 +1504,9 @@ pub trait RPC {
     /// mempool.
     async fn broadcast_all_mempool_txs(token: rpc_auth::Token) -> RpcResult<()>;
 
+    /// Broadcast running node's current favorable block proposal.
+    async fn broadcast_block_proposal(token: rpc_auth::Token) -> RpcResult<()>;
+
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
@@ -1733,6 +1743,20 @@ pub trait RPC {
         fee: NativeCurrencyAmount,
     ) -> RpcResult<TxCreationArtifacts>;
 
+    /// Like `send` but the resulting transaction is *transparent*. No privacy.
+    ///
+    /// Specifically, the resulting transaction contains announcements that
+    /// themselves contain the raw UTXOs and commitment randomnesses. This
+    /// info suffices to derive the addition records and removal records,
+    /// thereby exposing not just the amounts but also the origins and
+    /// destinations of the transfer.
+    async fn send_transparent(
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TxCreationArtifacts>;
+
     /// Upgrade a proof for a transaction found in the mempool. If the
     /// transaction cannot be in the mempool, or the transaction is not in need
     /// of upgrading because it is already single proof-backed and synced, then
@@ -1744,22 +1768,6 @@ pub trait RPC {
     /// Returns Ok(false) if no transaction for upgrading was found
     /// Returns an error if something else failed.
     async fn upgrade(token: rpc_auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
-
-    /// upgrades a transaction's proof.
-    ///
-    /// ignored if the transaction is already upgraded to level of supplied
-    /// proof (or higher)
-    ///
-    /// experimental and untested!  do not use yet!!!
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::upgrade_tx_proof()]
-    async fn upgrade_tx_proof(
-        token: rpc_auth::Token,
-        transaction_id: TransactionKernelId,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<()>;
 
     /// todo: docs.
     ///
@@ -2478,6 +2486,33 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn addition_record_indices_for_block(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Vec<(AdditionRecord, Option<u64>)>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let state = self.state.lock_guard().await;
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(vec![]);
+        };
+
+        let addition_records_dictionary = state
+            .chain
+            .archival_state()
+            .get_addition_record_indices_for_block(digest)
+            .await
+            .into_iter()
+            .flatten()
+            .collect_vec();
+
+        Ok(addition_records_dictionary)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn announcements_in_block(
         self,
         _context: tarpc::context::Context,
@@ -3017,7 +3052,12 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        Ok(self.state.api().tx_initiator().spendable_inputs().await)
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .spendable_inputs(Timestamp::now())
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
@@ -3035,7 +3075,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .api()
             .tx_initiator()
-            .select_spendable_inputs(policy, spend_amount)
+            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
             .await
             .into())
     }
@@ -3170,6 +3210,26 @@ impl RPC for NeptuneRPCServer {
             .await?)
     }
 
+    // documented in trait. do not add doc-commtn.
+    async fn send_transparent(
+        mut self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        outputs: Vec<OutputFormat>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+    ) -> RpcResult<TxCreationArtifacts> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api_mut()
+            .tx_initiator_mut()
+            .send_transparent(outputs, change_policy, fee, Timestamp::now())
+            .await?)
+    }
+
     async fn upgrade(
         mut self,
         _ctx: context::Context,
@@ -3253,25 +3313,6 @@ impl RPC for NeptuneRPCServer {
             .await;
 
         Ok(true)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn upgrade_tx_proof(
-        mut self,
-        _ctx: context::Context,
-        token: rpc_auth::Token,
-        transaction_id: TransactionKernelId,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<()> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api_mut()
-            .tx_initiator_mut()
-            .upgrade_tx_proof(transaction_id, transaction_proof)
-            .await?)
     }
 
     // documented in trait. do not add doc-comment.
@@ -3693,6 +3734,22 @@ impl RPC for NeptuneRPCServer {
         Ok(())
     }
 
+    async fn broadcast_block_proposal(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::BroadcastBlockProposal)
+            .await;
+
+        Ok(())
+    }
+
     // documented in trait. do not add doc-comment.
     async fn mempool_overview(
         self,
@@ -3914,7 +3971,7 @@ mod tests {
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
-    use crate::tests::shared::strategies::txkernel_with_lengths;
+    use crate::tests::shared::strategies::txkernel;
     use crate::tests::shared_tokio_runtime;
     use crate::Block;
 
@@ -4483,7 +4540,7 @@ mod tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn utxo_origin_block_test(
-        #[strategy(txkernel_with_lengths(0usize, 1usize, 0usize))]
+        #[strategy(txkernel::with_lengths(0usize, 1usize, 0usize, false))]
         transaction_kernel: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         prop_assume!(!transaction_kernel.fee.is_negative());
@@ -4668,7 +4725,7 @@ mod tests {
     #[traced_test]
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn announcements_in_block_test(
-        #[strategy(txkernel_with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1))]
+        #[strategy(txkernel::with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1, false))]
         tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;

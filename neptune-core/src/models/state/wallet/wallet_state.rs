@@ -505,36 +505,33 @@ impl WalletState {
     /// spending unconfirmed utxos. (issue #189)
     pub(in crate::models::state) async fn handle_mempool_event(&mut self, event: MempoolEvent) {
         match event {
-            MempoolEvent::AddTx(tx) => {
-                debug!(r"handling mempool AddTx event.  details:\n{}", tx.kernel);
+            MempoolEvent::AddTx(tx_kernel) => {
+                debug!(r"handling mempool AddTx event.  details:\n{}", tx_kernel);
 
-                let spent_utxos = self.scan_for_spent_utxos(&tx.kernel).await;
+                let spent_utxos = self.scan_for_spent_utxos(&tx_kernel).await;
 
                 // scan tx for utxo we can claim because we are expecting them (offchain)
                 let own_utxos_from_expected_utxos =
-                    self.scan_for_expected_utxos(&tx.kernel.outputs).await;
+                    self.scan_for_expected_utxos(&tx_kernel.outputs).await;
 
                 // scan tx for utxo with announcements we can claim
                 let announced_utxos_from_announcements =
-                    self.scan_for_utxos_announced_to_known_keys(&tx.kernel);
+                    self.scan_for_utxos_announced_to_known_keys(&tx_kernel);
 
                 let own_utxos = announced_utxos_from_announcements
                     .chain(own_utxos_from_expected_utxos)
                     .collect_vec();
 
-                let tx_id = tx.kernel.txid();
+                let tx_id = tx_kernel.txid();
 
                 self.mempool_spent_utxos.insert(tx_id, spent_utxos);
                 self.mempool_unspent_utxos.insert(tx_id, own_utxos);
             }
-            MempoolEvent::RemoveTx(tx) => {
-                let tx_id = tx.kernel.txid();
+            MempoolEvent::RemoveTx(tx_kernel) => {
+                let tx_id = tx_kernel.txid();
                 debug!("handling mempool RemoveTx event.  tx: {}", tx_id);
                 self.mempool_spent_utxos.remove(&tx_id);
                 self.mempool_unspent_utxos.remove(&tx_id);
-            }
-            MempoolEvent::UpdateTxMutatorSet(_tx_hash_pre_update, _tx_post_update) => {
-                // Wallet doesn't need to do anything here.
             }
         }
     }
@@ -4154,7 +4151,7 @@ pub(crate) mod tests {
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
-        use crate::tests::shared::strategies::txkernel_with_lengths;
+        use crate::tests::shared::strategies::txkernel;
 
         const NUM_FUTURE_KEYS: usize = 20;
 
@@ -4368,7 +4365,7 @@ pub(crate) mod tests {
         #[traced_test]
         #[test_strategy::proptest(async = "tokio")]
         async fn scan_for_utxos_announced_to_future_keys_behaves(
-            #[strategy(txkernel_with_lengths(10, 10, 10))] kernel: TransactionKernel,
+            #[strategy(txkernel::with_lengths(10, 10, 10, false))] kernel: TransactionKernel,
             #[strategy(arb())] wallet_secret: WalletEntropy,
             #[strategy(collection::vec(
                 0_usize..100,

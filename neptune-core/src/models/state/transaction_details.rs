@@ -9,7 +9,7 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use super::wallet::transaction_output::TxOutput;
-use super::wallet::utxo_notification::UtxoNotifyMethod;
+use super::wallet::utxo_notification::UtxoNotificationMethod;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -119,7 +119,7 @@ impl TransactionDetails {
             Digest::default(),
             mutator_set_accumulator,
             now,
-            UtxoNotifyMethod::None,
+            UtxoNotificationMethod::None,
             network,
         )
     }
@@ -139,7 +139,7 @@ impl TransactionDetails {
         sender_randomness: Digest,
         mutator_set_accumulator: MutatorSetAccumulator,
         now: Timestamp,
-        notification_method: UtxoNotifyMethod,
+        notification_method: UtxoNotificationMethod,
         network: Network,
     ) -> Self {
         assert!(
@@ -150,7 +150,7 @@ impl TransactionDetails {
             vec![]
         } else {
             match notification_method {
-                UtxoNotifyMethod::OnChain(receiving_address) => {
+                UtxoNotificationMethod::OnChain(receiving_address) => {
                     vec![TxOutput::onchain_native_currency(
                         gobbled_fee,
                         sender_randomness,
@@ -158,7 +158,7 @@ impl TransactionDetails {
                         true, // owned
                     )]
                 }
-                UtxoNotifyMethod::OffChain(receiving_address) => {
+                UtxoNotificationMethod::OffChain(receiving_address) => {
                     vec![TxOutput::offchain_native_currency(
                         gobbled_fee,
                         sender_randomness,
@@ -166,7 +166,7 @@ impl TransactionDetails {
                         true, // owned
                     )]
                 }
-                UtxoNotifyMethod::None => {
+                UtxoNotificationMethod::None => {
                     panic!("Cannot produce fee gobbler transaction without UTXO notification")
                 }
             }
@@ -318,7 +318,7 @@ impl TransactionDetails {
     }
 
     pub fn primitive_witness(&self) -> PrimitiveWitness {
-        self.into()
+        PrimitiveWitness::from_transaction_details(self)
     }
 
     /// Assemble the transaction kernel corresponding to this
@@ -357,9 +357,9 @@ mod tests {
         #[strategy(arb())] sender_randomness: Digest,
         #[strategy(arb())] mutator_set_accumulator: MutatorSetAccumulator,
         #[strategy(arb())] now: Timestamp,
-        #[filter(#notification_method != UtxoNotifyMethod::None)]
+        #[filter(#notification_method != UtxoNotificationMethod::None)]
         #[strategy(arb())]
-        notification_method: UtxoNotifyMethod,
+        notification_method: UtxoNotificationMethod,
     ) {
         let fee_gobbler = TransactionDetails::fee_gobbler(
             gobbled_fee,

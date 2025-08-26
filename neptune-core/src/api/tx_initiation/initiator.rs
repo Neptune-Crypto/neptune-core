@@ -17,6 +17,8 @@ use super::error;
 use crate::api::export::Timestamp;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
+use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
@@ -28,7 +30,6 @@ use crate::models::blockchain::transaction::transaction_proof::TransactionProofT
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
@@ -36,12 +37,13 @@ use crate::models::state::wallet::change_policy::ChangePolicy;
 use crate::models::state::wallet::transaction_input::TxInput;
 use crate::models::state::wallet::transaction_input::TxInputList;
 use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::triton_vm_job_queue::vm_job_queue;
 use crate::GlobalStateLock;
 
 /// provides an API for building and sending neptune transactions.
 #[derive(Debug)]
 pub struct TransactionInitiator {
-    global_state_lock: GlobalStateLock,
+    pub(super) global_state_lock: GlobalStateLock,
 }
 
 impl From<GlobalStateLock> for TransactionInitiator {
@@ -54,12 +56,12 @@ impl TransactionInitiator {
     /// returns all spendable inputs in the wallet.
     ///
     /// the order of inputs is undefined.
-    pub async fn spendable_inputs(&self) -> TxInputList {
+    pub async fn spendable_inputs(&self, timestamp: Timestamp) -> TxInputList {
         // sadly we have to collect here because we can't hold ref after lock guard is dropped.
         self.global_state_lock
             .lock_guard()
             .await
-            .wallet_spendable_inputs(Timestamp::now())
+            .wallet_spendable_inputs(timestamp)
             .await
             .into_iter()
             .into()
@@ -74,9 +76,10 @@ impl TransactionInitiator {
         &self,
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
+        timestamp: Timestamp,
     ) -> impl IntoIterator<Item = TxInput> {
         TxInputListBuilder::new()
-            .spendable_inputs(self.spendable_inputs().await.into())
+            .spendable_inputs(self.spendable_inputs(timestamp).await.into())
             .policy(policy)
             .spend_amount(spend_amount)
             .build()
@@ -209,68 +212,6 @@ impl TransactionInitiator {
         Ok(())
     }
 
-    /// upgrades a transaction's proof in the mempool.
-    ///
-    /// ignored if the transaction is already upgraded to level of supplied
-    /// proof (or higher)
-    ///
-    /// note: experimental and untested!  do not use yet!
-    ///
-    /// note: if the node is upgrading the transaction to use a
-    /// `ProofCollection`, this will return a TxNotInMempool error.  (That
-    /// behavior should change in the future.)
-    pub async fn upgrade_tx_proof(
-        &mut self,
-        transaction_id: TransactionKernelId,
-        transaction_proof: TransactionProof,
-    ) -> Result<(), error::UpgradeProofError> {
-        let network = self.global_state_lock.cli().network;
-        let mut gsm = self.global_state_lock.lock_guard_mut().await;
-        let block_height = gsm.chain.light_state().header().height;
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-
-        let Some(tx) = gsm.mempool.get_mut(transaction_id) else {
-            return Err(error::UpgradeProofError::TxNotInMempool);
-        };
-
-        let new = TransactionProofType::from(&transaction_proof);
-        let old = TransactionProofType::from(&tx.proof);
-
-        if new <= old {
-            return Err(error::UpgradeProofError::ProofNotAnUpgrade);
-        }
-
-        // tbd: how long does this verify take?   If too slow,
-        // we could obtain tx with a read-lock first, verify,
-        // then obtain again with write-lock to mutate it.
-        if !transaction_proof
-            .verify(tx.kernel.mast_hash(), network, consensus_rule_set)
-            .await
-        {
-            return Err(error::UpgradeProofError::InvalidProof);
-        }
-
-        // mutate
-        tx.proof = transaction_proof;
-
-        drop(gsm);
-
-        // tbd: do we need to remove this tx from mempool and re-add
-        // in order to trigger necessary events?
-
-        // todo: Inform all peers about our hard work
-        // for this, we need to hold the channel sender.
-        // but it is not presently available in GlobalStateLock.
-        // So we need to figure out how best do this.
-        // main_to_peer_channel
-        //     .send(MainToPeerTask::TransactionNotification(
-        //         (&upgraded).try_into().unwrap(),
-        //     ))
-        //     .unwrap();
-
-        Ok(())
-    }
-
     /// returns the type of proof that the queried transaction (in mempool)
     /// presently has.
     ///
@@ -289,6 +230,138 @@ impl TransactionInitiator {
     }
 
     fn worker(&self) -> super::private::TransactionInitiatorPrivate {
+        super::private::TransactionInitiatorPrivate::new(self.global_state_lock.clone())
+    }
+
+    /// Build and broadcast a regular transaction.
+    pub async fn send(
+        &mut self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+    ) -> Result<TxCreationArtifacts, error::SendError> {
+        self.send_inner(outputs, change_policy, fee, timestamp, false)
+            .await
+    }
+
+    /// Build and broadcast a *transparent* transaction.
+    ///
+    /// While transactions are private by default, an initiator can opt to make
+    /// it transparent. In this case, the transaction contains an announcement
+    /// containing the consumed and produced UTXOs along with the commitment
+    /// randomness.
+    pub async fn send_transparent(
+        &mut self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+    ) -> Result<TxCreationArtifacts, error::SendError> {
+        self.send_inner(outputs, change_policy, fee, timestamp, true)
+            .await
+    }
+
+    /// Build a transaction and broadcast it.
+    ///
+    // Locking: this function uses an incrementally lower-level interface, which
+    // takes locks where-ever needed and releases them as soon as possible
+    // afterwards. As a result, no single lock is held over the bulk of the
+    // function's duration, potentially leading to funky race conditions if
+    // multiple invocations are made in parallel.
+    async fn send_inner(
+        &mut self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+        transparent: bool,
+    ) -> Result<TxCreationArtifacts, error::SendError> {
+        self.private().check_proceed_with_send(fee).await?;
+
+        tracing::debug!("tx send initiated.");
+
+        // The target proof-type is set to the lowest possible value here,
+        // since we don't want the client (CLI or dashboard) to hang while
+        // producing proofs. Instead, we let (a task started by) main loop
+        // handle the proving.
+        let target_proof_type = TransactionProofType::PrimitiveWitness;
+
+        // generate outputs
+        let tx_outputs = self.generate_tx_outputs(outputs).await;
+
+        // select inputs
+        let spend_amount = tx_outputs.total_native_coins() + fee;
+        let policy = InputSelectionPolicy::Random;
+        let tx_inputs = self
+            .select_spendable_inputs(policy, spend_amount, timestamp)
+            .await
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        // generate tx details (may add change output)
+        let tx_details = TransactionDetailsBuilder::new()
+            .timestamp(timestamp)
+            .inputs(tx_inputs.into())
+            .outputs(tx_outputs)
+            .fee(fee)
+            .change_policy(change_policy)
+            .transparent(transparent)
+            .build(&mut self.global_state_lock.clone().into())
+            .await?;
+
+        let block_height = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header()
+            .height;
+        let cli_args = self.global_state_lock.cli();
+        let network = cli_args.network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+        // drop(state_lock); // release lock asap.
+
+        tracing::info!("send: proving tx:\n{}", tx_details);
+
+        // use cli options for building proof, but override proof-type
+        let options = TritonVmProofJobOptionsBuilder::new()
+            .template(&cli_args.as_proof_job_options())
+            .proof_type(target_proof_type)
+            .build();
+
+        // generate proof
+        let proof = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
+            .transaction_details(&tx_details)
+            .job_queue(vm_job_queue())
+            .proof_job_options(options)
+            .build()
+            .await?;
+
+        tracing::info!("send: assembling tx");
+
+        // create transaction
+        let transaction = self.assemble_transaction(&tx_details, proof)?;
+
+        // assemble transaction artifacts
+        let tx_creation_artifacts = TxCreationArtifactsBuilder::new()
+            .transaction_details(tx_details)
+            .transaction(transaction)
+            .build()?;
+
+        tracing::info!("send: recording tx");
+
+        self.record_and_broadcast_transaction(&tx_creation_artifacts)
+            .await?;
+
+        tracing::info!("send: all done!");
+
+        Ok(tx_creation_artifacts)
+    }
+
+    fn private(&self) -> super::private::TransactionInitiatorPrivate {
         super::private::TransactionInitiatorPrivate::new(self.global_state_lock.clone())
     }
 }

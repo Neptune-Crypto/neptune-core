@@ -202,5 +202,21 @@ pub(crate) mod tests {
             };
             Self::try_from(transaction).expect("just set merge bit")
         }
+
+        /// Produce an invalid [`BlockTransaction`] from a transaction kernel.
+        /// Is guaranteed to have an invalid transaction proof. Use only in
+        /// tests.
+        pub(crate) fn from_tx_kernel(kernel: TransactionKernel) -> Self {
+            let packed = RemovalRecordList::pack(kernel.inputs.clone());
+            let kernel = TransactionKernelModifier::default()
+                .merge_bit(true)
+                .inputs(packed)
+                .modify(kernel);
+            let transaction = Transaction {
+                kernel,
+                proof: TransactionProof::invalid(),
+            };
+            Self::try_from(transaction).expect("just set merge bit")
+        }
     }
 }
