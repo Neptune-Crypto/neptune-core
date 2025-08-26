@@ -44,7 +44,7 @@ impl WalletEntropy {
     }
 
     /// Returns the spending key for guesser rewards.
-    pub(crate) fn guesser_fee_key(&self) -> generation_address::GenerationSpendingKey {
+    pub fn guesser_fee_key(&self) -> generation_address::GenerationSpendingKey {
         self.nth_generation_spending_key(0u64)
     }
 

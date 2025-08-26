@@ -13,7 +13,7 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 /// (yet). Guessers can contribute proof-of-work to a block proposal and, if
 /// successful, the block proposal becomes a block.
 #[derive(Debug, Clone, Default)]
-pub(crate) enum BlockProposal {
+pub enum BlockProposal {
     OwnComposition((Block, Vec<ExpectedUtxo>)),
     ForeignComposition(Block),
     #[default]
@@ -33,7 +33,7 @@ impl BlockProposal {
         Self::None
     }
 
-    pub(crate) fn expect(&self, msg: &str) -> &Block {
+    pub fn expect(&self, msg: &str) -> &Block {
         match self {
             BlockProposal::OwnComposition((block, _)) => block,
             BlockProposal::ForeignComposition(block) => block,

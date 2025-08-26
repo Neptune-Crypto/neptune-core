@@ -43,6 +43,8 @@
 //!
 //! Every RPC method returns an [RpcResult] which is wrapped inside a
 //! [tarpc::Response] by the rpc server.
+pub mod proof_of_work_puzzle;
+
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -79,7 +81,6 @@ use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
-use crate::models::blockchain::block::pow::PowMastPaths;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -114,6 +115,7 @@ use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_auth;
+use crate::rpc_server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::DataDirectory;
@@ -206,54 +208,6 @@ impl MempoolTransactionInfo {
     pub fn synced(mut self) -> Self {
         self.synced = true;
         self
-    }
-}
-
-/// Data required to attempt to solve the proof-of-work puzzle that allows the
-/// minting of the next block.
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
-pub struct ProofOfWorkPuzzle {
-    // All fields public since used downstream by mining pool software.
-    pub auth_paths: PowMastPaths,
-
-    /// The threshold digest that defines when a PoW solution is valid. The
-    /// block's hash must be less than or equal to this value.
-    pub threshold: Digest,
-
-    /// The total reward, timelocked plus liquid, for a successful guess.
-    pub total_guesser_reward: NativeCurrencyAmount,
-
-    /// An identifier for the puzzle. Needed since more than one block proposal
-    /// may be known for the next block. A commitment to the entire block
-    /// kernel, apart from the PoW-field of the header.
-    pub id: Digest,
-
-    /// Indicates whether template is invalid due to the presence of a new tip.
-    /// Can be used to reset templates in pools that perform local checks before
-    /// submitting a solution to the node.
-    pub prev_block: Digest,
-}
-
-impl ProofOfWorkPuzzle {
-    /// Return a PoW puzzle assuming that the caller has already set the correct
-    /// guesser digest.
-    fn new(block_proposal: Block, latest_block_header: BlockHeader) -> Self {
-        let guesser_reward = block_proposal
-            .total_guesser_reward()
-            .expect("Block proposal must have well-defined guesser reward");
-        let auth_paths = block_proposal.pow_mast_paths();
-        let threshold = latest_block_header.difficulty.target();
-        let prev_block = block_proposal.header().prev_block_digest;
-
-        let id = Tip5::hash(&auth_paths);
-
-        Self {
-            auth_paths,
-            threshold,
-            total_guesser_reward: guesser_reward,
-            id,
-            prev_block,
-        }
     }
 }
 
@@ -2214,7 +2168,7 @@ impl NeptuneRPCServer {
         }))
     }
 
-    /// Return a PoW puzzle with the provided guesser digest.
+    /// Return a PoW puzzle with the provided guesser address.
     async fn pow_puzzle_inner(
         mut self,
         guesser_address: ReceivingAddress,

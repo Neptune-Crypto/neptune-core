@@ -318,7 +318,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         (index_a, index_b)
     }
 
-    pub(super) fn preprocess(
+    pub(crate) fn preprocess(
         mast_auth_paths: PowMastPaths,
         cancel_channel: Option<&dyn Cancelable>,
     ) -> GuesserBuffer<MERKLE_TREE_HEIGHT> {

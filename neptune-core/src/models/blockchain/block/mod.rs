@@ -323,7 +323,7 @@ impl Block {
     ///
     /// Note: this causes the block digest to change.
     #[inline]
-    pub(crate) fn set_header_guesser_address(&mut self, address: ReceivingAddress) {
+    pub fn set_header_guesser_address(&mut self, address: ReceivingAddress) {
         self.kernel.header.guesser_receiver_data.receiver_digest = address.privacy_digest();
         self.kernel.header.guesser_receiver_data.lock_script_hash = address.lock_script_hash();
         self.unset_digest();

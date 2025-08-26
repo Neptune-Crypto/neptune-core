@@ -111,7 +111,7 @@ pub(crate) fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, S
     let mut servers = load_servers();
     servers.shuffle(&mut rand::rng());
 
-    // Add test name to request allow server to see which test requires this
+    // Add test name to request to allow server to see which test requires this
     // file.
     let mut headers = clienter::HttpHeaders::default();
     headers.insert(
