@@ -1574,17 +1574,6 @@ pub trait RPC {
 
     /// todo: docs.
     ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_details()]
-    async fn generate_tx_details(
-        token: rpc_auth::Token,
-        tx_inputs: TxInputList,
-        tx_outputs: TxOutputList,
-        change_policy: ChangePolicy,
-        fee: NativeCurrencyAmount,
-    ) -> RpcResult<TransactionDetails>;
-
-    /// todo: docs.
-    ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
     async fn generate_witness_proof(
         token: rpc_auth::Token,
@@ -3072,27 +3061,6 @@ impl RPC for NeptuneRPCServer {
             .tx_initiator()
             .generate_tx_outputs(outputs)
             .await)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn generate_tx_details(
-        self,
-        _: context::Context,
-        token: rpc_auth::Token,
-        tx_inputs: TxInputList,
-        tx_outputs: TxOutputList,
-        change_policy: ChangePolicy,
-        fee: NativeCurrencyAmount,
-    ) -> RpcResult<TransactionDetails> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
-            .await?)
     }
 
     // documented in trait. do not add doc-comment.

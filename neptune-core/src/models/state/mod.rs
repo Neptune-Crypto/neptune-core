@@ -2407,6 +2407,7 @@ mod tests {
         use futures::future;
 
         use crate::api::export::TransactionProof;
+        use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
         use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 
         use super::*;
@@ -2629,23 +2630,19 @@ mod tests {
         /// Make the transaction. Update state accordingly. Return the
         /// transaction.
         pub(crate) async fn send_coins(
-            alice: &mut GlobalStateLock,
+            sender: &mut GlobalStateLock,
             amount: NativeCurrencyAmount,
             destination: GenerationReceivingAddress,
             timestamp: Timestamp,
         ) -> Transaction {
-            let inputs = alice
+            let inputs = sender
                 .api()
                 .tx_initiator()
-                .select_spendable_inputs(
-                    InputSelectionPolicy::ByProvidedOrder,
-                    NativeCurrencyAmount::coins(10),
-                    timestamp,
-                )
+                .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp)
                 .await
                 .into_iter()
                 .collect_vec();
-            let outputs = alice
+            let outputs = sender
                 .api()
                 .tx_initiator()
                 .generate_tx_outputs(vec![OutputFormat::AddressAndAmount(
@@ -2653,22 +2650,19 @@ mod tests {
                     amount,
                 )])
                 .await;
-            let fee = NativeCurrencyAmount::coins(0);
-            let transaction_details = alice
-                .api()
-                .tx_initiator()
-                .generate_tx_details(
-                    inputs.into(),
-                    outputs,
-                    ChangePolicy::RecoverToNextUnusedKey {
-                        key_type: KeyType::Symmetric,
-                        medium: UtxoNotificationMedium::OnChain,
-                    },
-                    fee,
-                )
+            let transaction_details = TransactionDetailsBuilder::default()
+                .inputs(inputs.into())
+                .outputs(outputs)
+                .change_policy(ChangePolicy::RecoverToNextUnusedKey {
+                    key_type: KeyType::Symmetric,
+                    medium: UtxoNotificationMedium::OnChain,
+                })
+                .timestamp(timestamp)
+                .build(&mut StateLock::Lock(Box::new(sender.clone())))
                 .await
                 .unwrap();
-            let primitive_witness_proof = alice
+
+            let primitive_witness_proof = sender
                 .api()
                 .tx_initiator()
                 .generate_witness_proof(transaction_details.into());
@@ -2859,11 +2853,13 @@ mod tests {
         current_block = a_blocks.last().unwrap().clone();
         let wallet_status_2 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_2 = current_block.header().timestamp;
+        let alice_balance_2 = alice_gsl
+            .wallet_state
+            .confirmed_available_balance(&wallet_status_2, timestamp_2);
+        let expected_balance_2 = LIQUID_BLOCK_SUBSIDY * 3;
         assert_eq!(
-            alice_gsl
-                .wallet_state
-                .confirmed_available_balance(&wallet_status_2, timestamp_2),
-            LIQUID_BLOCK_SUBSIDY * 3
+            expected_balance_2, alice_balance_2,
+            "wallet balance: {alice_balance_2}\nexpected: {expected_balance_2}",
         );
 
         // initiate transaction

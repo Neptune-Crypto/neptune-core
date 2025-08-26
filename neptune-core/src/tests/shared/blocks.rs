@@ -98,12 +98,18 @@ pub(crate) fn invalid_block_with_transaction(
     previous_block: &Block,
     transaction: Transaction,
 ) -> Block {
+    // 60s min block time on main and testnet
+    let minimum_block_time = Timestamp::seconds(60);
+    let timestamp = Timestamp::max(
+        previous_block.header().timestamp + minimum_block_time,
+        transaction.kernel.timestamp,
+    );
     let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
     let block_header = BlockHeader {
         version: bfe!(0),
         height: new_block_height,
         prev_block_digest: previous_block.hash(),
-        timestamp: transaction.kernel.timestamp,
+        timestamp,
         pow: Pow::default(),
         guesser_receiver_data: GuesserReceiverData::default(),
         cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
