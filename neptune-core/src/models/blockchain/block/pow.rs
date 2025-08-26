@@ -193,7 +193,7 @@ pub struct Pow<const MERKLE_TREE_HEIGHT: usize> {
 
     // The nonce comes at the end, so in the `BFieldCodec` encoding it comes
     // first. Therefore, you cannot store partial hashes of paths.
-    pub(crate) nonce: Digest,
+    pub nonce: Digest,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, BFieldCodec, Default, PartialEq, Eq)]
