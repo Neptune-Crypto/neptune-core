@@ -333,6 +333,11 @@ enum Command {
 
     /// Set the tip of the blockchain state to a stored block, identified by its
     /// hash.
+    ///
+    /// Note: this command does not freeze the state, meaning that after its
+    /// invocation it will automatically synchronize to a new canonical block
+    /// when it appears on the network. To avoid this behavior, use this command
+    /// in conjunction with `freeze` (before) and `unfreeze` (after).
     SetTip {
         #[arg(value_parser = HexDigest::from_str)]
         digest: HexDigest,
