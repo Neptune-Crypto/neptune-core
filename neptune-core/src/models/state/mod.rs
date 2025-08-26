@@ -613,7 +613,7 @@ pub struct GlobalState {
     pub mempool: Mempool,
 
     /// The `mining_state` can be updated by main task, mining task, or RPC server.
-    pub(crate) mining_state: MiningState,
+    pub mining_state: MiningState,
 }
 
 impl Drop for GlobalState {

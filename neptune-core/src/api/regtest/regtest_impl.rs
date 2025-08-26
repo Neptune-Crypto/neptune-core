@@ -3,7 +3,10 @@ use tasm_lib::prelude::Digest;
 use super::error::RegTestError;
 use crate::api::export::Timestamp;
 use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
+use crate::models::blockchain::block::Block;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
+use crate::models::state::block_proposal::BlockProposal;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 
@@ -74,7 +77,15 @@ impl RegTest {
         mine_mempool_sp_txs: bool,
     ) -> Result<Digest, RegTestError> {
         self.worker
-            .mine_block_to_wallet(timestamp, mine_mempool_sp_txs)
+            .mine_block_to_wallet(timestamp, rand::random(), mine_mempool_sp_txs)
+            .await
+    }
+
+    /// Compose a block with a mocked proof and set it as current block
+    /// proposal
+    pub async fn set_self_composed_proposal(&mut self, timestamp: Timestamp, seed: [u8; 32]) {
+        self.worker
+            .set_self_composed_proposal(timestamp, seed)
             .await
     }
 }
@@ -89,30 +100,33 @@ impl RegTestPrivate {
         Self { global_state_lock }
     }
 
-    // see description in [RegTest]
-    async fn mine_blocks_to_wallet(
-        &mut self,
-        n_blocks: u32,
-        mine_mempool_sp_txs: bool,
-    ) -> Result<(), RegTestError> {
-        for _ in 0..n_blocks {
-            self.mine_block_to_wallet(Timestamp::now(), mine_mempool_sp_txs)
-                .await?;
-        }
-        Ok(())
+    async fn set_self_composed_proposal(&mut self, timestamp: Timestamp, seed: [u8; 32]) {
+        let include_mempool_txs = true;
+        let find_valid_pow = false;
+        let (block_proposal, composer_utxos) = self
+            .compose(timestamp, seed, include_mempool_txs, find_valid_pow)
+            .await;
+
+        self.global_state_lock
+            .lock_guard_mut()
+            .await
+            .mining_state
+            .block_proposal = BlockProposal::OwnComposition((block_proposal, composer_utxos));
     }
 
-    // see description in [RegTest]
-    async fn mine_block_to_wallet(
-        &mut self,
+    async fn compose(
+        &self,
         timestamp: Timestamp,
+        seed: [u8; 32],
         include_mempool_txs: bool,
-    ) -> Result<Digest, RegTestError> {
-        let gsl = &mut self.global_state_lock;
+        find_valid_pow: bool,
+    ) -> (Block, Vec<ExpectedUtxo>) {
+        let gsl = &self.global_state_lock;
 
-        if !gsl.cli().network.use_mock_proof() {
-            return Err(RegTestError::WrongNetwork);
-        }
+        assert!(
+            gsl.cli().network.use_mock_proof(),
+            "Must use mock-proof network"
+        );
 
         let gs = gsl.lock_guard().await;
 
@@ -141,25 +155,57 @@ impl RegTestPrivate {
 
         drop(gs);
 
-        let (block, composer_tx_outputs) = MockBlockGenerator::mock_successor_with_pow(
-            tip_block,
+        let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_no_pow(
+            tip_block.clone(),
             composer_parameters.clone(),
             guesser_key.to_address().into(),
             timestamp,
-            rand::random(), // seed.
+            seed,
             txs_from_mempool,
             gsl.cli().network,
         );
 
-        // obtain utxos destined for our wallet from composer rewards.
-        let expected_utxos = composer_parameters.extract_expected_utxos(composer_tx_outputs);
+        if find_valid_pow {
+            MockBlockGenerator::satisfy_mock_pow(
+                &mut block,
+                tip_block.header().difficulty,
+                rand::random(),
+            );
+        }
 
-        // note: guesser utxos will be found by
-        // WalletState::update_wallet_state_with_new_block() inside this call.
-        //
-        // gsl.set_new_self_composed_tip(block.clone(), expected_utxos)
-        //     .await?;
-        gsl.lock_guard_mut()
+        (
+            block,
+            composer_parameters.extract_expected_utxos(composer_tx_outputs),
+        )
+    }
+
+    // see description in [RegTest]
+    async fn mine_blocks_to_wallet(
+        &mut self,
+        n_blocks: u32,
+        mine_mempool_sp_txs: bool,
+    ) -> Result<(), RegTestError> {
+        for _ in 0..n_blocks {
+            self.mine_block_to_wallet(Timestamp::now(), rand::random(), mine_mempool_sp_txs)
+                .await?;
+        }
+        Ok(())
+    }
+
+    // see description in [RegTest]
+    async fn mine_block_to_wallet(
+        &mut self,
+        timestamp: Timestamp,
+        seed: [u8; 32],
+        include_mempool_txs: bool,
+    ) -> Result<Digest, RegTestError> {
+        let find_valid_pow = true;
+        let (block, expected_utxos) = self
+            .compose(timestamp, seed, include_mempool_txs, find_valid_pow)
+            .await;
+
+        self.global_state_lock
+            .lock_guard_mut()
             .await
             .wallet_state
             .add_expected_utxos(expected_utxos)
@@ -171,7 +217,7 @@ impl RegTestPrivate {
         //
         // todo: ideally we would pass a listener here to wait on, so that
         // once the block is added we get notified, rather than polling.
-        gsl.rpc_server_to_main_tx()
+        self.global_state_lock.rpc_server_to_main_tx()
             .send(RPCServerToMain::ProofOfWorkSolution(Box::new(block)))
             .await
             .map_err(|_| {

@@ -11,12 +11,12 @@ use crate::Block;
 pub const MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED: usize = 10_000;
 
 #[derive(Debug, Default)]
-pub(crate) struct MiningState {
+pub struct MiningState {
     /// The most profitable block proposal seen on the network. But not
     /// necessarily the one a guesser is guessing on as the proposal is only
     /// changed when the delta in reward meets a threshold. Only updateable by
     /// main loop.
-    pub(crate) block_proposal: BlockProposal,
+    pub block_proposal: BlockProposal,
 
     /// The block proposals that were exported to external guessers. Not persisted. Only contains
     /// block proposals pertaining to the next block height. All other proposals are forgotten when

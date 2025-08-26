@@ -9,6 +9,7 @@ use crate::config_models::network::Network;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
@@ -58,34 +59,6 @@ impl MockBlockGenerator {
         };
 
         Block::new(header, body, appendix, proof)
-    }
-
-    /// Create a block from a transaction without the hassle of proving but such
-    /// that it appears valid.
-    fn mock_block_from_tx(
-        predecessor: Arc<Block>,
-        block_tx: BlockTransaction,
-        guesser_address: ReceivingAddress,
-        seed: [u8; 32],
-        network: Network,
-    ) -> Block {
-        let mut block = Self::mock_block_from_tx_without_pow(
-            (*predecessor).clone(),
-            block_tx,
-            guesser_address,
-            network,
-        );
-
-        let mut rng = StdRng::from_seed(seed);
-
-        // mining (guessing) loop.
-        let threshold = predecessor.header().difficulty.target();
-        while !block.is_valid_mock_pow(threshold) {
-            let pow = rng.random();
-            block.set_header_pow(pow);
-        }
-
-        block
     }
 
     /// Create a `Transaction` from `TransactionDetails` such that verification
@@ -193,12 +166,12 @@ impl MockBlockGenerator {
     ///
     /// For reg-test mode purposes.
     ///
-    /// The block will be valid both in terms of PoW and and will pass the
-    /// Block::is_valid() function.
+    /// The block will pass the Block::is_valid() function, but will not have a
+    /// valid proof-of-work.
     ///
     /// The associated (claim, proof) pair will pass `triton_vm::verify`,
     /// only if the network is regtest.  (The proof is mocked).
-    pub fn mock_successor_with_pow(
+    pub fn mock_successor_no_pow(
         predecessor: Arc<Block>,
         composer_parameters: ComposerParameters,
         guesser_address: ReceivingAddress,
@@ -207,7 +180,6 @@ impl MockBlockGenerator {
         mempool_tx: Vec<Transaction>,
         network: Network,
     ) -> (Block, TxOutputList) {
-        let with_valid_pow = true;
         let mut rng = StdRng::from_seed(seed);
 
         let (block_tx, composer_tx_outputs) = Self::create_mock_block_transaction(
@@ -221,22 +193,12 @@ impl MockBlockGenerator {
 
         let prev = predecessor.clone();
 
-        let block = if with_valid_pow {
-            Self::mock_block_from_tx(
-                predecessor,
-                block_tx,
-                guesser_address,
-                rng.random(),
-                network,
-            )
-        } else {
-            Self::mock_block_from_tx_without_pow(
-                (*predecessor).clone(),
-                block_tx,
-                guesser_address,
-                network,
-            )
-        };
+        let block = Self::mock_block_from_tx_without_pow(
+            (*predecessor).clone(),
+            block_tx,
+            guesser_address,
+            network,
+        );
 
         tracing::debug!(
             "new mock block has height: {}, prev block height: {}",
@@ -247,5 +209,16 @@ impl MockBlockGenerator {
         assert_eq!(block.header().height, prev.header().height + 1);
 
         (block, composer_tx_outputs)
+    }
+
+    pub fn satisfy_mock_pow(block: &mut Block, difficulty: Difficulty, seed: [u8; 32]) {
+        let mut rng = StdRng::from_seed(seed);
+
+        // Guessing loop.
+        let threshold = difficulty.target();
+        while !block.is_valid_mock_pow(threshold) {
+            let pow = rng.random();
+            block.set_header_pow(pow);
+        }
     }
 }
