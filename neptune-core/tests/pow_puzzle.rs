@@ -48,7 +48,6 @@ pub async fn can_find_valid_pow_solution() {
 
     logging::tracing_logger();
 
-    // let mut alice = GenesisNode::start_default_node().await.unwrap();
     let network = Network::RegTest;
     let mut alice = GenesisNode::start_node(
         GenesisNode::default_args_with_network_and_devnet_wallet(network).await,
