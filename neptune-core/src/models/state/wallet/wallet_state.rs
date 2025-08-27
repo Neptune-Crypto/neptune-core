@@ -82,7 +82,7 @@ pub struct WalletState {
 
     /// these two fields are for monitoring wallet-affecting utxos in the mempool.
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
-    mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
+    mempool_spent_utxos: HashMap<TransactionKernelId, HashMap<AbsoluteIndexSet, (Utxo, u64)>>,
     mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<IncomingUtxo>>,
 
     // these fields represent all known keys that have been handed out,
@@ -500,9 +500,9 @@ impl WalletState {
     /// handles a single mempool event.
     ///
     /// note: the wallet watches the mempool in order to keep track of
-    /// unconfirmed utxos sent from or to the wallet. This enables
-    /// calculation of unconfirmed balance.  It also lays foundation for
-    /// spending unconfirmed utxos. (issue #189)
+    /// unconfirmed utxos sent from or to the wallet. This enables calculation
+    /// of unconfirmed balance and prevents UTXOs in the mempool from being
+    /// double spent.
     pub(in crate::models::state) async fn handle_mempool_event(&mut self, event: MempoolEvent) {
         match event {
             MempoolEvent::AddTx(tx_kernel) => {
@@ -540,7 +540,7 @@ impl WalletState {
         self.mempool_spent_utxos
             .values()
             .flatten()
-            .map(|(utxo, ..)| utxo)
+            .map(|(_, (utxo, _))| utxo)
     }
 
     pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
@@ -560,8 +560,8 @@ impl WalletState {
             (
                 *txkid,
                 sender_data
-                    .iter()
-                    .map(|(utxo, _ais, _)| utxo.get_native_currency_amount())
+                    .values()
+                    .map(|(utxo, __)| utxo.get_native_currency_amount())
                     .sum::<NativeCurrencyAmount>(),
             )
         });
@@ -719,21 +719,19 @@ impl WalletState {
         }
     }
 
-    /// Return a list of UTXOs spent by this wallet in the transaction
-    ///
-    /// Returns a list of tuples (utxo, absolute-index-set, index-into-database).
+    /// Return UTXOs spent by this wallet in the transaction
     async fn scan_for_spent_utxos(
         &self,
         transaction_kernel: &TransactionKernel,
-    ) -> Vec<(Utxo, AbsoluteIndexSet, u64)> {
-        let confirmed_absolute_index_sets = transaction_kernel
+    ) -> HashMap<AbsoluteIndexSet, (Utxo, u64)> {
+        let confirmed_absolute_index_sets: HashSet<_> = transaction_kernel
             .inputs
             .iter()
             .map(|rr| rr.absolute_indices)
-            .collect_vec();
+            .collect();
 
         let monitored_utxos = self.wallet_db.monitored_utxos();
-        let mut spent_own_utxos = vec![];
+        let mut spent_own_utxos = HashMap::default();
 
         let stream = monitored_utxos.stream().await;
         pin_mut!(stream); // needed for iteration
@@ -745,7 +743,7 @@ impl WalletState {
             };
 
             if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.push((monitored_utxo.utxo, abs_i, i));
+                spent_own_utxos.insert(abs_i, (monitored_utxo.utxo, i));
             }
         }
         spent_own_utxos
@@ -1415,8 +1413,7 @@ impl WalletState {
 
         let tx_kernel = &new_block.kernel.body.transaction_kernel;
 
-        let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
-            self.scan_for_spent_utxos(tx_kernel).await;
+        let spent_inputs = self.scan_for_spent_utxos(tx_kernel).await;
 
         let onchain_received_outputs = self
             .scan_for_utxos_announced_to_known_keys(tx_kernel)
@@ -1625,22 +1622,17 @@ impl WalletState {
             // how do we ensure that we can recover them in case of a fork? For now we maintain
             // them even if the are spent, and then, later, we can add logic to remove these
             // membership proofs of spent UTXOs once they have been spent for M blocks.
-            match spent_inputs
-                .iter()
-                .find(|(_, abs_i, _mutxo_list_index)| *abs_i == removal_record.absolute_indices)
+            if let Some((_spent_utxo, mutxo_list_index)) =
+                spent_inputs.get(&removal_record.absolute_indices)
             {
-                None => (),
-                Some((_spent_utxo, _abs_i, mutxo_list_index)) => {
-                    debug!(
-                        "Discovered own input at removal record index {}, marking UTXO as spent.",
-                        removal_record_index
-                    );
+                debug!(
+                    "Discovered own input at removal record index {}, marking UTXO as spent.",
+                    removal_record_index
+                );
 
-                    let mut spent_mutxo =
-                        all_mutxo.get(*mutxo_list_index as usize).unwrap().clone();
-                    spent_mutxo.mark_as_spent(new_block);
-                    update_mutxos.push((*mutxo_list_index, spent_mutxo));
-                }
+                let mut spent_mutxo = all_mutxo.get(*mutxo_list_index as usize).unwrap().clone();
+                spent_mutxo.mark_as_spent(new_block);
+                update_mutxos.push((*mutxo_list_index, spent_mutxo));
             }
 
             msa_state.remove(removal_record);
@@ -1815,8 +1807,8 @@ impl WalletState {
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .mempool_spent_utxos
             .iter()
-            .flat_map(|(_txkid, tx_inputs)| tx_inputs.iter())
-            .map(|(_, absi, _)| *absi)
+            .flat_map(|(_txkid, tx_inputs)| tx_inputs.keys())
+            .map(|absi| *absi)
             .collect();
 
         // filter spendable inputs.
