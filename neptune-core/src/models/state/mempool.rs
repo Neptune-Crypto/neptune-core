@@ -725,6 +725,7 @@ impl Mempool {
     /// to handle the events individually as each Tx is removed.
     pub(super) fn clear(&mut self) -> Vec<MempoolEvent> {
         // note: this causes event listeners to be notified of each removed tx.
+        self.merge_input_cache.clear();
         self.retain(|_| false)
     }
 
@@ -1167,6 +1168,7 @@ mod tests {
     use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::models::state::GlobalStateLock;
+    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
@@ -2165,6 +2167,49 @@ mod tests {
         assert_eq!(1, mempool.len());
     }
 
+    #[apply(shared_tokio_runtime)]
+    async fn reorganization_clears_mempool_and_merge_input_cache() {
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+
+        let block_1a = invalid_empty_block_with_timestamp(
+            &genesis,
+            network.launch_date() + Timestamp::hours(1),
+            network,
+        );
+        let block_1b = invalid_empty_block_with_timestamp(
+            &genesis,
+            network.launch_date() + Timestamp::hours(1),
+            network,
+        );
+        let mut mempool =
+            Mempool::new(ByteSize::gb(1), TxProvingCapability::SingleProof, &block_1a);
+        let (((a, b), c), _) = merge_tx_triplet(consensus_rule_set).await;
+        mempool.insert(a.clone(), UpgradePriority::Irrelevant);
+        mempool.insert(b.clone(), UpgradePriority::Irrelevant);
+        mempool.insert(c.clone(), UpgradePriority::Irrelevant);
+
+        assert!(
+            !mempool.is_empty(),
+            "Test assumption: Not empty prior to reorganization"
+        );
+        assert!(
+            !mempool.merge_input_cache.is_empty(),
+            "Test assumption: Not empty prior to reorganization"
+        );
+
+        mempool.update_with_block(&block_1b).unwrap();
+        assert!(
+            mempool.is_empty(),
+            "Mempool must be cleared after reorganization"
+        );
+        assert!(
+            mempool.merge_input_cache.is_empty(),
+            "Merge input must be cleared after reorganization"
+        );
+    }
+
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn reorganization_does_not_crash_mempool() {
@@ -2626,14 +2671,18 @@ mod tests {
         async fn a_b_merged_b_mined() {
             // merge: (a, b) -> c
             // Scenario: a is mined => b is in mempool after block update
-            let consensus_rule_set = ConsensusRuleSet::Reboot;
             let network = Network::Main;
+            let consensus_rule_set = ConsensusRuleSet::Reboot;
+            let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
+            let block1 = invalid_block_with_kernel_and_mutator_set(b.kernel.clone(), mutator_set);
+
             let mut mempool = Mempool::new(
                 ByteSize::gb(1),
                 TxProvingCapability::SingleProof,
                 &Block::genesis(network),
             );
-            let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
+            mempool.tip_digest = block1.header().prev_block_digest;
+
             mempool.insert(a.clone(), UpgradePriority::Irrelevant);
             mempool.insert(b.clone(), UpgradePriority::Irrelevant);
             mempool.insert(c.clone(), UpgradePriority::Irrelevant);
@@ -2642,7 +2691,6 @@ mod tests {
             assert!(mempool.contains(c.txid()));
 
             assert_eq!(2, mempool.merge_input_cache.len());
-            let block1 = invalid_block_with_kernel_and_mutator_set(b.kernel.clone(), mutator_set);
             let (events, _) = mempool.update_with_block(&block1).unwrap();
             assert!(mempool.contains(a.txid()));
             assert!(!mempool.contains(b.txid()));
@@ -2659,14 +2707,18 @@ mod tests {
         async fn a_b_merged_c_mined() {
             // merge: (a, b) -> c
             // Scenario: c is mined => mempool is empty after block update
-            let consensus_rule_set = ConsensusRuleSet::Reboot;
             let network = Network::Main;
+            let consensus_rule_set = ConsensusRuleSet::Reboot;
+            let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
+            let block1 = invalid_block_with_kernel_and_mutator_set(c.kernel.clone(), mutator_set);
+
             let mut mempool = Mempool::new(
                 ByteSize::gb(1),
                 TxProvingCapability::SingleProof,
                 &Block::genesis(network),
             );
-            let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
+            mempool.tip_digest = block1.header().prev_block_digest;
+
             mempool.insert(a.clone(), UpgradePriority::Irrelevant);
             mempool.insert(b.clone(), UpgradePriority::Irrelevant);
             mempool.insert(c.clone(), UpgradePriority::Irrelevant);
@@ -2674,7 +2726,6 @@ mod tests {
             assert!(!mempool.contains(b.txid()));
             assert!(mempool.contains(c.txid()));
 
-            let block1 = invalid_block_with_kernel_and_mutator_set(c.kernel.clone(), mutator_set);
             let (events, _) = mempool.update_with_block(&block1).unwrap();
             assert!(!mempool.contains(a.txid()));
             assert!(!mempool.contains(b.txid()));
@@ -2691,13 +2742,26 @@ mod tests {
         async fn nested_mergers_behave() {
             let consensus_rule_set = ConsensusRuleSet::Reboot;
             let network = Network::Main;
+            let (bottom, [left, right], final_tx, mutator_set) =
+                nested_mergers(consensus_rule_set).await;
+            let block_bottom = invalid_block_with_kernel_and_mutator_set(
+                bottom[0].kernel.clone(),
+                mutator_set.clone(),
+            );
+            let block_middle =
+                invalid_block_with_kernel_and_mutator_set(left.kernel.clone(), mutator_set.clone());
+            let block_top = invalid_block_with_kernel_and_mutator_set(
+                final_tx.kernel.clone(),
+                mutator_set.clone(),
+            );
+
             let mut mempool = Mempool::new(
                 ByteSize::gb(1),
                 TxProvingCapability::SingleProof,
                 &Block::genesis(network),
             );
-            let (bottom, [left, right], final_tx, mutator_set) =
-                nested_mergers(consensus_rule_set).await;
+            mempool.tip_digest = block_bottom.header().prev_block_digest;
+
             for tx in &bottom {
                 let events = mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
                 assert_eq!(1, events.len());
@@ -2723,45 +2787,35 @@ mod tests {
             assert_eq!(6, mempool.merge_input_cache.len());
 
             // Scenario: non-merged transaction mined (bottom layer)
-            let mut mempool1 = mempool.clone();
-            let block1 = invalid_block_with_kernel_and_mutator_set(
-                bottom[0].kernel.clone(),
-                mutator_set.clone(),
-            );
-            let (events1, _) = mempool1.update_with_block(&block1).unwrap();
-            assert!(!mempool1.contains(bottom[0].txid()));
-            assert!(mempool1.contains(bottom[1].txid()));
-            assert!(mempool1.contains(right.txid()));
+            let mut mempool_bottom = mempool.clone();
+            let (events1, _) = mempool_bottom.update_with_block(&block_bottom).unwrap();
+            assert!(!mempool_bottom.contains(bottom[0].txid()));
+            assert!(mempool_bottom.contains(bottom[1].txid()));
+            assert!(mempool_bottom.contains(right.txid()));
             assert_eq!(3, events1.len());
             assert_eq!(2, MempoolEvent::num_adds(&events1));
             assert_eq!(1, MempoolEvent::num_removes(&events1));
-            assert_eq!(2, mempool1.merge_input_cache.len());
+            assert_eq!(2, mempool_bottom.merge_input_cache.len());
 
             // Scenario: one-time-merged transaction mined (middle layer)
-            let mut mempool2 = mempool.clone();
-            let block2 =
-                invalid_block_with_kernel_and_mutator_set(left.kernel.clone(), mutator_set.clone());
-            let (events2, _) = mempool2.update_with_block(&block2).unwrap();
+            let mut mempool_middle = mempool.clone();
+            let (events2, _) = mempool_middle.update_with_block(&block_middle).unwrap();
             assert_eq!(2, events2.len());
             assert_eq!(1, MempoolEvent::num_adds(&events2));
             assert_eq!(1, MempoolEvent::num_removes(&events2));
-            assert!(!mempool2.contains(bottom[0].txid()));
-            assert!(!mempool2.contains(bottom[1].txid()));
-            assert!(mempool2.contains(right.txid()));
-            assert_eq!(2, mempool2.merge_input_cache.len());
+            assert!(!mempool_middle.contains(bottom[0].txid()));
+            assert!(!mempool_middle.contains(bottom[1].txid()));
+            assert!(mempool_middle.contains(right.txid()));
+            assert_eq!(2, mempool_middle.merge_input_cache.len());
 
             // Scenario: two-time-merged transaction mined (top layer)
-            let mut mempool3 = mempool.clone();
-            let block3 = invalid_block_with_kernel_and_mutator_set(
-                final_tx.kernel.clone(),
-                mutator_set.clone(),
-            );
-            let (events3, _) = mempool3.update_with_block(&block3).unwrap();
+            let mut mempool_top = mempool.clone();
+            let (events3, _) = mempool_top.update_with_block(&block_top).unwrap();
             assert_eq!(1, events3.len());
             assert_eq!(0, MempoolEvent::num_adds(&events3));
             assert_eq!(1, MempoolEvent::num_removes(&events3));
-            assert!(mempool3.is_empty());
-            assert!(mempool3.merge_input_cache.is_empty());
+            assert!(mempool_top.is_empty());
+            assert!(mempool_top.merge_input_cache.is_empty());
         }
     }
 

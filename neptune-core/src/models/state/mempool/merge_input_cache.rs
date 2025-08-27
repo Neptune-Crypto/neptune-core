@@ -53,6 +53,11 @@ impl MergeInputCache {
         self.tx_dictionary.is_empty()
     }
 
+    pub(super) fn clear(&mut self) {
+        self.tx_dictionary.clear();
+        self.insertion_order.clear();
+    }
+
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.tx_dictionary.len()
