@@ -128,7 +128,8 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             .mine_blocks_to_wallet(1, mine_mempool_txs)
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
         assert_eq!(1, alice.gsl.lock_guard().await.mempool.len());
 
         let tip = alice.gsl.lock_guard().await.chain.light_state().clone();
@@ -138,6 +139,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
             "Expected block height: 3"
         );
 
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let tip_msa = tip.mutator_set_accumulator_after().unwrap();
         let tx_upgrade_timeout_secs = 15;
         alice
@@ -153,7 +155,7 @@ pub async fn alice_updates_mutator_set_data_on_own_transaction() {
         // are dropped. When the application shuts down after it goes out of
         // scope all messages must have been sent, otherwise there might be a
         // sender without a receiver and that causes a panic.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         // Verify that transaction is confirmable against tip.
         let txid = tx_artifacts.transaction().txid();
