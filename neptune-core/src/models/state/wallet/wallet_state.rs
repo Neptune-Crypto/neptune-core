@@ -1321,38 +1321,22 @@ impl WalletState {
         /// Preprocess all own monitored UTXOs prior to processing of the block.
         ///
         /// Returns
-        /// - all membership proofs that need to be maintained
-        /// - The set of potential duplicates, UTXOs that have, potentially
-        ///   already been added by this wallet. Used for a later check to avoid
-        ///   adding the same UTXO twice. Since we don't know the AOCL leaf
-        ///   index of the incoming transaction, these are only potential
-        ///   duplicates, not certain duplicates.
-        async fn memberships_proofs_and_potential_duplicates(
+        /// all membership proofs that need to be maintained
+        async fn all_wallet_membership_proofs(
             monitored_utxos: &mut DbtVec<MonitoredUtxo>,
             new_block: &Block,
-            incoming: &HashMap<AdditionRecord, IncomingUtxo>,
-        ) -> (
-            HashMap<StrongUtxoKey, (MsMembershipProof, u64, Digest)>,
-            HashMap<StrongUtxoKey, u64>,
-        ) {
+        ) -> HashMap<StrongUtxoKey, (MsMembershipProof, u64, Digest)> {
             // Find the membership proofs that were valid at the previous tip. They have
             // to be updated to the mutator set of the new block.
             let mut valid_membership_proofs_and_own_utxo_count: HashMap<
                 StrongUtxoKey,
                 (MsMembershipProof, u64, Digest),
             > = HashMap::default();
-
-            let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
             let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
 
             while let Some((i, monitored_utxo)) = stream.next().await {
                 let addition_record = monitored_utxo.addition_record();
-                let strong_key = StrongUtxoKey::new(addition_record, monitored_utxo.aocl_index());
-                if incoming.contains_key(&addition_record) {
-                    maybe_duplicates.insert(strong_key, i);
-                }
-
                 let utxo_digest = Hash::hash(&monitored_utxo.utxo);
                 match monitored_utxo
                     .get_membership_proof_for_block(new_block.kernel.header.prev_block_digest)
@@ -1375,8 +1359,8 @@ impl WalletState {
                     }
                     None => {
                         // Monitored UTXO does not have a synced MS-membership proof.
-                        // Was MUTXO marked as abandoned? Then this is fine. Otherwise, log a .
-                        // TODO: If MUTXO was spent, maybe we also don't want to maintain it?
+                        // Was MUTXO marked as abandoned? Then this is fine. Otherwise, log a
+                        // warning.
                         if monitored_utxo.abandoned_at.is_some() {
                             debug!(
                                 "Monitored UTXO with addition record {addition_record} was \
@@ -1400,7 +1384,33 @@ impl WalletState {
                 }
             }
 
-            (valid_membership_proofs_and_own_utxo_count, maybe_duplicates)
+            valid_membership_proofs_and_own_utxo_count
+        }
+
+        /// Get potential duplicates, to avoid registering same UTXO twice.
+        ///
+        /// The set of potential duplicates, UTXOs that have, potentially
+        /// already been added by this wallet. Used for a later check to avoid
+        /// adding the same UTXO twice. Since we don't know the AOCL leaf
+        /// index of the incoming transaction, these are only potential
+        /// duplicates, not certain duplicates.
+        async fn potential_duplicates(
+            monitored_utxos: &mut DbtVec<MonitoredUtxo>,
+            incoming: &HashMap<AdditionRecord, IncomingUtxo>,
+        ) -> HashMap<StrongUtxoKey, u64> {
+            let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
+            let stream = monitored_utxos.stream().await;
+            pin_mut!(stream); // needed for iteration
+
+            while let Some((i, monitored_utxo)) = stream.next().await {
+                let addition_record = monitored_utxo.addition_record();
+                let strong_key = StrongUtxoKey::new(addition_record, monitored_utxo.aocl_index());
+                if incoming.contains_key(&addition_record) {
+                    maybe_duplicates.insert(strong_key, i);
+                }
+            }
+
+            maybe_duplicates
         }
 
         let tx_kernel = &new_block.kernel.body.transaction_kernel;
@@ -1463,10 +1473,9 @@ impl WalletState {
             return Ok(());
         }
 
-        let (mut valid_membership_proofs_and_own_utxo_count, potential_duplicates) =
-            memberships_proofs_and_potential_duplicates(monitored_utxos, new_block, &incoming)
-                .await;
-
+        let mut valid_membership_proofs_and_own_utxo_count =
+            all_wallet_membership_proofs(monitored_utxos, new_block).await;
+        let potential_duplicates = potential_duplicates(monitored_utxos, &incoming).await;
         debug!(
             "doing maintenance on {}/{} monitored UTXOs",
             valid_membership_proofs_and_own_utxo_count.len(),
@@ -1669,11 +1678,6 @@ impl WalletState {
             );
 
             monitored_utxos.set(*own_utxo_index, monitored_utxo).await;
-
-            // TODO: What if a newly added transaction replaces a transaction that was in another fork?
-            // How do we ensure that this transaction is not counted twice?
-            // One option is to only count UTXOs that are synced as valid.
-            // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
 
         // write UTXO-recovery data to disk.
