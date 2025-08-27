@@ -1322,11 +1322,15 @@ impl WalletState {
         ///
         /// Returns
         /// - all membership proofs that need to be maintained
-        /// - A mapping of all monitored UTXOs (identified by strong keys) to
-        ///   their position in the monitored UTXO list in this wallet.
-        async fn preprocess_own_mutxos(
+        /// - The set of potential duplicates, UTXOs that have, potentially
+        ///   already been added by this wallet. Used for a later check to avoid
+        ///   adding the same UTXO twice. Since we don't know the AOCL leaf
+        ///   index of the incoming transaction, these are only potential
+        ///   duplicates, not certain duplicates.
+        async fn memberships_proofs_and_potential_duplicates(
             monitored_utxos: &mut DbtVec<MonitoredUtxo>,
             new_block: &Block,
+            incoming: &HashMap<AdditionRecord, IncomingUtxo>,
         ) -> (
             HashMap<StrongUtxoKey, (MsMembershipProof, u64, Digest)>,
             HashMap<StrongUtxoKey, u64>,
@@ -1338,14 +1342,16 @@ impl WalletState {
                 (MsMembershipProof, u64, Digest),
             > = HashMap::default();
 
-            let mut all_existing_mutxos: HashMap<StrongUtxoKey, u64> = HashMap::default();
+            let mut maybe_duplicates: HashMap<StrongUtxoKey, u64> = HashMap::default();
             let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
 
             while let Some((i, monitored_utxo)) = stream.next().await {
                 let addition_record = monitored_utxo.addition_record();
                 let strong_key = StrongUtxoKey::new(addition_record, monitored_utxo.aocl_index());
-                all_existing_mutxos.insert(strong_key, i);
+                if incoming.contains_key(&addition_record) {
+                    maybe_duplicates.insert(strong_key, i);
+                }
 
                 let utxo_digest = Hash::hash(&monitored_utxo.utxo);
                 match monitored_utxo
@@ -1361,7 +1367,9 @@ impl WalletState {
 
                         if let Some(replaced) = replaced {
                             panic!(
-                                "Strong key must be unique in wallet DB. addition record: {addition_record:?}; ms_mp.aocl_leaf_index: {}.\n\n Existing value was: {replaced:?}", aocl_leaf_index
+                                "Strong key must be unique in wallet DB. addition record:\
+                                {addition_record}; ms_mp.aocl_leaf_index: {aocl_leaf_index}.\n\n
+                                 Existing value was: {replaced:?}",
                             );
                         }
                     }
@@ -1370,7 +1378,10 @@ impl WalletState {
                         // Was MUTXO marked as abandoned? Then this is fine. Otherwise, log a .
                         // TODO: If MUTXO was spent, maybe we also don't want to maintain it?
                         if monitored_utxo.abandoned_at.is_some() {
-                            debug!("Monitored UTXO with addition record {addition_record} was marked as abandoned. Skipping.");
+                            debug!(
+                                "Monitored UTXO with addition record {addition_record} was \
+                             marked as abandoned. Skipping."
+                            );
                         } else {
                             let confirmed_in_block_info = match monitored_utxo.confirmed_in_block {
                                 Some(mutxo_received_in_block) => format!(
@@ -1380,17 +1391,16 @@ impl WalletState {
                                 None => String::from("No info about when UTXO was confirmed."),
                             };
                             warn!(
-                            "Unable to find valid membership proof for UTXO with addition record {addition_record}. {confirmed_in_block_info} Current block height is {}", new_block.kernel.header.height
+                            "Unable to find valid membership proof for UTXO with addition record \
+                            {addition_record}. {confirmed_in_block_info} Current block height is {}",
+                            new_block.kernel.header.height
                         );
                         }
                     }
                 }
             }
 
-            (
-                valid_membership_proofs_and_own_utxo_count,
-                all_existing_mutxos,
-            )
+            (valid_membership_proofs_and_own_utxo_count, maybe_duplicates)
         }
 
         let tx_kernel = &new_block.kernel.body.transaction_kernel;
@@ -1430,14 +1440,13 @@ impl WalletState {
             offchain_received_outputs.len()
         );
 
-        let all_spendable_received_outputs = onchain_received_outputs
+        let incoming = onchain_received_outputs
             .into_iter()
             .chain(outputs_recovered_through_scan_mode)
             .chain(offchain_received_outputs.iter().cloned())
             .filter(|announced_utxo| announced_utxo.utxo.all_type_script_states_are_valid())
             .chain(guesser_fee_outputs);
-
-        let incoming: HashMap<AdditionRecord, IncomingUtxo> = all_spendable_received_outputs
+        let incoming: HashMap<AdditionRecord, IncomingUtxo> = incoming
             .map(|incoming_utxo| (incoming_utxo.addition_record(), incoming_utxo))
             .collect();
 
@@ -1454,17 +1463,14 @@ impl WalletState {
             return Ok(());
         }
 
-        // Get membership proofs that should be maintained, and the set of
-        // UTXOs that were already added. The latter is empty if the wallet
-        // never processed this block, or a sibling-block with the same block
-        // proof before.
-        let (mut valid_membership_proofs_and_own_utxo_count, all_existing_mutxos) =
-            preprocess_own_mutxos(monitored_utxos, new_block).await;
+        let (mut valid_membership_proofs_and_own_utxo_count, potential_duplicates) =
+            memberships_proofs_and_potential_duplicates(monitored_utxos, new_block, &incoming)
+                .await;
 
         debug!(
             "doing maintenance on {}/{} monitored UTXOs",
             valid_membership_proofs_and_own_utxo_count.len(),
-            all_existing_mutxos.len()
+            monitored_utxos.len().await
         );
 
         // Loop over all output UTXOs, applying all addition records. In each iteration,
@@ -1541,7 +1547,7 @@ impl WalletState {
 
                 // Add the membership proof to the list of managed membership
                 // proofs.
-                if let Some(mutxo_index) = all_existing_mutxos.get(&strong_key) {
+                if let Some(mutxo_index) = potential_duplicates.get(&strong_key) {
                     // There is already a monitored UTXO with that key in the
                     // database. If this block is confirming that UTXO, then it
                     // must be a reorg. So overwrite the existing entry's
@@ -2620,6 +2626,11 @@ pub(crate) mod tests {
                 network,
             )
             .await;
+        assert_ne!(
+            block_1a.header().guesser_receiver_data,
+            block_1b.header().guesser_receiver_data,
+            "Test assumption: Guesser receiver data is different"
+        );
 
         // Composer UTXOs must agree
         for (expu_1a, expu_1b) in expected_utxos_block_1a
