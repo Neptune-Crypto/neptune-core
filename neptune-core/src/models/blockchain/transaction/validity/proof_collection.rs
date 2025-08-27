@@ -165,7 +165,7 @@ impl ProofCollection {
             .iter()
             .enumerate()
         {
-            debug!("proving type script number {i}: {}", tsaw.program.hash());
+            debug!("proving type script number {i}: {:x}", tsaw.program.hash());
             type_scripts_halt.push(
                 tsaw.prove(
                     txk_mast_hash,

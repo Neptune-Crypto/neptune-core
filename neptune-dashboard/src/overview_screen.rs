@@ -384,8 +384,7 @@ impl Widget for OverviewScreen {
         ));
 
         let tip_digest_hex = data.tip_digest.map(|d| d.to_hex());
-        lines.push(format!("tip (hex): {}\n", dashifnotset!(tip_digest_hex),));
-        lines.push(format!("tip (raw): {}\n\n", dashifnotset!(data.tip_digest),));
+        lines.push(format!("tip: {}\n", dashifnotset!(tip_digest_hex),));
 
         lines.push(format!(
             "latest block timestamp: {}",

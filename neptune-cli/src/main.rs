@@ -818,7 +818,9 @@ async fn main() -> Result<()> {
             let digests = client
                 .block_digests_by_height(ctx, token, height.into())
                 .await??;
-            println!("{}", digests.iter().join("\n"));
+            for digest in digests {
+                println!("{digest:x}");
+            }
         }
         Command::BestBlockProposal => {
             let best_proposal = client.best_proposal(ctx, token).await??;
@@ -855,12 +857,12 @@ async fn main() -> Result<()> {
                 .block_digest(ctx, token, BlockSelector::Tip)
                 .await??
                 .unwrap_or_default();
-            println!("{} / {:x}", head_hash, head_hash);
+            println!("{:x}", head_hash);
         }
         Command::LatestTipDigests { n } => {
             let head_hashes = client.latest_tip_digests(ctx, token, n).await??;
             for hash in head_hashes {
-                println!("{hash} / {hash:x}");
+                println!("{hash:x}");
             }
         }
         Command::TipHeader => {

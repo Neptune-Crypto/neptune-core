@@ -11,7 +11,6 @@ use futures::sink::Sink;
 use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
-use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -312,9 +311,9 @@ impl PeerLoopHandler {
                 );
                 warn!("Difficulty is {}.", previous_block.kernel.header.difficulty);
                 warn!(
-                    "Proof of work should be {} (or more) but was [{}].",
+                    "Proof of work should be {:x} (or more) but was {:x}.",
                     previous_block.kernel.header.difficulty.target(),
-                    new_block.hash().values().iter().join(", ")
+                    new_block.hash()
                 );
                 self.punish(NegativePeerSanction::InvalidBlock((
                     new_block.kernel.header.height,
@@ -873,7 +872,7 @@ impl PeerLoopHandler {
                 match block {
                     None => {
                         // TODO: Consider punishing here
-                        warn!("Peer requested unknown block with hash {}", block_digest);
+                        warn!("Peer requested unknown block with hash {:x}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                     Some(b) => {
@@ -2178,6 +2177,8 @@ mod tests {
     }
 
     mod blocks {
+        use itertools::Itertools;
+
         use super::*;
 
         #[traced_test]
@@ -4010,6 +4011,7 @@ mod tests {
     }
 
     mod proof_qualities {
+        use itertools::Itertools;
         use strum::IntoEnumIterator;
 
         use super::*;
@@ -4162,6 +4164,8 @@ mod tests {
     }
 
     mod sync_challenges {
+        use itertools::Itertools;
+
         use super::*;
         use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests_dyn;
 

@@ -1129,7 +1129,7 @@ impl GlobalState {
             Possible solution: try deleting the database at `DATA_DIR/databases/`. \
             Get the value of `DATA_DIR` from the first message in the log, and \
             *do not* delete the wallet file or directory.\n\n\
-            Tip:\n{tip_hash};\nsync label:\n{asm_sync_label}"
+            Tip:\n{tip_hash:x};\nsync label:\n{asm_sync_label:x}"
         );
 
         // Fetch all incoming UTXOs from recovery data. Then make a HashMap for

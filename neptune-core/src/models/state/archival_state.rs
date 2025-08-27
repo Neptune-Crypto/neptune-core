@@ -478,7 +478,7 @@ impl ArchivalState {
             self.store_block(block).await?
         } else {
             warn!(
-                "Attempted to store block but block was already stored.\nBlock digest: {}",
+                "Attempted to store block but block was already stored.\nBlock digest: {:x}",
                 block.hash()
             );
             vec![]

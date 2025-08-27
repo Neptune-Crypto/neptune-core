@@ -1468,7 +1468,7 @@ impl WalletState {
                     is_guesser_fee,
                 } = incoming_utxo.to_owned();
                 info!(
-                    "Received UTXO in block {}, height {}\nvalue = {}\n\
+                    "Received UTXO in block {:x}, height {}\nvalue = {}\n\
                     is guesser fee: {is_guesser_fee}\ntime-lock: {}\n\n",
                     block.hash(),
                     block.kernel.header.height,

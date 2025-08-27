@@ -2156,7 +2156,7 @@ impl NeptuneRPCServer {
                         .await
                     {
                         warn!(
-                            "Claimed UTXO was spent in block {}; which has height {}",
+                            "Claimed UTXO was spent in block {:x}; which has height {}",
                             spending_block.hash(),
                             spending_block.header().height
                         );
@@ -3466,7 +3466,7 @@ impl RPC for NeptuneRPCServer {
         if solution_digest > threshold {
             warn!(
                 "Got claimed PoW solution but PoW threshold was not met.\n\
-            Claimed solution: {solution_digest};\nthreshold: {threshold}"
+            Claimed solution: {solution_digest:x};\nthreshold: {threshold:x}"
             );
             return Ok(false);
         }

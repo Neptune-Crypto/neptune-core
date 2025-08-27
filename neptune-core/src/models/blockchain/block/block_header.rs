@@ -61,21 +61,21 @@ impl Display for BlockHeader {
         let string = format!(
             "Height: {}\n\
             Timestamp: {}\n\
-            Prev. Digest: {}\n\
+            Prev. Digest: {:x}\n\
             Cumulative Proof-of-Work: {}\n\
             Difficulty: {}\n\
             Version: {}\n\
-            Guesser receiver digest: {}\n\
-            Guesser lock script hash: {}\n\
+            Guesser receiver digest: {:x}\n\
+            Guesser lock script hash: {:x}\n\
             pow: {}\n",
             self.height,
             self.timestamp.standard_format(),
-            self.prev_block_digest.to_hex(),
+            self.prev_block_digest,
             self.cumulative_proof_of_work,
             self.difficulty,
             self.version,
-            self.guesser_receiver_data.receiver_digest.to_hex(),
-            self.guesser_receiver_data.lock_script_hash.to_hex(),
+            self.guesser_receiver_data.receiver_digest,
+            self.guesser_receiver_data.lock_script_hash,
             self.pow
         );
 
