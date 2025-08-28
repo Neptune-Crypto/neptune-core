@@ -662,11 +662,13 @@ impl GlobalState {
         cli: cli_args::Args,
         wallet_state: WalletState,
     ) -> Result<Self> {
-        let archival_state = ArchivalState::new(data_directory.clone(), genesis, cli.network).await;
+        let mut archival_state =
+            ArchivalState::new(data_directory.clone(), genesis, cli.network).await;
         debug!("Got archival state");
 
         // Get latest block. Use hardcoded genesis block if nothing is in database.
-        let latest_block: Block = archival_state.get_tip().await;
+        let max_tip_rollback = 1;
+        let latest_block: Block = archival_state.get_tip_or_rollback(max_tip_rollback).await?;
 
         let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
         let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;

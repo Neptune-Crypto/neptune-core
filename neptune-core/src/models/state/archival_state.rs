@@ -411,6 +411,16 @@ impl ArchivalState {
             };
             let mut mmap: memmap2::MmapMut = mmap.make_mut().unwrap();
             mmap.deref_mut()[..].copy_from_slice(&serialized_block);
+
+            // FIX for #471
+            // https://github.com/Neptune-Crypto/neptune-core/issues/471
+            //
+            // Flush the memory-mapped pages to the physical disk.
+            // This call will block until the data is safely persisted.
+            // This ensures block data is written to the blkXX.dat file before
+            // updating the DB.  Else we can have situations where the DB
+            // references a block that does not exist on disk.
+            mmap.flush().unwrap();
         })
         .await?;
 
@@ -482,6 +492,12 @@ impl ArchivalState {
         self.block_index_db.batch_write(batch).await;
 
         Ok(())
+    }
+
+    async fn set_tip_digest(&mut self, tip_digest: Digest) {
+        let key = BlockIndexKey::BlockTipDigest;
+        let val = BlockIndexValue::BlockTipDigest(tip_digest);
+        self.block_index_db.put(key, val).await
     }
 
     /// Write a newly found block to database and to disk, without setting it as
@@ -560,47 +576,48 @@ impl ArchivalState {
             .await;
     }
 
+    // FIX for #471.
+    // This fn performs validation that we will not read past end of file with mmap
+    // as that can crash the program with SIGBUS error.
+    // https://github.com/Neptune-Crypto/neptune-core/issues/471
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
-        // Get path of file for block
         let block_file_path: PathBuf = self
             .data_dir
             .block_file_path(block_record.file_location.file_index);
 
-        // Open file as read-only
-        let block_file: tokio::fs::File = match tokio::fs::OpenOptions::new()
-            .read(true)
-            .open(block_file_path.clone())
-            .await
-        {
-            Ok(file) => file,
-            Err(e) => {
+        tokio::task::spawn_blocking(move || {
+            let block_file = std::fs::File::open(&block_file_path)?;
+
+            // 1. Get file metadata to find its actual size on disk.
+            let metadata = block_file.metadata()?;
+            let file_size = metadata.len();
+
+            // 2. VALIDATE that the requested slice is within the file's bounds.
+            let requested_end = block_record.file_location.offset
+                .saturating_add(block_record.file_location.block_length as u64);
+
+            if requested_end > file_size {
                 bail!(
-                    "Could not open block file {}: {e}",
-                    block_file_path.as_path().to_string_lossy()
+                    "Data corruption: Attempted to read beyond end of file '{}'. (Size: {}, Requested End: {})",
+                    block_file_path.display(), file_size, requested_end
                 );
             }
-        };
 
-        // Read the file into memory, set the offset and length indicated in the block record
-        // to avoid using more memory than needed
-        // we use spawn_blocking to make the blocking mmap async-friendly.
-
-        tokio::task::spawn_blocking(move || {
+            // 3. The slice is valid, so we can safely memory-map it.
             let mmap = unsafe {
                 MmapOptions::new()
                     .offset(block_record.file_location.offset)
                     .len(block_record.file_location.block_length)
                     .map(&block_file)?
             };
-            let block: Block = match bincode::deserialize(&mmap) {
-                Ok(b) => b,
-                Err(e) => {
-                    panic!("Could not deserialize block file into `Block`.\n\
-                            Block files may be corrupt, out of date, or incompatible with current version of neptune-core.\n\
-                            Error was: {e}");
-                }
-            };
-            Ok(block)
+
+            // 4. deserialize directly from the validated mmap slice.
+            bincode::deserialize(&mmap).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to deserialize block from file {}. Data may be corrupt. Error: {}",
+                    block_file_path.display(), e
+                )
+            })
         })
         .await?
     }
@@ -763,6 +780,66 @@ impl ArchivalState {
         }
     }
 
+    /// Fetches the tip block from the database and verifies that it is valid on disk.
+    /// If the tip block is found to be corrupt (i.e., not fully written to disk),
+    /// it will automatically roll back the database state and retry with the parent
+    /// block until a valid tip is found or max_rollback is reached.
+    ///
+    /// This is intended to be called when node is starting up (only).
+    pub(crate) async fn get_tip_or_rollback(&mut self, max_rollback: usize) -> Result<Block> {
+        let mut rollbacks_attempted = 0;
+        loop {
+            let tip_block_result = self.get_tip_from_disk().await;
+
+            match tip_block_result {
+                Ok(Some(block)) => return Ok(block),
+                Ok(None) => return Ok(*self.genesis_block.clone()),
+
+                Err(e) if Self::is_corruption_error(&e) => {
+                    // bail if max_rollbacks reached
+                    if rollbacks_attempted >= max_rollback {
+                        bail!(
+                            "Failed to find valid tip after {} rollbacks. Last error: {}",
+                            rollbacks_attempted,
+                            e
+                        );
+                    }
+
+                    // If the guard clause doesn't trigger, we proceed with the rollback.
+                    warn!(
+                        "Corruption detected. Rolling back (attempt {}/{})",
+                        rollbacks_attempted + 1,
+                        max_rollback
+                    );
+
+                    let tip_digest = self.get_tip_digest().await;
+                    let tip_header =
+                        self.get_block_header(tip_digest)
+                            .await
+                            .ok_or(anyhow::anyhow!(
+                                "block header not found for {}",
+                                tip_digest.to_hex()
+                            ))?;
+                    self.block_index_db
+                        .delete(BlockIndexKey::Block(tip_digest))
+                        .await;
+                    self.set_tip_digest(tip_header.prev_block_digest).await;
+
+                    rollbacks_attempted += 1;
+                }
+
+                Err(e) => {
+                    bail!("Failed to read tip due to unrecoverable error: {}", e);
+                }
+            }
+        }
+    }
+
+    fn is_corruption_error(e: &anyhow::Error) -> bool {
+        e.to_string()
+            .contains("Attempted to read beyond end of file")
+    }
+
     /// Return latest block from database, or genesis block if no other block
     /// is known.
     pub(crate) async fn get_tip(&self) -> Block {
@@ -775,6 +852,14 @@ impl ArchivalState {
             None => *self.genesis_block.clone(),
             Some(block) => block,
         }
+    }
+
+    pub(crate) async fn get_tip_digest(&self) -> Digest {
+        self.block_index_db
+            .get(BlockIndexKey::BlockTipDigest)
+            .await
+            .map(|h| h.as_tip_digest())
+            .unwrap_or(self.genesis_block.hash())
     }
 
     /// Return parent of tip block. Returns `None` iff tip is genesis block.
