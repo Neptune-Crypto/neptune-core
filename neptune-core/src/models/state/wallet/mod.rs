@@ -127,10 +127,12 @@ mod tests {
                     make_mock_block(&previous_block, None, charlie_key, rng.random(), network)
                         .await;
                 next_block = nb;
+                let maintain_mps = true;
                 alice
                     .update_wallet_state_with_new_block(
                         &previous_block.mutator_set_accumulator_after().unwrap(),
                         &next_block,
+                        maintain_mps,
                     )
                     .await
                     .unwrap();
@@ -187,10 +189,12 @@ mod tests {
             alice_wallet.wallet_db.expected_utxos().len().await,
             "Expected UTXO list must have length 2 before block registration"
         );
+        let maintain_mps = true;
         alice_wallet
             .update_wallet_state_with_new_block(
                 &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block_1,
+                maintain_mps,
             )
             .await
             .unwrap();
@@ -249,6 +253,7 @@ mod tests {
             .update_wallet_state_with_new_block(
                 &block_1.mutator_set_accumulator_after().unwrap(),
                 &block_2,
+                maintain_mps,
             )
             .await
             .unwrap();
@@ -256,6 +261,7 @@ mod tests {
             .update_wallet_state_with_new_block(
                 &block_2.mutator_set_accumulator_after().unwrap(),
                 &block_3,
+                maintain_mps,
             )
             .await
             .unwrap();
@@ -804,6 +810,7 @@ mod tests {
             network,
         )
         .await;
+        let maintain_mps = true;
         alice
             .lock_guard_mut()
             .await
@@ -813,6 +820,7 @@ mod tests {
                     .mutator_set_accumulator_after()
                     .unwrap(),
                 &first_block_continuing_spree,
+                maintain_mps,
             )
             .await
             .unwrap();
@@ -949,6 +957,7 @@ mod tests {
             .update_wallet_state_with_new_block(
                 &block_2_b.mutator_set_accumulator_after().unwrap(),
                 &block_3_b,
+                maintain_mps,
             )
             .await
             .unwrap();
@@ -1005,6 +1014,7 @@ mod tests {
                     .mutator_set_accumulator_after()
                     .unwrap(),
                 &second_block_continuing_spree,
+                maintain_mps,
             )
             .await
             .unwrap();

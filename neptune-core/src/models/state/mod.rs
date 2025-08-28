@@ -99,6 +99,7 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_input::TxInput;
+use crate::models::state::wallet::wallet_state::IncomingUtxoRecoveryData;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -614,6 +615,11 @@ pub struct GlobalState {
 
     /// The `mining_state` can be updated by main task, mining task, or RPC server.
     pub mining_state: MiningState,
+
+    /// Force wallet to maintain its own membership proofs. These membership
+    /// proofs will otherwise be read from the archival mutator set.
+    #[cfg(test)]
+    force_wallet_membership_proof_maintance: bool,
 }
 
 impl Drop for GlobalState {
@@ -703,6 +709,8 @@ impl GlobalState {
             cli,
             mempool,
             mining_state: MiningState::default(),
+            #[cfg(test)]
+            force_wallet_membership_proof_maintance: false,
         }
     }
 
@@ -1258,8 +1266,14 @@ impl GlobalState {
     /// Restore mutator set membership proofs of all monitored UTXOs from an
     /// archival mutator set.
     ///
-    ///
-    pub(crate) async fn restore_monitored_utxos_from_archival_mutator_set(&mut self) {
+    /// If some monitored UTXOs don't have any mutator set membership proofs,
+    /// then they must have an associated element in `new_utxos` argument. The
+    /// order of the monitored UTXO with a missing membership proofs must match
+    /// the order of the `new_utxos` input.
+    pub async fn restore_monitored_utxos_from_archival_mutator_set(
+        &mut self,
+        mut new_utxos: Option<Vec<IncomingUtxoRecoveryData>>,
+    ) {
         let tip_hash = self.chain.light_state().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
@@ -1289,22 +1303,52 @@ impl GlobalState {
 
             // monitored UTXO does not have a valid membership proof. Fetch it
             // from the archival mutator set.
-            let Some((_, deprecated_msmp)) = monitored_utxo.get_latest_membership_proof_entry()
-            else {
-                // I don't think this can happen, as a membership proof is
-                // always known for a monitored UTXO.
-                warn!("Cannot restore MUTXO because *no* membership proof is known");
-                continue;
+            let (sender_randomness, receiver_preimage, aocl_leaf_index) = match monitored_utxo
+                .get_latest_membership_proof_entry()
+            {
+                Some((_, msmp)) => (
+                    msmp.sender_randomness,
+                    msmp.receiver_preimage,
+                    msmp.aocl_leaf_index,
+                ),
+                None => {
+                    // TODO: Fix this ugly hack. We probably need AOCL leaf index on the monitored
+                    // UTXO structure to do that. And that requires a DB migration :(
+                    let Some(new_utxos) = new_utxos.as_mut() else {
+                        warn!("Monitored UTXO has no membership proof and no recovery data was provided.");
+                        continue;
+                    };
+                    let Some((index, _)) = new_utxos
+                        .iter()
+                        .find_position(|x| x.utxo == monitored_utxo.utxo)
+                    else {
+                        warn!("Monitored UTXO has no membership proof recovery data for this UTXO was not provided.");
+                        continue;
+                    };
+
+                    assert!(
+                        index.is_zero(),
+                        "Order of recovery data must match MUTXO order"
+                    );
+
+                    let recovery_data = new_utxos.remove(index);
+
+                    debug!("Setting MUTXO membership proof for the 1st time");
+                    (
+                        recovery_data.sender_randomness,
+                        recovery_data.receiver_preimage,
+                        recovery_data.aocl_index,
+                    )
+                }
             };
 
             let ms_item = Tip5::hash(&monitored_utxo.utxo);
-            let aocl_leaf_index = deprecated_msmp.aocl_leaf_index;
             let Ok(restored_msmp) = ams_ref
                 .ams()
                 .restore_membership_proof(
                     ms_item,
-                    deprecated_msmp.sender_randomness,
-                    deprecated_msmp.receiver_preimage,
+                    sender_randomness,
+                    receiver_preimage,
                     aocl_leaf_index,
                 )
                 .await
@@ -1316,7 +1360,9 @@ impl GlobalState {
                 continue;
             };
 
-            if !ams_ref.ams().verify(ms_item, &restored_msmp).await {
+            if monitored_utxo.spent_in_block.is_none()
+                && !ams_ref.ams().verify(ms_item, &restored_msmp).await
+            {
                 // If the UTXO was spent *and* its membership proof is invalid
                 // after attempting to resync, then that expenditure must still
                 // be canonical.
@@ -1329,9 +1375,7 @@ impl GlobalState {
                 // So instead, we use the information that the UTXO was spent
                 // only for suppressing the following log message, which would
                 // be rather noisy otherwise.
-                if monitored_utxo.spent_in_block.is_none() {
-                    warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", aocl_leaf_index);
-                }
+                warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", aocl_leaf_index);
                 continue;
             }
 
@@ -1672,7 +1716,7 @@ impl GlobalState {
     ///
     /// Returns a list of update-jobs that should be
     /// performed by this client.
-    pub(crate) async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
+    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
         self.set_new_tip_internal(new_block).await
     }
 
@@ -1702,7 +1746,7 @@ impl GlobalState {
     async fn set_new_tip_internal(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
-        // Apply the updates
+        // Update archival state
         self.chain
             .archival_state_mut()
             .write_block_as_tip(&new_block)
@@ -1719,11 +1763,20 @@ impl GlobalState {
             .update_mutator_set(&new_block)
             .await?;
 
-        // Get parent of tip for mutator-set data needed for various updates. Parent of the
-        // stored block will always exist since all blocks except the genesis block have a
-        // parent, and the genesis block is considered code, not data, so the genesis block
-        // will never be changed or updated through this method.
-        let tip_parent = self
+        *self.chain.light_state_mut() = std::sync::Arc::new(new_block.clone());
+
+        // Update mempool with UTXOs from this block. This is done by
+        // removing all transaction that became invalid/was mined by this
+        // block. Also returns the list of update-jobs that should be
+        // performed by this client.
+        let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_block)?;
+
+        // Get parent of tip for mutator-set data needed for wallet update.
+        // Parent of the stored block will always exist since all blocks except
+        // the genesis block have a parent, and the genesis block is considered
+        // code, not data, so the genesis block will never be changed or updated
+        // through this method.
+        let parent = self
             .chain
             .archival_state()
             .get_tip_parent()
@@ -1732,30 +1785,56 @@ impl GlobalState {
 
         // Sanity check that must always be true for a valid block
         assert_eq!(
-            tip_parent.hash(),
+            parent.hash(),
             new_block.header().prev_block_digest,
             "Tip parent has must match indicated parent hash"
         );
-        let previous_ms_accumulator = tip_parent
+
+        // update wallet state with relevant UTXOs from this block. If we can
+        // avoid it, we don't maintain the membership proofs in the wallet
+        // since this is very slow. It's faster to read them from the archival
+        // mutator set that we already updated above.
+        let previous_ms_accumulator = parent
             .mutator_set_accumulator_after()
             .expect("block from archival state must have mutator set after")
             .clone();
 
-        // Update mempool with UTXOs from this block. This is done by
-        // removing all transaction that became invalid/was mined by this
-        // block. Also returns the list of update-jobs that should be
-        // performed by this client.
-        let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_block)?;
-
-        // update wallet state with relevant UTXOs from this block``
-        self.wallet_state
-            .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
+        let maintain_mps_in_wallet = {
+            #[cfg(not(test))]
+            {
+                false
+            }
+            #[cfg(test)]
+            {
+                !self
+                    .chain
+                    .archival_state()
+                    .genesis_block
+                    .header()
+                    .height
+                    .is_genesis()
+                    || self.force_wallet_membership_proof_maintance
+            }
+        };
+        let received_utxos = self
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &previous_ms_accumulator,
+                &new_block,
+                maintain_mps_in_wallet,
+            )
             .await?;
+
+        // Get new membership proofs from mutator set accumulator, in case
+        // wallet didn't set these from block data.
+        if !maintain_mps_in_wallet {
+            self.restore_monitored_utxos_from_archival_mutator_set(Some(received_utxos))
+                .await;
+        }
+
         self.wallet_state
             .handle_mempool_events(mempool_events)
             .await;
-
-        *self.chain.light_state_mut() = std::sync::Arc::new(new_block);
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip. Also reset set of exported block proposals.
@@ -1783,7 +1862,7 @@ impl GlobalState {
 
         // do we have an archival mutator set?
         if self.chain.is_archival_node() {
-            self.restore_monitored_utxos_from_archival_mutator_set()
+            self.restore_monitored_utxos_from_archival_mutator_set(None)
                 .await;
             return Ok(());
         }
@@ -2239,6 +2318,13 @@ mod tests {
     use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+    impl GlobalStateLock {
+        async fn force_wallet_membership_proof_maintance(&mut self) {
+            self.lock_mut(|x| x.force_wallet_membership_proof_maintance = true)
+                .await;
+        }
+    }
 
     mod handshake {
 
@@ -2726,7 +2812,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set()
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 };
@@ -2810,7 +2896,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set()
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 }
@@ -3038,6 +3124,8 @@ mod tests {
                     cli_args::Args::default_with_network(network),
                 )
                 .await;
+                alice.force_wallet_membership_proof_maintance().await;
+
                 let mut alice = alice.lock_guard_mut().await;
                 let alice_key = alice
                     .wallet_state
@@ -3159,7 +3247,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set()
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 };
@@ -3217,7 +3305,7 @@ mod tests {
                         .unwrap(),
                     RestoreMsMpMethod::ArchivalMutatorSet => {
                         alice
-                            .restore_monitored_utxos_from_archival_mutator_set()
+                            .restore_monitored_utxos_from_archival_mutator_set(None)
                             .await
                     }
                 };

@@ -55,7 +55,7 @@ pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
 ///
 /// all file operations are async, or async-friendly.
 ///       see <https://github.com/Neptune-Crypto/neptune-core/issues/75>
-pub(crate) struct ArchivalState {
+pub struct ArchivalState {
     data_dir: DataDirectory,
 
     /// maps block index key to block index value where key/val pairs can be:
@@ -72,7 +72,7 @@ pub(crate) struct ArchivalState {
 
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker task.
-    genesis_block: Box<Block>,
+    pub(super) genesis_block: Box<Block>,
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
@@ -1173,7 +1173,7 @@ impl ArchivalState {
     /// assumed to be valid. The given `new_block` is also assumed to be valid.
     /// This function will return an error if the new block does not have a
     /// mutator set update.
-    pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+    pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         #[cfg(test)]
         {
             // In tests you're allowed to set a genesis block with a height

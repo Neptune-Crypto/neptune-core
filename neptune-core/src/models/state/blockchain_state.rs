@@ -55,7 +55,7 @@ impl BlockchainState {
     ///
     /// panics if called by a light node.
     #[inline]
-    pub(crate) fn archival_state_mut(&mut self) -> &mut ArchivalState {
+    pub fn archival_state_mut(&mut self) -> &mut ArchivalState {
         match self {
             Self::Archival(bac) => &mut bac.archival_state,
             Self::Light(_) => panic!("archival_state not available in LightState mode"),

@@ -2,7 +2,7 @@ use divan::Bencher;
 use neptune_cash::api::export::KeyType;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
-use neptune_cash::bench_helpers::devops_wallet_state_genesis;
+use neptune_cash::bench_helpers::devops_global_state_genesis;
 use neptune_cash::bench_helpers::next_block_incoming_utxos;
 use neptune_cash::models::blockchain::block::Block;
 
@@ -14,7 +14,6 @@ mod resync_membership_proofs {
     use super::*;
 
     mod sync_200_msmps_over_10_blocks {
-        use neptune_cash::bench_helpers::devops_global_state_genesis;
 
         use super::*;
 
@@ -107,67 +106,86 @@ mod resync_membership_proofs {
 mod maintain_membership_proofs {
     use super::*;
 
-    /// Maintain 100 membership proofs, while receiving an additional 100 UTXOs.
-    mod maintain_100_100 {
+    /// Maintain 400 membership proofs, while receiving an additional 10 UTXOs.
+    mod maintain_400_10 {
         use super::*;
 
-        fn update_wallet_with_block2(bencher: Bencher) {
+        fn update_wallet_with_block2(bencher: Bencher, maintain_msmps_from_block_data: bool) {
+            const NUM_UTXOS_MAINTAINED: usize = 400;
+            const NUM_NEW_UTXOS: usize = 10;
             let rt = tokio::runtime::Runtime::new().unwrap();
             let network = Network::Main;
-            let mut wallet_state = rt.block_on(devops_wallet_state_genesis(Network::Main));
+            let mut global_state_lock = rt.block_on(devops_global_state_genesis(Network::Main));
+            let mut global_state = rt.block_on(global_state_lock.lock_guard_mut());
 
             let genesis = Block::genesis(network);
             let own_address = rt
-                .block_on(wallet_state.next_unused_spending_key(KeyType::Generation))
+                .block_on(
+                    global_state
+                        .wallet_state
+                        .next_unused_spending_key(KeyType::Generation),
+                )
                 .to_address();
             let block1_time = Network::Main.launch_date() + Timestamp::months(7);
             let block1 = rt.block_on(next_block_incoming_utxos(
                 &genesis,
                 own_address.clone(),
-                100,
-                &wallet_state,
+                NUM_UTXOS_MAINTAINED,
+                &global_state.wallet_state,
                 block1_time,
                 network,
             ));
 
-            rt.block_on(async {
-                wallet_state
-                    .update_wallet_state_with_new_block(
-                        &genesis.mutator_set_accumulator_after().unwrap(),
-                        &block1,
-                    )
-                    .await
-                    .unwrap()
-            });
+            rt.block_on(global_state.set_new_tip(block1.clone()))
+                .unwrap();
 
             let block2_time = block1_time + Timestamp::hours(1);
             let block2 = rt.block_on(next_block_incoming_utxos(
                 &block1,
                 own_address,
-                100,
-                &wallet_state,
+                NUM_NEW_UTXOS,
+                &global_state.wallet_state,
                 block2_time,
                 network,
             ));
 
-            // Benchmark the receival of 100 UTXOs while already managing 100
-            // UTXOs in the wallet.
+            // update the mutator set with the UTXOs from this block
+            rt.block_on(
+                global_state
+                    .chain
+                    .archival_state_mut()
+                    .update_mutator_set(&block2),
+            )
+            .unwrap();
+            *global_state.chain.light_state_mut() = std::sync::Arc::new(block2.clone());
+
             bencher.bench_local(|| {
                 rt.block_on(async {
-                    wallet_state
+                    let recovery_data = global_state
+                        .wallet_state
                         .update_wallet_state_with_new_block(
                             &block1.mutator_set_accumulator_after().unwrap(),
                             &block2,
+                            maintain_msmps_from_block_data,
                         )
                         .await
-                        .unwrap()
+                        .unwrap();
+
+                    global_state
+                        .restore_monitored_utxos_from_archival_mutator_set(Some(recovery_data))
+                        .await
                 });
             });
         }
 
         #[divan::bench(sample_count = 10)]
-        fn apply_block2(bencher: Bencher) {
-            update_wallet_with_block2(bencher);
+        fn apply_block2_maintain_msmps(bencher: Bencher) {
+            update_wallet_with_block2(bencher, true);
+        }
+
+        #[divan::bench(sample_count = 10)]
+        fn apply_block2_no_maintain_msmps(bencher: Bencher) {
+            update_wallet_with_block2(bencher, false);
         }
     }
 }
