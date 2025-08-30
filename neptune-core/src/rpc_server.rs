@@ -3517,7 +3517,7 @@ impl RPC for NeptuneRPCServer {
 
     // Documented in trait. Do not add doc-comment.
     async fn set_tip(
-        mut self,
+        self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
         indicated_tip: Digest,
@@ -3525,13 +3525,13 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        // Set tip.
-        self.state
-            .lock_guard_mut()
+        // Set tip asynchronously -- avoid RPC timeout.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::SetTipToStoredBlock(indicated_tip))
             .await
-            .set_tip_to_stored_block(indicated_tip)
-            .await
-            .map_err(|e| RpcError::Failed(format!("failed to set tip to stored block: {e}")))
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.

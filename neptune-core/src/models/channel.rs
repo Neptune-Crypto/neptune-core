@@ -236,6 +236,7 @@ pub enum RPCServerToMain {
     Shutdown,
     PauseMiner,
     RestartMiner,
+    SetTipToStoredBlock(Digest),
 }
 
 pub trait Cancelable: Send + Sync {

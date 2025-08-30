@@ -1931,6 +1931,21 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
+            RPCServerToMain::SetTipToStoredBlock(digest) => {
+                info!("setting tip to {digest:x}");
+
+                if let Err(e) = self
+                    .global_state_lock()
+                    .lock_guard_mut()
+                    .await
+                    .set_tip_to_stored_block(digest)
+                    .await
+                {
+                    error!("Failed to set tip to {digest:x}: {e}");
+                }
+
+                Ok(false)
+            }
             RPCServerToMain::BroadcastBlockProposal => {
                 let pmsg = self
                     .global_state_lock
