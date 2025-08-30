@@ -560,7 +560,6 @@ pub mod neptune_arbitrary {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use std::cmp::max;
-    use std::ops::Mul;
     use std::panic::catch_unwind;
 
     use get_size2::GetSize;
@@ -1089,18 +1088,6 @@ pub(crate) mod tests {
             }
             difference_threshold = max(difference_threshold, NativeCurrencyAmount::from_nau(1));
             prop_assert!(difference < difference_threshold);
-        }
-    }
-
-    impl Mul<isize> for NativeCurrencyAmount {
-        type Output = Self;
-
-        /// Panics on overflow. (Or, technically, if `isize` is a bigger type
-        /// than `i128` and casting from the former to the latter fails.)
-        fn mul(self, rhs: isize) -> Self::Output {
-            let cofactor = i128::try_from(rhs).unwrap();
-            let new_internal = self.0.checked_mul(cofactor).unwrap();
-            Self(new_internal)
         }
     }
 }

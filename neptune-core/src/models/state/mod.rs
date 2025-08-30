@@ -2832,7 +2832,7 @@ mod tests {
             alice_gsl
                 .wallet_state
                 .confirmed_available_balance(&wallet_status_1, timestamp_1),
-            LIQUID_BLOCK_SUBSIDY * 3
+            LIQUID_BLOCK_SUBSIDY.scalar_mul(3)
         );
 
         // prepare two branches with 3*|a| = |b|
@@ -2856,7 +2856,7 @@ mod tests {
         let alice_balance_2 = alice_gsl
             .wallet_state
             .confirmed_available_balance(&wallet_status_2, timestamp_2);
-        let expected_balance_2 = LIQUID_BLOCK_SUBSIDY * 3;
+        let expected_balance_2 = LIQUID_BLOCK_SUBSIDY.scalar_mul(3);
         assert_eq!(
             expected_balance_2, alice_balance_2,
             "wallet balance: {alice_balance_2}\nexpected: {expected_balance_2}",
@@ -2883,7 +2883,7 @@ mod tests {
         let wallet_balance_3 = alice_gsl
             .wallet_state
             .confirmed_available_balance(&wallet_status_3, timestamp_3);
-        let expected_balance_3 = (LIQUID_BLOCK_SUBSIDY * 3)
+        let expected_balance_3 = (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
             .checked_sub(&NativeCurrencyAmount::coins(10))
             .unwrap();
         assert_eq!(
@@ -2912,7 +2912,7 @@ mod tests {
             alice_gsl
                 .wallet_state
                 .confirmed_available_balance(&wallet_status_4, timestamp_4),
-            (LIQUID_BLOCK_SUBSIDY * 3)
+            (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
                 .checked_sub(&NativeCurrencyAmount::coins(10))
                 .unwrap()
         );
@@ -2942,7 +2942,7 @@ mod tests {
             .confirmed_available_balance(&wallet_status_5, timestamp_5);
         assert_eq!(
             wallet_balance_5,
-            LIQUID_BLOCK_SUBSIDY * 3,
+            LIQUID_BLOCK_SUBSIDY.scalar_mul(3),
             "wallet balance: {wallet_balance_5}"
         );
 
@@ -2967,7 +2967,7 @@ mod tests {
             alice_gsl
                 .wallet_state
                 .confirmed_available_balance(&wallet_status_6, timestamp_6),
-            (LIQUID_BLOCK_SUBSIDY * 3)
+            (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
                 .checked_sub(&NativeCurrencyAmount::coins(5))
                 .unwrap()
         );
@@ -2987,7 +2987,7 @@ mod tests {
             alice_gsl
                 .wallet_state
                 .confirmed_available_balance(&wallet_status_7, timestamp_7),
-            (LIQUID_BLOCK_SUBSIDY * 3)
+            (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
                 .checked_sub(&NativeCurrencyAmount::coins(10))
                 .unwrap()
         );
