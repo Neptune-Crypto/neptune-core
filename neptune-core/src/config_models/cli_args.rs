@@ -83,6 +83,12 @@ pub struct Args {
     )]
     pub(crate) peer_tolerance: u16,
 
+    /// Only connect to the peers specified by --peer.
+    /// When this flag is set, peer discovery is disabled and
+    /// incoming connections from unlisted peers are rejected.
+    #[arg(long)]
+    pub restrict_peers_to_list: bool,
+
     /// Maximum number of peers to accept connections from.
     ///
     /// Will not prevent outgoing connections made with `--peers`.
