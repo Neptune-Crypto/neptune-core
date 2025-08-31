@@ -1,5 +1,6 @@
 pub(crate) mod composer_parameters;
 use std::cmp::max;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,7 +9,9 @@ use anyhow::Result;
 use block_header::BlockHeader;
 use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
+use num_bigint::BigUint;
 use num_traits::CheckedSub;
+use num_traits::ToPrimitive;
 use num_traits::Zero;
 use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
@@ -38,6 +41,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::pow::GuesserBuffer;
 use crate::models::blockchain::block::pow::Pow;
 use crate::models::blockchain::block::*;
@@ -131,31 +135,165 @@ pub(crate) async fn guess_nonce(
     sender: oneshot::Sender<NewBlockFound>,
     guessing_configuration: GuessingConfiguration,
 ) {
-    // We wrap mining loop with spawn_blocking() because it is a
-    // very lengthy and CPU intensive task, which should execute
-    // on its own thread(s).
-    //
-    // Instead of spawn_blocking(), we could start a native OS
-    // thread which avoids using one from tokio's threadpool
-    // but that doesn't seem a concern for neptune-core.
-    // Also we would need to use a oneshot channel to avoid
-    // blocking while joining the thread.
-    // see: https://ryhl.io/blog/async-what-is-blocking/
-    //
-    // note: there is no async code inside the mining loop.
-    tokio::task::spawn_blocking(move || {
+    let hash_counter = Arc::new(AtomicU64::new(0));
+    let logger_hash_counter = hash_counter.clone();
+    let (difficulty_tx, difficulty_rx) = tokio::sync::oneshot::channel::<(Difficulty, Duration)>();
+
+    let guess_handle = tokio::task::spawn_blocking(move || {
         guess_worker(
             network,
             block,
-            previous_block_header,
+            previous_block_header, // The original header is moved here
             sender,
             guessing_configuration,
             Timestamp::now(),
             None,
+            hash_counter,
+            Some(difficulty_tx),
         )
+    });
+
+    // Get values needed for logging estimates
+    let (new_difficulty, preprocessing_time) = match difficulty_rx.await {
+        Ok(d) => d,
+        Err(_) => {
+            // Receiver error means sender was dropped. Guesser might have exited.
+            warn!("Guess worker exited before sending difficulty. No hash rate logging.");
+            guess_handle.await.unwrap();
+            return;
+        }
+    };
+
+    // Spawn the logging task
+    let logger_task = spawn_hash_rate_logger(
+        network,
+        logger_hash_counter,
+        new_difficulty,
+        preprocessing_time,
+    );
+
+    guess_handle.await.unwrap();
+
+    // Stop the logger when guessing is done
+    logger_task.abort();
+}
+
+/// Spawns a background task to periodically log the hash rate and time-to-find estimates.
+/// Spawns a background task to periodically log the hash rate and time-to-find estimates.
+fn spawn_hash_rate_logger(
+    network: Network,
+    logger_hash_counter: Arc<AtomicU64>,
+    new_difficulty: Difficulty,
+    preprocessing_time: Duration,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        const LOG_INTERVAL_SECS: u64 = 30;
+        let mut interval = time::interval(Duration::from_secs(LOG_INTERVAL_SECS));
+        interval.tick().await; // Don't log immediately
+
+        // Add a flag to skip the first measurement. This prevents reporting a
+        // misleadingly low hash rate from the first, partial interval that
+        // occurs after the `mem init` preprocessing step.
+        let mut first_report_skipped = false;
+
+        loop {
+            interval.tick().await;
+            let count = logger_hash_counter.swap(0, Ordering::Relaxed);
+            if count == 0 {
+                continue;
+            }
+            if !first_report_skipped {
+                first_report_skipped = true;
+                continue;
+            }
+            // This is your peak hash rate, measured only during the guessing phase.
+            let peak_rate = count as f64 / LOG_INTERVAL_SECS as f64;
+
+            // --- Estimate to Guess a single Block Without any Competition ---
+            // This estimate correctly uses the *peak rate* because it assumes
+            // no competition and therefore no repeated mem init downtime.
+            let biguint_difficulty: BigUint = new_difficulty.into();
+            let difficulty_f64 = biguint_difficulty.to_f64().unwrap_or(f64::INFINITY);
+            let guessing_time_secs = if peak_rate > 0.0 {
+                difficulty_f64 / peak_rate
+            } else {
+                f64::INFINITY
+            };
+            let not_competing_total_time_secs =
+                preprocessing_time.as_secs_f64() + guessing_time_secs;
+
+            // Estimate to Find a Block With Competition
+            let target_interval_secs = network.target_block_interval().to_millis() as f64 / 1000.0;
+
+            // 1. Calculate your long-term *average* hash rate.
+            // This accounts for the mem init downtime you experience for every
+            // block found by the network, giving a more realistic measure of your output.
+            let uptime_ratio = ((target_interval_secs - preprocessing_time.as_secs_f64())
+                / target_interval_secs)
+                .max(0.0);
+            let average_rate = peak_rate * uptime_ratio;
+
+            // 2. Estimate the total network hash rate
+            let network_hash_rate = if target_interval_secs > 0.0 {
+                difficulty_f64 / target_interval_secs
+            } else {
+                f64::INFINITY
+            };
+
+            // 3. Calculate the final estimate using your *average rate*.
+            let competing_time_secs =
+                if average_rate > 0.0 && network_hash_rate.is_finite() && network_hash_rate > 0.0 {
+                    target_interval_secs / (average_rate / network_hash_rate)
+                } else {
+                    f64::INFINITY
+                };
+
+            // --- Formatting using neptune's `Timestamp` type ---
+            let preprocessing_timestamp =
+                Timestamp::millis(preprocessing_time.as_millis().try_into().unwrap());
+            let not_competing_duration =
+                Timestamp::millis((not_competing_total_time_secs * 1000.0) as u64);
+            let guess_duration = Timestamp::millis((guessing_time_secs * 1000.0) as u64);
+            let competing_duration = Timestamp::millis((competing_time_secs * 1000.0) as u64);
+
+            // note: the #est# makes it easy to grep for these multi-line estimates in the log.
+            info!(
+                r#"
+#est# Mining stats:
+#est#  Your hash rate:     {}
+#est#  Network hash rate:  {}
+#est#  Estimated time to find a block:
+#est#    with competition: {}
+#est#    in isolation:     {}
+#est#      mem init:       {}
+#est#      guessing:       {}
+"#,
+                format_hash_rate(peak_rate),
+                format_hash_rate(network_hash_rate),
+                competing_duration.format_human_duration(),
+                not_competing_duration.format_human_duration(),
+                preprocessing_timestamp.format_human_duration(),
+                guess_duration.format_human_duration(),
+            );
+        }
     })
-    .await
-    .unwrap()
+}
+
+/// Formats a hash rate into a human-readable string with appropriate units (H/s, kH/s, MH/s, etc.).
+fn format_hash_rate(rate: f64) -> String {
+    if rate.is_infinite() {
+        "inf".to_string()
+    } else if rate < 1_000.0 {
+        format!("{:.2} H/s", rate)
+    } else if rate < 1_000_000.0 {
+        format!("{:.2} kH/s", rate / 1_000.0)
+    } else if rate < 1_000_000_000.0 {
+        format!("{:.2} MH/s", rate / 1_000_000.0)
+    } else if rate < 1_000_000_000_000.0 {
+        format!("{:.2} GH/s", rate / 1_000_000_000.0)
+    } else {
+        format!("{:.2} TH/s", rate / 1_000_000_000_000.0)
+    }
 }
 
 /// Guess the nonce in parallel until success.
@@ -167,6 +305,9 @@ fn guess_worker(
     guessing_configuration: GuessingConfiguration,
     now: Timestamp,
     override_target_block_interval: Option<Timestamp>,
+    hash_counter: Arc<AtomicU64>,
+    // CHANGED: The channel now sends a tuple containing the difficulty and the preprocessing duration
+    difficulty_tx: Option<tokio::sync::oneshot::Sender<(Difficulty, Duration)>>,
 ) {
     let target_block_interval =
         override_target_block_interval.unwrap_or(network.target_block_interval());
@@ -230,12 +371,30 @@ fn guess_worker(
     block.set_header_guesser_address(guesser_address);
 
     info!("Start: guess preprocessing.");
+    // NEW: Time the preprocessing step
+    let start_preprocessing = std::time::Instant::now();
     let guesser_buffer = block.guess_preprocess(Some(&sender), Some(threads_to_use));
+    let preprocessing_time = start_preprocessing.elapsed();
+
+    // CHANGED: Send the tuple back to the logger
+    if let Some(tx) = difficulty_tx {
+        if tx.send((new_difficulty, preprocessing_time)).is_err() {
+            // This can happen if the receiver is dropped, e.g. guess_nonce exits early.
+            // In that case, we should probably stop guessing.
+            info!("Difficulty receiver dropped, stopping guess_worker.");
+            return;
+        }
+    }
+
     if sender.is_canceled() {
         info!("Guess preprocessing canceled. Stopping guessing task.");
         return;
     }
-    info!("Completed: guess preprocessing.");
+    // NEW: Log the measured preprocessing time
+    info!(
+        "Completed: guess preprocessing. Took {:.2}s.",
+        preprocessing_time.as_secs_f32()
+    );
 
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
@@ -244,7 +403,7 @@ fn guess_worker(
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(rand::rng, |rng, _i| {
-                guess_nonce_iteration(&guesser_buffer, threshold, rng, &sender)
+                guess_nonce_iteration(&guesser_buffer, threshold, rng, &sender, &hash_counter)
             })
             .find_any(|r| !r.block_not_found())
             .unwrap()
@@ -312,7 +471,9 @@ fn guess_nonce_iteration(
     threshold: Digest,
     rng: &mut rand::rngs::ThreadRng,
     sender: &oneshot::Sender<NewBlockFound>,
+    hash_counter: &Arc<AtomicU64>,
 ) -> GuessNonceResult {
+    hash_counter.fetch_add(1, Ordering::Relaxed);
     let nonce: Digest = rng.random();
 
     // Check every N guesses if task has been cancelled.
@@ -1154,10 +1315,17 @@ pub(crate) mod tests {
 
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let guesser_buffer = block.guess_preprocess(Some(&worker_task_tx), None);
+        let hash_counter = Arc::new(AtomicU64::new(0));
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::rng, |prng, _i| {
-                    guess_nonce_iteration(&guesser_buffer, threshold, prng, &worker_task_tx);
+                    guess_nonce_iteration(
+                        &guesser_buffer,
+                        threshold,
+                        prng,
+                        &worker_task_tx,
+                        &hash_counter,
+                    );
                 })
                 .count();
         drop(worker_task_rx);
@@ -1596,6 +1764,8 @@ pub(crate) mod tests {
             },
             Timestamp::now(),
             None,
+            Arc::new(AtomicU64::new(0)),
+            None,
         );
 
         let mined_block_info = worker_task_rx.await.unwrap();
@@ -1678,6 +1848,8 @@ pub(crate) mod tests {
                 address: guesser_key.to_address().into(),
             },
             Timestamp::now(),
+            None,
+            Arc::new(AtomicU64::new(0)),
             None,
         );
 
@@ -1830,6 +2002,8 @@ pub(crate) mod tests {
                 },
                 Timestamp::now(),
                 Some(target_block_interval),
+                Arc::new(AtomicU64::new(0)),
+                None,
             );
 
             let mined_block_info = worker_task_rx.await.unwrap();
@@ -2437,6 +2611,8 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                 },
                 block_time,
+                None,
+                Arc::new(AtomicU64::new(0)),
                 None,
             );
 
