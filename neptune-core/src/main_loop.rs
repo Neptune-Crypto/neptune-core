@@ -1656,9 +1656,40 @@ impl MainLoopHandler {
 
                 // Handle incoming connections from peer
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
+
+                    // reject if --restrict-peers-to-list and incoming peer is not in list
+                    let cli_args = self.global_state_lock.cli();
+                    if cli_args.restrict_peers_to_list {
+                        let allowed_ips: Vec<std::net::IpAddr> =
+                            cli_args.peers.iter().map(|p| p.ip()).collect();
+
+                        // Convert the incoming IP to a canonical IPv4 if it's an IPv4-mapped IPv6 address
+                        let connecting_ip = peer_address.ip();
+                        let is_allowed = match connecting_ip {
+                            std::net::IpAddr::V6(v6) => {
+                                if let Some(v4) = v6.to_ipv4() {
+                                    // Check if the converted IPv4 is in the list
+                                    allowed_ips.contains(&std::net::IpAddr::V4(v4))
+                                } else {
+                                    // It's a true IPv6 address, check if it's in the list as-is
+                                    allowed_ips.contains(&connecting_ip)
+                                }
+                            }
+                            _ => allowed_ips.contains(&connecting_ip),
+                        };
+
+                        if !is_allowed {
+                            warn!(
+                                "Rejecting incoming connection from unlisted peer {} due to --restrict-peers-to-list",
+                                peer_address
+                            );
+                            continue;
+                        }
+                    }
+
                     // Return early if no incoming connections are accepted. Do
                     // not send application-handshake.
-                    if self.global_state_lock.cli().disallow_all_incoming_peer_connections() {
+                    if cli_args.disallow_all_incoming_peer_connections() {
                         warn!("Got incoming connection despite not accepting any. Ignoring");
                         continue;
                     }
@@ -1728,16 +1759,24 @@ impl MainLoopHandler {
                     // more peers if needed.
                     debug!("Timer: peer discovery job");
 
-                    // this check makes regtest mode behave in a local, controlled way
-                    // because no regtest nodes attempt to discover eachother, so the only
-                    // peers are those that are manually added.
-                    // see: https://github.com/Neptune-Crypto/neptune-core/issues/539#issuecomment-2764701027
-                    if self.global_state_lock.cli().network.performs_peer_discovery() {
+                    let perform_discovery = if !self.global_state_lock.cli().network.performs_peer_discovery() {
+                        // this makes regtest mode behave in a local, controlled way
+                        // because no regtest nodes attempt to discover eachother, so the only
+                        // peers are those that are manually added.
+                        // see: https://github.com/Neptune-Crypto/neptune-core/issues/539#issuecomment-2764701027
+                        debug!("peer discovery disabled for network {}", self.global_state_lock.cli().network);
+                        false
+                    } else if self.global_state_lock.cli().restrict_peers_to_list {
+                        debug!("peer discovery disabled due to --restrict-peers-to-list");
+                        false
+                    } else {
+                        true
+                    };
+
+                    if perform_discovery {
                         self.prune_peers().await?;
                         self.reconnect(&mut main_loop_state).await?;
                         self.discover_peers(&mut main_loop_state).await?;
-                    } else {
-                        debug!("peer discovery disabled for network {}", self.global_state_lock.cli().network);
                     }
                 }
 
