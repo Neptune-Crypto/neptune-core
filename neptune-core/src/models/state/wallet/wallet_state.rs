@@ -2808,9 +2808,10 @@ pub(crate) mod tests {
         let network = Network::Main;
         let bob_wallet_secret = WalletEntropy::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+
         let mut bob_global_lock = mock_genesis_global_state(
             0,
-            bob_wallet_secret,
+            bob_wallet_secret.clone(),
             cli_args::Args::default_with_network(network),
         )
         .await;
@@ -2830,12 +2831,11 @@ pub(crate) mod tests {
             "Monitored UTXO list must be empty at init"
         );
 
-        let maintain_mps = true;
         bob.wallet_state
             .update_wallet_state_with_new_block(
                 &genesis_block.mutator_set_accumulator_after().unwrap(),
                 &block1,
-                maintain_mps,
+                true,
             )
             .await
             .unwrap();
@@ -2853,34 +2853,39 @@ pub(crate) mod tests {
             &bob.wallet_state.read_utxo_ms_recovery_data().await.unwrap()[0];
 
         // Apply block again and verify that nothing new is stored.
-        bob.wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.mutator_set_accumulator_after().unwrap(),
-                &block1,
-                maintain_mps,
-            )
-            .await
-            .unwrap();
-        assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
-        assert_eq!(
-            2,
+        for wallet_maintains_mp in [false, true] {
             bob.wallet_state
-                .read_utxo_ms_recovery_data()
+                .update_wallet_state_with_new_block(
+                    &genesis_block.mutator_set_accumulator_after().unwrap(),
+                    &block1,
+                    wallet_maintains_mp,
+                )
                 .await
-                .unwrap()
-                .len(),
-        );
+                .unwrap();
+            assert_eq!(2, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+            assert_eq!(
+                2,
+                bob.wallet_state
+                    .read_utxo_ms_recovery_data()
+                    .await
+                    .unwrap()
+                    .len(),
+            );
 
-        let new_mutxo = bob.wallet_state.wallet_db.monitored_utxos().get(0).await;
-        let new_recovery_entry = &bob.wallet_state.read_utxo_ms_recovery_data().await.unwrap()[0];
+            let new_mutxo = bob.wallet_state.wallet_db.monitored_utxos().get(0).await;
+            let new_recovery_entry =
+                &bob.wallet_state.read_utxo_ms_recovery_data().await.unwrap()[0];
 
-        assert_eq!(
-            original_mutxo, new_mutxo,
-            "Adding same block twice may not mutate MUTXOs"
-        );
-        assert_eq!(original_recovery_entry, new_recovery_entry);
+            assert_eq!(
+                original_mutxo, new_mutxo,
+                "Adding same block twice may not mutate MUTXOs"
+            );
+            assert_eq!(original_recovery_entry, new_recovery_entry);
 
-        assert!(wallet_state_has_all_valid_mps(&bob.wallet_state, &block1).await);
+            if wallet_maintains_mp {
+                assert!(wallet_state_has_all_valid_mps(&bob.wallet_state, &block1).await);
+            }
+        }
     }
 
     #[apply(shared_tokio_runtime)]
