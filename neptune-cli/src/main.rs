@@ -317,6 +317,13 @@ enum Command {
     /// mempool.
     ClearMempool,
 
+    /// pause processing of new transaction data. Prevents new blocks, new
+    /// block proposals, and new transactions from being received.
+    Freeze,
+
+    /// If state updates have been paused, resumes them. Otherwise does nothing.
+    Unfreeze,
+
     /// pause mining
     PauseMiner,
 
@@ -1249,6 +1256,14 @@ async fn main() -> Result<()> {
         Command::ClearMempool => {
             println!("Sending command to delete all commands from the mempool.");
             client.clear_mempool(ctx, token).await??;
+        }
+        Command::Freeze => {
+            println!("Sending command to pause state updates.");
+            client.freeze(ctx, token).await??;
+        }
+        Command::Unfreeze => {
+            println!("Sending command to resume state updates.");
+            client.unfreeze(ctx, token).await??;
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");
