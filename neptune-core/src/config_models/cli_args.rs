@@ -186,6 +186,20 @@ pub struct Args {
     #[clap(long)]
     pub(crate) secret_compositions: bool,
 
+    /// If set, node will only accept block proposals from these IP addresses.
+    ///
+    /// Multiple IP address can be set in which case the node will accept
+    /// block proposals from any node connected from an IP in this list. Apart
+    /// from ignoring all other block proposals, this argument does not change
+    /// the proposal-selection behavior, meaning that the node will still pick
+    /// the most favorable block proposal in terms of guesser rewards, as long
+    /// as they are shared from any of these IPs.
+    ///
+    /// Example: `--whitelisted-composer=8.8.8.8 --whitelisted-composer=8.8.4.4`
+    ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
+    #[clap(long = "whitelisted-composer")]
+    pub(crate) whitelisted_composers: Vec<IpAddr>,
+
     /// Regulates the fraction of the block subsidy that a composer sends to the
     /// guesser.
     /// Value must be between 0 and 1.
@@ -579,6 +593,11 @@ impl Args {
                 Self::estimate_proving_capability()
             }
         })
+    }
+
+    /// Check if block proposal should be accepted from this IP address.
+    pub(crate) fn accept_block_proposal_from(&self, ip_address: &IpAddr) -> bool {
+        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(ip_address)
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {

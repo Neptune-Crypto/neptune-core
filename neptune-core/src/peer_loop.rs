@@ -1473,6 +1473,15 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
+                if !self
+                    .global_state_lock
+                    .cli()
+                    .accept_block_proposal_from(&self.peer_address.ip())
+                {
+                    debug!("Ignoring proposal notification because they are not whitelisted");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 let verdict = self
                     .global_state_lock
                     .lock_guard()
@@ -1521,6 +1530,16 @@ impl PeerLoopHandler {
             }
             PeerMessage::BlockProposal(new_proposal) => {
                 debug!("Got block proposal from peer.");
+
+                if !self
+                    .global_state_lock
+                    .cli()
+                    .accept_block_proposal_from(&self.peer_address.ip())
+                {
+                    warn!("Got block proposal from unwanted peer");
+                    self.punish(NegativePeerSanction::UnwantedMessage).await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 // Is the proposal valid?
                 // Lock needs to be held here because race conditions: otherwise
