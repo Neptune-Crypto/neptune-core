@@ -59,6 +59,7 @@ use config_models::cli_args;
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
+use itertools::Itertools;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::handshake_data::HandshakeData;
@@ -166,6 +167,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         info!(
             "Triton VM environment variables set to: {}",
             cli_args.triton_vm_env_vars
+        );
+    }
+
+    if !cli_args.whitelisted_composers.is_empty() {
+        info!(
+            "Whitelisted composers: {}",
+            cli_args.whitelisted_composers.iter().join("\n")
         );
     }
 

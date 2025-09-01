@@ -1473,12 +1473,16 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
+                let peer_ip = self.peer_address.ip();
                 if !self
                     .global_state_lock
                     .cli()
-                    .accept_block_proposal_from(&self.peer_address.ip())
+                    .accept_block_proposal_from(&peer_ip)
                 {
-                    debug!("Ignoring proposal notification because they are not whitelisted");
+                    debug!(
+                        "Ignoring proposal notification because they are not whitelisted. \
+                     Peer IP: {peer_ip}"
+                    );
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
