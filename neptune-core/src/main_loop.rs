@@ -993,6 +993,15 @@ impl MainLoopHandler {
             PeerTaskToMain::BlockProposal(block) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::BlockProposal");
 
+                // Relay block proposal notification to peers immediately, before checking favorability.
+                // This allows a composing node to act as a relayer without adopting the proposal itself.
+                //
+                // Notify all peers of the block proposal we just accepted. Do
+                // this regardless of the difference in guesser fee relative to
+                // the previous proposal (as long as it is positive).
+                let pmsg = MainToPeerTask::BlockProposalNotification((&*block).into());
+                self.main_to_peer_broadcast(pmsg);
+
                 debug!("main loop received block proposal from peer loop");
 
                 // Due to race-conditions, we need to verify that this
@@ -1012,8 +1021,12 @@ impl MainLoopHandler {
                             .expect("block received by main loop must have guesser reward"),
                     );
                     if let Err(reject_reason) = verdict {
-                        warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
-                        return Ok(());
+                        if !reject_reason.is_composing() {
+                            warn!(
+                                "main loop got unfavorable block proposal. Reason: {reject_reason}"
+                            );
+                            return Ok(());
+                        }
                     }
 
                     global_state_mut.mining_state.block_proposal =
@@ -1021,12 +1034,6 @@ impl MainLoopHandler {
 
                     global_state_mut.block_proposal_warrants_guess_restart(&block)
                 };
-
-                // Notify all peers of the block proposal we just accepted. Do
-                // this regardless of the difference in guesser fee relative to
-                // the previous proposal (as long as it is positive).
-                let pmsg = MainToPeerTask::BlockProposalNotification((&*block).into());
-                self.main_to_peer_broadcast(pmsg);
 
                 if should_inform_own_miner {
                     if self.global_state_lock.cli().guess {

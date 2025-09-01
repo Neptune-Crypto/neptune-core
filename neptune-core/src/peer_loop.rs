@@ -1486,6 +1486,23 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // if composing, request proposal anyway if we have peers to relay to
+                let should_request_for_relay = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    let is_composing = state.mining_state.mining_status.is_composing();
+                    let has_peers_to_relay_to = state.net.peer_map.len() > 1;
+                    is_composing && has_peers_to_relay_to
+                };
+
+                if should_request_for_relay {
+                    peer.send(PeerMessage::BlockProposalRequest(
+                        BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
+                    ))
+                    .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // this logic is for non-composing nodes, or composing nodes with no one to relay to.
                 let verdict = self
                     .global_state_lock
                     .lock_guard()
@@ -1578,6 +1595,11 @@ impl PeerLoopHandler {
                         {
                             debug!("ignoring new block proposal because the fee is equal to the present one");
                             return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        BlockProposalRejectError::Composing => {
+                            // we are composing, but we still want to relay this msg to peers, so
+                            // we do NOT return.
+                            debug!("ignoring new block proposal because we are composing");
                         }
                         _ => {
                             warn!("Rejecting new block proposal:\n{rejection_reason}");
