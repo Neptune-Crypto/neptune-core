@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
@@ -22,6 +23,7 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
+use crate::config_models::cli_args;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
@@ -73,6 +75,41 @@ fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
         || other_version.major == 0 && other_version.minor == 0
     {
         return own_version == other_version;
+    }
+
+    true
+}
+
+/// Initial check if incoming connection is allowed. Performed prior to the
+/// sending of the handshake.
+pub(crate) fn precheck_incoming_connection_is_allowed(
+    cli: &cli_args::Args,
+    connecting_ip: IpAddr,
+) -> bool {
+    let connecting_ip = match connecting_ip {
+        IpAddr::V4(_) => connecting_ip,
+        IpAddr::V6(v6) => match v6.to_ipv4() {
+            Some(v4) => std::net::IpAddr::V4(v4),
+            None => connecting_ip,
+        },
+    };
+    if cli.restrict_peers_to_list {
+        let allowed_ips: Vec<std::net::IpAddr> = cli.peers.iter().map(|p| p.ip()).collect();
+        let is_allowed = allowed_ips.contains(&connecting_ip);
+        if !is_allowed {
+            debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to --restrict-peers-to-list",);
+            return false;
+        }
+    }
+
+    if cli.ban.contains(&connecting_ip) {
+        debug!("Rejecting incoming connection because it's explicitly banned");
+        return false;
+    }
+
+    if cli.disallow_all_incoming_peer_connections() {
+        debug!("Rejecting incoming connection because all incoming connections are disallowed");
+        return false;
     }
 
     true
@@ -664,6 +701,41 @@ mod tests {
                 assert!(versions_are_compatible(a, b));
             }
         }
+    }
+
+    #[test]
+    fn precheck_incoming_connection_is_allowed_test() {
+        let mut cli = cli_args::Args::default();
+        let socket_address = get_dummy_socket_address(0);
+        assert!(
+            precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
+            "Default behavior: connection allowed"
+        );
+
+        cli.peers.push(socket_address);
+        assert!(
+            precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
+            "Incoming allowed when incoming is specified peer"
+        );
+
+        cli.restrict_peers_to_list = true;
+        assert!(
+            precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
+            "Incoming allowed when restricted to peers list and incoming is specified peer"
+        );
+
+        cli.peers.clear();
+        assert!(
+            !precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
+            "Incoming disallowed when restricted to peers and not peer"
+        );
+
+        cli.restrict_peers_to_list = false;
+        cli.ban.push(socket_address.ip());
+        assert!(
+            !precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
+            "Incoming disallowed when peer is banned via CLI argument"
+        );
     }
 
     #[traced_test]

@@ -30,6 +30,7 @@ use tracing::warn;
 
 use crate::connect_to_peers::answer_peer;
 use crate::connect_to_peers::call_peer;
+use crate::connect_to_peers::precheck_incoming_connection_is_allowed;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
@@ -1656,41 +1657,7 @@ impl MainLoopHandler {
 
                 // Handle incoming connections from peer
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
-
-                    // reject if --restrict-peers-to-list and incoming peer is not in list
-                    let cli_args = self.global_state_lock.cli();
-                    if cli_args.restrict_peers_to_list {
-                        let allowed_ips: Vec<std::net::IpAddr> =
-                            cli_args.peers.iter().map(|p| p.ip()).collect();
-
-                        // Convert the incoming IP to a canonical IPv4 if it's an IPv4-mapped IPv6 address
-                        let connecting_ip = peer_address.ip();
-                        let is_allowed = match connecting_ip {
-                            std::net::IpAddr::V6(v6) => {
-                                if let Some(v4) = v6.to_ipv4() {
-                                    // Check if the converted IPv4 is in the list
-                                    allowed_ips.contains(&std::net::IpAddr::V4(v4))
-                                } else {
-                                    // It's a true IPv6 address, check if it's in the list as-is
-                                    allowed_ips.contains(&connecting_ip)
-                                }
-                            }
-                            _ => allowed_ips.contains(&connecting_ip),
-                        };
-
-                        if !is_allowed {
-                            warn!(
-                                "Rejecting incoming connection from unlisted peer {} due to --restrict-peers-to-list",
-                                peer_address
-                            );
-                            continue;
-                        }
-                    }
-
-                    // Return early if no incoming connections are accepted. Do
-                    // not send application-handshake.
-                    if cli_args.disallow_all_incoming_peer_connections() {
-                        warn!("Got incoming connection despite not accepting any. Ignoring");
+                    if !precheck_incoming_connection_is_allowed(self.global_state_lock.cli(), peer_address.ip()) {
                         continue;
                     }
 

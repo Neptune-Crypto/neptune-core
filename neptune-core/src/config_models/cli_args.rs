@@ -63,7 +63,7 @@ pub struct Args {
     ///
     /// This node can still make outgoing connections to IP address.
     ///
-    /// To do this, see `--peers`.
+    /// To do this, see `--peer`.
     ///
     /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
     #[clap(long, value_name = "IP")]
@@ -84,14 +84,14 @@ pub struct Args {
     pub(crate) peer_tolerance: u16,
 
     /// Only connect to the peers specified by --peer.
-    /// When this flag is set, peer discovery is disabled and
-    /// incoming connections from unlisted peers are rejected.
+    /// When this flag is set, peer discovery is disabled and incoming
+    /// connections from unlisted peers are rejected.
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
     /// Maximum number of peers to accept connections from.
     ///
-    /// Will not prevent outgoing connections made with `--peers`.
+    /// Will not prevent outgoing connections made with `--peer`.
     /// Set this value to 0 to refuse all incoming connections.
     #[clap(
         long,

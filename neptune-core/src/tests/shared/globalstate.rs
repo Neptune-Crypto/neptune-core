@@ -187,7 +187,7 @@ pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
-    std::net::SocketAddr::from_str(&format!("127.0.0.{}:8080", count)).unwrap()
+    std::net::SocketAddr::from_str(&format!("113.151.22.{}:8080", count)).unwrap()
 }
 
 /// Get a dummy-peer representing an incoming connection.

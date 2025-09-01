@@ -2052,12 +2052,18 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn test_peer_loop_peer_list() {
         let network = Network::Main;
-        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 2, cli_args::Args::default())
-                .await
-                .unwrap();
 
-        let mut peer_infos = state_lock
+        let num_already_connected_peers = 2;
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
+            get_test_genesis_setup(
+                network,
+                num_already_connected_peers,
+                cli_args::Args::default(),
+            )
+            .await
+            .unwrap();
+
+        let peer_infos = state_lock
             .lock_guard()
             .await
             .net
@@ -2065,22 +2071,21 @@ mod tests {
             .clone()
             .into_values()
             .collect::<Vec<_>>();
-        peer_infos.sort_by_cached_key(|x| x.connected_address());
-        let (peer_address0, instance_id0) = (
-            peer_infos[0].connected_address(),
-            peer_infos[0].instance_id(),
-        );
-        let (peer_address1, instance_id1) = (
-            peer_infos[1].connected_address(),
-            peer_infos[1].instance_id(),
-        );
 
         let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(network, 2);
-        let expected_response = vec![
-            (peer_address0, instance_id0),
-            (peer_address1, instance_id1),
+        let mut expected_response = vec![
+            (
+                peer_infos[0].connected_address(),
+                peer_infos[0].instance_id(),
+            ),
+            (
+                peer_infos[1].connected_address(),
+                peer_infos[1].instance_id(),
+            ),
             (sa2, hsd2.instance_id),
         ];
+        expected_response.sort_by_cached_key(|x| x.0);
+
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::PeerListRequest),
             Action::Write(PeerMessage::PeerListResponse(expected_response)),
@@ -3415,13 +3420,14 @@ mod tests {
             state_lock.set_new_tip(block_1.clone()).await?;
 
             let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
-            let expected_peer_list_resp = vec![
+            let mut expected_peer_list_resp = vec![
                 (
                     peer_infos[0].listen_address().unwrap(),
                     peer_infos[0].instance_id(),
                 ),
                 (sa_1, hsd_1.instance_id),
             ];
+            expected_peer_list_resp.sort_by_cached_key(|x| x.0);
             let mock = Mock::new(vec![
                 Action::Read(PeerMessage::Block(Box::new(
                     block_4.clone().try_into().unwrap(),
