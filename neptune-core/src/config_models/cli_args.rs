@@ -596,8 +596,15 @@ impl Args {
     }
 
     /// Check if block proposal should be accepted from this IP address.
-    pub(crate) fn accept_block_proposal_from(&self, ip_address: &IpAddr) -> bool {
-        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(ip_address)
+    pub(crate) fn accept_block_proposal_from(&self, ip_address: IpAddr) -> bool {
+        let ip_address = match ip_address {
+            IpAddr::V4(_) => ip_address,
+            IpAddr::V6(v6) => match v6.to_ipv4() {
+                Some(v4) => std::net::IpAddr::V4(v4),
+                None => ip_address,
+            },
+        };
+        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(&ip_address)
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {

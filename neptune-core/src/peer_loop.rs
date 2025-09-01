@@ -1477,7 +1477,7 @@ impl PeerLoopHandler {
                 if !self
                     .global_state_lock
                     .cli()
-                    .accept_block_proposal_from(&peer_ip)
+                    .accept_block_proposal_from(peer_ip)
                 {
                     debug!(
                         "Ignoring proposal notification because they are not whitelisted. \
@@ -1538,7 +1538,7 @@ impl PeerLoopHandler {
                 if !self
                     .global_state_lock
                     .cli()
-                    .accept_block_proposal_from(&self.peer_address.ip())
+                    .accept_block_proposal_from(self.peer_address.ip())
                 {
                     warn!("Got block proposal from unwanted peer");
                     self.punish(NegativePeerSanction::UnwantedMessage).await?;
