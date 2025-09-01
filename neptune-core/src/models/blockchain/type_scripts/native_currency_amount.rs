@@ -178,7 +178,7 @@ impl NativeCurrencyAmount {
     /// # Panics
     ///
     /// If the provided fraction is not between 0 and 1 (inclusive).
-    pub(crate) fn lossy_f64_fraction_mul(&self, fraction: f64) -> NativeCurrencyAmount {
+    pub fn lossy_f64_fraction_mul(&self, fraction: f64) -> NativeCurrencyAmount {
         assert!(
             (0.0..=1.0).contains(&fraction),
             "fraction must be between 0 and 1"
