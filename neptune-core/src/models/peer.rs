@@ -558,6 +558,34 @@ impl PeerMessage {
             PeerMessage::SyncChallengeResponse(_) => false,
         }
     }
+
+    /// Function to filter out messages that should be ignored when all state
+    /// updates have been paused.
+    pub fn ignore_on_freeze(&self) -> bool {
+        match self {
+            PeerMessage::Handshake { .. } => false,
+            PeerMessage::Block(_) => true,
+            PeerMessage::BlockNotificationRequest => true,
+            PeerMessage::BlockNotification(_) => true,
+            PeerMessage::BlockRequestByHeight(_) => true,
+            PeerMessage::BlockRequestByHash(_) => true,
+            PeerMessage::BlockRequestBatch(_) => true,
+            PeerMessage::BlockResponseBatch(_) => true,
+            PeerMessage::UnableToSatisfyBatchRequest => true,
+            PeerMessage::SyncChallenge(_) => true,
+            PeerMessage::SyncChallengeResponse(_) => true,
+            PeerMessage::BlockProposalNotification(_) => true,
+            PeerMessage::BlockProposalRequest(_) => true,
+            PeerMessage::BlockProposal(_) => true,
+            PeerMessage::Transaction(_) => true,
+            PeerMessage::TransactionNotification(_) => true,
+            PeerMessage::TransactionRequest(_) => true,
+            PeerMessage::PeerListRequest => false,
+            PeerMessage::PeerListResponse(_) => false,
+            PeerMessage::Bye => false,
+            PeerMessage::ConnectionStatus(_) => false,
+        }
+    }
 }
 
 /// `MutablePeerState` contains information about the peer's blockchain state.
