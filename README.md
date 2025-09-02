@@ -6,7 +6,6 @@
 [![Coverage Status](https://coveralls.io/repos/github/Neptune-Crypto/neptune-core/badge.svg?branch=master)](https://coveralls.io/github/Neptune-Crypto/neptune-core?branch=master)
 
 Neptune-core is the reference implementation for the [Neptune Cash](https://neptune.cash/) protocol.
-The implementation is not complete yet, but already supports many integral components.
 
 ## Disclaimer
 
@@ -15,7 +14,7 @@ The implementation is not complete yet, but already supports many integral compo
 > you can afford to lose.
 
 > [!IMPORTANT]
-> If a catastrophic vulnerability is discovered in the protocol, it will restart from genesis.
+> If a catastrophic vulnerability is discovered in the protocol, it might be restarted from genesis.
 
 ## Installing
 
@@ -40,8 +39,9 @@ The implementation is not complete yet, but already supports many integral compo
   ```
 
 > [!IMPORTANT]
-> Any branch except `release` is considered an _unstable development_ branch. Should you choose to use
-> such a branch, you risk database corruption, loss of funds, crashing user interfaces, _etc_.
+> Any commit except the one tagged `release` is considered an _unstable development_ commit and thus carries a
+> higher risk of database corruption and/or loss of funds. However, known bug fixes make their way into `master`
+> before being part of a release.
 
 ### Windows
 
