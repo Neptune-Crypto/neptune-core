@@ -247,7 +247,7 @@ impl ArchivalState {
     /// set. Set the sync label to the genesis block hash. Persist.
     async fn populate_archival_mutator_set_with_genesis_block(
         archival_mutator_set: &mut RustyArchivalMutatorSet,
-        genesis_block: Block,
+        genesis_block: &Block,
     ) {
         for addition_record in &genesis_block.kernel.body.transaction_kernel.outputs {
             archival_mutator_set.ams_mut().add(addition_record).await;
@@ -275,7 +275,7 @@ impl ArchivalState {
         if archival_mutator_set.ams().aocl.is_empty().await {
             Self::populate_archival_mutator_set_with_genesis_block(
                 &mut archival_mutator_set,
-                genesis_block.clone(),
+                &genesis_block,
             )
             .await;
         }
@@ -834,10 +834,10 @@ impl ArchivalState {
         Some(parent.expect("Indicated block must exist"))
     }
 
-    /// Get the header of the block identified by digest, assuming it is stored.
+    /// Get the header of the block identified by digest.
     ///
-    /// Returns `None` if the block digest is different from that of the genesis
-    /// block and no such block is stored.
+    /// Returns `None` if no block with this digest is known. Returns the
+    /// genesis header if the block digest is that of the genesis block.
     pub(crate) async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
         let mut ret = self
             .block_index_db
@@ -1211,8 +1211,8 @@ impl ArchivalState {
     /// Assumes the block in question has already been stored to the database
     /// (or else it is the genesis block). This function handles rollback of the
     /// mutator set if needed but requires that all blocks that are rolled back
-    /// are present in the DB. The input block is considered chain tip. All
-    /// blocks stored in the database are assumed to be valid. The given
+    /// are present in the database. The input block is considered chain tip.
+    /// All blocks stored in the database are assumed to be valid. The given
     /// `new_block` is also assumed to be valid. This function will return an
     /// error if the new block does not have a mutator set update.
     ///
@@ -1239,12 +1239,13 @@ impl ArchivalState {
             self.archival_mutator_set.ams_mut().clear().await;
             Self::populate_archival_mutator_set_with_genesis_block(
                 &mut self.archival_mutator_set,
-                new_block.clone(),
+                new_block,
             )
             .await;
 
             return Ok(());
         }
+
         // cannot get the mutator set update from new block, so abort early
         if new_block.mutator_set_update().is_err() {
             bail!("invalid block: could not get mutator set update");

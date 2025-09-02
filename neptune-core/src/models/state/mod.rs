@@ -1275,6 +1275,8 @@ impl GlobalState {
     /// # Panics
     ///
     ///  - If the archival mutator set is not synced to the current state tip.
+    ///  - If recovery data is provided but out-of-order to the monitored UTXOs
+    ///    that don't have any membership proofs.
     pub async fn restore_monitored_utxos_from_archival_mutator_set(
         &mut self,
         mut new_utxos: Option<Vec<IncomingUtxoRecoveryData>>,
@@ -1728,9 +1730,10 @@ impl GlobalState {
     pub(crate) async fn set_tip_to_stored_block(&mut self, block_digest: Digest) -> Result<()> {
         // If the node not archival, it cannot sync the wallet. So in this case,
         // abort early.
-        if !self.chain.is_archival_node() {
-            bail!("node must be archival in order to set tip to stored block");
-        }
+        ensure!(
+            self.chain.is_archival_node(),
+            "node must be archival in order to set tip to stored block"
+        );
 
         // Read the block.
         let block = self
@@ -1745,12 +1748,10 @@ impl GlobalState {
             bail!("block does not have a mutator set update".to_string(),);
         }
 
-        // Set light state to this block.
-        *self.chain.light_state_mut() = Arc::new(block.clone());
-
-        // No need to mark the block as tip in the block index database. If the
-        // node is unfrozen and blocks are found, the tip in the block index
-        // database will be set by the new block handler.
+        self.chain
+            .archival_state_mut()
+            .write_block_as_tip(&block)
+            .await?;
 
         // Update archival block MMR.
         self.chain
@@ -1765,6 +1766,11 @@ impl GlobalState {
             .await
             .expect("mutator set update was already verified");
 
+        // Set light state to this block.
+        *self.chain.light_state_mut() = Arc::new(block.clone());
+
+        let (mempool_events, _) = self.mempool.update_with_block(&block)?;
+
         // Update wallet state.
         // We can't use `update_wallet_state_with_new_block` because it doesn't
         // handle forks or even rollbacks without fast-forwards. Instead, we
@@ -1773,6 +1779,13 @@ impl GlobalState {
         // verified to be archival.
         self.restore_monitored_utxos_from_archival_mutator_set(None)
             .await;
+
+        self.wallet_state
+            .handle_mempool_events(mempool_events)
+            .await;
+
+        self.mining_state.block_proposal = BlockProposal::none();
+        self.mining_state.exported_block_proposals.clear();
 
         Ok(())
     }
@@ -2355,6 +2368,7 @@ mod tests {
     use num_traits::Zero;
     use rand::random;
     use rand::rngs::StdRng;
+    use rand::seq::SliceRandom;
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
@@ -2384,6 +2398,7 @@ mod tests {
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block;
+    use crate::tests::shared::blocks::invalid_empty_block_with_timestamp;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::blocks::make_mock_block_with_inputs_and_outputs;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -2785,25 +2800,7 @@ mod tests {
             cli_args::Args::default_with_network(network),
         )
         .await;
-        let mut bob = mock_genesis_global_state(
-            2,
-            WalletEntropy::new_pseudorandom(rng.random()),
-            cli_args::Args::default_with_network(network),
-        )
-        .await;
-        let mut bob = bob.global_state_lock.lock_guard_mut().await;
-        let block1 = invalid_empty_block(&Block::genesis(network), network);
 
-        bob.mining_state.block_proposal = BlockProposal::ForeignComposition(block1.clone());
-        bob.mining_state
-            .exported_block_proposals
-            .insert(random(), block1.clone());
-
-        bob.set_new_tip(block1).await.unwrap();
-        assert!(
-            matches!(bob.mining_state.block_proposal, BlockProposal::None),
-            "block proposal must be reset after setting new tip."
-        );
         let mut alice_gsl = alice.lock_guard_mut().await;
         let alice_key = alice_gsl
             .wallet_state
@@ -2813,8 +2810,8 @@ mod tests {
         let bob_key = bob_secret.nth_generation_spending_key(0);
 
         // alice mines 3 blocks
-        let genesis_block = alice_gsl.chain.archival_state().get_tip().await;
-        let mut current_block = genesis_block.clone();
+        let genesis = Block::genesis(network);
+        let mut current_block = genesis.clone();
         for _ in 0..3 {
             let (block, alice_composer_expected_utxos) =
                 make_mock_block(&current_block, None, alice_key, rng.random(), network).await;
@@ -2837,14 +2834,13 @@ mod tests {
 
         // prepare two branches with 3*|a| = |b|
         let branch_length = 60;
-        let [mut a_blocks, b_blocks] = helper::make_branches(
+        let [mut a_blocks, mut b_blocks] = helper::make_branches(
             network,
             [&current_block, &current_block],
             [branch_length / 3, branch_length],
             &bob_key,
         )
         .await;
-        a_blocks = a_blocks[0..(branch_length / 3)].to_vec();
 
         // apply branch a
         for block in &a_blocks {
@@ -2862,7 +2858,7 @@ mod tests {
             "wallet balance: {alice_balance_2}\nexpected: {expected_balance_2}",
         );
 
-        // initiate transaction
+        // initiate transaction to rando
         let rando = GenerationReceivingAddress::derive_from_seed(rng.random());
         drop(alice_gsl); // drop lock to free up api
         let tx_a = helper::send_coins(
@@ -2883,12 +2879,12 @@ mod tests {
         let wallet_balance_3 = alice_gsl
             .wallet_state
             .confirmed_available_balance(&wallet_status_3, timestamp_3);
-        let expected_balance_3 = (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
+        let expected_branch_a_liquid_balance = (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
             .checked_sub(&NativeCurrencyAmount::coins(10))
             .unwrap();
         assert_eq!(
-            wallet_balance_3, expected_balance_3,
-            "wallet balance: {wallet_balance_3}\nexpected balance: {expected_balance_3}"
+            expected_branch_a_liquid_balance, wallet_balance_3,
+            "wallet balance: {wallet_balance_3}\nexpected balance: {expected_branch_a_liquid_balance}"
         );
 
         // continue for a while
@@ -2909,12 +2905,10 @@ mod tests {
         let wallet_status_4 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_4 = current_block.header().timestamp;
         assert_eq!(
+            expected_branch_a_liquid_balance,
             alice_gsl
                 .wallet_state
                 .confirmed_available_balance(&wallet_status_4, timestamp_4),
-            (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
-                .checked_sub(&NativeCurrencyAmount::coins(10))
-                .unwrap()
         );
 
         // resolve fork: apply all of branch b
@@ -2923,13 +2917,7 @@ mod tests {
         }
         current_block = b_blocks.last().unwrap().clone();
 
-        // option 1
         let _ = alice_gsl.resync_membership_proofs().await;
-
-        // option 2
-        // let _ = alice_gsl
-        //     .resync_membership_proofs_from_stored_blocks(current_block.hash())
-        //     .await;
 
         let wallet_status_5 = alice_gsl.get_wallet_status_for_tip().await;
         println!(
@@ -2957,7 +2945,7 @@ mod tests {
         .await;
         alice_gsl = alice.lock_guard_mut().await; //re-acquire lock
         let block_end_of_b = invalid_block_with_transaction(&current_block, tx_b);
-        a_blocks.push(block_end_of_b.clone());
+        b_blocks.push(block_end_of_b.clone());
         current_block = block_end_of_b;
         alice_gsl.set_new_tip(current_block.clone()).await.unwrap();
 
@@ -2972,7 +2960,7 @@ mod tests {
                 .unwrap()
         );
 
-        // set tip to half-way in branch a
+        // set tip to half-way in branch a and verify balance
         let target_block = a_blocks[branch_length / 2].clone();
         alice_gsl
             .set_tip_to_stored_block(target_block.hash())
@@ -2984,13 +2972,88 @@ mod tests {
         let wallet_status_7 = alice_gsl.get_wallet_status_for_tip().await;
         let timestamp_7 = current_block.header().timestamp;
         assert_eq!(
+            expected_branch_a_liquid_balance,
             alice_gsl
                 .wallet_state
                 .confirmed_available_balance(&wallet_status_7, timestamp_7),
-            (LIQUID_BLOCK_SUBSIDY.scalar_mul(3))
-                .checked_sub(&NativeCurrencyAmount::coins(10))
-                .unwrap()
         );
+
+        // Can set tip to genesis
+        let premine_amount = NativeCurrencyAmount::coins(20);
+        alice_gsl
+            .set_tip_to_stored_block(genesis.hash())
+            .await
+            .unwrap();
+        let wallet_status_8 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_8 = genesis.header().timestamp;
+        assert!(alice_gsl
+            .wallet_state
+            .confirmed_available_balance(&wallet_status_8, timestamp_8)
+            .is_zero(),);
+        assert_eq!(
+            premine_amount,
+            alice_gsl
+                .wallet_state
+                .confirmed_total_balance(&wallet_status_8),
+        );
+        assert_eq!(alice_gsl.chain.light_state().hash(), genesis.hash());
+
+        // State updates work when tip is genesis
+        let block_c_timestamp = genesis.header().timestamp + Timestamp::seconds(556);
+        let block_c = invalid_empty_block_with_timestamp(&genesis, block_c_timestamp, network);
+        alice_gsl.set_new_tip(block_c.clone()).await.unwrap();
+        assert_eq!(alice_gsl.chain.light_state().hash(), block_c.hash());
+
+        // Can set back and restore balance, with backwards walk (from c to a)
+        alice_gsl
+            .set_tip_to_stored_block(target_block.hash())
+            .await
+            .unwrap();
+        let wallet_status_9 = alice_gsl.get_wallet_status_for_tip().await;
+        let timestamp_9 = current_block.header().timestamp;
+        assert_eq!(
+            expected_branch_a_liquid_balance,
+            alice_gsl
+                .wallet_state
+                .confirmed_available_balance(&wallet_status_9, timestamp_9),
+        );
+
+        let expected_branch_a_total_balance = (LIQUID_BLOCK_SUBSIDY.scalar_mul(6))
+            .checked_sub(&NativeCurrencyAmount::coins(10))
+            .unwrap()
+            + premine_amount;
+        assert_eq!(
+            expected_branch_a_total_balance,
+            alice_gsl
+                .wallet_state
+                .confirmed_total_balance(&wallet_status_9),
+        );
+
+        // Set tip to genesis again, then to target some place on the a-chain.
+        alice_gsl
+            .set_tip_to_stored_block(genesis.hash())
+            .await
+            .unwrap();
+
+        a_blocks.shuffle(&mut rng);
+        for block in a_blocks {
+            alice_gsl
+                .set_tip_to_stored_block(block.hash())
+                .await
+                .unwrap();
+            assert_eq!(
+                expected_branch_a_total_balance,
+                alice_gsl
+                    .wallet_state
+                    .confirmed_total_balance(&wallet_status_9),
+            );
+            assert_eq!(
+                expected_branch_a_liquid_balance,
+                alice_gsl
+                    .wallet_state
+                    .confirmed_available_balance(&wallet_status_9, timestamp_9),
+            );
+        }
     }
 
     #[traced_test]

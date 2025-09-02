@@ -857,7 +857,7 @@ async fn main() -> Result<()> {
                 .block_digest(ctx, token, BlockSelector::Tip)
                 .await??
                 .unwrap_or_default();
-            println!("{:x}", head_hash);
+            println!("{head_hash:x}");
         }
         Command::LatestTipDigests { n } => {
             let head_hashes = client.latest_tip_digests(ctx, token, n).await??;
