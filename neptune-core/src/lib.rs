@@ -172,7 +172,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
 
     if !cli_args.whitelisted_composers.is_empty() {
         info!(
-            "Whitelisted composers: {}",
+            "Whitelisted composers:\n{}",
             cli_args.whitelisted_composers.iter().join("\n")
         );
     }
