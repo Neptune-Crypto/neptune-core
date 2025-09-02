@@ -1724,9 +1724,10 @@ impl GlobalState {
 
     /// Set the current tip to a stored block, identified by block hash.
     ///
-    /// Assumes the block was stored, and if it is not canonical that there is
-    /// a connecting path. Assumes furthermore that the node is archival. If any
-    /// of these assumptions are not met then this function returns an error.
+    /// Assumes the block was stored (or is the genesis block), and if it is
+    /// not canonical that there is a connecting path. Assumes furthermore that
+    /// the node is archival. If any of these assumptions are not met then this
+    /// function returns an error.
     pub(crate) async fn set_tip_to_stored_block(&mut self, block_digest: Digest) -> Result<()> {
         // If the node not archival, it cannot sync the wallet. So in this case,
         // abort early.
@@ -1748,44 +1749,7 @@ impl GlobalState {
             bail!("block does not have a mutator set update".to_string(),);
         }
 
-        self.chain
-            .archival_state_mut()
-            .write_block_as_tip(&block)
-            .await?;
-
-        // Update archival block MMR.
-        self.chain
-            .archival_state_mut()
-            .append_to_archival_block_mmr(&block)
-            .await;
-
-        // Update archival Mutator Set.
-        self.chain
-            .archival_state_mut()
-            .update_mutator_set(&block)
-            .await
-            .expect("mutator set update was already verified");
-
-        // Set light state to this block.
-        *self.chain.light_state_mut() = Arc::new(block.clone());
-
-        let (mempool_events, _) = self.mempool.update_with_block(&block)?;
-
-        // Update wallet state.
-        // We can't use `update_wallet_state_with_new_block` because it doesn't
-        // handle forks or even rollbacks without fast-forwards. Instead, we
-        // need to dig into the archival mutator set to find the membership
-        // proofs. The reason why that's okay is because the node is already
-        // verified to be archival.
-        self.restore_monitored_utxos_from_archival_mutator_set(None)
-            .await;
-
-        self.wallet_state
-            .handle_mempool_events(mempool_events)
-            .await;
-
-        self.mining_state.block_proposal = BlockProposal::none();
-        self.mining_state.exported_block_proposals.clear();
+        let _ = self.set_new_tip_internal(block).await?;
 
         Ok(())
     }
@@ -1819,75 +1783,80 @@ impl GlobalState {
         Ok(())
     }
 
-    /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
-    /// The received block will be set as the new tip, regardless of its accumulated PoW. or its
-    /// validity.
+    /// Update client's state with a new block. Block is assumed to be valid,
+    /// also wrt. to PoW. The received block will be set as the new tip,
+    /// regardless of its accumulated PoW. or its validity.
     ///
-    /// Returns a list of update-jobs that should be
-    /// performed by this client.
-    async fn set_new_tip_internal(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
+    /// May also be used to set the tip back to any earlier block, including the
+    /// genesis block. However, a path from the current tip to the new tip must
+    /// be known.
+    ///
+    /// Returns a list of update-jobs that should be performed by this client.
+    async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
         // Update archival state
         self.chain
             .archival_state_mut()
-            .write_block_as_tip(&new_block)
+            .write_block_as_tip(&new_tip)
             .await?;
 
         self.chain
             .archival_state_mut()
-            .append_to_archival_block_mmr(&new_block)
+            .append_to_archival_block_mmr(&new_tip)
             .await;
 
         // update the mutator set with the UTXOs from this block
         self.chain
             .archival_state_mut()
-            .update_mutator_set(&new_block)
+            .update_mutator_set(&new_tip)
             .await?;
 
-        *self.chain.light_state_mut() = std::sync::Arc::new(new_block.clone());
+        *self.chain.light_state_mut() = std::sync::Arc::new(new_tip.clone());
 
         // Update mempool with UTXOs from this block. This is done by
         // removing all transaction that became invalid/was mined by this
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
-        let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_block)?;
+        let (mempool_events, update_jobs) = self.mempool.update_with_block(&new_tip)?;
 
-        // Get parent of tip for mutator-set data needed for wallet update.
-        // Parent of the stored block will always exist since all blocks except
-        // the genesis block have a parent, and the genesis block is considered
-        // code, not data, so the genesis block will never be changed or updated
-        // through this method.
-        let parent = self
-            .chain
-            .archival_state()
-            .get_tip_parent()
-            .await
-            .expect("Parent must exist when storing a new block");
+        let parent_ms_accumulator =
+            self.chain
+                .archival_state()
+                .get_tip_parent()
+                .await
+                .map(|parent| {
+                    parent
+                        .mutator_set_accumulator_after()
+                        .expect("block from archival state must have mutator set after")
+                });
 
-        // Sanity check that must always be true for a valid block
-        assert_eq!(
-            parent.hash(),
-            new_block.header().prev_block_digest,
-            "Tip parent has must match indicated parent hash"
-        );
+        // Sanity check: If no parent is known, new block must be the genesis
+        // block.
+        if parent_ms_accumulator.is_none() {
+            assert_eq!(
+                self.chain.archival_state().genesis_block().hash(),
+                new_tip.hash(),
+                "If no parent is known, new tip must be the genesis block"
+            );
+        }
 
         // update wallet state with relevant UTXOs from this block. If we can
         // avoid it, we don't maintain the membership proofs in the wallet
         // since this is very slow. It's faster to read them from the archival
         // mutator set that we already updated above.
-        let previous_ms_accumulator = parent
-            .mutator_set_accumulator_after()
-            .expect("block from archival state must have mutator set after")
-            .clone();
-
         let maintain_mps_in_wallet = {
             #[cfg(not(test))]
             {
-                false
+                // always false, unless block is genesis
+                parent_ms_accumulator.is_none()
             }
             #[cfg(test)]
             {
+                // Tests are allowed to initialize the state at an arbitrary
+                // block height. If this first block is not genesis, the wallet
+                // must maintain its own membership proofs, since no valid
+                // archival mutator set is known.
                 !self
                     .chain
                     .archival_state()
@@ -1901,8 +1870,8 @@ impl GlobalState {
         let received_utxos = self
             .wallet_state
             .update_wallet_state_with_new_block(
-                &previous_ms_accumulator,
-                &new_block,
+                &parent_ms_accumulator.unwrap_or_default(),
+                &new_tip,
                 maintain_mps_in_wallet,
             )
             .await?;
@@ -2787,6 +2756,83 @@ mod tests {
                 "Set of exported block proposals must be empty after registering new block"
             );
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn can_use_set_new_tip_to_reset_to_genesis() {
+        let network = Network::Main;
+        let mut alice = mock_genesis_global_state(
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let mut alice = alice.lock_guard_mut().await;
+        assert!(alice.chain.light_state().header().height.is_genesis());
+
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+
+        alice.set_new_tip(block1.clone()).await.unwrap();
+        assert!(!alice.chain.light_state().header().height.is_genesis());
+        assert!(alice
+            .chain
+            .archival_state()
+            .get_tip_parent()
+            .await
+            .is_some());
+
+        alice.set_new_tip(genesis.clone()).await.unwrap();
+        assert!(alice
+            .chain
+            .archival_state()
+            .get_tip_parent()
+            .await
+            .is_none());
+        assert!(alice.chain.light_state().header().height.is_genesis());
+
+        alice.set_new_tip(block1.clone()).await.unwrap();
+        assert!(alice
+            .chain
+            .light_state()
+            .header()
+            .height
+            .previous()
+            .unwrap()
+            .is_genesis());
+        assert!(alice
+            .chain
+            .archival_state()
+            .get_tip_parent()
+            .await
+            .is_some());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn dont_register_premine_amount_twice() {
+        let network = Network::Main;
+        let mut alice = mock_genesis_global_state(
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let mut alice_gsl = alice.lock_guard_mut().await;
+
+        assert_eq!(
+            1,
+            alice_gsl.get_wallet_status_for_tip().await.num_elements()
+        );
+
+        let genesis = Block::genesis(network);
+        alice_gsl
+            .set_tip_to_stored_block(genesis.hash())
+            .await
+            .unwrap();
+        assert_eq!(
+            1,
+            alice_gsl.get_wallet_status_for_tip().await.num_elements()
+        );
     }
 
     #[traced_test]
@@ -4426,7 +4472,7 @@ mod tests {
         async fn assert_correct_global_state(
             global_state: &GlobalState,
             expected_tip: Block,
-            expected_parent: Block,
+            expected_parent: Option<Block>,
             expected_num_blocks_at_tip_height: usize,
             expected_num_spendable_utxos: usize,
         ) {
@@ -4512,17 +4558,19 @@ mod tests {
                 "Exactly {expected_num_blocks_at_tip_height} blocks at height must be known"
             );
 
-            let expected_parent_digest = expected_parent.hash();
-            assert_eq!(
-                expected_parent_digest,
-                global_state
-                    .chain
-                    .archival_state()
-                    .get_tip_parent()
-                    .await
-                    .unwrap()
-                    .hash()
-            );
+            if let Some(expected_parent) = expected_parent {
+                let expected_parent_digest = expected_parent.hash();
+                assert_eq!(
+                    expected_parent_digest,
+                    global_state
+                        .chain
+                        .archival_state()
+                        .get_tip_parent()
+                        .await
+                        .unwrap()
+                        .hash()
+                );
+            }
 
             // Peek into wallet
             let tip_msa = expected_tip
@@ -4597,7 +4645,7 @@ mod tests {
                 assert_correct_global_state(
                     &global_state,
                     next_block.clone(),
-                    previous_block.clone(),
+                    Some(previous_block.clone()),
                     1,
                     2 * block_height + 1,
                 )
@@ -4627,13 +4675,21 @@ mod tests {
                 assert_correct_global_state(
                     &global_state,
                     next_block.clone(),
-                    previous_block.clone(),
+                    Some(previous_block.clone()),
                     2,
                     2 * block_height + 1,
                 )
                 .await;
                 previous_block = next_block;
             }
+
+            // Can roll back to genesis
+            let mut global_state = global_state_lock.lock_guard_mut().await;
+            global_state
+                .set_new_tip(genesis_block.clone())
+                .await
+                .unwrap();
+            assert_correct_global_state(&global_state, genesis_block.clone(), None, 1, 1).await;
         }
 
         #[traced_test]
@@ -4674,7 +4730,7 @@ mod tests {
             );
 
             alice.set_new_tip(block_1.clone()).await.unwrap();
-            assert_correct_global_state(&alice, block_1.clone(), genesis_block, 1, 0).await;
+            assert_correct_global_state(&alice, block_1.clone(), Some(genesis_block), 1, 0).await;
         }
 
         /// Return a list of (Block, parent) pairs, of length N.
@@ -4720,7 +4776,7 @@ mod tests {
             assert_correct_global_state(
                 &alice,
                 chain_a_tip.to_owned(),
-                chain_a_tip_parent.to_owned(),
+                Some(chain_a_tip_parent.to_owned()),
                 1,
                 0,
             )
@@ -4736,7 +4792,7 @@ mod tests {
             assert_correct_global_state(
                 &alice,
                 chain_a_tip.to_owned(),
-                chain_a_tip_parent.to_owned(),
+                Some(chain_a_tip_parent.to_owned()),
                 2,
                 0,
             )
@@ -4751,7 +4807,7 @@ mod tests {
             assert_correct_global_state(
                 &alice,
                 chain_b_tip.to_owned(),
-                chain_b_tip_parent.to_owned(),
+                Some(chain_b_tip_parent.to_owned()),
                 1,
                 0,
             )
@@ -4798,8 +4854,14 @@ mod tests {
                 // tip, resulting in a consistent, correct state.
                 for (block, parent) in &blocks_and_parents {
                     alice.set_new_tip(block.clone()).await.unwrap();
-                    assert_correct_global_state(&alice, block.clone(), parent.to_owned(), 2, 0)
-                        .await;
+                    assert_correct_global_state(
+                        &alice,
+                        block.clone(),
+                        Some(parent.to_owned()),
+                        2,
+                        0,
+                    )
+                    .await;
                 }
             }
         }
@@ -4866,7 +4928,7 @@ mod tests {
                 assert_correct_global_state(
                     &global_state,
                     block_1a.clone(),
-                    genesis_block.clone(),
+                    Some(genesis_block.clone()),
                     1,
                     expected_number_of_mutxos,
                 )
@@ -4880,7 +4942,7 @@ mod tests {
                 assert_correct_global_state(
                     &global_state,
                     block_1b.clone(),
-                    genesis_block.clone(),
+                    Some(genesis_block.clone()),
                     2,
                     1,
                 )
@@ -4905,13 +4967,20 @@ mod tests {
                     assert_correct_global_state(
                         &global_state,
                         next_block.clone(),
-                        previous_block.clone(),
+                        Some(previous_block.clone()),
                         if block_height <= 3 { 2 } else { 1 },
                         2 * (block_height - 1) + 1,
                     )
                     .await;
                     previous_block = next_block;
                 }
+
+                // Can roll back to genesis
+                global_state
+                    .set_new_tip(genesis_block.clone())
+                    .await
+                    .unwrap();
+                assert_correct_global_state(&global_state, genesis_block.clone(), None, 1, 1).await;
             }
         }
 
@@ -4956,7 +5025,7 @@ mod tests {
                 assert_correct_global_state(
                     &global_state,
                     block_1.clone(),
-                    genesis_block.clone(),
+                    Some(genesis_block.clone()),
                     1,
                     expected_num_mutxos,
                 )

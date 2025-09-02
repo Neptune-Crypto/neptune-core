@@ -201,3 +201,14 @@ impl WalletStatusExportFormat {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl WalletStatus {
+        pub(crate) fn num_elements(&self) -> usize {
+            self.synced_spent.len() + self.synced_unspent.len() + self.unsynced.len()
+        }
+    }
+}

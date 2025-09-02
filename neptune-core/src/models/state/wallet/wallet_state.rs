@@ -1648,7 +1648,7 @@ impl WalletState {
                 ));
 
                 if let Some(mutxo_index) = potential_duplicates.get(&strong_key) {
-                    // Update `confirmed_in_block` data to reflect
+                    // Update `confirmed_in_block` data to reflect potential
                     // reorganization.
                     let mut existing_mutxo = monitored_utxos.get(*mutxo_index).await;
                     existing_mutxo.confirmed_in_block = mutxo.confirmed_in_block;

@@ -815,11 +815,17 @@ impl ArchivalState {
 
     /// Return parent of tip block. Returns `None` iff tip is genesis block.
     pub(crate) async fn get_tip_parent(&self) -> Option<Block> {
+        // Tip can be genesis block in two cases: If no block tip key is known,
+        // or if one is known and it matches with the genesis block.
         let tip_digest = self
             .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
             .await?
             .as_tip_digest();
+        if tip_digest == self.genesis_block().hash() {
+            return None;
+        }
+
         let tip_header = self
             .get_block_record(tip_digest)
             .await
