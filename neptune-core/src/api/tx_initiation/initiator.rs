@@ -103,26 +103,6 @@ impl TransactionInitiator {
             .await
     }
 
-    /// generates [TransactionDetails] from inputs and outputs
-    ///
-    /// see [TransactionDetailsBuilder] for details.
-    pub async fn generate_tx_details(
-        &mut self,
-        inputs: TxInputList,
-        outputs: TxOutputList,
-        change_policy: ChangePolicy,
-        fee: NativeCurrencyAmount,
-    ) -> Result<TransactionDetails, error::CreateTxError> {
-        TransactionDetailsBuilder::new()
-            .timestamp(Timestamp::now())
-            .inputs(inputs)
-            .outputs(outputs)
-            .fee(fee)
-            .change_policy(change_policy)
-            .build(&mut self.global_state_lock.clone().into())
-            .await
-    }
-
     /// generates a witness proof from [TransactionDetails]
     ///
     /// a witness proof is sufficient for initiating a transaction

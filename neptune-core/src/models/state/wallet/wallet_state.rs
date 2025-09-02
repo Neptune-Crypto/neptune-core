@@ -1468,7 +1468,7 @@ impl WalletState {
                     is_guesser_fee,
                 } = incoming_utxo.to_owned();
                 info!(
-                    "Received UTXO in block {}, height {}\nvalue = {}\n\
+                    "Received UTXO in block {:x}, height {}\nvalue = {}\n\
                     is guesser fee: {is_guesser_fee}\ntime-lock: {}\n\n",
                     block.hash(),
                     block.kernel.header.height,
@@ -1648,7 +1648,7 @@ impl WalletState {
                 ));
 
                 if let Some(mutxo_index) = potential_duplicates.get(&strong_key) {
-                    // Update `confirmed_in_block` data to reflect
+                    // Update `confirmed_in_block` data to reflect potential
                     // reorganization.
                     let mut existing_mutxo = monitored_utxos.get(*mutxo_index).await;
                     existing_mutxo.confirmed_in_block = mutxo.confirmed_in_block;

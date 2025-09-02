@@ -673,7 +673,7 @@ impl MainLoopHandler {
         let pmsg = MainToPeerTask::Block(new_block);
         self.main_to_peer_broadcast(pmsg);
 
-        info!("Locally-mined block is new tip: {}", new_block_hash);
+        info!("Locally-mined block is new tip: {new_block_hash:x}");
         info!("broadcasting new block to peers");
 
         self.spawn_mempool_txs_update_job(main_loop_state, update_jobs);
@@ -838,7 +838,7 @@ impl MainLoopHandler {
                     let mut update_jobs: Vec<MempoolUpdateJob> = vec![];
                     for new_block in blocks {
                         debug!(
-                            "Storing block {} in database. Height: {}, Mined: {}",
+                            "Storing block {:x} in database. Height: {}, Mined: {}",
                             new_block.hash(),
                             new_block.kernel.header.height,
                             new_block.kernel.header.timestamp.standard_format()
@@ -1407,7 +1407,7 @@ impl MainLoopHandler {
         // Send message to the relevant peer loop to request the blocks
         let chosen_peer = chosen_peer.unwrap();
         info!(
-            "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
+            "Sending block batch request to {}\nrequesting blocks descending from {:x}\n height {}",
             chosen_peer, own_tip_hash, own_tip_height
         );
         let pmsg = MainToPeerTask::RequestBlockBatch(MainToPeerTaskBatchBlockRequest {
@@ -1927,6 +1927,21 @@ impl MainLoopHandler {
 
                 for notification in notifications {
                     self.main_to_peer_broadcast(notification);
+                }
+
+                Ok(false)
+            }
+            RPCServerToMain::SetTipToStoredBlock(digest) => {
+                info!("setting tip to {digest:x}");
+
+                if let Err(e) = self
+                    .global_state_lock()
+                    .lock_guard_mut()
+                    .await
+                    .set_tip_to_stored_block(digest)
+                    .await
+                {
+                    error!("Failed to set tip to {digest:x}: {e}");
                 }
 
                 Ok(false)

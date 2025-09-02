@@ -212,12 +212,12 @@ fn guess_worker(
     let threshold = prev_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
-        "Guessing with {} threads on block {} with {} outputs and difficulty {}. Target: {}",
+        "Guessing with {} threads on block {:x} of height {} with {} outputs and difficulty {}. Target: {threshold:x}",
         threads_to_use,
+        block.hash(),
         block.header().height,
         block.body().transaction_kernel.outputs.len(),
         previous_block_header.difficulty,
-        threshold.to_hex()
     );
 
     // note: this article discusses rayon strategies for mining.
@@ -267,7 +267,6 @@ fn guess_worker(
     let timestamp_standard = timestamp.standard_format();
     let elapsed_human = (timestamp - previous_block_header.timestamp).format_human_duration();
     let hash = block.hash();
-    let hex = hash.to_hex();
     let height = block.kernel.header.height;
     let num_inputs = block.body().transaction_kernel.inputs.len();
     let num_outputs = block.body().transaction_kernel.outputs.len();
@@ -276,8 +275,7 @@ fn guess_worker(
               Height: {height}
                 Time: {timestamp_standard} ({timestamp})
 Since previous block: {elapsed_human}
-        Digest (Hex): {hex}
-        Digest (Raw): {hash}
+              Digest: {hash:x}
 Difficulty threshold: {threshold}
           Difficulty: {prev_difficulty}
            #inputs  : {num_inputs}
@@ -977,7 +975,7 @@ pub(crate) async fn mine(
                                 error!("Found block with valid proof-of-work but block is invalid.");
                         } else {
 
-                            info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
+                            info!("Found new {} block with block height {}. Hash: {:x}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
 
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
 
@@ -1843,9 +1841,8 @@ pub(crate) mod tests {
 
             let block_time = start_st.elapsed()?.as_millis();
             println!(
-                "Found block {} in {block_time} milliseconds; \
+                "Found block {height} in {block_time} milliseconds; \
                 difficulty was {}; total time elapsed so far: {} ms",
-                height,
                 BigUint::from(prev_block.header().difficulty),
                 start_instant.elapsed()?.as_millis()
             );

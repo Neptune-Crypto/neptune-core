@@ -91,6 +91,11 @@ pub struct NetworkingState {
     /// Read-only value set at random during startup
     pub instance_id: u128,
 
+    /// If set to `true`, no blocks, block proposals, or transactions will be
+    /// sent from this client, or accepted from peers.
+    /// Only the RPC server may update this flag.
+    pub freeze: bool,
+
     /// Disconnection times of past peers. Can be used to determine if a connection
     /// request should be accepted or rejected.
     ///
@@ -110,6 +115,7 @@ impl NetworkingState {
             peer_databases,
             sync_anchor: None,
             instance_id: rand::random(),
+            freeze: false,
             disconnection_times: HashMap::new(),
         }
     }

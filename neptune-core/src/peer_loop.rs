@@ -11,7 +11,6 @@ use futures::sink::Sink;
 use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
-use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -312,9 +311,9 @@ impl PeerLoopHandler {
                 );
                 warn!("Difficulty is {}.", previous_block.kernel.header.difficulty);
                 warn!(
-                    "Proof of work should be {} (or more) but was [{}].",
+                    "Proof of work should be {:x} (or more) but was {:x}.",
                     previous_block.kernel.header.difficulty.target(),
-                    new_block.hash().values().iter().join(", ")
+                    new_block.hash()
                 );
                 self.punish(NegativePeerSanction::InvalidBlock((
                     new_block.kernel.header.height,
@@ -873,7 +872,7 @@ impl PeerLoopHandler {
                 match block {
                     None => {
                         // TODO: Consider punishing here
-                        warn!("Peer requested unknown block with hash {}", block_digest);
+                        warn!("Peer requested unknown block with hash {:x}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                     Some(b) => {
@@ -1764,10 +1763,10 @@ impl PeerLoopHandler {
                         break;
                     };
 
-                    let syncing =
-                        self.global_state_lock.lock(|s| s.net.sync_anchor.is_some()).await;
+                    let (syncing, frozen) =
+                        self.global_state_lock.lock(|s| (s.net.sync_anchor.is_some(), s.net.freeze)).await;
                     let message_type = peer_message.get_type();
-                    if peer_message.ignore_during_sync() && syncing {
+                    if syncing && peer_message.ignore_during_sync() {
                         debug!(
                             "Ignoring {message_type} message when syncing, from {peer_address}",
                         );
@@ -1777,6 +1776,10 @@ impl PeerLoopHandler {
                         debug!(
                             "Ignoring {message_type} message when not syncing, from {peer_address}",
                         );
+                        continue;
+                    }
+                    if frozen && peer_message.ignore_on_freeze() {
+                        debug!("Ignoring message because state updates have been paused.");
                         continue;
                     }
 
@@ -1803,6 +1806,13 @@ impl PeerLoopHandler {
                         error!(err_msg);
                         panic!("{err_msg}");
                     });
+
+                    let frozen = self.global_state_lock.lock_guard().await.net.freeze;
+                    if frozen && main_msg.ignore_on_freeze() {
+                        warn!("Peer loop ignores message from main loop because state updates have been paused");
+                        continue;
+                    }
+
                     let close_connection = self
                         .handle_main_task_message(main_msg, &mut peer, peer_state_info)
                         .await
@@ -2167,6 +2177,8 @@ mod tests {
     }
 
     mod blocks {
+        use itertools::Itertools;
+
         use super::*;
 
         #[traced_test]
@@ -3999,6 +4011,7 @@ mod tests {
     }
 
     mod proof_qualities {
+        use itertools::Itertools;
         use strum::IntoEnumIterator;
 
         use super::*;
@@ -4151,6 +4164,8 @@ mod tests {
     }
 
     mod sync_challenges {
+        use itertools::Itertools;
+
         use super::*;
         use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests_dyn;
 

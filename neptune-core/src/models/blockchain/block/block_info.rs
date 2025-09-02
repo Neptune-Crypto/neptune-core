@@ -45,9 +45,9 @@ impl std::fmt::Display for BlockInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let buf = String::new()
             + &format!("height: {}\n", self.height)
-            + &format!("digest: {}\n", self.digest.to_hex())
+            + &format!("digest: {:x}\n", self.digest)
             + &format!("size: {}\n", self.size)
-            + &format!("prev_block_digest: {}\n", self.prev_block_digest.to_hex())
+            + &format!("prev_block_digest: {:x}\n", self.prev_block_digest)
             + &format!("timestamp: {}\n", self.timestamp.standard_format())
             + &format!(
                 "cumulative_proof_of_work: {}\n",

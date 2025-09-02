@@ -54,14 +54,16 @@ impl Display for MonitoredUtxo {
         };
         let spent = match self.spent_in_block {
             Some((block_hash, block_timestamp, block_height)) => {
-                format!("spent in {block_hash}, at {block_timestamp}, block height {block_height}.")
+                format!(
+                    "spent in {block_hash:x}, at {block_timestamp}, block height {block_height}."
+                )
             }
             None => "not spent".to_owned(),
         };
         let confirmed = match self.confirmed_in_block {
             Some((block_hash, block_timestamp, block_height)) => {
                 format!(
-                    "received in {block_hash}, at {block_timestamp}, block height {block_height}."
+                    "received in {block_hash:x}, at {block_timestamp}, block height {block_height}."
                 )
             }
             None => "not mined yet".to_owned(),
@@ -70,7 +72,7 @@ impl Display for MonitoredUtxo {
             "valid MSMPs for blocks\n{}\n",
             self.blockhash_to_membership_proof
                 .iter()
-                .map(|(digest, _)| digest)
+                .map(|(digest, _)| digest.to_hex())
                 .join("\n")
         );
 

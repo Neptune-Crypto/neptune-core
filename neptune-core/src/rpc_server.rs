@@ -115,6 +115,7 @@ use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_auth;
+use crate::rpc_server::error::RpcError;
 use crate::rpc_server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -1573,17 +1574,6 @@ pub trait RPC {
 
     /// todo: docs.
     ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_details()]
-    async fn generate_tx_details(
-        token: rpc_auth::Token,
-        tx_inputs: TxInputList,
-        tx_outputs: TxOutputList,
-        change_policy: ChangePolicy,
-        fee: NativeCurrencyAmount,
-    ) -> RpcResult<TransactionDetails>;
-
-    /// todo: docs.
-    ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
     async fn generate_witness_proof(
         token: rpc_auth::Token,
@@ -1788,6 +1778,22 @@ pub trait RPC {
     /// Delete all transactions from the mempool.
     async fn clear_mempool(token: rpc_auth::Token) -> RpcResult<()>;
 
+    /// Pause receiving of blocks, block proposals, and transactions. If
+    /// activated, no new blocks will be received. Transactions, blocks, and
+    /// block proposals originating locally will not be shared with peers.
+    /// Mining should be paused when this is activated. Cannot be called if the
+    /// client is currently syncing.
+    ///
+    /// Can be used to build a big transaction through the merge of multiple
+    /// smaller transactions without risking that the smaller, unmerged
+    /// transactions are mined.
+    async fn freeze(token: rpc_auth::Token) -> RpcResult<()>;
+
+    /// Resume state updates. If state updates were paused, start receiving and
+    /// transmitting blocks, block proposals, and transactions again. Otherwise,
+    /// does nothing.
+    async fn unfreeze(token: rpc_auth::Token) -> RpcResult<()>;
+
     /// Stop miner if running
     ///
     /// ```no_run
@@ -1913,6 +1919,11 @@ pub trait RPC {
     /// # }
     /// ```
     async fn prune_abandoned_monitored_utxos(token: rpc_auth::Token) -> RpcResult<usize>;
+
+    /// Set the tip of the blockchain state to a given block, identified by its
+    /// hash. The block must be stored, but it does not need to live on the
+    /// canonical chain.
+    async fn set_tip(token: rpc_auth::Token, indicated_tip: Digest) -> RpcResult<()>;
 
     /// Gracious shutdown.
     ///
@@ -2145,7 +2156,7 @@ impl NeptuneRPCServer {
                         .await
                     {
                         warn!(
-                            "Claimed UTXO was spent in block {}; which has height {}",
+                            "Claimed UTXO was spent in block {:x}; which has height {}",
                             spending_block.hash(),
                             spending_block.header().height
                         );
@@ -3053,27 +3064,6 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn generate_tx_details(
-        self,
-        _: context::Context,
-        token: rpc_auth::Token,
-        tx_inputs: TxInputList,
-        tx_outputs: TxOutputList,
-        change_policy: ChangePolicy,
-        fee: NativeCurrencyAmount,
-    ) -> RpcResult<TransactionDetails> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .generate_tx_details(tx_inputs, tx_outputs, change_policy, fee)
-            .await?)
-    }
-
-    // documented in trait. do not add doc-comment.
     async fn generate_witness_proof(
         self,
         _: context::Context,
@@ -3343,6 +3333,40 @@ impl RPC for NeptuneRPCServer {
             .rpc_server_to_main_tx
             .send(RPCServerToMain::ClearMempool)
             .await;
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn freeze(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let mut state = self.state.lock_guard_mut().await;
+
+        if state.net.sync_anchor.is_some() {
+            error!("Cannot pause state updates when syncing.");
+            return Err(error::RpcError::CannotPauseWhileSyncing);
+        }
+
+        state.net.freeze = true;
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn unfreeze(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.state.lock_mut(|state| state.net.freeze = false).await;
 
         Ok(())
     }
@@ -3442,7 +3466,7 @@ impl RPC for NeptuneRPCServer {
         if solution_digest > threshold {
             warn!(
                 "Got claimed PoW solution but PoW threshold was not met.\n\
-            Claimed solution: {solution_digest};\nthreshold: {threshold}"
+            Claimed solution: {solution_digest:x};\nthreshold: {threshold:x}"
             );
             return Ok(false);
         }
@@ -3489,6 +3513,25 @@ impl RPC for NeptuneRPCServer {
                 Ok(0)
             }
         }
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn set_tip(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        indicated_tip: Digest,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Set tip asynchronously -- avoid RPC timeout.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::SetTipToStoredBlock(indicated_tip))
+            .await
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.
@@ -3827,6 +3870,9 @@ pub mod error {
 
         #[error("claim error: {0}")]
         ClaimError(String),
+
+        #[error("Cannot pause state updates while client is syncing")]
+        CannotPauseWhileSyncing,
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
