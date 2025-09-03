@@ -1395,6 +1395,17 @@ pub trait RPC {
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>>;
 
+    /// Get the proof-of-work puzzle for the current block proposal, along with
+    /// the block proposal itself. Works like [`Self::pow_puzzle_external_key`]
+    /// but does not task the node with remembering the proposal, meaning that
+    /// another node can receive the solution if one is found. If a solution is
+    /// found, the endpoint [`Self::provide_new_tip()`] can be used to pass the
+    /// solution onto a node.
+    async fn full_pow_puzzle_external_key(
+        token: rpc_auth::Token,
+        guesser_fee_address: ReceivingAddress,
+    ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>>;
+
     /******** BLOCKCHAIN STATISTICS ********/
     // Place all endpoints that relate to statistics of the blockchain here
 
@@ -1887,6 +1898,20 @@ pub trait RPC {
         proposal_id: Digest,
     ) -> RpcResult<bool>;
 
+    /// Provide a PoW solution along with a valid block proposal. Caller must
+    /// provide both the block proposal and the pow solution.
+    ///
+    /// Works like [`Self::provide_pow_solution()`] except that it takes a full
+    /// block proposal rather than a proposal ID. This allows for the provision
+    /// of a block without the node having to know the associated block proposal
+    /// since proposal is provided by the caller. Can be used in conjuction with
+    /// [`Self::full_pow_puzzle_external_key`].
+    async fn provide_new_tip(
+        token: rpc_auth::Token,
+        pow: BlockPow,
+        block_proposal: Block,
+    ) -> RpcResult<bool>;
+
     /// mark MUTXOs as abandoned
     ///
     /// ```no_run
@@ -2205,6 +2230,28 @@ impl NeptuneRPCServer {
             .insert(puzzle.id, proposal);
 
         Ok(Some(puzzle))
+    }
+
+    /// Verify a pow solution and send it to main loop if it is valid.
+    async fn pow_solution_inner(&self, mut proposal: Block, pow: BlockPow) -> RpcResult<bool> {
+        // Check if solution works.
+        let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
+
+        proposal.set_header_pow(pow);
+
+        if !proposal.has_proof_of_work(self.state.cli().network, &latest_block_header) {
+            warn!("Got claimed PoW solution but PoW solution is not valid.");
+            return Ok(false);
+        }
+
+        // No time to waste! Inform main_loop!
+        let solution = Box::new(proposal);
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::ProofOfWorkSolution(solution))
+            .await;
+
+        Ok(true)
     }
 
     /// get the data_directory for this neptune-core instance
@@ -3441,7 +3488,7 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Find proposal from list of exported proposals.
-        let Some(mut proposal) = self
+        let Some(proposal) = self
             .state
             .lock_guard()
             .await
@@ -3457,28 +3504,31 @@ impl RPC for NeptuneRPCServer {
             return Ok(false);
         };
 
-        // A proposal was found. Check if solution works.
-        let latest_block_header = *self.state.lock_guard().await.chain.light_state().header();
+        self.pow_solution_inner(proposal, pow).await
+    }
 
-        proposal.set_header_pow(pow);
-        let threshold = latest_block_header.difficulty.target();
-        let solution_digest = proposal.hash();
-        if solution_digest > threshold {
-            warn!(
-                "Got claimed PoW solution but PoW threshold was not met.\n\
-            Claimed solution: {solution_digest:x};\nthreshold: {threshold:x}"
-            );
+    // documented in trait. do not add doc-comment.
+    async fn provide_new_tip(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        pow: BlockPow,
+        proposal: Block,
+    ) -> RpcResult<bool> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        // Since block comes from external source, we need to check validity.
+        let current_tip = self.state.lock_guard().await.chain.light_state().clone();
+        if !proposal
+            .is_valid(&current_tip, Timestamp::now(), self.state.cli().network)
+            .await
+        {
+            warn!("Got claimed new block that was not valid");
             return Ok(false);
         }
 
-        // No time to waste! Inform main_loop!
-        let solution = Box::new(proposal);
-        let _ = self
-            .rpc_server_to_main_tx
-            .send(RPCServerToMain::ProofOfWorkSolution(solution))
-            .await;
-
-        Ok(true)
+        self.pow_solution_inner(proposal, pow).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -3622,6 +3672,36 @@ impl RPC for NeptuneRPCServer {
         };
 
         self.pow_puzzle_inner(guesser_fee_address, proposal).await
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn full_pow_puzzle_external_key(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        guesser_fee_address: ReceivingAddress,
+    ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let (mut proposal, latest_block_header) = {
+            let global_state = self.state.lock_guard().await;
+            let Some(proposal) = global_state
+                .mining_state
+                .block_proposal
+                .map(|x| x.to_owned())
+            else {
+                return Ok(None);
+            };
+
+            let latest_block_header = *global_state.chain.light_state().header();
+            (proposal, latest_block_header)
+        };
+
+        proposal.set_header_guesser_address(guesser_fee_address);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
+
+        Ok(Some((proposal, puzzle)))
     }
 
     // documented in trait. do not add doc-comment.
@@ -4112,6 +4192,16 @@ mod tests {
             .clone()
             .provide_pow_solution(ctx, token, rng.random(), rng.random())
             .await;
+        let _ = rpc_server
+            .clone()
+            .full_pow_puzzle_external_key(ctx, token, own_receiving_address.clone())
+            .await
+            .unwrap();
+        let _ = rpc_server
+            .clone()
+            .provide_new_tip(ctx, token, rng.random(), Block::genesis(network))
+            .await
+            .unwrap();
         let _ = rpc_server
             .clone()
             .block_intervals(ctx, token, BlockSelector::Tip, None)
@@ -4932,9 +5022,12 @@ mod tests {
         use super::*;
         use crate::models::blockchain::block::block_header::BlockPow;
         use crate::models::blockchain::block::pow::Pow;
+        use crate::models::blockchain::block::BlockProof;
+        use crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof;
         use crate::models::state::block_proposal::BlockProposal;
         use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::models::state::wallet::address::KeyType;
+        use crate::tests::shared::blocks::fake_deterministic_successor;
         use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
@@ -4982,6 +5075,80 @@ mod tests {
             assert!(
                 !accepted,
                 "Must reject PoW solution when no proposal exists"
+            );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn full_pow_puzzle_test() {
+            let network = Network::Main;
+            let bob = WalletEntropy::new_random();
+            let mut bob = test_rpc_server(
+                bob.clone(),
+                2,
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
+
+            let genesis = Block::genesis(network);
+            let block1 = fake_deterministic_successor(&genesis, network).await;
+            bob.state
+                .lock_mut(|x| {
+                    x.mining_state.block_proposal =
+                        BlockProposal::ForeignComposition(block1.clone())
+                })
+                .await;
+            let guesser_address = bob
+                .state
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await
+                .to_address();
+            let bob_token = cookie_token(&bob).await;
+
+            let (proposal, puzzle) = bob
+                .clone()
+                .full_pow_puzzle_external_key(context::current(), bob_token, guesser_address)
+                .await
+                .unwrap()
+                .unwrap();
+
+            assert!(
+                !bob.clone()
+                    .provide_new_tip(
+                        context::current(),
+                        bob_token,
+                        Default::default(),
+                        proposal.clone()
+                    )
+                    .await
+                    .unwrap(),
+                "Node must reject new tip with invalid PoW solution."
+            );
+
+            let solution = puzzle.solve();
+            assert!(
+                bob.clone()
+                    .provide_new_tip(context::current(), bob_token, solution, proposal.clone())
+                    .await
+                    .unwrap(),
+                "Node must accept valid new tip."
+            );
+
+            let mut bad_proposal = proposal;
+            bad_proposal.set_proof(BlockProof::SingleProof(NeptuneProof::invalid()));
+            assert!(
+                !bob.clone()
+                    .provide_new_tip(
+                        context::current(),
+                        bob_token,
+                        Default::default(),
+                        bad_proposal
+                    )
+                    .await
+                    .unwrap(),
+                "Node must reject new tip with invalid proof."
             );
         }
 
