@@ -100,16 +100,23 @@ impl From<RemovalRecordListUnpackError> for BlockValidationError {
 mod tests {
     use super::*;
     use proptest::prelude::Just;
+    use proptest::prop_assert_eq;
+    use proptest::prop_assume;
     use proptest::test_runner::RngSeed;
-    use proptest::{prop_assert_eq, prop_assume};
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::triton_vm::{prelude::BFieldElement, proof::Claim};
+    use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::triton_vm::proof::Claim;
     use tasm_lib::twenty_first::bfe;
     use test_strategy::proptest;
 
-    use crate::api::export::{NativeCurrencyAmount, NeptuneProof, Network, Timestamp};
+    use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::NeptuneProof;
+    use crate::api::export::Network;
+    use crate::api::export::Timestamp;
     use crate::models::blockchain::block::block_appendix::{BlockAppendix, MAX_NUM_CLAIMS};
-    use crate::models::blockchain::block::difficulty_control::{self, Difficulty};
+    use crate::models::blockchain::block::difficulty_control;
+    use crate::models::blockchain::block::difficulty_control::Difficulty;
+    use crate::models::blockchain::block::tests::DIFFICULTY_LIMIT_FOR_TESTS;
     use crate::models::blockchain::block::validity::block_program::BlockProgram;
     use crate::models::blockchain::block::{Block, BlockProof};
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
@@ -124,7 +131,7 @@ mod tests {
     proptest::prop_compose! {
         fn setup() (
             rness in arb::<Randomness<2, 2>>(),
-            d in 1..crate::tests::shared::blocks::DIFFICULTY_LIMIT_FOR_TESTS,
+            d in 1..DIFFICULTY_LIMIT_FOR_TESTS,
             b in block_with_arbkernel()
         ) (
             ts in (

@@ -9,7 +9,6 @@ use crate::config_models::network::Network;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
-use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
 use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
@@ -209,16 +208,5 @@ impl MockBlockGenerator {
         assert_eq!(block.header().height, prev.header().height + 1);
 
         (block, composer_tx_outputs)
-    }
-
-    pub fn satisfy_mock_pow(block: &mut Block, difficulty: Difficulty, seed: [u8; 32]) {
-        let mut rng = StdRng::from_seed(seed);
-
-        // Guessing loop.
-        let threshold = difficulty.target();
-        while !block.is_valid_mock_pow(threshold) {
-            let pow = rng.random();
-            block.set_header_pow(pow);
-        }
     }
 }

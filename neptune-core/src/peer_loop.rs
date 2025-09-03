@@ -2179,6 +2179,8 @@ mod tests {
     mod blocks {
         use itertools::Itertools;
 
+        use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+
         use super::*;
 
         #[traced_test]
@@ -2269,6 +2271,106 @@ mod tests {
             Ok(())
         }
 
+        /// Return three blocks:
+        /// - one with invalid PoW and invalid mock-PoW
+        /// - one with invalid PoW and valid mock-Pow
+        /// - one with valid Pow
+        async fn pow_related_blocks(
+            network: Network,
+            predecessor: &Block,
+        ) -> (Block, Block, Block) {
+            let rng = StdRng::seed_from_u64(5550001).random();
+            let block = fake_valid_block_proposal_successor_for_test(
+                predecessor,
+                predecessor.header().timestamp + Timestamp::hours(1),
+                rng,
+                network,
+            )
+            .await;
+
+            let difficulty = predecessor.header().difficulty;
+
+            let mut invalid_pow = block.clone();
+            invalid_pow.set_header_pow(Default::default());
+            assert!(!invalid_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(!invalid_pow.has_proof_of_work(network, predecessor.header()));
+
+            let mut block_with_valid_mock_pow = block.clone();
+            block_with_valid_mock_pow.satisfy_mock_pow(difficulty, rand::random());
+            assert!(block_with_valid_mock_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(!block_with_valid_mock_pow.has_proof_of_work(network, predecessor.header()));
+
+            let mut block_with_valid_pow = block;
+            block_with_valid_pow.satisfy_pow(difficulty, rand::random());
+            assert!(block_with_valid_pow.is_valid_mock_pow(difficulty.target()));
+            assert!(block_with_valid_pow.has_proof_of_work(network, predecessor.header()));
+
+            (invalid_pow, block_with_valid_mock_pow, block_with_valid_pow)
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn handle_blocks_rejects_blocks_with_invalid_pow() {
+            let network = Network::Main;
+            let (
+                _peer_broadcast_tx,
+                _from_main_rx_clone,
+                to_main_tx,
+                _to_main_rx1,
+                state_lock,
+                hsd,
+            ) = get_test_genesis_setup(network, 1, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+            let peer_address = state_lock
+                .lock_guard()
+                .await
+                .net
+                .peer_map
+                .clone()
+                .into_keys()
+                .next()
+                .unwrap();
+            let genesis: Block = Block::genesis(network);
+
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                peer_address,
+                hsd,
+                true,
+                1,
+            );
+
+            let (block_without_any_pow, block_with_valid_mock_pow, block_with_valid_pow) =
+                pow_related_blocks(network, &genesis).await;
+            assert!(
+                peer_loop_handler
+                    .handle_blocks(vec![block_without_any_pow], genesis.clone())
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "Must return None on invalid Pow"
+            );
+            assert!(
+                peer_loop_handler
+                    .handle_blocks(vec![block_with_valid_mock_pow], genesis.clone())
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "Must return None on valid mock Pow and invalid Pow"
+            );
+            assert_eq!(
+                BlockHeight::genesis().next(),
+                peer_loop_handler
+                    .handle_blocks(vec![block_with_valid_pow], genesis.clone())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "Must return Some(1) on valid Pow"
+            );
+        }
+
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn block_without_valid_pow_test() -> Result<()> {
@@ -2285,61 +2387,46 @@ mod tests {
                 hsd,
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
             let peer_address = get_dummy_socket_address(0);
-            let genesis_block: Block = state_lock
-                .lock_guard()
-                .await
-                .chain
-                .archival_state()
-                .get_tip()
-                .await;
 
-            // Make a with hash above what the implied threshold from
-            let [mut block_without_valid_pow] = fake_valid_sequence_of_blocks_for_tests(
-                &genesis_block,
-                Timestamp::hours(1),
-                StdRng::seed_from_u64(5550001).random(),
-                network,
-            )
-            .await;
+            let (block_without_any_pow, block_with_valid_mock_pow, _) =
+                pow_related_blocks(network, &Block::genesis(network)).await;
+            for block_without_valid_pow in [block_without_any_pow, block_with_valid_mock_pow] {
+                // Sending an invalid block will not necessarily result in a ban. This depends on the peer
+                // tolerance that is set in the client. For this reason, we include a "Bye" here.
+                let mock = Mock::new(vec![
+                    Action::Read(PeerMessage::Block(Box::new(
+                        block_without_valid_pow.clone().try_into().unwrap(),
+                    ))),
+                    Action::Read(PeerMessage::Bye),
+                ]);
 
-            // Ensure invalid PoW
-            block_without_valid_pow.set_header_pow(Default::default());
+                let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-            // Sending an invalid block will not necessarily result in a ban. This depends on the peer
-            // tolerance that is set in the client. For this reason, we include a "Bye" here.
-            let mock = Mock::new(vec![
-                Action::Read(PeerMessage::Block(Box::new(
-                    block_without_valid_pow.clone().try_into().unwrap(),
-                ))),
-                Action::Read(PeerMessage::Bye),
-            ]);
+                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                    to_main_tx.clone(),
+                    state_lock.clone(),
+                    peer_address,
+                    hsd,
+                    true,
+                    1,
+                    block_without_valid_pow.header().timestamp,
+                );
+                peer_loop_handler
+                    .run_wrapper(mock, from_main_rx_clone)
+                    .await
+                    .expect("sending (one) invalid block should not result in closed connection");
 
-            let from_main_rx_clone = peer_broadcast_tx.subscribe();
+                match to_main_rx1.recv().await {
+                    Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
+                    _ => bail!("Must receive remove of peer block max height"),
+                }
 
-            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
-                to_main_tx.clone(),
-                state_lock.clone(),
-                peer_address,
-                hsd,
-                true,
-                1,
-                block_without_valid_pow.header().timestamp,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await
-                .expect("sending (one) invalid block should not result in closed connection");
-
-            match to_main_rx1.recv().await {
-                Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-                _ => bail!("Must receive remove of peer block max height"),
+                // Verify that no further message was sent to main loop
+                match to_main_rx1.try_recv() {
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
+                    _ => bail!("Block notification must not be sent for block with invalid PoW"),
+                };
             }
-
-            // Verify that no further message was sent to main loop
-            match to_main_rx1.try_recv() {
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
-                _ => bail!("Block notification must not be sent for block with invalid PoW"),
-            };
 
             // We need to have the transmitter in scope until we have received from it
             // otherwise the receiver will report the disconnected error when we attempt

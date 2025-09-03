@@ -30,6 +30,9 @@ use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use rand::rngs::StdRng;
+use rand::Rng;
+use rand::SeedableRng;
 use rayon::ThreadPoolBuilder;
 use serde::Deserialize;
 use serde::Serialize;
@@ -978,8 +981,22 @@ impl Block {
     /// Mock verification of Pow. Use only on networks that allow for PoW
     /// mocking. Only checks that block hash is less than target. Does not
     /// verify other aspects of PoW.
-    fn is_valid_mock_pow(&self, target: Digest) -> bool {
+    pub(crate) fn is_valid_mock_pow(&self, target: Digest) -> bool {
         self.hash() <= target
+    }
+
+    /// Satisfy mock-PoW, meaning that only the hash needs to be lower than the
+    /// threshold, does not set valid root/authentication paths of the PoW
+    /// field.
+    pub fn satisfy_mock_pow(&mut self, difficulty: Difficulty, seed: [u8; 32]) {
+        let mut rng = StdRng::from_seed(seed);
+
+        // Guessing loop.
+        let threshold = difficulty.target();
+        while !self.is_valid_mock_pow(threshold) {
+            let pow = rng.random();
+            self.set_header_pow(pow);
+        }
     }
 
     /// Verify that block digest is less than threshold and integral.
@@ -1192,6 +1209,7 @@ pub(crate) mod tests {
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::archival_mmr::ArchivalMmr;
 
+    pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
     pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
 
     impl Block {
@@ -1253,6 +1271,27 @@ pub(crate) mod tests {
             .unwrap();
 
             (fake_genesis, fake_child)
+        }
+
+        /// Satisfy PoW for this block. Only to be used for tests since this
+        /// function cannot be cancelled.
+        pub(crate) fn satisfy_pow(&mut self, difficulty: Difficulty, seed: [u8; 32]) {
+            let guesser_buffer = self.guess_preprocess(None, None);
+            println!("Trying to guess for difficulty: {difficulty}");
+            assert!(
+                difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
+                "Don't use high difficulty in test"
+            );
+            let target = difficulty.target();
+            let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
+
+            let valid_pow = loop {
+                if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
+                    break valid_pow;
+                }
+            };
+
+            self.set_header_pow(valid_pow);
         }
     }
 

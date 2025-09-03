@@ -166,11 +166,7 @@ impl RegTestPrivate {
         );
 
         if find_valid_pow {
-            MockBlockGenerator::satisfy_mock_pow(
-                &mut block,
-                tip_block.header().difficulty,
-                rand::random(),
-            );
+            block.satisfy_mock_pow(tip_block.header().difficulty, rand::random());
         }
 
         (

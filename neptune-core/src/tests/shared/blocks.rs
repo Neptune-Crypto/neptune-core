@@ -47,8 +47,6 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
-
 /// Create an invalid block with the provided transaction kernel, using the
 /// provided mutator set as the predessor block's mutator set. Invalid block in
 /// most ways you can think of but the mutator set evolution is consistent.
@@ -446,24 +444,7 @@ pub(crate) async fn fake_valid_block_from_block_tx_for_tests(
     network: Network,
 ) -> Block {
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, network).await;
-
-    let guesser_buffer = block.guess_preprocess(None, None);
-    let difficulty = predecessor.header().difficulty;
-    println!("Trying to guess for difficulty: {difficulty}");
-    assert!(
-        difficulty < Difficulty::from(DIFFICULTY_LIMIT_FOR_TESTS),
-        "Don't use high difficulty in test"
-    );
-    let target = difficulty.target();
-    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_seed(seed);
-
-    let valid_pow = loop {
-        if let Some(valid_pow) = Pow::guess(&guesser_buffer, rng.random(), target) {
-            break valid_pow;
-        }
-    };
-
-    block.set_header_pow(valid_pow);
+    block.satisfy_pow(predecessor.header().difficulty, seed);
 
     block
 }
