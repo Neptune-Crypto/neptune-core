@@ -871,10 +871,12 @@ pub(super) async fn get_upgrade_task_from_mempool(
     let min_gobbling_fee = global_state.min_gobbling_fee();
     let num_proofs_threshold = global_state.max_num_proofs();
 
+    let upgrade_filter = global_state.cli().tx_upgrade_filter;
+
     // Do we have any `ProofCollection`s?
     let proof_collection_job = if let Some((kernel, proof, upgrade_priority)) = global_state
         .mempool
-        .preferred_proof_collection(num_proofs_threshold)
+        .preferred_proof_collection(num_proofs_threshold, upgrade_filter)
     {
         if kernel.mutator_set_hash != tip_mutator_set.hash() {
             error!("Deprecated transaction found in mempool. Has ProofCollection in need of updating. Consider clearing mempool.");
@@ -908,7 +910,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
 
     // Do we have any unsynced single proofs, worthy of an update?
     let update_job = global_state
-        .preferred_update_job_from_mempool(min_gobbling_fee)
+        .preferred_update_job_from_mempool(min_gobbling_fee, upgrade_filter)
         .await;
     let update_job = update_job.map(UpgradeJob::UpdateMutatorSetData);
 
@@ -916,7 +918,9 @@ pub(super) async fn get_upgrade_task_from_mempool(
     let merge_job = if let Some((
         [(left_kernel, left_single_proof), (right_kernel, right_single_proof)],
         upgrade_priority,
-    )) = global_state.mempool.preferred_single_proof_pair()
+    )) = global_state
+        .mempool
+        .preferred_single_proof_pair(upgrade_filter)
     {
         // Sanity check
         assert_eq!(

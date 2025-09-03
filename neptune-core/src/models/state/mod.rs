@@ -73,6 +73,7 @@ use crate::api;
 use crate::api::export::NeptuneProof;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
@@ -2100,8 +2101,10 @@ impl GlobalState {
     pub(crate) async fn preferred_update_job_from_mempool(
         &mut self,
         min_gobbling_fee: NativeCurrencyAmount,
+        tx_upgrade_filter: TxUpgradeFilter,
     ) -> Option<UpdateMutatorSetDataJob> {
-        let (old_kernel, old_proof, upgrade_priority) = self.mempool.preferred_update()?;
+        let (old_kernel, old_proof, upgrade_priority) =
+            self.mempool.preferred_update(tx_upgrade_filter)?;
 
         let gobbling_potential = NativeCurrencyAmount::zero();
         let upgrade_incentive =
