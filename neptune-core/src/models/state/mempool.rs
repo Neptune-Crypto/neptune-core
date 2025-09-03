@@ -54,6 +54,7 @@ use tracing::warn;
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;
 use crate::api::export::NeptuneProof;
+use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -293,17 +294,22 @@ impl Mempool {
     /// proof upgrade. Returns a transaction that is not synced to the tip
     /// such that the caller can make the transaction synced again.
     ///
+    /// Only transactions matching the filter will be returned. Unless the
+    /// mempool has been deemed to have a financial interest in the transaction,
+    /// in which case the filter is ignored.
+    ///
     /// Favors transactions based on upgrade priority first, fee density
     /// second.
     pub(crate) fn preferred_update(
         &self,
+        tx_upgrade_filter: TxUpgradeFilter,
     ) -> Option<(&TransactionKernel, &NeptuneProof, UpgradePriority)> {
-        for txid in self
+        for candidate_txid in self
             .upgrade_priority_iter()
             .map(|(txid, _)| txid)
             .chain(self.fee_density_iter().map(|(txid, _)| txid))
         {
-            let candidate = self.tx_dictionary.get(&txid).unwrap();
+            let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
             if self.tx_is_synced(&candidate.transaction.kernel) {
                 continue;
             }
@@ -316,6 +322,12 @@ impl Mempool {
             let TransactionProof::SingleProof(single_proof) = &candidate.transaction.proof else {
                 continue;
             };
+
+            if candidate.upgrade_priority.is_irrelevant()
+                && !tx_upgrade_filter.matches(candidate_txid)
+            {
+                continue;
+            }
 
             return Some((
                 &candidate.transaction.kernel,
@@ -332,6 +344,10 @@ impl Mempool {
     /// means that transactions initialized by this node's wallet will always be
     /// targeted for proof-upgrading first.
     ///
+    /// Only transactions matching the filter will be returned. Unless the
+    /// mempool has been deemed to have a financial interest in the transaction,
+    /// in which case the filter is ignored.
+    ///
     /// Will only return transactions that are synced to the latest tip.
     ///
     /// Also returns the upgrade priority of this transactions, for the node
@@ -339,28 +355,38 @@ impl Mempool {
     pub(crate) fn preferred_proof_collection(
         &self,
         num_proofs_threshold: usize,
+        tx_upgrade_filter: TxUpgradeFilter,
     ) -> Option<(&TransactionKernel, &ProofCollection, UpgradePriority)> {
-        for txid in self
+        for candidate_txid in self
             .upgrade_priority_iter()
             .map(|(txid, _)| txid)
             .chain(self.fee_density_iter().map(|(txid, _)| txid))
         {
-            let candidate = self.tx_dictionary.get(&txid).unwrap();
+            let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
             if !self.tx_is_synced(&candidate.transaction.kernel) {
                 continue;
             }
 
-            if let TransactionProof::ProofCollection(proof_collection) =
-                &candidate.transaction.proof
-            {
-                if proof_collection.num_proofs() <= num_proofs_threshold {
-                    return Some((
-                        &candidate.transaction.kernel,
-                        proof_collection,
-                        candidate.upgrade_priority,
-                    ));
-                }
+            let TransactionProof::ProofCollection(proof_collection) = &candidate.transaction.proof
+            else {
+                continue;
+            };
+
+            if proof_collection.num_proofs() > num_proofs_threshold {
+                continue;
             }
+
+            if candidate.upgrade_priority.is_irrelevant()
+                && !tx_upgrade_filter.matches(candidate_txid)
+            {
+                continue;
+            }
+
+            return Some((
+                &candidate.transaction.kernel,
+                proof_collection,
+                candidate.upgrade_priority,
+            ));
         }
 
         None
@@ -378,15 +404,17 @@ impl Mempool {
     /// Returns the pair of transaction along with their sum of priorities.
     pub(crate) fn preferred_single_proof_pair(
         &self,
+        tx_upgrade_filter: TxUpgradeFilter,
     ) -> Option<([(TransactionKernel, Proof); 2], UpgradePriority)> {
         let mut ret = vec![];
+        let mut filter_mismatches = vec![];
         let mut priority = UpgradePriority::Irrelevant;
-        for txid in self
+        for candidate_txid in self
             .upgrade_priority_iter()
             .map(|(txid, _)| txid)
             .chain(self.fee_density_iter().map(|(txid, _)| txid))
         {
-            let candidate = self.tx_dictionary.get(&txid).unwrap();
+            let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
 
             if !self.tx_is_synced(&candidate.transaction.kernel) {
                 continue;
@@ -396,8 +424,8 @@ impl Mempool {
                 continue;
             };
 
-            // Do not attempt to merge transactions that neither have a value
-            // nor pay a fee.
+            // Do not attempt to merge transactions that neither have a value to
+            // us nor pay a fee.
             if candidate.upgrade_priority.is_irrelevant()
                 && candidate.transaction.kernel.fee.is_zero()
             {
@@ -405,16 +433,42 @@ impl Mempool {
             }
 
             // Avoid selecting same transaction twice.
-            if ret.contains(&txid) {
+            if ret.contains(&candidate_txid) {
+                continue;
+            }
+
+            if candidate.upgrade_priority.is_irrelevant()
+                && !tx_upgrade_filter.matches(candidate_txid)
+            {
+                filter_mismatches.push(candidate_txid);
                 continue;
             }
 
             priority = priority + candidate.upgrade_priority;
 
-            ret.push(txid);
+            ret.push(candidate_txid);
 
             if ret.len() == 2 {
                 break;
+            }
+        }
+
+        // If only one transaction was found and one or more were avoided
+        // because they did not match the filter, see if the combined
+        // transaction (filter match + filter mismatch) matches the filter.
+        // This way, the filter avoids double work in the merge case, and it
+        // ensures that all possible mergers are performed in a "fully covering"
+        // upgrade filter setup.
+        if 1 == ret.len() {
+            let first_candidate = ret[0];
+            for second_candidate in filter_mismatches {
+                if tx_upgrade_filter.matches(TransactionKernelId::combine(
+                    first_candidate,
+                    second_candidate,
+                )) {
+                    ret.push(second_candidate);
+                    break;
+                }
             }
         }
 
@@ -1343,7 +1397,7 @@ mod tests {
         let mutator_set_update = new_block.mutator_set_update().unwrap();
 
         while let Some((old_kernel, old_single_proof, upgrade_priority)) =
-            mempool.preferred_update()
+            mempool.preferred_update(TxUpgradeFilter::match_all())
         {
             let job = UpdateMutatorSetDataJob::new(
                 old_kernel.to_owned(),
@@ -1609,7 +1663,7 @@ mod tests {
         // No candidate when mempool is empty
         assert!(
             mempool
-                .preferred_proof_collection(bob.cli.max_num_proofs)
+                .preferred_proof_collection(bob.cli.max_num_proofs, TxUpgradeFilter::match_all())
                 .is_none(),
             "No proof collection when mempool is empty"
         );
@@ -1618,7 +1672,7 @@ mod tests {
         mempool.insert(tx_by_bob.into(), UpgradePriority::Irrelevant);
         assert_eq!(
             mempool
-                .preferred_proof_collection(bob.cli.max_num_proofs)
+                .preferred_proof_collection(bob.cli.max_num_proofs, TxUpgradeFilter::match_all())
                 .unwrap()
                 .0
                 .txid(),
@@ -1879,7 +1933,7 @@ mod tests {
             assert_eq!(
                 densest_txs,
                 mempool
-                    .preferred_single_proof_pair()
+                    .preferred_single_proof_pair(TxUpgradeFilter::match_all())
                     .unwrap()
                     .0
                     .map(|x| x.0.txid())
@@ -2027,7 +2081,7 @@ mod tests {
         assert_eq!(
             densest_txs,
             mempool
-                .preferred_single_proof_pair()
+                .preferred_single_proof_pair(TxUpgradeFilter::match_all())
                 .unwrap()
                 .0
                 .map(|x| x.0.txid())
@@ -2038,7 +2092,9 @@ mod tests {
         assert_eq!(1, mempool.len());
         assert_eq!(&merged, mempool.get(merged.kernel.txid()).unwrap());
 
-        assert!(mempool.preferred_single_proof_pair().is_none());
+        assert!(mempool
+            .preferred_single_proof_pair(TxUpgradeFilter::match_all())
+            .is_none());
 
         assert_eq!(
             2,
@@ -2907,7 +2963,9 @@ mod tests {
             // Insert synced transaction into mempool, verify no transaction
             // is returned.
             mempool.insert(sp_tx.into(), UpgradePriority::Irrelevant);
-            assert!(mempool.preferred_update().is_none());
+            assert!(mempool
+                .preferred_update(TxUpgradeFilter::match_all())
+                .is_none());
 
             // Ensure tx in mempool becomes unsynced.
             let block1_timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
@@ -2920,7 +2978,9 @@ mod tests {
             .await;
             let (_, returned_jobs) = mempool.update_with_block(&block1).unwrap();
             assert!(returned_jobs.is_empty());
-            assert!(mempool.preferred_update().is_some());
+            assert!(mempool
+                .preferred_update(TxUpgradeFilter::match_all())
+                .is_some());
         }
 
         #[proptest(cases = 15, async = "tokio")]
@@ -2957,7 +3017,9 @@ mod tests {
 
             // All transactions in the mempool should be considered unsynced at
             // this point, so a transaction will be returned from below call.
-            let (preferred_txk, _, upgrade_priority) = mempool.preferred_update().unwrap();
+            let (preferred_txk, _, upgrade_priority) = mempool
+                .preferred_update(TxUpgradeFilter::match_all())
+                .unwrap();
 
             if preferred_txk.txid() == tx_a.txid() {
                 prop_assert!(upgrade_priority_a >= upgrade_priority_b);

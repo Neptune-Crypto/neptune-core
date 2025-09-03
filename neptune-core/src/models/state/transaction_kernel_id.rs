@@ -14,7 +14,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, GetSize, Hash, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Default))]
+#[cfg_attr(test, derive(Default, arbitrary::Arbitrary))]
 pub struct TransactionKernelId(Digest);
 
 impl Display for TransactionKernelId {
@@ -28,6 +28,27 @@ impl FromStr for TransactionKernelId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(Digest::try_from_hex(s)?))
+    }
+}
+
+impl From<TransactionKernelId> for Digest {
+    fn from(value: TransactionKernelId) -> Self {
+        value.0
+    }
+}
+
+impl TransactionKernelId {
+    /// A symmetric operation that takes two transaction kernel IDs to produce
+    /// a new transaction kernel ID. The output does not correspond to the
+    /// output of the merge operation. The outputted transaction kernel ID has
+    /// no independent meaning and offers no guarantees other than it being a
+    /// symmetric and deterministic operation.
+    pub(crate) fn combine(a: Self, b: Self) -> Self {
+        let a = a.0.values();
+        let b = b.0.values();
+        let c: Digest = Digest::new(std::array::from_fn(|i| a[i] + b[i]));
+
+        Self(c)
     }
 }
 
@@ -108,11 +129,22 @@ impl TransactionKernel {
 mod tests {
     use super::*;
     use proptest::prelude::Strategy;
+    use proptest::prop_assert_eq;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
+    use rand::distr::Distribution;
+    use rand::distr::StandardUniform;
+    use test_strategy::proptest;
 
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
+
+    impl Distribution<TransactionKernelId> for StandardUniform {
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernelId {
+            TransactionKernelId(rng.random::<Digest>())
+        }
+    }
 
     #[test]
     fn txid_value_is_constant_under_transaction_update() {
@@ -141,5 +173,16 @@ mod tests {
             "04e19a9adfefa811f68d8de45da6412d0d73368159a119af97cfd38da6cfc55ae7c6ba403b9c8b52"
         )
         .is_ok());
+    }
+
+    #[proptest]
+    fn combine_is_symmetric_and_deterministic(
+        #[strategy(arb())] a: TransactionKernelId,
+        #[strategy(arb())] b: TransactionKernelId,
+    ) {
+        prop_assert_eq!(
+            TransactionKernelId::combine(a, b),
+            TransactionKernelId::combine(b, a)
+        );
     }
 }

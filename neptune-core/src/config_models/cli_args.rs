@@ -17,6 +17,7 @@ use sysinfo::System;
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
 use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
+use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
@@ -129,15 +130,6 @@ pub struct Args {
     #[clap(long, alias = "notx")]
     pub(crate) no_transaction_initiation: bool,
 
-    /// Whether to expend computational resources on upgrading proofs for 3rd
-    /// party transactions, i.e. for transactions that this node is not party
-    /// to. This is the 1st step of three-step mining. Transaction fees can be
-    /// collected through this process. Note that upgrading transaction proofs
-    /// involves the computationally expensive task of producing STARK proofs.
-    /// You should have plenty of cores and probably at least 128 GB of RAM.
-    #[clap(long)]
-    pub(crate) tx_proof_upgrading: bool,
-
     /// Specify environment variables for Triton VM for a given (log2 of) the
     /// padded height. Can be used to control the environment variables
     /// `TVM_LDE_TRACE` and `RAYON_NUM_THREADS` as a function of the proof's
@@ -153,6 +145,33 @@ pub struct Args {
     ///  --triton-vm-env-vars='24:"RAYON_NUM_THREADS=90 TVM_LDE_TRACE=no_cache",25:"RAYON_NUM_THREADS=45 TVM_LDE_TRACE=no_cache"'
     #[clap(long, default_value = "")]
     pub triton_vm_env_vars: TritonVmEnvVars,
+
+    /// Whether to expend computational resources on upgrading proofs for 3rd
+    /// party transactions, i.e. for transactions that this node is not party
+    /// to. This is the 1st step of three-step mining. Transaction fees can be
+    /// collected through this process. Note that upgrading transaction proofs
+    /// involves the computationally expensive task of producing STARK proofs.
+    /// You should have plenty of cores and probably at least 128 GB of RAM.
+    #[clap(long)]
+    pub(crate) tx_proof_upgrading: bool,
+
+    /// If [`Self::tx_proof_upgrading`] is set, only upgrade transactions that
+    /// match this filter. Syntax: `--tx-upgrade-filter <divisor>:<remainder>`
+    ///
+    /// Only upgrade transactions where txid % divisor == remainder.
+    /// Example: `--tx-upgrade-filter 4:2`
+    ///
+    /// Setting the filter to e.g. '4:2' means that this node will on average
+    /// only upgrade one out of four transactions. Specifically those whose
+    /// txid modulo 4 is 2.
+    ///
+    /// Can be used to avoid duplicate work where multiple machines upgrade the
+    /// same transaction. Useful if the same entity controls multiple nodes that
+    /// all do transaction proof upgrading. If this flag is not set that
+    /// corresponds to the "1:0" filter, a filter that matches on all
+    /// transactions.
+    #[arg(long, default_value = "1:0")]
+    pub(crate) tx_upgrade_filter: TxUpgradeFilter,
 
     /// Determines the fraction of the transaction fee consumed by this node as
     /// a reward either for upgrading transaction proofs. Ignored unless
@@ -477,6 +496,7 @@ impl Default for Args {
     fn default() -> Self {
         let empty: Vec<String> = vec![];
         Self::parse_from(empty)
+        // Self::parse_from(["neptune-core"])
     }
 }
 
@@ -709,6 +729,7 @@ mod tests {
             default_args.peer_listen_addr
         );
         assert_eq!(1, default_args.max_num_compose_mergers.get());
+        assert_eq!(TxUpgradeFilter::match_all(), default_args.tx_upgrade_filter);
     }
 
     #[test]

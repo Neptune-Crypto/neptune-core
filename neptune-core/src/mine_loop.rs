@@ -31,6 +31,7 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
+use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
 use crate::job_queue::errors::JobHandleError;
 use crate::main_loop::proof_upgrader::UpgradeJob;
 use crate::models::blockchain::block::block_header::BlockPow;
@@ -590,7 +591,7 @@ pub(crate) async fn create_block_transaction_from(
         let update_job = global_state_lock
             .lock_guard_mut()
             .await
-            .preferred_update_job_from_mempool(min_gobbling_fee)
+            .preferred_update_job_from_mempool(min_gobbling_fee, TxUpgradeFilter::match_all())
             .await;
         let update_job = update_job.map(UpgradeJob::UpdateMutatorSetData);
         if let Some(update_job) = update_job {
@@ -1043,6 +1044,7 @@ pub(crate) mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
+    use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
     use crate::job_queue::errors::JobHandleError;
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
@@ -1279,7 +1281,7 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool
-                .preferred_update()
+                .preferred_update(TxUpgradeFilter::match_all())
                 .is_some(),
             "Must have unsynced tx in mempool"
         );
