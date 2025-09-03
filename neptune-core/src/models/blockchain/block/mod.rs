@@ -687,68 +687,6 @@ impl Block {
         }
     }
 
-    // /// Merge a transaction into this block's transaction.
-    // /// The mutator set data must be valid in all inputs.
-    // ///
-    // /// note: this causes block digest to change.
-    // pub async fn accumulate_transaction(
-    //     &mut self,
-    //     transaction: Transaction,
-    //     previous_mutator_set_accumulator: &MutatorSetAccumulator,
-    // ) {
-    //     // merge transactions
-    //     let merged_timestamp = max::<Timestamp>(
-    //         self.kernel.header.timestamp,
-    //         max::<Timestamp>(
-    //             self.kernel.body.transaction_kernel.timestamp,
-    //             transaction.kernel.timestamp,
-    //         ),
-    //     );
-    //     let new_transaction = self
-    //         .kernel
-    //         .body
-    //         .transaction_kernel
-    //         .clone()
-    //         .merge_with(transaction.clone());
-
-    //     // accumulate mutator set updates
-    //     // Can't use the current mutator sat accumulator because it is in an in-between state.
-    //     let mut new_mutator_set_accumulator = previous_mutator_set_accumulator.clone();
-    //     let mutator_set_update = MutatorSetUpdate::new(
-    //         new_transaction.kernel.inputs.clone(),
-    //         new_transaction.kernel.outputs.clone(),
-    //     );
-
-    //     // Apply the mutator set update to get the `next_mutator_set_accumulator`
-    //     mutator_set_update
-    //         .apply_to_accumulator(&mut new_mutator_set_accumulator)
-    //         .expect("Mutator set mutation must work");
-
-    //     let block_body: BlockBody = BlockBody {
-    //         transaction_kernel: new_transaction,
-    //         mutator_set_accumulator: new_mutator_set_accumulator.clone(),
-    //         lock_free_mmr_accumulator: self.kernel.body.lock_free_mmr_accumulator.clone(),
-    //         block_mmr_accumulator: self.kernel.body.block_mmr_accumulator.clone(),
-    //         uncle_blocks: self.kernel.body.uncle_blocks.clone(),
-    //     };
-
-    //     let block_header = BlockHeader {
-    //         version: self.kernel.header.version,
-    //         height: self.kernel.header.height,
-    //         prev_block_digest: self.kernel.header.prev_block_digest,
-    //         timestamp: merged_timestamp,
-    //         nonce: self.kernel.header.nonce,
-    //         max_block_size: self.kernel.header.max_block_size,
-    //         proof_of_work_line: self.kernel.header.proof_of_work_line,
-    //         proof_of_work_family: self.kernel.header.proof_of_work_family,
-    //         difficulty: self.kernel.header.difficulty,
-    //     };
-
-    //     self.kernel.body = block_body;
-    //     self.kernel.header = block_header;
-    //     self.unset_digest();
-    // }
-
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the block has enough
     /// proof of work; that must be done separately by the caller, for instance
@@ -974,10 +912,7 @@ impl Block {
     ///
     /// Specifically, compare the hash of the current block against the
     /// target corresponding to the previous block's difficulty and return true
-    /// if the former is smaller. If the timestamp difference exceeds the
-    /// `TARGET_BLOCK_INTERVAL` by a factor `ADVANCE_DIFFICULTY_CORRECTION_WAIT`
-    /// then the effective difficulty is reduced by a factor
-    /// `ADVANCE_DIFFICULTY_CORRECTION_FACTOR`.
+    /// if the former is smaller.
     pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
         // enforce network difficulty-reset-interval if present. Note that *no*
         // pow checks are enforced in this case, not even Merkle authentication

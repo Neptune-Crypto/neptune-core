@@ -1930,8 +1930,6 @@ impl GlobalState {
 
         // request blocks from peers
         todo!("We don't yet support non-archival nodes");
-
-        // Ok(())
     }
 
     pub(crate) async fn response_to_sync_challenge(

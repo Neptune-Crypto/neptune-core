@@ -633,6 +633,10 @@ impl MainLoopHandler {
     /// Shares block with all connected peers, updates own state, and updates
     /// any mempool transactions to be valid under this new block.
     ///
+    /// Caller is responsible for both block validity and that the provided
+    /// block has a valid PoW solution. Otherwise, the new state will be
+    /// invalid.
+    ///
     /// Locking:
     ///  * acquires `global_state_lock` for read and write
     async fn handle_self_guessed_block(
