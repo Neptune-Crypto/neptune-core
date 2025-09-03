@@ -74,7 +74,7 @@ impl BlockProposal {
 
 /// Enumerates the reason that a specific block proposal was rejected. The
 /// block proposal is most likely from another peer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, strum::EnumIs)]
 pub(crate) enum BlockProposalRejectError {
     /// Denotes that this instance is itself composing blocks
     Composing,
