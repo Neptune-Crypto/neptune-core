@@ -342,7 +342,7 @@ where
         .await?;
     if let InternalConnectionStatus::Refused(reason) = connection_status {
         let reason = format!("Refusing incoming connection. Reason: {reason:?}");
-        warn!("{reason}");
+        debug!("{reason}");
         bail!("{reason}");
     }
 

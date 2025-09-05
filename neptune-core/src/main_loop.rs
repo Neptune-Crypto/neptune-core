@@ -1682,7 +1682,7 @@ impl MainLoopHandler {
                             own_handshake_data,
                         ).await {
                             Ok(()) => (),
-                            Err(err) => error!("Got error: {:?}", err),
+                            Err(err) => debug!("Got result: {:?}", err),
                         }
                     })?;
                     main_loop_state.task_handles.push(incoming_peer_task_handle);
@@ -3031,7 +3031,7 @@ mod tests {
                     .await
                     {
                         Ok(()) => (),
-                        Err(err) => error!("Got error: {:?}", err),
+                        Err(err) => debug!("Got result: {:?}", err),
                     }
                 })
                 .unwrap();
