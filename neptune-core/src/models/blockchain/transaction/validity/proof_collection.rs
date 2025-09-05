@@ -485,9 +485,30 @@ pub mod tests {
 
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
+    use crate::api::export::NeptuneProof;
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::tests::shared_tokio_runtime;
     use crate::triton_vm_job_queue::vm_job_queue;
+
+    impl ProofCollection {
+        /// Return an invalid proof collection for testing purposes
+        pub(crate) fn invalid() -> Self {
+            Self {
+                removal_records_integrity: NeptuneProof::invalid(),
+                collect_lock_scripts: NeptuneProof::invalid(),
+                lock_scripts_halt: vec![],
+                kernel_to_outputs: NeptuneProof::invalid(),
+                collect_type_scripts: NeptuneProof::invalid(),
+                type_scripts_halt: vec![],
+                lock_script_hashes: vec![],
+                type_script_hashes: vec![],
+                kernel_mast_hash: Digest::default(),
+                salted_inputs_hash: Digest::default(),
+                salted_outputs_hash: Digest::default(),
+                merge_bit_mast_path: vec![],
+            }
+        }
+    }
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]

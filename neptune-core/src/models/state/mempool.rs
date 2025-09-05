@@ -2937,6 +2937,8 @@ mod tests {
     }
 
     mod proof_upgrade_candidates {
+        use std::str::FromStr;
+
         use proptest::prop_assert;
         use proptest::prop_assert_eq;
         use test_strategy::proptest;
@@ -2981,6 +2983,13 @@ mod tests {
             assert!(mempool
                 .preferred_update(TxUpgradeFilter::match_all())
                 .is_some());
+
+            // Verify filter behavior
+            let accept_first_half = TxUpgradeFilter::from_str("2:0").unwrap();
+            let accept_second_half = TxUpgradeFilter::from_str("2:1").unwrap();
+            let num_matches = mempool.preferred_update(accept_first_half).is_some() as u8
+                + mempool.preferred_update(accept_second_half).is_some() as u8;
+            assert_eq!(1, num_matches, "Exactly one filter must match transaction");
         }
 
         #[proptest(cases = 15, async = "tokio")]
@@ -3030,6 +3039,47 @@ mod tests {
             } else {
                 panic!("Must return either tx_a or tx_b");
             }
+        }
+
+        #[proptest(cases = 8, async = "tokio")]
+        async fn preferred_proof_collection_respects_tx_upgrade_filter(
+            #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 3, 9))]
+            primitive_witness: PrimitiveWitness,
+        ) {
+            let tx = Transaction {
+                kernel: primitive_witness.kernel,
+                proof: TransactionProof::ProofCollection(ProofCollection::invalid()),
+            };
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &Block::genesis(Network::Main),
+            );
+            mempool.tip_mutator_set_hash = tx.kernel.mutator_set_hash;
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+
+            let accept_all = TxUpgradeFilter::match_all();
+            let accept_first_third = TxUpgradeFilter::from_str("3:0").unwrap();
+            let accept_second_third = TxUpgradeFilter::from_str("3:1").unwrap();
+            let accept_third_third = TxUpgradeFilter::from_str("3:2").unwrap();
+
+            let num_proofs_threshold = 20;
+            prop_assert!(mempool
+                .preferred_proof_collection(num_proofs_threshold, accept_all)
+                .is_some());
+            let num_matches = mempool
+                .preferred_proof_collection(num_proofs_threshold, accept_first_third)
+                .is_some() as u8
+                + mempool
+                    .preferred_proof_collection(num_proofs_threshold, accept_second_third)
+                    .is_some() as u8
+                + mempool
+                    .preferred_proof_collection(num_proofs_threshold, accept_third_third)
+                    .is_some() as u8;
+            assert_eq!(
+                1, num_matches,
+                "Only one match from mutually exclusive filters"
+            );
         }
     }
 
@@ -3154,7 +3204,7 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
-        async fn proof_collection_always_replaces_proof_primitive_witness() {
+        async fn proof_collection_always_replaces_primitive_witness() {
             let network = Network::Main;
             let pc_high_fee = genesis_tx_with_proof_type(
                 TxProvingCapability::PrimitiveWitness,
