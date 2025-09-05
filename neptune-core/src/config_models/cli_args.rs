@@ -176,7 +176,7 @@ pub struct Args {
     /// Determines the fraction of the transaction fee consumed by this node as
     /// a reward either for upgrading transaction proofs. Ignored unless
     /// proof upgrading is activated.
-    #[clap(long, default_value = "0.2", value_parser = fraction_validator)]
+    #[clap(long, default_value = "0.6", value_parser = fraction_validator)]
     pub(crate) gobbling_fraction: f64,
 
     /// Determines the minimum fee to take as a reward for upgrading 3rd party
