@@ -199,10 +199,6 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
                             // calculate it once.
                             if !batch_modification_hash_map.contains_key(chunk_index) {
                                 let target_chunk = chunk.to_owned();
-                                // for index in indices.iter() {
-                                //     let relative_index = (index % CHUNK_SIZE as u128) as u32;
-                                //     target_chunk.insert(relative_index);
-                                // }
 
                                 // Since all indices have been applied to the chunk in the above
                                 // for-loop, we can calculate the hash of the updated chunk now.

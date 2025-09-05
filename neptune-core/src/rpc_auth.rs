@@ -53,8 +53,6 @@ impl Token {
 
         match (self, valid_token) {
             (Self::Cookie(c), Self::Cookie(valid)) => c.auth(valid),
-            // uncomment this line if another variant is added.
-            // _ => unreachable!(),
         }
     }
 }

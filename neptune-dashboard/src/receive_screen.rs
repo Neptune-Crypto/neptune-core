@@ -144,7 +144,6 @@ impl Screen for ReceiveScreen {
         let data_arc = self.data.clone();
         let token = self.token;
         self.populate_receiving_address_async(server_arc, token, data_arc);
-        // *self.escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
     }
 
     fn deactivate(&mut self) {

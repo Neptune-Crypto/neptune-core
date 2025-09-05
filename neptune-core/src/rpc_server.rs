@@ -4245,8 +4245,6 @@ mod tests {
             .await;
         let _ = rpc_server.clone().mempool_tx_ids(ctx, token).await;
 
-        // let transaction_timestamp = network.launch_date();
-        // let proving_capability = rpc_server.state.cli().proving_capability();
         let my_output: OutputFormat =
             (own_receiving_address, NativeCurrencyAmount::one_nau()).into();
         let _ = rpc_server
@@ -4260,18 +4258,6 @@ mod tests {
             )
             .await;
 
-        // .send_to_many_inner(
-        //     ctx,
-        //     vec![],
-        //     (
-        //         UtxoNotificationMedium::OffChain,
-        //         UtxoNotificationMedium::OffChain,
-        //     ),
-        //     NativeCurrencyAmount::one(),
-        //     transaction_timestamp,
-        //     proving_capability,
-        // )
-        // .await;
         let _ = rpc_server.clone().pause_miner(ctx, token).await;
         let _ = rpc_server.clone().restart_miner(ctx, token).await;
         let _ = rpc_server
@@ -5803,18 +5789,6 @@ mod tests {
                         fee,
                     )
                     .await;
-                // .send_to_many_inner(
-                //     ctx,
-                //     outputs.clone().take(i).collect(),
-                //     (
-                //         UtxoNotificationMedium::OffChain,
-                //         UtxoNotificationMedium::OffChain,
-                //     ),
-                //     fee,
-                //     timestamp,
-                //     TxProvingCapability::PrimitiveWitness,
-                // )
-                // .await;
                 assert!(result.is_ok());
             }
         }
@@ -6034,21 +6008,6 @@ mod tests {
                         fee,
                     )
                     .await;
-
-                // let result = rpc_server
-                //     .clone()
-                //     .send_to_many_inner(
-                //         ctx,
-                //         outputs,
-                //         (
-                //             UtxoNotificationMedium::OffChain,
-                //             UtxoNotificationMedium::OffChain,
-                //         ),
-                //         fee,
-                //         timestamp,
-                //         TxProvingCapability::ProofCollection,
-                //     )
-                //     .await;
 
                 // --- Test: bech32m serialize/deserialize roundtrip.
                 assert_eq!(

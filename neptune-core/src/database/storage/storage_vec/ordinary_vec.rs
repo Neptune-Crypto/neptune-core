@@ -46,44 +46,6 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec
         self.0.get_all()
     }
 
-    // async fn many_iter<'a>(
-    //     &'a self,
-    //     indices: impl IntoIterator<Item = Index> + 'a,
-    // ) -> Box<dyn Iterator<Item = (Index, T)> + '_> {
-    //     // note: this lock is moved into the iterator closure and is not
-    //     //       released until caller drops the returned iterator
-    //     let inner = self.read_lock();
-
-    //     Box::new(indices.into_iter().map(move |i| {
-    //         assert!(
-    //             i < inner.len(),
-    //             "Out-of-bounds. Got index {} but length was {}.",
-    //             i,
-    //             inner.len(),
-    //         );
-    //         (i, inner.get(i))
-    //     }))
-    // }
-
-    // async fn many_iter_values<'a>(
-    //     &'a self,
-    //     indices: impl IntoIterator<Item = Index> + 'a,
-    // ) -> Box<dyn Iterator<Item = T> + '_> {
-    //     // note: this lock is moved into the iterator closure and is not
-    //     //       released until caller drops the returned iterator
-    //     let inner = self.read_lock();
-
-    //     Box::new(indices.into_iter().map(move |i| {
-    //         assert!(
-    //             i < inner.len(),
-    //             "Out-of-bounds. Got index {} but length was {}.",
-    //             i,
-    //             inner.len(),
-    //         );
-    //         inner.get(i)
-    //     }))
-    // }
-
     #[inline]
     async fn set(&mut self, index: Index, value: T) {
         // note: on 32 bit systems, this could panic.

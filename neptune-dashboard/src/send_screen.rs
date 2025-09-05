@@ -105,8 +105,6 @@ impl SendScreen {
     ) {
         const SEND_DEADLINE_IN_SECONDS: u64 = 40;
 
-        //        *focus_arc.lock().await = SendScreenWidget::Notice;
-
         *notice_arc.lock().await = "sending ...".to_string();
         refresh_tx.send(()).await.unwrap();
 
@@ -240,7 +238,6 @@ impl SendScreen {
                                             rpc_client, token, address, amount, fee, notice,
                                             reset_me, network, refresh_tx,
                                         ));
-                                        // escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
                                     SendScreenWidget::Notice => {
                                         escalate_event = None;

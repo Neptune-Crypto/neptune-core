@@ -378,7 +378,6 @@ impl Widget for AddressScreen {
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
         let table = Table::new(rows, width_constraints)
-            // .widths(&width_constraints)
             .style(style)
             .row_highlight_style(selected_style);
         table_canvas.width = min(

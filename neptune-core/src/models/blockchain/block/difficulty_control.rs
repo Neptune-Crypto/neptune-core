@@ -798,11 +798,6 @@ mod tests {
         let mut cumulative_pow = cumulative_pow_start;
         let mut difficulty = difficulty_start;
 
-        // f =  1 + (MINIMUM_BLOCK_TIME - TARGET_BLOCK_INTERVAL) / TARGET_BLOCK_INTERVAL * P
-        // let f = (1u64 << 32) + (115 << 21);
-        // let second_term = (MINIMUM_BLOCK_TIME.to_millis() - TARGET_BLOCK_INTERVAL.to_millis())
-        //     as f64
-        //     / TARGET_BLOCK_INTERVAL.to_millis() as f64;
         let target_block_interval = network.target_block_interval();
         let f = (1.0_f64
             + (target_block_interval.to_millis() - network.minimum_block_time().to_millis())
@@ -811,8 +806,7 @@ mod tests {
                 / 16.0)
             * (1u64 << 32) as f64;
         let f = f as u64;
-        // let second_term_shift_amount = 32 - second_term.ilog2() - 1;
-        // let f = (1u64 << 32) + (second_term << second_term_shift_amount);
+
         let lo = f as u32;
         let hi = (f >> 32) as u32;
         for _ in 0..num_blocks {

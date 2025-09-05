@@ -496,7 +496,6 @@ impl Default for Args {
     fn default() -> Self {
         let empty: Vec<String> = vec![];
         Self::parse_from(empty)
-        // Self::parse_from(["neptune-core"])
     }
 }
 

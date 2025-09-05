@@ -93,7 +93,6 @@ impl GetSize for Utxo {
     }
 
     fn get_heap_size(&self) -> usize {
-        // self.lock_script.get_heap_size() + self.coins.len() * (std::mem::size_of::<Digest>())
         let mut total = self.lock_script_hash().get_heap_size();
         for v in &self.coins {
             total += size_of::<Digest>();

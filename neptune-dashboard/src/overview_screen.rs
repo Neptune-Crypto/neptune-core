@@ -177,38 +177,6 @@ impl OverviewScreen {
                         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
                     }
                 }
-
-                // _ = &mut mempool_size => {
-                //     match rpc_client.get_mempool_size(context::current()).await {
-                //         Ok(ms) => {
-                //             overview_data.lock().unwrap().mempool_size=Some(ByteSize::b(ms.try_into().unwrap()));
-                //             reset_poller!(mempool_size,Duration::from_secs(10));
-                //         },
-                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                //     }
-                // }
-
-                // _ = &mut mempool_tx_count => {
-                //     match rpc_client.get_mempool_tx_count(context::current()).await {
-                //         Ok(txc) => {
-                //             overview_data.lock().unwrap().mempool_tx_count = Some(txc.try_into().unwrap());
-                //             reset_poller!(mempool_tx_count, Duration::from_secs(10));
-                //         },
-                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                //     }
-                // }
-
-                // _ = &mut peer_count => {
-                //     match rpc_client.get_peer_info(context::current()).await {
-                //         Ok(peers) => {
-                //             let num_peers=peers.len();
-                //             overview_data.lock().unwrap().peer_count=Some(num_peers);
-                //             overview_data.lock().unwrap().authenticated_peer_count=Some(0);
-                //             reset_poller!(peer_count,Duration::from_secs(5));
-                //         },
-                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                //     }
-                // }
             }
         }
     }

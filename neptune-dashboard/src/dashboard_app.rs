@@ -476,8 +476,6 @@ impl DashboardApp {
         else {
             // delegate
             let escalated: Option<DashboardEvent> = match self.current_menu_item {
-                // MenuItem::Overview => todo!(),
-                // MenuItem::Peers => todo!(),
                 MenuItem::Address => {
                     let mut address_screen = self.address_screen.as_ref().borrow_mut();
                     address_screen.handle(event)
@@ -498,7 +496,6 @@ impl DashboardApp {
                     let mut send_screen = self.send_screen.as_ref().borrow_mut();
                     send_screen.handle(event, refresh_tx)
                 }
-                // MenuItem::Quit => todo!(),
                 _ => Some(event),
             };
 

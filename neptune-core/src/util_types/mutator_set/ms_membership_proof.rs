@@ -1112,7 +1112,6 @@ pub mod tests {
     #[apply(shared_tokio_runtime)]
     async fn revert_updates_mixed_test() {
         let mut rng_seeder = rand::rng();
-        // let seed_integer = rng.next_u32();
         let error_tuple: (usize, u32) = (
             10 + rng_seeder.next_u32() as usize % 100,
             rng_seeder.next_u32(),

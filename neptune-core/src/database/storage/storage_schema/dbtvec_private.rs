@@ -255,8 +255,6 @@ where
     /// Return all stored elements in a vector, whose index matches the StorageVec's.
     /// It's the caller's responsibility that there is enough memory to store all elements.
     pub(super) async fn get_all(&self) -> Vec<V> {
-        // let fake_cache: HashMap<Index, V> = HashMap::new();
-
         let (indices_of_elements_in_cache, indices_of_elements_not_in_cache): (Vec<_>, Vec<_>) =
             (0..self.len().await).partition(|index| self.cache.contains_key(index));
 
@@ -359,7 +357,6 @@ where
         self.process_persist_count(persist_count);
 
         // try cache first
-        // let current_length = self.len().await;
         if self.cache.contains_key(&new_length) {
             self.cache.remove(&new_length)
         } else {

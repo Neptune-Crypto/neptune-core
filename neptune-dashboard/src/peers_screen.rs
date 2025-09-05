@@ -153,29 +153,6 @@ impl PeersScreen {
         loop {
             select! {
                 _ = &mut balance => {
-                    // dummy data for testing
-                    // let pi = vec![
-                    //     PeerInfo{
-                    //         address_for_incoming_connections: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
-                    //         connected_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                    //         instance_id: 893457,
-                    //         inbound: true,
-                    //         last_seen: SystemTime::now(),
-                    //         standing: PeerStanding::default(),
-                    //         version: "hello".to_string(),
-                    //         is_archival_node: true,
-                    //     },
-                    //     PeerInfo{
-                    //         address_for_incoming_connections: None,
-                    //         connected_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 255, 0, 1)), 8080),
-                    //         instance_id: 90564,
-                    //         inbound: false,
-                    //         last_seen: SystemTime::now(),
-                    //         standing: PeerStanding::default(),
-                    //         version: "world".to_string(),
-                    //         is_archival_node: false,
-                    //     }
-                    // ];
                     match rpc_client.peer_info(context::current(), token).await {
                         Ok(Ok(pi)) => {
 
