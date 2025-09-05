@@ -2987,8 +2987,8 @@ mod tests {
             // Verify filter behavior
             let accept_first_half = TxUpgradeFilter::from_str("2:0").unwrap();
             let accept_second_half = TxUpgradeFilter::from_str("2:1").unwrap();
-            let num_matches = mempool.preferred_update(accept_first_half).is_some() as u8
-                + mempool.preferred_update(accept_second_half).is_some() as u8;
+            let num_matches = u8::from(mempool.preferred_update(accept_first_half).is_some())
+                + u8::from(mempool.preferred_update(accept_second_half).is_some());
             assert_eq!(1, num_matches, "Exactly one filter must match transaction");
         }
 
@@ -3067,15 +3067,19 @@ mod tests {
             prop_assert!(mempool
                 .preferred_proof_collection(num_proofs_threshold, accept_all)
                 .is_some());
-            let num_matches = mempool
-                .preferred_proof_collection(num_proofs_threshold, accept_first_third)
-                .is_some() as u8
-                + mempool
+            let num_matches = u8::from(
+                mempool
+                    .preferred_proof_collection(num_proofs_threshold, accept_first_third)
+                    .is_some(),
+            ) + u8::from(
+                mempool
                     .preferred_proof_collection(num_proofs_threshold, accept_second_third)
-                    .is_some() as u8
-                + mempool
+                    .is_some(),
+            ) + u8::from(
+                mempool
                     .preferred_proof_collection(num_proofs_threshold, accept_third_third)
-                    .is_some() as u8;
+                    .is_some(),
+            );
             assert_eq!(
                 1, num_matches,
                 "Only one match from mutually exclusive filters"
