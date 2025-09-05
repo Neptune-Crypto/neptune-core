@@ -39,7 +39,7 @@ happy: clippy format
 
 install:
 	cargo install --force --locked --path neptune-core/
-	cargo install --force --locked --path neptune-cli/
+	cargo install --force --locked --path neptune-core-cli/
 	cargo install --force --locked --path neptune-dashboard/
 
 install-linux: install

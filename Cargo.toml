@@ -3,7 +3,7 @@ resolver="2"
 
 members = [
     "neptune-core",
-    "neptune-cli",
+    "neptune-core-cli",
     "neptune-dashboard"
 ]
 

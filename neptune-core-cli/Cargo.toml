@@ -1,5 +1,5 @@
 [package]
-name = "neptune-cli"
+name = "neptune-core-cli"
 description = "cli client for interfacing with neptune-core"
 authors = ["Triton Software"]
 
@@ -11,6 +11,10 @@ homepage = "https://neptune.cash/"
 repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 default-run = "neptune-cli"
+
+[[bin]]
+name = "neptune-cli"
+path = "src/main.rs"
 
 [dependencies]
 
