@@ -3,7 +3,7 @@ name = "neptune-dashboard"
 description = "neptune-cash tui dashboard and wallet"
 authors = ["Triton Software"]
 
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -12,7 +12,7 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
 [dependencies]
 anyhow = { version = "1.0" }
-neptune-cash = { version = "0.3.0-alpha.1", path = "../neptune-core" }
+neptune-cash = { version = "0.4.0", path = "../neptune-core" }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.27"
 tarpc = { version = "^0.34", features = [
