@@ -24,7 +24,7 @@
 // danda: making all of these pub for now, so docs are generated.
 // later maybe we ought to split some stuff out into re-usable crate(s)...?
 pub mod api;
-pub mod config_models;
+pub mod application;
 pub mod connect_to_peers;
 pub mod database;
 pub mod job_queue;
@@ -53,10 +53,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
+use application::config::cli_args;
 use chrono::DateTime;
 use chrono::Local;
 use chrono::Utc;
-use config_models::cli_args;
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
@@ -81,7 +81,7 @@ use tracing::debug;
 use tracing::info;
 use triton_vm::prelude::BFieldElement;
 
-use crate::config_models::data_directory::DataDirectory;
+use crate::application::config::data_directory::DataDirectory;
 use crate::connect_to_peers::call_peer;
 use crate::locks::tokio as sync_tokio;
 use crate::main_loop::MainLoopHandler;

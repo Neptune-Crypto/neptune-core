@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
-use neptune_cash::config_models::network::Network;
+use neptune_cash::application::config::network::Network;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use neptune_cash::state::wallet::address::KeyType;

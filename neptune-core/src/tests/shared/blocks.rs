@@ -14,7 +14,7 @@ use crate::api::export::GlobalStateLock;
 use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
-use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
@@ -169,7 +169,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         FeeNotificationPolicy::OffChain,
     );
 
-    let cli = crate::config_models::cli_args::Args {
+    let cli = crate::application::config::cli_args::Args {
         network,
         ..Default::default()
     };

@@ -7,7 +7,7 @@ use directories::ProjectDirs;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::database::DATABASE_DIRECTORY_ROOT_NAME;
 use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
 use crate::state::archival_state::BLOCK_INDEX_DB_NAME;

@@ -21,7 +21,7 @@ use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use super::Block;
 use crate::api::export::ReceivingAddress;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::block::guesser_receiver_data::GuesserReceiverData;
 use crate::models::blockchain::block::pow::Pow;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;

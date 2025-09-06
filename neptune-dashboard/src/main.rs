@@ -18,7 +18,7 @@ use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::LeaveAlternateScreen;
 use dashboard_app::Config;
 use dashboard_app::DashboardApp;
-use neptune_cash::config_models::data_directory::DataDirectory;
+use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;

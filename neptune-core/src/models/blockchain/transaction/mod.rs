@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -255,7 +255,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::api::export::{TxInputList, TxOutputList};
     use crate::api::tx_initiation::error::CreateProofError;
-    use crate::config_models::network::Network;
+    use crate::application::config::network::Network;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;

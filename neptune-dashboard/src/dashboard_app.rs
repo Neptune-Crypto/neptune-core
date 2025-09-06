@@ -23,7 +23,7 @@ use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::enable_raw_mode;
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
-use neptune_cash::config_models::network::Network;
+use neptune_cash::application::config::network::Network;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::backend::CrosstermBackend;

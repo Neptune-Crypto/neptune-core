@@ -20,7 +20,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::debug;
 
 use super::block_proof_witness::BlockProofWitness;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
@@ -341,8 +341,8 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::mine_loop::create_block_transaction_from;
     use crate::mine_loop::TxMergeOrigin;
     use crate::models::blockchain::block::block_validation_error::BlockValidationError;

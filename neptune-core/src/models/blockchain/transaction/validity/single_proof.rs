@@ -763,7 +763,7 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::network::Network;
+    use crate::application::config::network::Network;
     use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;

@@ -8,7 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;

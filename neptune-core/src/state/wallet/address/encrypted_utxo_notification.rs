@@ -10,7 +10,7 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::api::export::SpendingKey;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::state::wallet::address::common::network_hrp_char;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
@@ -137,7 +137,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::EncryptedUtxoNotification;
-    use crate::config_models::network::Network;
+    use crate::application::config::network::Network;
 
     impl<'a> Arbitrary<'a> for EncryptedUtxoNotification {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {

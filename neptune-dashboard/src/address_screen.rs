@@ -9,7 +9,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::api::export::KeyType;
-use neptune_cash::config_models::network::Network;
+use neptune_cash::application::config::network::Network;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use neptune_cash::state::wallet::address::SpendingKey;

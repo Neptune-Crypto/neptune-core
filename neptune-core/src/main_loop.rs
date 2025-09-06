@@ -1075,7 +1075,7 @@ impl MainLoopHandler {
     /// If necessary, disconnect from peers.
     ///
     /// While a reasonable effort is made to never have more connections than
-    /// [`max_num_peers`](crate::config_models::cli_args::Args::max_num_peers),
+    /// [`max_num_peers`](crate::application::config::cli_args::Args::max_num_peers),
     /// this is not guaranteed. For example, bootstrap nodes temporarily allow a
     /// surplus of incoming connections to provide their service more reliably.
     ///
@@ -2059,8 +2059,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::tests::shared::blocks::invalid_empty_block;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;

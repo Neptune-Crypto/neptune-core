@@ -11,7 +11,7 @@ use tasm_lib::triton_vm::prelude::Digest;
 use super::generation_address;
 use super::symmetric_key;
 use crate::api::export::KeyType;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;

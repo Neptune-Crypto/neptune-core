@@ -9,7 +9,7 @@ use crate::api::export::Network;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TxProvingCapability;
-use crate::config_models::cli_args;
+use crate::application::config::cli_args;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::Block;

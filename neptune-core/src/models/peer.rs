@@ -39,7 +39,7 @@ use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::channel::BlockProposalNotification;
 use super::proof_abstractions::timestamp::Timestamp;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::state::transaction_kernel_id::TransactionKernelId;

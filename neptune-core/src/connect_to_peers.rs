@@ -23,7 +23,7 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-use crate::config_models::cli_args;
+use crate::application::config::cli_args;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
@@ -614,8 +614,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::models::peer::handshake_data::VersionString;
     use crate::models::peer::peer_info::PeerInfo;
     use crate::models::peer::InternalConnectionStatus;

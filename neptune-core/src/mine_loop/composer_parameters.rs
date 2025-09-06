@@ -1,6 +1,6 @@
 use tasm_lib::prelude::Digest;
 
-use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;

@@ -1,7 +1,7 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
-use crate::config_models::network::Network;
-use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
+use crate::application::config::network::Network;
+use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
@@ -171,7 +171,7 @@ impl TritonVmProofJobOptionsBuilder {
 
     /// add max_log2_padded_height_for_proofs
     ///
-    /// see [cli_args::Args::max_log2_padded_height_for_proofs](crate::config_models::cli_args::Args::max_log2_padded_height_for_proofs).
+    /// see [cli_args::Args::max_log2_padded_height_for_proofs](crate::application::config::cli_args::Args::max_log2_padded_height_for_proofs).
     ///
     /// default: None (no limit)
     pub fn max_log2_padded_height_for_proofs(mut self, max: u8) -> Self {

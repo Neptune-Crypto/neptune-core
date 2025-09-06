@@ -36,7 +36,7 @@ use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::lock_script::LockScript;

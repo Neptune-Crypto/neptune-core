@@ -19,7 +19,7 @@ pub(crate) mod import_blocks_from_files;
 use super::shared::new_block_file_is_needed;
 use super::StorageVecBase;
 use crate::api::export::Network;
-use crate::config_models::data_directory::DataDirectory;
+use crate::application::config::data_directory::DataDirectory;
 use crate::database::create_db_if_missing;
 use crate::database::storage::storage_schema::traits::*;
 use crate::database::NeptuneLevelDb;
@@ -1416,9 +1416,9 @@ pub(super) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::data_directory::DataDirectory;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::data_directory::DataDirectory;
+    use crate::application::config::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;

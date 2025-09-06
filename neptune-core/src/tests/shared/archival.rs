@@ -24,7 +24,7 @@ pub(crate) async fn mock_genesis_archival_state(
 ) -> (
     ArchivalState,
     PeerDatabases,
-    crate::config_models::data_directory::DataDirectory,
+    crate::application::config::data_directory::DataDirectory,
 ) {
     let data_dir = super::files::unit_test_data_directory(network).unwrap();
 
