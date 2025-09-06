@@ -51,8 +51,6 @@ use tracing::debug;
 use tracing::error;
 use tracing::warn;
 
-use super::transaction_kernel_id::TransactionKernelId;
-use super::tx_proving_capability::TxProvingCapability;
 use crate::api::export::NeptuneProof;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::models::blockchain::block::Block;
@@ -70,6 +68,8 @@ use crate::state::mempool::merge_input_cache::MergeInputCache;
 use crate::state::mempool::merge_input_cache::MergeInputCacheElement;
 use crate::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
+use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
@@ -1217,8 +1217,8 @@ mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
-    use crate::state::tx_creation_config::TxCreationConfig;
-    use crate::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::transaction_output::TxOutputList;

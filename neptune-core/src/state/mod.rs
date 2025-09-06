@@ -5,14 +5,7 @@ pub mod mempool;
 pub mod mining;
 pub mod networking_state;
 pub mod shared;
-pub(crate) mod transaction_details;
-pub(crate) mod transaction_kernel_id;
-pub(crate) mod tx_creation_artifacts;
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub(crate) mod tx_creation_config;
-pub mod tx_proving_capability;
+pub mod transaction;
 pub mod wallet;
 
 use std::cmp::max;
@@ -48,10 +41,10 @@ use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
-use transaction_kernel_id::TransactionKernelId;
-use tx_creation_artifacts::TxCreationArtifacts;
-use tx_creation_artifacts::TxCreationArtifactsError;
-use tx_proving_capability::TxProvingCapability;
+use transaction::transaction_kernel_id::TransactionKernelId;
+use transaction::tx_creation_artifacts::TxCreationArtifacts;
+use transaction::tx_creation_artifacts::TxCreationArtifactsError;
+use transaction::tx_proving_capability::TxProvingCapability;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -2360,7 +2353,7 @@ mod tests {
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::state::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;

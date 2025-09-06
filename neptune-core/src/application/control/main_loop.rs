@@ -61,7 +61,7 @@ use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
 use crate::state::mining::block_proposal::BlockProposal;
 use crate::state::networking_state::SyncAnchor;
-use crate::state::tx_proving_capability::TxProvingCapability;
+use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
 use crate::SUCCESS_EXIT_CODE;
@@ -2460,7 +2460,7 @@ mod tests {
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
-        use crate::state::tx_creation_config::TxCreationConfig;
+        use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::transaction_output::TxOutput;
 
         async fn tx_no_outputs(

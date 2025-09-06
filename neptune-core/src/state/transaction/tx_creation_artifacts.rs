@@ -10,7 +10,7 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::state::transaction_details::TransactionDetails;
+use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::utxo_notification::PrivateNotificationData;
 
 /// represents a [Transaction] and its corresponding [TransactionDetails]

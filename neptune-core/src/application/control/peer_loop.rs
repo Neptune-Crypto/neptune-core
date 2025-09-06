@@ -2002,8 +2002,8 @@ mod tests {
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::peer::Sanction;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
-    use crate::state::tx_creation_config::TxCreationConfig;
-    use crate::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_block_for_tests;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;

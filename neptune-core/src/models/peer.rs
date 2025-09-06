@@ -42,7 +42,7 @@ use super::proof_abstractions::timestamp::Timestamp;
 use crate::application::config::network::Network;
 use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
 use crate::models::peer::transfer_block::TransferBlock;
-use crate::state::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
 pub(crate) type InstanceId = u128;
 

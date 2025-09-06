@@ -5,7 +5,7 @@ use tasm_lib::prelude::Digest;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::state::transaction_details::TransactionDetails;
+use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::transaction_output::TxOutputList;
 
 pub(crate) type AoclLeafIndex = u64;
