@@ -123,7 +123,7 @@ impl fmt::Display for BlockProposalRejectError {
 
 #[cfg(test)]
 mod tests {
-    use crate::state::block_proposal::BlockProposal;
+    use crate::state::mining::block_proposal::BlockProposal;
 
     impl BlockProposal {
         pub(crate) fn is_none(&self) -> bool {
