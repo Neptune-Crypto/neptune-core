@@ -5,7 +5,7 @@ use crate::api::export::Timestamp;
 use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
 use crate::models::blockchain::block::Block;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::state::block_proposal::BlockProposal;
+use crate::state::mining::block_proposal::BlockProposal;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;

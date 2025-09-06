@@ -1055,7 +1055,7 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
-    use crate::state::mining_status::MiningStatus;
+    use crate::state::mining::mining_status::MiningStatus;
     use crate::state::tx_creation_config::TxCreationConfig;
     use crate::state::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::address::symmetric_key::SymmetricKey;
