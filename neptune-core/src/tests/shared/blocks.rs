@@ -15,8 +15,9 @@ use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-use crate::mine_loop::composer_parameters::ComposerParameters;
-use crate::mine_loop::make_coinbase_transaction_stateless;
+use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::control::mine_loop::make_coinbase_transaction_stateless;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -42,7 +43,6 @@ use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::Randomness;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -290,13 +290,14 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let timestamp =
         timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
 
-    let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
-        &tip_block,
-        global_state_lock.clone(),
-        timestamp,
-        Default::default(),
-    )
-    .await?;
+    let (transaction, expected_composer_utxos) =
+        crate::application::control::mine_loop::create_block_transaction(
+            &tip_block,
+            global_state_lock.clone(),
+            timestamp,
+            Default::default(),
+        )
+        .await?;
 
     let guesser_key = global_state_lock
         .lock_guard()

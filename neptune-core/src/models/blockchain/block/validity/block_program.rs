@@ -343,8 +343,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::mine_loop::create_block_transaction_from;
-    use crate::mine_loop::TxMergeOrigin;
+    use crate::application::control::mine_loop::create_block_transaction_from;
+    use crate::application::control::mine_loop::TxMergeOrigin;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_validation_error::BlockValidationError;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
@@ -363,8 +365,6 @@ pub(crate) mod tests {
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::GlobalStateLock;
 
     impl ConsensusProgramSpecification for BlockProgram {

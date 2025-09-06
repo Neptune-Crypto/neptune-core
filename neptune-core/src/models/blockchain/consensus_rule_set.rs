@@ -83,9 +83,10 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
     use crate::application::config::cli_args;
-    use crate::mine_loop::compose_block_helper;
-    use crate::mine_loop::create_block_transaction_from;
-    use crate::mine_loop::TxMergeOrigin;
+    use crate::application::control::mine_loop::compose_block_helper;
+    use crate::application::control::mine_loop::create_block_transaction_from;
+    use crate::application::control::mine_loop::TxMergeOrigin;
+    use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::models::blockchain::block::Block;
     use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -93,7 +94,6 @@ pub(crate) mod tests {
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
     use crate::tests::tokio_runtime;
-    use crate::application::triton_vm_job_queue::vm_job_queue;
 
     use super::*;
 

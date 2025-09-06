@@ -1419,8 +1419,10 @@ pub(super) mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::data_directory::DataDirectory;
     use crate::application::config::network::Network;
+    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::database::storage::storage_vec::traits::*;
-    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -1443,8 +1445,6 @@ pub(super) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
     pub(super) async fn make_test_archival_state(network: Network) -> ArchivalState {
         let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();

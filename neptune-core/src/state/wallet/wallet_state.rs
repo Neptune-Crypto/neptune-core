@@ -47,14 +47,14 @@ use super::wallet_status::WalletStatusElement;
 use crate::application::config::cli_args::Args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::control::mine_loop::composer_outputs;
+use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
-use crate::mine_loop::composer_outputs;
-use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
@@ -2095,6 +2095,7 @@ pub(crate) mod tests {
     use crate::api::export::Transaction;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
@@ -2113,7 +2114,6 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
     impl WalletState {
         pub(crate) async fn new_from_wallet_entropy(
@@ -3139,9 +3139,9 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-        use crate::mine_loop::composer_parameters;
-        use crate::mine_loop::guess_nonce;
-        use crate::mine_loop::GuessingConfiguration;
+        use crate::application::control::mine_loop::composer_parameters;
+        use crate::application::control::mine_loop::guess_nonce;
+        use crate::application::control::mine_loop::GuessingConfiguration;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::channel::NewBlockFound;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
@@ -4295,7 +4295,7 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-        use crate::mine_loop::make_coinbase_transaction_stateless;
+        use crate::application::control::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
@@ -4765,12 +4765,12 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-        use crate::main_loop::proof_upgrader::ProofCollectionToSingleProof;
-        use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
-        use crate::main_loop::proof_upgrader::UpgradeJob;
-        use crate::main_loop::upgrade_incentive::UpgradeIncentive;
-        use crate::mine_loop::create_block_transaction;
-        use crate::mine_loop::make_coinbase_transaction_stateless;
+        use crate::application::control::main_loop::proof_upgrader::ProofCollectionToSingleProof;
+        use crate::application::control::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+        use crate::application::control::main_loop::proof_upgrader::UpgradeJob;
+        use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
+        use crate::application::control::mine_loop::create_block_transaction;
+        use crate::application::control::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::block::block_transaction::BlockTransaction;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
