@@ -23,8 +23,8 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::state::transaction_details::TransactionDetails;
+use crate::state::wallet::transaction_output::TxOutputList;
 
 use super::block_transaction::BlockOrRegularTransaction;
 

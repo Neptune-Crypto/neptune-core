@@ -29,11 +29,11 @@ use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::channel::RPCServerToMain;
-use crate::models::state::wallet::transaction_output::TxOutput;
-use crate::models::state::wallet::wallet_configuration::WalletConfiguration;
-use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-use crate::models::state::wallet::wallet_state::WalletState;
-use crate::models::state::GlobalState;
+use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::wallet_configuration::WalletConfiguration;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
+use crate::state::wallet::wallet_state::WalletState;
+use crate::state::GlobalState;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use crate::RPC_CHANNEL_CAPACITY;
 

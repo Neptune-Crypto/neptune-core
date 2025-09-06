@@ -106,7 +106,7 @@ pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
     fee: NativeCurrencyAmount,
-    _wallet_state: &crate::models::state::wallet::wallet_state::WalletState,
+    _wallet_state: &crate::state::wallet::wallet_state::WalletState,
     timestamp: Option<Timestamp>,
 ) -> proptest::prelude::BoxedStrategy<Transaction> {
     txkernel::with_usualtxdata(

@@ -38,9 +38,9 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::proof_abstractions::verifier::cache_true_claim;
-use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::address::generation_address;
+use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::Randomness;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -211,7 +211,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
                 txo.utxo(),
                 txo.sender_randomness(),
                 composer_key.receiver_preimage(),
-                crate::models::state::wallet::expected_utxo::UtxoNotifier::OwnMinerComposeBlock,
+                crate::state::wallet::expected_utxo::UtxoNotifier::OwnMinerComposeBlock,
             )
         })
         .collect();

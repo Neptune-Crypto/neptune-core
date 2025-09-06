@@ -572,7 +572,7 @@ pub mod neptune_arbitrary {
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::state::wallet::address::generation_address;
+    use crate::state::wallet::address::generation_address;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
     impl PrimitiveWitness {

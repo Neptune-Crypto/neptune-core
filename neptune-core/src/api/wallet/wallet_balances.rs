@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::GlobalState;
+use crate::state::GlobalState;
 
 /// represents the 4 native-currency wallet balances that neptune-core tracks.
 ///

@@ -36,9 +36,9 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::peer::PeerMessage;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::wallet_state::WalletState;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::expected_utxo::UtxoNotifier;
+use crate::state::wallet::wallet_state::WalletState;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub mod archival;
@@ -178,7 +178,7 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
 }
 
 pub(crate) async fn mock_genesis_wallet_state(
-    wallet_entropy: crate::models::state::wallet::wallet_entropy::WalletEntropy,
+    wallet_entropy: crate::state::wallet::wallet_entropy::WalletEntropy,
     cli_args: &crate::config_models::cli_args::Args,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(cli_args.network).unwrap();

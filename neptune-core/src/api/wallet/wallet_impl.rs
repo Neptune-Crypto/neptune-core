@@ -5,12 +5,12 @@ use super::wallet_balances::WalletBalances;
 use crate::macros::state_lock_call_async;
 use crate::macros::state_lock_call_mut_async;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::address::KeyType;
-use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::address::SpendingKey;
-use crate::models::state::wallet::transaction_input::TxInputList;
-use crate::models::state::GlobalState;
-use crate::models::state::StateLock;
+use crate::state::wallet::address::KeyType;
+use crate::state::wallet::address::ReceivingAddress;
+use crate::state::wallet::address::SpendingKey;
+use crate::state::wallet::transaction_input::TxInputList;
+use crate::state::GlobalState;
+use crate::state::StateLock;
 use crate::GlobalStateLock;
 
 /// provides an API for interacting with the neptune-core wallet.

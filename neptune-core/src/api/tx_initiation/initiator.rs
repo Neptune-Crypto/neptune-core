@@ -30,13 +30,13 @@ use crate::models::blockchain::transaction::transaction_proof::TransactionProofT
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
-use crate::models::state::wallet::change_policy::ChangePolicy;
-use crate::models::state::wallet::transaction_input::TxInput;
-use crate::models::state::wallet::transaction_input::TxInputList;
-use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::state::transaction_details::TransactionDetails;
+use crate::state::transaction_kernel_id::TransactionKernelId;
+use crate::state::tx_creation_artifacts::TxCreationArtifacts;
+use crate::state::wallet::change_policy::ChangePolicy;
+use crate::state::wallet::transaction_input::TxInput;
+use crate::state::wallet::transaction_input::TxInputList;
+use crate::state::wallet::transaction_output::TxOutputList;
 use crate::triton_vm_job_queue::vm_job_queue;
 use crate::GlobalStateLock;
 

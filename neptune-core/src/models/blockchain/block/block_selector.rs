@@ -21,7 +21,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use super::block_height::BlockHeight;
-use crate::models::state::GlobalState;
+use crate::state::GlobalState;
 use crate::twenty_first::error::TryFromHexDigestError;
 use crate::twenty_first::prelude::Digest;
 

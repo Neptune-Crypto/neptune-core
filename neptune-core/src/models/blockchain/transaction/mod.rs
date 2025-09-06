@@ -6,8 +6,8 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction_details::TransactionDetails;
+use crate::state::transaction_kernel_id::TransactionKernelId;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 pub mod announcement;

@@ -21,9 +21,9 @@ use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::verifier::cache_true_claim;
-use crate::models::state::tx_creation_config::TxCreationConfig;
-use crate::models::state::wallet::transaction_output::TxOutput;
-use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+use crate::state::tx_creation_config::TxCreationConfig;
+use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;

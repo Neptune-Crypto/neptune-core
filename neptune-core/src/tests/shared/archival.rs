@@ -1,6 +1,6 @@
 use crate::models::blockchain::block::Block;
 use crate::models::database::PeerDatabases;
-use crate::models::state::archival_state::ArchivalState;
+use crate::state::archival_state::ArchivalState;
 
 /// Set a new block as tip
 pub(crate) async fn add_block_to_archival_state(
@@ -31,11 +31,9 @@ pub(crate) async fn mock_genesis_archival_state(
     let genesis = Block::genesis(network);
     let archival_state = ArchivalState::new(data_dir.clone(), genesis, network).await;
     let peer_db =
-        crate::models::state::networking_state::NetworkingState::initialize_peer_databases(
-            &data_dir,
-        )
-        .await
-        .unwrap();
+        crate::state::networking_state::NetworkingState::initialize_peer_databases(&data_dir)
+            .await
+            .unwrap();
 
     (archival_state, peer_db, data_dir)
 }

@@ -14,14 +14,14 @@ use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::handshake_data::VersionString;
 use crate::models::peer::peer_info::PeerConnectionInfo;
 use crate::models::peer::peer_info::PeerInfo;
-use crate::models::state::blockchain_state::BlockchainState;
-use crate::models::state::light_state::LightState;
-use crate::models::state::mempool::Mempool;
-use crate::models::state::networking_state::NetworkingState;
-use crate::models::state::wallet::wallet_configuration::WalletConfiguration;
-use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-use crate::models::state::GlobalState;
-use crate::models::state::GlobalStateLock;
+use crate::state::blockchain_state::BlockchainState;
+use crate::state::light_state::LightState;
+use crate::state::mempool::Mempool;
+use crate::state::networking_state::NetworkingState;
+use crate::state::wallet::wallet_configuration::WalletConfiguration;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
+use crate::state::GlobalState;
+use crate::state::GlobalStateLock;
 use crate::HandshakeData;
 use crate::RPCServerToMain;
 use crate::PEER_CHANNEL_CAPACITY;
@@ -37,7 +37,7 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     genesis_block: Block,
 ) -> GlobalStateLock {
     let data_dir = crate::tests::shared::files::unit_test_data_directory(cli.network).unwrap();
-    let archival_state = crate::models::state::archival_state::ArchivalState::new(
+    let archival_state = crate::state::archival_state::ArchivalState::new(
         data_dir.clone(),
         genesis_block.clone(),
         cli.network,
@@ -61,7 +61,7 @@ pub(crate) async fn mock_genesis_global_state_with_block(
 
     let light_state: LightState = LightState::from(genesis_block.to_owned());
     let chain = BlockchainState::Archival(Box::new(
-        crate::models::state::blockchain_state::BlockchainArchivalState {
+        crate::state::blockchain_state::BlockchainArchivalState {
             light_state,
             archival_state,
         },
@@ -73,7 +73,7 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     );
 
     let configuration = WalletConfiguration::new(&data_dir).absorb_options(&cli);
-    let wallet_state = crate::models::state::wallet::wallet_state::WalletState::try_new(
+    let wallet_state = crate::state::wallet::wallet_state::WalletState::try_new(
         configuration,
         wallet,
         &genesis_block,

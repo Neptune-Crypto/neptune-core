@@ -39,10 +39,10 @@ use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::channel::BlockProposalNotification;
 use super::proof_abstractions::timestamp::Timestamp;
-use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
 use crate::models::peer::transfer_block::TransferBlock;
+use crate::state::transaction_kernel_id::TransactionKernelId;
 
 pub(crate) type InstanceId = u128;
 

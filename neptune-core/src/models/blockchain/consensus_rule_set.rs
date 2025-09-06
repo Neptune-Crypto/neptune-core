@@ -89,8 +89,8 @@ pub(crate) mod tests {
     use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::models::blockchain::block::Block;
     use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
     use crate::tests::tokio_runtime;
     use crate::triton_vm_job_queue::vm_job_queue;
