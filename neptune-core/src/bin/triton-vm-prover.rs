@@ -3,7 +3,7 @@
 use std::io::BufRead;
 use std::io::Write;
 
-use neptune_cash::config_models::triton_vm_env_vars::TritonVmEnvVars;
+use neptune_cash::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use neptune_cash::models::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
 use tasm_lib::triton_vm::config::overwrite_lde_trace_caching_to;
 use tasm_lib::triton_vm::config::CacheDecision;

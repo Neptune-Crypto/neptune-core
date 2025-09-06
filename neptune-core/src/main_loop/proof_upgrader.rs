@@ -12,8 +12,8 @@ use tracing::warn;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
-use crate::config_models::network::Network;
+use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::config::network::Network;
 use crate::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -978,8 +978,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::models::blockchain::block::Block;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
     use crate::state::tx_creation_config::TxCreationConfig;

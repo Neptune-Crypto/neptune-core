@@ -16,8 +16,8 @@ use tasm_lib::triton_vm::error::InstructionError;
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
-use crate::config_models::network::Network;
-use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
+use crate::application::config::network::Network;
+use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::job_queue::channels::JobCancelReceiver;
 use crate::job_queue::traits::Job;
 use crate::job_queue::JobCompletion;

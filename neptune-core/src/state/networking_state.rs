@@ -7,7 +7,7 @@ use anyhow::Result;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::config_models::data_directory::DataDirectory;
+use crate::application::config::data_directory::DataDirectory;
 use crate::database::create_db_if_missing;
 use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;

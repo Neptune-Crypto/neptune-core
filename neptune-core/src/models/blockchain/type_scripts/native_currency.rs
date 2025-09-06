@@ -757,7 +757,7 @@ pub mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::config_models::network::Network;
+    use crate::application::config::network::Network;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::announcement::Announcement;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;

@@ -7,12 +7,13 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::utxo_notification::UtxoNotificationMethod;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::prelude::twenty_first::prelude::Digest;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::expected_utxo::UtxoNotifier;
@@ -20,7 +21,6 @@ use crate::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::state::wallet::wallet_state::WalletState;
-use crate::prelude::twenty_first::prelude::Digest;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 /// represents a transaction output, as used by
@@ -616,8 +616,8 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;

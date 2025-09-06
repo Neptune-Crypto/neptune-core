@@ -6,7 +6,7 @@ use arraystring::ArrayString;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::block::block_header::BlockHeader;
 
 pub(crate) type VersionString = ArrayString<U30>;

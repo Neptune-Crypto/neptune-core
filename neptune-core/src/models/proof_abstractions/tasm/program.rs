@@ -189,7 +189,7 @@ pub mod tests {
 
     use super::*;
     use crate::api::export::Network;
-    use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
+    use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;

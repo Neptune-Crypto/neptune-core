@@ -53,7 +53,7 @@ use super::transaction::utxo::Utxo;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::block::block_header::BlockHeaderField;
 use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
@@ -126,7 +126,7 @@ pub enum BlockProof {
 ///
 /// ```compile_fail,E0594
 /// use neptune_cash::models::blockchain::block::Block;
-/// use neptune_cash::config_models::network::Network;
+/// use neptune_cash::application::config::network::Network;
 /// use neptune_cash::prelude::twenty_first::math::b_field_element::BFieldElement;
 /// use tasm_lib::prelude::Digest;
 ///
@@ -1179,9 +1179,9 @@ pub(crate) mod tests {
     use super::super::transaction::Transaction;
     use super::block_transaction::BlockOrRegularTransaction;
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+    use crate::application::config::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
     use crate::mine_loop::composer_parameters::ComposerParameters;

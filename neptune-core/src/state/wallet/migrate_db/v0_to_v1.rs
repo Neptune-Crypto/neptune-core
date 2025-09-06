@@ -146,7 +146,7 @@ mod tests {
 
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
-    use crate::config_models::network::Network;
+    use crate::application::config::network::Network;
     use crate::database::storage::storage_schema::traits::StorageWriter;
     use crate::database::storage::storage_schema::DbtSingleton;
     use crate::database::storage::storage_schema::DbtVec;

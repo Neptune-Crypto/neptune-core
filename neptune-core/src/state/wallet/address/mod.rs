@@ -27,7 +27,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::config_models::network::Network;
+    use crate::application::config::network::Network;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::utxo_notification::UtxoNotificationPayload;

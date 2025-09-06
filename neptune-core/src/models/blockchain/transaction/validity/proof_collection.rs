@@ -15,7 +15,7 @@ use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::api::tx_initiation::error::CreateProofError;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;

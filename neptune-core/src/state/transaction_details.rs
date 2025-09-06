@@ -10,7 +10,7 @@ use tasm_lib::prelude::Digest;
 
 use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotificationMethod;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;

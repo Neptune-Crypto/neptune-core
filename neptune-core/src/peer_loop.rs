@@ -1995,8 +1995,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
@@ -4102,7 +4102,7 @@ mod tests {
         use strum::IntoEnumIterator;
 
         use super::*;
-        use crate::config_models::cli_args;
+        use crate::application::config::cli_args;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::state::wallet::transaction_output::TxOutput;

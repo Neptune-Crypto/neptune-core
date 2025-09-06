@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
 use crate::api::export::Network;
-use crate::config_models::cli_args;
+use crate::application::config::cli_args;
 use crate::models::blockchain::block::Block;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;

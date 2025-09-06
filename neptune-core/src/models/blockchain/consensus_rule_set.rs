@@ -82,7 +82,7 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
-    use crate::config_models::cli_args;
+    use crate::application::config::cli_args;
     use crate::mine_loop::compose_block_helper;
     use crate::mine_loop::create_block_transaction_from;
     use crate::mine_loop::TxMergeOrigin;

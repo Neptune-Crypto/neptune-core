@@ -44,9 +44,9 @@ use super::wallet_entropy::WalletEntropy;
 use super::wallet_file::WalletFileContext;
 use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
-use crate::config_models::cli_args::Args;
-use crate::config_models::data_directory::DataDirectory;
-use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::config::cli_args::Args;
+use crate::application::config::data_directory::DataDirectory;
+use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_schema::RustyKey;
 use crate::database::storage::storage_schema::RustyValue;
@@ -2093,8 +2093,8 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::api::export::Transaction;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
@@ -3138,7 +3138,7 @@ pub(crate) mod tests {
         use rand::rng;
 
         use super::*;
-        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::mine_loop::composer_parameters;
         use crate::mine_loop::guess_nonce;
         use crate::mine_loop::GuessingConfiguration;
@@ -3430,7 +3430,7 @@ pub(crate) mod tests {
         use rand::SeedableRng;
 
         use super::*;
-        use crate::config_models::cli_args;
+        use crate::application::config::cli_args;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
         use crate::state::tx_proving_capability::TxProvingCapability;
@@ -4294,7 +4294,7 @@ pub(crate) mod tests {
         use proptest_arbitrary_interop::arb;
 
         use super::*;
-        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
@@ -4764,7 +4764,7 @@ pub(crate) mod tests {
     pub(crate) mod fee_notifications {
 
         use super::*;
-        use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+        use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::main_loop::proof_upgrader::ProofCollectionToSingleProof;
         use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
         use crate::main_loop::proof_upgrader::UpgradeJob;

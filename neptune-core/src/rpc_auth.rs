@@ -17,8 +17,8 @@ use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
-use crate::config_models::data_directory::DataDirectory;
-use crate::config_models::network::Network;
+use crate::application::config::data_directory::DataDirectory;
+use crate::application::config::network::Network;
 
 /// enumerates neptune-core RPC authentication token types
 ///

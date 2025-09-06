@@ -16,8 +16,8 @@ use sysinfo::System;
 
 use super::fee_notification_policy::FeeNotificationPolicy;
 use super::network::Network;
-use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
-use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
+use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
+use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;

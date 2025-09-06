@@ -30,8 +30,8 @@ use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
-use crate::config_models::network::Network;
-use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
+use crate::application::config::network::Network;
+use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::job_queue::errors::JobHandleError;
 use crate::main_loop::proof_upgrader::UpgradeJob;
 use crate::models::blockchain::block::block_header::BlockPow;
@@ -1041,10 +1041,10 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::api::export::GenerationSpendingKey;
-    use crate::config_models::cli_args;
-    use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
-    use crate::config_models::network::Network;
-    use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
+    use crate::application::config::cli_args;
+    use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+    use crate::application::config::network::Network;
+    use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
     use crate::job_queue::errors::JobHandleError;
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;

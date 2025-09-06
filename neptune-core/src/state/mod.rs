@@ -59,9 +59,9 @@ use wallet::wallet_status::WalletStatus;
 
 use crate::api;
 use crate::api::export::NeptuneProof;
-use crate::config_models::cli_args;
-use crate::config_models::data_directory::DataDirectory;
-use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
+use crate::application::config::cli_args;
+use crate::application::config::data_directory::DataDirectory;
+use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
@@ -2353,7 +2353,7 @@ mod tests {
     use crate::api::export::OutputFormat;
     use crate::api::export::ReceivingAddress;
     use crate::api::export::TxOutputList;
-    use crate::config_models::network::Network;
+    use crate::application::config::network::Network;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::block::Block;

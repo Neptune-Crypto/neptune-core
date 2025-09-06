@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use bytesize::ByteSize;
 use itertools::Itertools;
-use neptune_cash::config_models::network::Network;
+use neptune_cash::application::config::network::Network;
 use neptune_cash::models::blockchain::block::block_header::BlockHeader;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;

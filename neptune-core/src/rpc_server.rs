@@ -70,7 +70,7 @@ use crate::api;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::main_loop::proof_upgrader::UpgradeJob;
@@ -1189,7 +1189,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::config_models::network::Network;
+    /// use neptune_cash::application::config::network::Network;
     /// # use neptune_cash::rpc_server::RPCClient;
     /// # use neptune_cash::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1644,7 +1644,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::config_models::network::Network;
+    /// # use neptune_cash::application::config::network::Network;
     /// # use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::models::state::wallet::address::ReceivingAddress;
     /// # use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -4037,8 +4037,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;

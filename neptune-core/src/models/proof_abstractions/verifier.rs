@@ -3,7 +3,7 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 // This claims-cache stores mock proof-claims that are simply asserted to be valid.

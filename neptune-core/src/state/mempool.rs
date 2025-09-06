@@ -54,7 +54,7 @@ use tracing::warn;
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;
 use crate::api::export::NeptuneProof;
-use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
+use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -1141,7 +1141,7 @@ impl Mempool {
     ///
     /// ```
     /// use bytesize::ByteSize;
-    /// use neptune_cash::config_models::network::Network;
+    /// use neptune_cash::application::config::network::Network;
     /// use neptune_cash::models::blockchain::block::Block;
     /// use neptune_cash::models::state::mempool::Mempool;
     /// use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
@@ -1199,8 +1199,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
     use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
     use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
     use crate::main_loop::upgrade_incentive::UpgradeIncentive;
