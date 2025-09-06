@@ -25,7 +25,7 @@ The RPC server allows other programs to interact with a `neptune-core` node incl
 
 ## RPC Methods
 
-The RPC server provides several methods that allow clients to interact with the node. The list of methods and examples are provided on the [`neptune-cash` crate documentation](https://docs.rs/neptune-cash/latest/neptune_cash/rpc_server/trait.RPC.html).
+The RPC server provides several methods that allow clients to interact with the node. The list of methods and examples are provided on the [`neptune-cash` crate documentation](https://docs.rs/neptune-cash/latest/neptune_cash/server/trait.RPC.html).
 
 ## RPC consistency guarantees
 State that can be queried via RPCs is guaranteed to be at least up-to-date with the chain state immediately prior to the call's execution.

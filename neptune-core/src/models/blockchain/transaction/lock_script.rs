@@ -16,9 +16,9 @@ use tasm_lib::twenty_first::tip5::digest::Digest;
 use super::utxo::Utxo;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScript {

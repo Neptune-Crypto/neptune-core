@@ -28,6 +28,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransactionKernel;
 use crate::models::blockchain::block::block_transaction::BlockTransactionKernel;
@@ -53,7 +54,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
@@ -1045,11 +1045,11 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::api::export::Network;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MergeWitness {

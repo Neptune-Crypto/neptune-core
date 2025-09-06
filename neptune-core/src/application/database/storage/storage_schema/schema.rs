@@ -31,7 +31,8 @@ use crate::application::locks::tokio::LockCallbackFn;
 /// This can be achieved by placing the `table`s into a heterogenous
 /// container such as a `struct` or `tuple`. Then place an
 /// `Arc<Mutex<..>>` or `Arc<Mutex<RwLock<..>>` around the container.
-/// This crate provides [`AtomicRw`] and [`AtomicMutex`](crate::locks::tokio::AtomicMutex)
+/// This crate provides [`AtomicRw`] and
+/// [`AtomicMutex`](crate::application::locks::tokio::AtomicMutex)
 /// which are simple wrappers around `Arc<RwLock<T>>` and `Arc<Mutex<T>>`.
 ///
 /// This is the recommended usage.
@@ -42,7 +43,7 @@ use crate::application::locks::tokio::LockCallbackFn;
 /// # // note: compile_fail due to: https://github.com/rust-lang/rust/issues/67295
 /// # tokio_test::block_on(async {
 /// # use neptune_cash::application::database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = neptune_cash::database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
+/// # let db = neptune_cash::application::database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
 /// use neptune_cash::application::locks::tokio::AtomicRw;
 ///
 /// let mut storage = SimpleRustyStorage::new(db);

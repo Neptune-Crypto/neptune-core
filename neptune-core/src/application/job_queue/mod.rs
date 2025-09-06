@@ -43,9 +43,9 @@
 //! We don't have to check for job-cancellation in the job itself.
 //!
 //! ```
-//! use neptune_cash::job_queue::JobResultWrapper;
-//! use neptune_cash::job_queue::JobQueue;
-//! use neptune_cash::job_queue::traits::*;
+//! use neptune_cash::application::job_queue::JobResultWrapper;
+//! use neptune_cash::application::job_queue::JobQueue;
+//! use neptune_cash::application::job_queue::traits::*;
 //!
 //! // define our custom job type that just returns "hello <name>"
 //! pub struct HelloJobAsync(String);
@@ -134,11 +134,11 @@
 //! ### Example
 //!
 //! ```
-//! use neptune_cash::job_queue::JobCompletion;
-//! use neptune_cash::job_queue::JobResultWrapper;
-//! use neptune_cash::job_queue::JobQueue;
-//! use neptune_cash::job_queue::channels::JobCancelReceiver;
-//! use neptune_cash::job_queue::traits::*;
+//! use neptune_cash::application::job_queue::JobCompletion;
+//! use neptune_cash::application::job_queue::JobResultWrapper;
+//! use neptune_cash::application::job_queue::JobQueue;
+//! use neptune_cash::application::job_queue::channels::JobCancelReceiver;
+//! use neptune_cash::application::job_queue::traits::*;
 //! use rand::Rng;
 //!
 //! // ### First lets define some common types ###

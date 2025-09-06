@@ -154,6 +154,8 @@ pub(crate) mod tests {
     use super::BlockPrimitiveWitness;
     use crate::api::export::BlockHeight;
     use crate::api::export::Network;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_appendix::BlockAppendix;
     use crate::models::blockchain::block::block_body::BlockBody;
     use crate::models::blockchain::block::block_header::BlockHeader;
@@ -171,8 +173,6 @@ pub(crate) mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;

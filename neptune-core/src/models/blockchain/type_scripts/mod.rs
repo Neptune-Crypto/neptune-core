@@ -23,11 +23,11 @@ use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Coin;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::Hash;
 
 pub(crate) trait TypeScript: ConsensusProgram {

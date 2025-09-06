@@ -33,8 +33,8 @@ impl JobHandleError {
     /// Returns true if the error was caused by the task panicking.
     ///
     /// ```
-    /// use neptune_cash::job_queue::JobQueue;
-    /// use neptune_cash::job_queue::traits::*;
+    /// use neptune_cash::application::job_queue::JobQueue;
+    /// use neptune_cash::application::job_queue::traits::*;
     ///
     /// struct PanicJob;
     ///
@@ -66,8 +66,8 @@ impl JobHandleError {
     /// into_panic() panics if the Error does not represent the underlying task terminating with a panic. Use is_panic to check the error reason or try_into_panic for a variant that does not panic.
     ///
     /// ```should_panic(expected = "boom")
-    /// use neptune_cash::job_queue::JobQueue;
-    /// use neptune_cash::job_queue::traits::*;
+    /// use neptune_cash::application::job_queue::JobQueue;
+    /// use neptune_cash::application::job_queue::traits::*;
     ///
     /// struct PanicJob;
     ///
@@ -102,8 +102,8 @@ impl JobHandleError {
     /// Consumes the `JobHandleError`, returning the object with which the task panicked if the task terminated due to a panic. Otherwise, self is returned.
     ///
     /// ```should_panic(expected = "boom")
-    /// use neptune_cash::job_queue::JobQueue;
-    /// use neptune_cash::job_queue::traits::*;
+    /// use neptune_cash::application::job_queue::JobQueue;
+    /// use neptune_cash::application::job_queue::traits::*;
     ///
     /// struct PanicJob;
     ///
@@ -148,8 +148,8 @@ impl JobHandleError {
     /// be downcast to a string representation
     ///
     /// ```
-    /// use neptune_cash::job_queue::JobQueue;
-    /// use neptune_cash::job_queue::traits::*;
+    /// use neptune_cash::application::job_queue::JobQueue;
+    /// use neptune_cash::application::job_queue::traits::*;
     ///
     /// struct PanicJob;
     ///

@@ -102,7 +102,8 @@ use crate::RPCServerToMain;
 use crate::WalletFileContext;
 use crate::VERSION;
 
-/// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
+/// `GlobalStateLock` holds a
+/// [`tokio::AtomicRw`](crate::application::locks::tokio::AtomicRw)
 /// ([`RwLock`](tokio::sync::RwLock)) over [`GlobalState`].
 ///
 /// Conceptually** all reads and writes of application state
@@ -386,8 +387,8 @@ pub enum RecordTransactionError {
 /// Example usage:
 ///
 /// ```rust
-/// use neptune_cash::models::state::GlobalState;
-/// use neptune_cash::models::state::GlobalStateLock;
+/// use neptune_cash::state::GlobalState;
+/// use neptune_cash::state::GlobalStateLock;
 /// use neptune_cash::api::export::StateLock;
 /// fn worker(gs: &GlobalState, truth: bool) {
 ///    // do something with gs and truth.
