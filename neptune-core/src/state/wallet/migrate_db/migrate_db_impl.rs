@@ -1,6 +1,6 @@
 use super::v0_to_v1;
-use crate::database::storage::storage_schema::traits::StorageWriter;
-use crate::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::storage::storage_schema::traits::StorageWriter;
+use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 
 // migrates a wallet db from a lower schema version to a higher version.
 //

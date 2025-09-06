@@ -1,8 +1,8 @@
 use futures::pin_mut;
 use itertools::Itertools;
 
-use crate::database::storage::storage_schema::SimpleRustyStorage;
-use crate::database::storage::storage_vec::traits::*;
+use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::storage::storage_vec::traits::*;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::transaction_output::TxOutputList;
@@ -147,12 +147,12 @@ mod tests {
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
     use crate::application::config::network::Network;
-    use crate::database::storage::storage_schema::traits::StorageWriter;
-    use crate::database::storage::storage_schema::DbtSingleton;
-    use crate::database::storage::storage_schema::DbtVec;
-    use crate::database::storage::storage_schema::RustyKey;
-    use crate::database::storage::storage_schema::RustyValue;
-    use crate::database::NeptuneLevelDb;
+    use crate::application::database::storage::storage_schema::traits::StorageWriter;
+    use crate::application::database::storage::storage_schema::DbtSingleton;
+    use crate::application::database::storage::storage_schema::DbtVec;
+    use crate::application::database::storage::storage_schema::RustyKey;
+    use crate::application::database::storage::storage_schema::RustyValue;
+    use crate::application::database::NeptuneLevelDb;
     use crate::state::wallet::rusty_wallet_database::RustyWalletDatabase;
     use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
     use crate::state::Timestamp;
@@ -365,7 +365,7 @@ mod tests {
             DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
             NeptuneLevelDb::new(
                 &wallet_database_path,
-                &crate::database::create_db_if_missing(),
+                &crate::application::database::create_db_if_missing(),
             )
             .await
         }

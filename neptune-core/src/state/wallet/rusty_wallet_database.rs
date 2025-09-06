@@ -8,12 +8,12 @@ use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
 use super::wallet_db_tables::WalletDbTables;
 use super::wallet_db_tables::WALLET_DB_SCHEMA_VERSION;
-use crate::database::storage::storage_schema::traits::*;
-use crate::database::storage::storage_schema::DbtVec;
-use crate::database::storage::storage_schema::RustyKey;
-use crate::database::storage::storage_schema::RustyValue;
-use crate::database::storage::storage_schema::SimpleRustyStorage;
-use crate::database::NeptuneLevelDb;
+use crate::application::database::storage::storage_schema::traits::*;
+use crate::application::database::storage::storage_schema::DbtVec;
+use crate::application::database::storage::storage_schema::RustyKey;
+use crate::application::database::storage::storage_schema::RustyValue;
+use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::NeptuneLevelDb;
 
 #[derive(Debug)]
 pub struct RustyWalletDatabase {

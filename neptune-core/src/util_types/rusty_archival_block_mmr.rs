@@ -1,12 +1,12 @@
 use tasm_lib::prelude::Digest;
 
 use super::archival_mmr::ArchivalMmr;
-use crate::database::storage::storage_schema::traits::*;
-use crate::database::storage::storage_schema::DbtVec;
-use crate::database::storage::storage_schema::RustyKey;
-use crate::database::storage::storage_schema::RustyValue;
-use crate::database::storage::storage_schema::SimpleRustyStorage;
-use crate::database::NeptuneLevelDb;
+use crate::application::database::storage::storage_schema::traits::*;
+use crate::application::database::storage::storage_schema::DbtVec;
+use crate::application::database::storage::storage_schema::RustyKey;
+use crate::application::database::storage::storage_schema::RustyValue;
+use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::NeptuneLevelDb;
 
 pub(crate) struct RustyArchivalBlockMmr {
     ammr: ArchivalMmr<DbtVec<Digest>>,

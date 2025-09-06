@@ -1182,8 +1182,8 @@ pub(crate) mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::network::Network;
-    use crate::database::storage::storage_schema::SimpleRustyStorage;
-    use crate::database::NeptuneLevelDb;
+    use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+    use crate::application::database::NeptuneLevelDb;
     use crate::mine_loop::composer_parameters::ComposerParameters;
     use crate::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;

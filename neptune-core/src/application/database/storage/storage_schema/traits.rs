@@ -1,7 +1,7 @@
 //! Traits that define the StorageSchema interface
 //!
 //! It is recommended to wildcard import these with
-//! `use crate::database::storage::storage_vec::traits::*`
+//! `use crate::application::database::storage::storage_vec::traits::*`
 
 pub use leveldb::database::key::IntoLevelDBKey;
 

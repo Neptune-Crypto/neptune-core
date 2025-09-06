@@ -23,7 +23,7 @@ use tracing::warn;
 use crate::api::export::TransactionDetails;
 use crate::api::export::TxOutputList;
 use crate::application::config::network::Network;
-use crate::database::storage::storage_vec::traits::StorageVecBase;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;

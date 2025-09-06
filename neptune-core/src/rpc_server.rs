@@ -4039,7 +4039,7 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::database::storage::storage_vec::traits::*;
+    use crate::application::database::storage::storage_vec::traits::*;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::proof_abstractions::mast_hash::MastHash;

@@ -10,7 +10,7 @@ use super::blockchain::block::block_header::HeaderToBlockHashWitness;
 use super::blockchain::block::block_height::BlockHeight;
 use super::peer::PeerStanding;
 use super::proof_abstractions::timestamp::Timestamp;
-use crate::database::NeptuneLevelDb;
+use crate::application::database::NeptuneLevelDb;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 

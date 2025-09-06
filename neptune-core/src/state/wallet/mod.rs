@@ -45,7 +45,7 @@ mod tests {
     use crate::api::export::Transaction;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::database::storage::storage_vec::traits::*;
+    use crate::application::database::storage::storage_vec::traits::*;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;
