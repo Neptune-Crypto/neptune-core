@@ -9,8 +9,8 @@ use super::DbtSingleton;
 use super::DbtVec;
 use super::PendingWrites;
 use super::SimpleRustyReader;
-use crate::locks::tokio::AtomicRw;
-use crate::locks::tokio::LockCallbackFn;
+use crate::application::locks::tokio::AtomicRw;
+use crate::application::locks::tokio::LockCallbackFn;
 
 /// Provides a virtual database schema.
 ///
@@ -43,7 +43,7 @@ use crate::locks::tokio::LockCallbackFn;
 /// # tokio_test::block_on(async {
 /// # use neptune_cash::application::database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
 /// # let db = neptune_cash::database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
-/// use neptune_cash::locks::tokio::AtomicRw;
+/// use neptune_cash::application::locks::tokio::AtomicRw;
 ///
 /// let mut storage = SimpleRustyStorage::new(db);
 ///

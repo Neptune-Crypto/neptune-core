@@ -14,7 +14,7 @@ use super::RustyKey;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
-use crate::locks::tokio::AtomicRw;
+use crate::application::locks::tokio::AtomicRw;
 
 pub(super) struct DbtVecPrivate<V> {
     pub(super) pending_writes: AtomicRw<PendingWrites>,

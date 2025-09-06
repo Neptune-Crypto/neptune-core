@@ -6,7 +6,7 @@ use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
 use crate::application::database::neptune_leveldb::WriteBatchAsync;
-use crate::locks::tokio::LockCallbackFn;
+use crate::application::locks::tokio::LockCallbackFn;
 
 /// Database schema and tables logic for RustyLevelDB.
 ///

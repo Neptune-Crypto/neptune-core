@@ -17,7 +17,7 @@ use super::LockType;
 ///
 /// # Examples
 /// ```
-/// # use neptune_cash::locks::tokio::AtomicMutex;
+/// # use neptune_cash::application::locks::tokio::AtomicMutex;
 /// struct Car {
 ///     year: u16,
 /// };
@@ -34,7 +34,7 @@ use super::LockType;
 ///
 /// # Examples
 /// ```
-/// # use neptune_cash::locks::tokio::{AtomicMutex, LockEvent, LockCallbackFn};
+/// # use neptune_cash::application::locks::tokio::{AtomicMutex, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -207,7 +207,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::locks::tokio::AtomicMutex;
+    /// # use neptune_cash::application::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -250,7 +250,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::locks::tokio::AtomicMutex;
+    /// # use neptune_cash::application::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -277,7 +277,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::locks::tokio::AtomicMutex;
+    /// # use neptune_cash::application::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -309,7 +309,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::locks::tokio::AtomicMutex;
+    /// # use neptune_cash::application::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -344,7 +344,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::locks::tokio::AtomicMutex;
+    /// # use neptune_cash::application::locks::tokio::AtomicMutex;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
@@ -378,7 +378,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_cash::locks::tokio::AtomicMutex;
+    /// # use neptune_cash::application::locks::tokio::AtomicMutex;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
