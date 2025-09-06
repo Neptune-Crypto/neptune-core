@@ -1194,8 +1194,8 @@ pub(crate) mod tests {
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::TypeScript;
     use crate::state::mempool::upgrade_priority::UpgradePriority;
-    use crate::state::tx_creation_config::TxCreationConfig;
-    use crate::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::address::KeyType;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -1720,7 +1720,7 @@ pub(crate) mod tests {
         use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
         use crate::application::control::mine_loop::TxMergeOrigin;
         use crate::application::triton_vm_job_queue::vm_job_queue;
-        use crate::state::tx_creation_config::TxCreationConfig;
+        use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
 
@@ -2140,7 +2140,7 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use super::*;
         use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-        use crate::state::tx_creation_config::TxCreationConfig;
+        use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;

@@ -36,7 +36,7 @@ use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::initiator::TransactionInitiator;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::state::tx_creation_artifacts::TxCreationArtifacts;
+use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 use crate::state::wallet::change_policy::ChangePolicy;
 use crate::GlobalStateLock;
 

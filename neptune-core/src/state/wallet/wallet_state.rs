@@ -64,7 +64,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::state::mempool::mempool_event::MempoolEvent;
-use crate::state::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::rusty_wallet_database::WalletDbConnectError;
 use crate::state::wallet::transaction_input::TxInput;
@@ -2100,8 +2100,8 @@ pub(crate) mod tests {
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-    use crate::state::tx_creation_config::TxCreationConfig;
-    use crate::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::state::wallet::transaction_output::TxOutput;
@@ -3433,7 +3433,7 @@ pub(crate) mod tests {
         use crate::application::config::cli_args;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
-        use crate::state::tx_proving_capability::TxProvingCapability;
+        use crate::state::transaction::tx_proving_capability::TxProvingCapability;
         use crate::state::wallet::address::ReceivingAddress;
         use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;

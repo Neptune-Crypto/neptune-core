@@ -8,8 +8,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use super::wallet::transaction_output::TxOutput;
-use super::wallet::utxo_notification::UtxoNotificationMethod;
+use super::super::wallet::transaction_output::TxOutput;
+use super::super::wallet::utxo_notification::UtxoNotificationMethod;
 use crate::application::config::network::Network;
 use crate::models::blockchain::transaction::announcement::Announcement;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;

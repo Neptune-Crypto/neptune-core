@@ -1430,8 +1430,8 @@ pub(super) mod tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::state::archival_state::ArchivalState;
-    use crate::state::tx_creation_config::TxCreationConfig;
-    use crate::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::address::KeyType;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
     use crate::state::wallet::transaction_output::TxOutput;

@@ -14,7 +14,7 @@ use neptune_cash::models::blockchain::block::block_header::BlockHeader;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::state::mining::mining_status::MiningStatus;
-use neptune_cash::state::tx_proving_capability::TxProvingCapability;
+use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Color;

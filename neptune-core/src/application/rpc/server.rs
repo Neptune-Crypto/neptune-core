@@ -99,10 +99,10 @@ use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::mining::mining_status::MiningStatus;
-use crate::state::transaction_details::TransactionDetails;
-use crate::state::transaction_kernel_id::TransactionKernelId;
-use crate::state::tx_creation_artifacts::TxCreationArtifacts;
-use crate::state::tx_proving_capability::TxProvingCapability;
+use crate::state::transaction::transaction_details::TransactionDetails;
+use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
+use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::address::ReceivingAddress;
@@ -5349,7 +5349,7 @@ mod tests {
             use cli_args::Args;
 
             use super::*;
-            use crate::state::tx_proving_capability::TxProvingCapability;
+            use crate::state::transaction::tx_proving_capability::TxProvingCapability;
             use crate::tests::shared::blocks::invalid_block_with_transaction;
             use crate::tests::shared::blocks::invalid_empty_block;
 

@@ -5,13 +5,13 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use super::super::wallet::address::SpendingKey;
+use super::super::wallet::change_policy::ChangePolicy;
+use super::super::wallet::utxo_notification::UtxoNotificationMedium;
 use super::tx_proving_capability::TxProvingCapability;
-use super::wallet::address::SpendingKey;
-use super::wallet::change_policy::ChangePolicy;
-use super::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]

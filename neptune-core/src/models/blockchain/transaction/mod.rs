@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::application::config::network::Network;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::state::transaction_details::TransactionDetails;
-use crate::state::transaction_kernel_id::TransactionKernelId;
-use crate::application::triton_vm_job_queue::TritonVmJobQueue;
+use crate::state::transaction::transaction_details::TransactionDetails;
+use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 
 pub mod announcement;
 pub mod lock_script;
@@ -256,6 +256,7 @@ pub(crate) mod tests {
     use crate::api::export::{TxInputList, TxOutputList};
     use crate::api::tx_initiation::error::CreateProofError;
     use crate::application::config::network::Network;
+    use crate::application::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
@@ -265,7 +266,6 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::application::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
