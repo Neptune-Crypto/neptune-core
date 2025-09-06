@@ -1443,8 +1443,8 @@ pub(super) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
     pub(super) async fn make_test_archival_state(network: Network) -> ArchivalState {
         let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();

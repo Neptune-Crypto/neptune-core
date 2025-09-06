@@ -27,7 +27,7 @@ use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::Hash;
 
 pub(crate) trait TypeScript: ConsensusProgram {

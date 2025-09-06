@@ -3614,13 +3614,13 @@ mod tests {
     }
 
     mod transactions {
+        use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
         use crate::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
-        use crate::triton_vm_job_queue::vm_job_queue;
 
         use super::*;
 

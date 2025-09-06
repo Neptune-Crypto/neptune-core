@@ -70,8 +70,8 @@ mod tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...

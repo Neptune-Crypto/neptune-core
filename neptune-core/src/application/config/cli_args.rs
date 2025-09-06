@@ -23,7 +23,7 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::state::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 
 /// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]

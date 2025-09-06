@@ -32,7 +32,10 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::config::network::Network;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::job_queue::errors::JobHandleError;
+use crate::application::job_queue::errors::JobHandleError;
+use crate::application::triton_vm_job_queue::vm_job_queue;
+use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::main_loop::proof_upgrader::UpgradeJob;
 use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -55,9 +58,6 @@ use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::GlobalStateLock;
-use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 /// Information related to guessing.
@@ -1045,7 +1045,8 @@ pub(crate) mod tests {
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::network::Network;
     use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-    use crate::job_queue::errors::JobHandleError;
+    use crate::application::job_queue::errors::JobHandleError;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::mock_block_generator::MockBlockGenerator;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
@@ -1067,7 +1068,6 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_tx::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;

@@ -31,7 +31,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {
@@ -488,7 +488,7 @@ pub mod tests {
     use crate::api::export::NeptuneProof;
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::vm_job_queue;
+    use crate::application::triton_vm_job_queue::vm_job_queue;
 
     impl ProofCollection {
         /// Return an invalid proof collection for testing purposes

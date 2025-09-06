@@ -46,8 +46,8 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::state::transaction_details::TransactionDetails;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
-use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::vm_job_queue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 /// a builder for [TransactionProof]
 ///

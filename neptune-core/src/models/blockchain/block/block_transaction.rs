@@ -7,7 +7,7 @@ use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 /// Newtype for [`TransactionKernel`] where removal records are packed. For use
 /// in the context of [`BlockTransaction`]s. See [`BlockTransaction`] for more

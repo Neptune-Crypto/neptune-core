@@ -363,8 +363,8 @@ pub(crate) mod tests {
     use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::GlobalStateLock;
 
     impl ConsensusProgramSpecification for BlockProgram {

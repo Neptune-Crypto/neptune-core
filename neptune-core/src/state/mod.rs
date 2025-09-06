@@ -2375,8 +2375,8 @@ mod tests {
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 

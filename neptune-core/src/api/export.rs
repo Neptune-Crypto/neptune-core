@@ -41,5 +41,5 @@ pub use crate::tasm_lib::prelude::Tip5;
 pub use crate::triton_vm::prelude::Program;
 pub use crate::triton_vm::proof::Claim;
 pub use crate::triton_vm::vm::NonDeterminism;
-pub use crate::triton_vm_job_queue::TritonVmJobPriority;
+pub use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 pub use crate::util_types::mutator_set::addition_record::AdditionRecord;
