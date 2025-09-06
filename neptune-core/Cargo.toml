@@ -146,29 +146,36 @@ workspace = true
 
 [[bench]]
 name = "sync_atomic"
+path = "benchmark/benches/sync_atomic.rs"
 harness = false
 
 [[bench]]
 name = "db_leveldb"
+path = "benchmark/benches/db_leveldb.rs"
 harness = false
 
 [[bench]]
 name = "db_dbtvec"
+path = "benchmark/benches/db_dbtvec.rs"
 harness = false
 
 [[bench]]
 name = "archival_mmr"
+path = "benchmark/benches/archival_mmr.rs"
 harness = false
 
 [[bench]]
 name = "consensus"
+path = "benchmark/benches/consensus.rs"
 harness = false
 required-features = ["arbitrary-impls"]
 
 [[bench]]
 name = "fast_kernel_mast_hash"
+path = "benchmark/benches/fast_kernel_mast_hash.rs"
 harness = false
 
 [[bench]]
 name = "wallet_state"
+path = "benchmark/benches/wallet_state.rs"
 harness = false

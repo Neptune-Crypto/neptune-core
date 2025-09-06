@@ -20,7 +20,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::debug;
 
 use super::block_proof_witness::BlockProofWitness;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
@@ -341,10 +341,12 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::network::Network;
-    use crate::mine_loop::create_block_transaction_from;
-    use crate::mine_loop::TxMergeOrigin;
+    use crate::application::config::cli_args;
+    use crate::application::config::network::Network;
+    use crate::application::control::mine_loop::create_block_transaction_from;
+    use crate::application::control::mine_loop::TxMergeOrigin;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_validation_error::BlockValidationError;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
@@ -357,14 +359,12 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
-    use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+    use crate::state::wallet::transaction_output::TxOutput;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::GlobalStateLock;
 
     impl ConsensusProgramSpecification for BlockProgram {

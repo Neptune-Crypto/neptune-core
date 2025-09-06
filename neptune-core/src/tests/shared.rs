@@ -22,10 +22,10 @@ use tracing::warn;
 
 use crate::api::export::TransactionDetails;
 use crate::api::export::TxOutputList;
-use crate::config_models::network::Network;
-use crate::database::storage::storage_vec::traits::StorageVecBase;
-use crate::mine_loop::composer_parameters::ComposerParameters;
-use crate::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::application::config::network::Network;
+use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::control::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::application::database::storage::storage_vec::traits::StorageVecBase;
 use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::Block;
@@ -36,9 +36,9 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::peer::PeerMessage;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::wallet_state::WalletState;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::expected_utxo::UtxoNotifier;
+use crate::state::wallet::wallet_state::WalletState;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub mod archival;
@@ -178,8 +178,8 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
 }
 
 pub(crate) async fn mock_genesis_wallet_state(
-    wallet_entropy: crate::models::state::wallet::wallet_entropy::WalletEntropy,
-    cli_args: &crate::config_models::cli_args::Args,
+    wallet_entropy: crate::state::wallet::wallet_entropy::WalletEntropy,
+    cli_args: &crate::application::config::cli_args::Args,
 ) -> WalletState {
     let data_dir = unit_test_data_directory(cli_args.network).unwrap();
     WalletState::new_from_wallet_entropy(&data_dir, wallet_entropy, cli_args).await

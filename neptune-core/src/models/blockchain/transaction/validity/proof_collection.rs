@@ -15,7 +15,8 @@ use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::api::tx_initiation::error::CreateProofError;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
@@ -31,7 +32,6 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {
@@ -486,9 +486,9 @@ pub mod tests {
     use super::*;
     use crate::api::export::NativeCurrencyAmount;
     use crate::api::export::NeptuneProof;
+    use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::models::proof_abstractions::tasm::program::tests::ConsensusProgramSpecification;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::vm_job_queue;
 
     impl ProofCollection {
         /// Return an invalid proof collection for testing purposes

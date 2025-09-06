@@ -8,9 +8,9 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::models::peer::peer_info::PeerInfo;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -100,7 +100,7 @@ pub struct PeersScreen {
     in_focus: bool,
     data: PeerInfoArc,
     server: Arc<RPCClient>,
-    token: rpc_auth::Token,
+    token: auth::Token,
     poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
     events: Events,
@@ -109,7 +109,7 @@ pub struct PeersScreen {
 }
 
 impl PeersScreen {
-    pub fn new(config: Arc<Config>, rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
+    pub fn new(config: Arc<Config>, rpc_server: Arc<RPCClient>, token: auth::Token) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
         Self {
             sort_column: config.peer_sort_column,
@@ -130,7 +130,7 @@ impl PeersScreen {
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
-        token: rpc_auth::Token,
+        token: auth::Token,
         peer_info: PeerInfoArc,
         escalatable_event_arc: DashboardEventArc,
     ) -> ! {

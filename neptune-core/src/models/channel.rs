@@ -7,7 +7,7 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::control::main_loop::proof_upgrader::UpgradeJob;
 
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
@@ -16,8 +16,8 @@ use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::peer::transaction_notification::TransactionNotification;
 use super::proof_abstractions::mast_hash::MastHash;
-use super::state::wallet::expected_utxo::ExpectedUtxo;
-use super::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 
 #[derive(Clone, Debug, strum::Display)]
 pub(crate) enum MainToMiner {

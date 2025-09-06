@@ -7,7 +7,7 @@ use super::transfer_transaction::TransactionProofQuality;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::tasm_lib::prelude::Digest;
 
 /// Data structure for communicating knowledge of transactions.
@@ -21,7 +21,7 @@ pub(crate) struct TransactionNotification {
     /// A unique identifier of the transaction. Matches keys in the [mempool]
     /// data structure.
     ///
-    /// [mempool]: crate::models::state::mempool::Mempool
+    /// [mempool]: crate::state::mempool::Mempool
     pub(crate) txid: TransactionKernelId,
 
     /// The hash of the mutator set under which this transaction is valid.

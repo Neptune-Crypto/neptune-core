@@ -5,9 +5,9 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use crate::api::export::ReceivingAddress;
-use crate::config_models::network::Network;
-use crate::mine_loop::composer_parameters::ComposerParameters;
-use crate::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::application::config::network::Network;
+use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::control::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;
@@ -23,8 +23,8 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::state::transaction::transaction_details::TransactionDetails;
+use crate::state::wallet::transaction_output::TxOutputList;
 
 use super::block_transaction::BlockOrRegularTransaction;
 

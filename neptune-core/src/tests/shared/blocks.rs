@@ -14,9 +14,10 @@ use crate::api::export::GlobalStateLock;
 use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
-use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
-use crate::mine_loop::composer_parameters::ComposerParameters;
-use crate::mine_loop::make_coinbase_transaction_stateless;
+use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::control::mine_loop::make_coinbase_transaction_stateless;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -38,11 +39,10 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::proof_abstractions::verifier::cache_true_claim;
-use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::address::generation_address;
+use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::Randomness;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -169,7 +169,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
         FeeNotificationPolicy::OffChain,
     );
 
-    let cli = crate::config_models::cli_args::Args {
+    let cli = crate::application::config::cli_args::Args {
         network,
         ..Default::default()
     };
@@ -211,7 +211,7 @@ pub(crate) async fn make_mock_block_with_puts_and_guesser_preimage_and_guesser_f
                 txo.utxo(),
                 txo.sender_randomness(),
                 composer_key.receiver_preimage(),
-                crate::models::state::wallet::expected_utxo::UtxoNotifier::OwnMinerComposeBlock,
+                crate::state::wallet::expected_utxo::UtxoNotifier::OwnMinerComposeBlock,
             )
         })
         .collect();
@@ -290,13 +290,14 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let timestamp =
         timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
 
-    let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
-        &tip_block,
-        global_state_lock.clone(),
-        timestamp,
-        Default::default(),
-    )
-    .await?;
+    let (transaction, expected_composer_utxos) =
+        crate::application::control::mine_loop::create_block_transaction(
+            &tip_block,
+            global_state_lock.clone(),
+            timestamp,
+            Default::default(),
+        )
+        .await?;
 
     let guesser_key = global_state_lock
         .lock_guard()

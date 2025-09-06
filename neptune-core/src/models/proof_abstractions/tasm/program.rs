@@ -12,9 +12,9 @@ use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
+use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -189,11 +189,11 @@ pub mod tests {
 
     use super::*;
     use crate::api::export::Network;
-    use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
+    use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::tests::shared::files::test_helper_data_dir;
     use crate::tests::shared::files::try_fetch_file_from_server;
     use crate::tests::shared::files::try_load_file_from_disk;

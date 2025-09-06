@@ -6,7 +6,7 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::transaction_output::TxOutput;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 

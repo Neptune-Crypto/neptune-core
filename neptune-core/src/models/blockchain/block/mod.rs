@@ -53,7 +53,8 @@ use super::transaction::utxo::Utxo;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
-use crate::config_models::network::Network;
+use crate::application::config::network::Network;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_header::BlockHeaderField;
 use crate::models::blockchain::block::block_header::BlockPow;
 use crate::models::blockchain::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
@@ -75,9 +76,8 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::wallet_entropy::WalletEntropy;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::state::wallet::address::ReceivingAddress;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -126,7 +126,7 @@ pub enum BlockProof {
 ///
 /// ```compile_fail,E0594
 /// use neptune_cash::models::blockchain::block::Block;
-/// use neptune_cash::config_models::network::Network;
+/// use neptune_cash::application::config::network::Network;
 /// use neptune_cash::prelude::twenty_first::math::b_field_element::BFieldElement;
 /// use tasm_lib::prelude::Digest;
 ///
@@ -1032,7 +1032,7 @@ impl Block {
     ///     the `mine_loop`. It is possible that despite (1), race conditions
     ///     arise, and they must be solved here.
     ///
-    /// [1]: crate::models::state::GlobalState::incoming_block_is_more_canonical
+    /// [1]: crate::state::GlobalState::incoming_block_is_more_canonical
     pub(crate) fn fork_choice_rule<'a>(
         current_tip: &'a Self,
         incoming_block: &'a Self,
@@ -1179,24 +1179,26 @@ pub(crate) mod tests {
     use super::super::transaction::Transaction;
     use super::block_transaction::BlockOrRegularTransaction;
     use super::*;
-    use crate::config_models::cli_args;
-    use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
-    use crate::config_models::network::Network;
-    use crate::database::storage::storage_schema::SimpleRustyStorage;
-    use crate::database::NeptuneLevelDb;
-    use crate::mine_loop::composer_parameters::ComposerParameters;
-    use crate::mine_loop::prepare_coinbase_transaction_stateless;
-    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::config::cli_args;
+    use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
+    use crate::application::config::network::Network;
+    use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
+    use crate::application::control::mine_loop::prepare_coinbase_transaction_stateless;
+    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+    use crate::application::database::NeptuneLevelDb;
+    use crate::application::triton_vm_job_queue::vm_job_queue;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::TypeScript;
-    use crate::models::state::mempool::upgrade_priority::UpgradePriority;
-    use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::address::KeyType;
-    use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::state::mempool::upgrade_priority::UpgradePriority;
+    use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+    use crate::state::wallet::address::KeyType;
+    use crate::state::wallet::transaction_output::TxOutput;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block;
@@ -1205,8 +1207,6 @@ pub(crate) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::vm_job_queue;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
@@ -1716,13 +1716,13 @@ pub(crate) mod tests {
         use rand::SeedableRng;
 
         use super::*;
-        use crate::mine_loop::create_block_transaction_from;
-        use crate::mine_loop::tests::make_coinbase_transaction_from_state;
-        use crate::mine_loop::TxMergeOrigin;
-        use crate::models::state::tx_creation_config::TxCreationConfig;
-        use crate::models::state::wallet::address::KeyType;
+        use crate::application::control::mine_loop::create_block_transaction_from;
+        use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+        use crate::application::control::mine_loop::TxMergeOrigin;
+        use crate::application::triton_vm_job_queue::vm_job_queue;
+        use crate::state::transaction::tx_creation_config::TxCreationConfig;
+        use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
-        use crate::triton_vm_job_queue::vm_job_queue;
 
         async fn deterministic_empty_block1_proposal() -> (Block, Timestamp, Network, Block) {
             let network = Network::Main;
@@ -2140,9 +2140,9 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use super::*;
         use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-        use crate::models::state::tx_creation_config::TxCreationConfig;
-        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-        use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+        use crate::state::transaction::tx_creation_config::TxCreationConfig;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
 
         #[apply(shared_tokio_runtime)]
