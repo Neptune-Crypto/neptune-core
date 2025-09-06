@@ -1201,10 +1201,12 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
-    use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
-    use crate::main_loop::upgrade_incentive::UpgradeIncentive;
-    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::control::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+    use crate::application::control::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+    use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
+    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
@@ -1230,8 +1232,6 @@ mod tests {
     use crate::tests::shared::mock_tx::testrunning::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::mock_tx::testrunning::make_plenty_mock_transaction_supported_by_primitive_witness;
     use crate::tests::shared_tokio_runtime;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
     impl Mempool {

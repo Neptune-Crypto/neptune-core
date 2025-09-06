@@ -3,7 +3,7 @@ use std::ops::Add;
 use get_size2::GetSize;
 
 use crate::api::export::NativeCurrencyAmount;
-use crate::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
 
 /// Used by memory pool subscribers to indicate how interested they are in
 /// a specific transaction.

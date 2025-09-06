@@ -62,17 +62,17 @@ use crate::api::export::NeptuneProof;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
+use crate::application::control::main_loop::proof_upgrader::ProofCollectionToSingleProof;
+use crate::application::control::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+use crate::application::control::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::locks::tokio as sync_tokio;
 use crate::application::locks::tokio::AtomicRwReadGuard;
 use crate::application::locks::tokio::AtomicRwWriteGuard;
-use crate::main_loop::proof_upgrader::ProofCollectionToSingleProof;
-use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
-use crate::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
-use crate::main_loop::upgrade_incentive::UpgradeIncentive;
-use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -2354,7 +2354,9 @@ mod tests {
     use crate::api::export::ReceivingAddress;
     use crate::api::export::TxOutputList;
     use crate::application::config::network::Network;
-    use crate::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -2375,8 +2377,6 @@ mod tests {
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -5153,8 +5153,8 @@ mod tests {
         use num_traits::CheckedSub;
 
         use super::*;
-        use crate::mine_loop::create_block_transaction_from;
-        use crate::mine_loop::TxMergeOrigin;
+        use crate::application::control::mine_loop::create_block_transaction_from;
+        use crate::application::control::mine_loop::TxMergeOrigin;
 
         /// test scenario: onchain/symmetric.
         /// pass outcome: no funds loss

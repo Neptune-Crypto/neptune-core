@@ -26,10 +26,10 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-use crate::connect_to_peers::close_peer_connected_callback;
+use crate::application::control::connect_to_peers::close_peer_connected_callback;
+use crate::application::control::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
@@ -3614,9 +3614,9 @@ mod tests {
     }
 
     mod transactions {
+        use crate::application::control::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+        use crate::application::control::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::application::triton_vm_job_queue::vm_job_queue;
-        use crate::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
-        use crate::main_loop::proof_upgrader::PrimitiveWitnessToSingleProof;
         use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
         use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::tests::shared::blocks::fake_deterministic_successor;

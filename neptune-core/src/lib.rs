@@ -25,12 +25,8 @@
 // later maybe we ought to split some stuff out into re-usable crate(s)...?
 pub mod api;
 pub mod application;
-pub mod connect_to_peers;
 pub mod macros;
-pub mod main_loop;
-pub mod mine_loop;
 pub mod models;
-pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_auth;
 pub mod rpc_server;
@@ -78,9 +74,9 @@ use tracing::info;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
+use crate::application::control::connect_to_peers::call_peer;
+use crate::application::control::main_loop::MainLoopHandler;
 use crate::application::locks::tokio as sync_tokio;
-use crate::connect_to_peers::call_peer;
-use crate::main_loop::MainLoopHandler;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::MinerToMain;
@@ -233,9 +229,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         let miner_join_handle = tokio::task::Builder::new()
             .name("miner")
             .spawn(async move {
-                mine_loop::mine(main_to_miner_rx, miner_to_main_tx, miner_state_lock)
-                    .await
-                    .expect("Error in mining task");
+                application::control::mine_loop::mine(
+                    main_to_miner_rx,
+                    miner_to_main_tx,
+                    miner_state_lock,
+                )
+                .await
+                .expect("Error in mining task");
             })?;
         task_join_handles.push(miner_join_handle);
         info!("Started mining task");
