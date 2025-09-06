@@ -11,8 +11,8 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::NeptuneLevelDb;
+use crate::application::database::storage::storage_vec::traits::*;
+use crate::application::database::NeptuneLevelDb;
 use crate::models::blockchain::shared::Hash;
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;

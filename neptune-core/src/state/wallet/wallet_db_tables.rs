@@ -3,9 +3,9 @@ use twenty_first::prelude::Digest;
 use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
 use super::sent_transaction::SentTransaction;
-use crate::database::storage::storage_schema::DbtSingleton;
-use crate::database::storage::storage_schema::DbtVec;
-use crate::database::storage::storage_schema::SimpleRustyStorage;
+use crate::application::database::storage::storage_schema::DbtSingleton;
+use crate::application::database::storage::storage_schema::DbtVec;
+use crate::application::database::storage::storage_schema::SimpleRustyStorage;
 use crate::prelude::twenty_first;
 
 /// defines the schema version of the wallet database.

@@ -26,7 +26,6 @@
 pub mod api;
 pub mod application;
 pub mod connect_to_peers;
-pub mod database;
 pub mod job_queue;
 pub mod locks;
 pub mod macros;

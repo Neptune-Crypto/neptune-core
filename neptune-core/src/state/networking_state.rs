@@ -8,9 +8,9 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::config::data_directory::DataDirectory;
-use crate::database::create_db_if_missing;
-use crate::database::NeptuneLevelDb;
-use crate::database::WriteBatchAsync;
+use crate::application::database::create_db_if_missing;
+use crate::application::database::NeptuneLevelDb;
+use crate::application::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::database::PeerDatabases;

@@ -156,7 +156,7 @@ impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> St
 mod tests {
     use super::super::SimpleRustyStorage;
     use super::*;
-    use crate::database::NeptuneLevelDb;
+    use crate::application::database::NeptuneLevelDb;
 
     pub async fn mk_test_vec_u64() -> DbtVec<u64> {
         // open new DB that will be closed on drop.

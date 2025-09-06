@@ -15,7 +15,7 @@ use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-use crate::database::storage::storage_vec::traits::*;
+use crate::application::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
 use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;

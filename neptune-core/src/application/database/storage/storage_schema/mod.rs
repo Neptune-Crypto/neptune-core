@@ -61,7 +61,7 @@ mod tests {
     use super::super::storage_vec::Index;
     use super::traits::*;
     use super::*;
-    use crate::database::NeptuneLevelDb;
+    use crate::application::database::NeptuneLevelDb;
     use crate::tests::shared_tokio_runtime;
     use crate::twenty_first::math::other::random_elements;
 
