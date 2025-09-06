@@ -43,7 +43,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::models::state::transaction_details::TransactionDetails;
+use crate::state::transaction_details::TransactionDetails;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 use crate::triton_vm_job_queue::vm_job_queue;

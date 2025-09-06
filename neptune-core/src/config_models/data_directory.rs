@@ -9,16 +9,16 @@ use serde::Serialize;
 
 use crate::config_models::network::Network;
 use crate::models::database::DATABASE_DIRECTORY_ROOT_NAME;
-use crate::models::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
-use crate::models::state::archival_state::BLOCK_INDEX_DB_NAME;
-use crate::models::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
-use crate::models::state::networking_state::BANNED_IPS_DB_NAME;
-use crate::models::state::shared::BLOCK_FILENAME_EXTENSION;
-use crate::models::state::shared::BLOCK_FILENAME_PREFIX;
-use crate::models::state::shared::DIR_NAME_FOR_BLOCKS;
-use crate::models::state::wallet::wallet_file::WALLET_DB_NAME;
-use crate::models::state::wallet::wallet_file::WALLET_DIRECTORY;
-use crate::models::state::wallet::wallet_file::WALLET_OUTPUT_COUNT_DB_NAME;
+use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
+use crate::state::archival_state::BLOCK_INDEX_DB_NAME;
+use crate::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
+use crate::state::networking_state::BANNED_IPS_DB_NAME;
+use crate::state::shared::BLOCK_FILENAME_EXTENSION;
+use crate::state::shared::BLOCK_FILENAME_PREFIX;
+use crate::state::shared::DIR_NAME_FOR_BLOCKS;
+use crate::state::wallet::wallet_file::WALLET_DB_NAME;
+use crate::state::wallet::wallet_file::WALLET_DIRECTORY;
+use crate::state::wallet::wallet_file::WALLET_OUTPUT_COUNT_DB_NAME;
 
 const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.

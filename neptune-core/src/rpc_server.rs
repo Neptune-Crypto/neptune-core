@@ -94,29 +94,29 @@ use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
-use crate::models::state::mining_status::MiningStatus;
-use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
-use crate::models::state::wallet::address::KeyType;
-use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::address::SpendingKey;
-use crate::models::state::wallet::change_policy::ChangePolicy;
-use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
-use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::transaction_input::TxInputList;
-use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::GlobalState;
-use crate::models::state::GlobalStateLock;
 use crate::rpc_auth;
 use crate::rpc_server::error::RpcError;
 use crate::rpc_server::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use crate::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
+use crate::state::mining_status::MiningStatus;
+use crate::state::transaction_details::TransactionDetails;
+use crate::state::transaction_kernel_id::TransactionKernelId;
+use crate::state::tx_creation_artifacts::TxCreationArtifacts;
+use crate::state::tx_proving_capability::TxProvingCapability;
+use crate::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
+use crate::state::wallet::address::KeyType;
+use crate::state::wallet::address::ReceivingAddress;
+use crate::state::wallet::address::SpendingKey;
+use crate::state::wallet::change_policy::ChangePolicy;
+use crate::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use crate::state::wallet::expected_utxo::UtxoNotifier;
+use crate::state::wallet::incoming_utxo::IncomingUtxo;
+use crate::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::state::wallet::transaction_input::TxInputList;
+use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::wallet_status::WalletStatus;
+use crate::state::GlobalState;
+use crate::state::GlobalStateLock;
 use crate::twenty_first::prelude::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::DataDirectory;
@@ -4043,10 +4043,10 @@ mod tests {
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::proof_abstractions::mast_hash::MastHash;
-    use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::rpc_server::NeptuneRPCServer;
+    use crate::state::wallet::address::generation_address::GenerationSpendingKey;
+    use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::make_mock_block;
     use crate::tests::shared::files::unit_test_data_directory;
@@ -5010,9 +5010,9 @@ mod tests {
         use crate::models::blockchain::block::pow::Pow;
         use crate::models::blockchain::block::BlockProof;
         use crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof;
-        use crate::models::state::block_proposal::BlockProposal;
-        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-        use crate::models::state::wallet::address::KeyType;
+        use crate::state::block_proposal::BlockProposal;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_deterministic_successor;
         use crate::tests::shared::blocks::invalid_empty_block;
 
@@ -5365,7 +5365,7 @@ mod tests {
             use cli_args::Args;
 
             use super::*;
-            use crate::models::state::tx_proving_capability::TxProvingCapability;
+            use crate::state::tx_proving_capability::TxProvingCapability;
             use crate::tests::shared::blocks::invalid_block_with_transaction;
             use crate::tests::shared::blocks::invalid_empty_block;
 
@@ -5856,9 +5856,9 @@ mod tests {
 
         mod worker {
             use super::*;
-            use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-            use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
-            use crate::models::state::wallet::address::SpendingKey;
+            use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+            use crate::state::wallet::address::symmetric_key::SymmetricKey;
+            use crate::state::wallet::address::SpendingKey;
 
             // sends a tx with two outputs: one self, one external.
             //

@@ -56,10 +56,10 @@ use crate::models::peer::PositivePeerSanction;
 use crate::models::peer::SyncChallenge;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::block_proposal::BlockProposalRejectError;
-use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
-use crate::models::state::GlobalState;
-use crate::models::state::GlobalStateLock;
+use crate::state::block_proposal::BlockProposalRejectError;
+use crate::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
+use crate::state::GlobalState;
+use crate::state::GlobalStateLock;
 use crate::util_types::mutator_set::removal_record::RemovalRecordValidityError;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
@@ -2001,10 +2001,10 @@ mod tests {
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::peer::Sanction;
-    use crate::models::state::mempool::upgrade_priority::UpgradePriority;
-    use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::state::mempool::upgrade_priority::UpgradePriority;
+    use crate::state::tx_creation_config::TxCreationConfig;
+    use crate::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_block_for_tests;
     use crate::tests::shared::blocks::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::globalstate::get_dummy_handshake_data_for_genesis;
@@ -4105,7 +4105,7 @@ mod tests {
         use crate::config_models::cli_args;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
-        use crate::models::state::wallet::transaction_output::TxOutput;
+        use crate::state::wallet::transaction_output::TxOutput;
         use crate::tests::shared::globalstate::mock_genesis_global_state;
 
         async fn tx_of_proof_quality(

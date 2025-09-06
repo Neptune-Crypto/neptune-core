@@ -31,7 +31,7 @@ use crate::models::proof_abstractions::tasm::program::tests;
 use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::vm::VMState;
 
 /// Error code from the spawned prover process in the range 200-232 are reserved

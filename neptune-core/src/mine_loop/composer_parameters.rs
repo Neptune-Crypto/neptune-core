@@ -1,10 +1,10 @@
 use tasm_lib::prelude::Digest;
 
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
-use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::address::ReceivingAddress;
+use crate::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::state::wallet::expected_utxo::UtxoNotifier;
+use crate::state::wallet::transaction_output::TxOutputList;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ComposerParameters {

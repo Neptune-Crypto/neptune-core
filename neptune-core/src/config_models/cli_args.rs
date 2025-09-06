@@ -21,8 +21,8 @@ use crate::config_models::tx_upgrade_filter::TxUpgradeFilter;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::scan_mode_configuration::ScanModeConfiguration;
+use crate::state::tx_proving_capability::TxProvingCapability;
+use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 use crate::triton_vm_job_queue::TritonVmJobPriority;
 
 /// The `neptune-core` command-line program starts a Neptune node.

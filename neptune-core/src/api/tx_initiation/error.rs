@@ -9,7 +9,7 @@ use crate::job_queue::errors::AddJobError;
 use crate::job_queue::errors::JobHandleError;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobError;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::state::tx_proving_capability::TxProvingCapability;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error)]

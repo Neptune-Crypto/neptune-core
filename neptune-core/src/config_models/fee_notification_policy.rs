@@ -1,7 +1,7 @@
 use anyhow::bail;
 use regex::Regex;
 
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
 
 /// How notifications for UTXOs resulting from proving jobs (*i.e.*, composing
 /// or upgrading) are communicated.

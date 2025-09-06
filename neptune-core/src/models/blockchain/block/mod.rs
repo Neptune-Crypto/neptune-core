@@ -75,8 +75,8 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+use crate::state::wallet::address::ReceivingAddress;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
@@ -1191,12 +1191,12 @@ pub(crate) mod tests {
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::TypeScript;
-    use crate::models::state::mempool::upgrade_priority::UpgradePriority;
-    use crate::models::state::tx_creation_config::TxCreationConfig;
-    use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::address::KeyType;
-    use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+    use crate::state::mempool::upgrade_priority::UpgradePriority;
+    use crate::state::tx_creation_config::TxCreationConfig;
+    use crate::state::tx_proving_capability::TxProvingCapability;
+    use crate::state::wallet::address::KeyType;
+    use crate::state::wallet::transaction_output::TxOutput;
+    use crate::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
     use crate::tests::shared::blocks::invalid_block_with_transaction;
     use crate::tests::shared::blocks::invalid_empty_block;
@@ -1719,8 +1719,8 @@ pub(crate) mod tests {
         use crate::mine_loop::create_block_transaction_from;
         use crate::mine_loop::tests::make_coinbase_transaction_from_state;
         use crate::mine_loop::TxMergeOrigin;
-        use crate::models::state::tx_creation_config::TxCreationConfig;
-        use crate::models::state::wallet::address::KeyType;
+        use crate::state::tx_creation_config::TxCreationConfig;
+        use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
         use crate::triton_vm_job_queue::vm_job_queue;
 
@@ -2140,9 +2140,9 @@ pub(crate) mod tests {
     mod guesser_fee_utxos {
         use super::*;
         use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-        use crate::models::state::tx_creation_config::TxCreationConfig;
-        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-        use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+        use crate::state::tx_creation_config::TxCreationConfig;
+        use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
+        use crate::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::blocks::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
 
         #[apply(shared_tokio_runtime)]

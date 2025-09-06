@@ -53,14 +53,14 @@ use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::state::block_proposal::BlockProposal;
-use crate::models::state::mempool::mempool_update_job::MempoolUpdateJob;
-use crate::models::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
-use crate::models::state::mempool::upgrade_priority::UpgradePriority;
-use crate::models::state::networking_state::SyncAnchor;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::GlobalState;
-use crate::models::state::GlobalStateLock;
+use crate::state::block_proposal::BlockProposal;
+use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
+use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
+use crate::state::mempool::upgrade_priority::UpgradePriority;
+use crate::state::networking_state::SyncAnchor;
+use crate::state::tx_proving_capability::TxProvingCapability;
+use crate::state::GlobalState;
+use crate::state::GlobalStateLock;
 use crate::triton_vm_job_queue::vm_job_queue;
 use crate::triton_vm_job_queue::TritonVmJobPriority;
 use crate::triton_vm_job_queue::TritonVmJobQueue;
@@ -2460,8 +2460,8 @@ mod tests {
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
-        use crate::models::state::tx_creation_config::TxCreationConfig;
-        use crate::models::state::wallet::transaction_output::TxOutput;
+        use crate::state::tx_creation_config::TxCreationConfig;
+        use crate::state::wallet::transaction_output::TxOutput;
 
         async fn tx_no_outputs(
             global_state_lock: &mut GlobalStateLock,

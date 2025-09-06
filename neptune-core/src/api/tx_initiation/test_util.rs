@@ -15,8 +15,8 @@ use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifact
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-use crate::models::state::tx_creation_config::TxCreationConfig;
-use crate::models::state::StateLock;
+use crate::state::tx_creation_config::TxCreationConfig;
+use crate::state::StateLock;
 use crate::GlobalStateLock;
 
 // provides crate-internal API(s)
