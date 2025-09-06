@@ -18,10 +18,10 @@ use tokio::io::AsyncWriteExt;
 
 use crate::application::config::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
-use crate::job_queue::channels::JobCancelReceiver;
-use crate::job_queue::traits::Job;
-use crate::job_queue::JobCompletion;
-use crate::job_queue::JobResultWrapper;
+use crate::application::job_queue::channels::JobCancelReceiver;
+use crate::application::job_queue::traits::Job;
+use crate::application::job_queue::JobCompletion;
+use crate::application::job_queue::JobResultWrapper;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;

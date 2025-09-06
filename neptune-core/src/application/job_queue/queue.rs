@@ -514,9 +514,9 @@ mod tests {
 
     mod workers {
         use super::*;
-        use crate::job_queue::errors::JobHandleError;
-        use crate::job_queue::traits::JobResult;
-        use crate::job_queue::JobResultWrapper;
+        use crate::application::job_queue::errors::JobHandleError;
+        use crate::application::job_queue::traits::JobResult;
+        use crate::application::job_queue::JobResultWrapper;
 
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {

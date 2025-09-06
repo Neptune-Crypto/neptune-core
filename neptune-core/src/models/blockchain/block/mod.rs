@@ -77,7 +77,7 @@ use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::wallet_entropy::WalletEntropy;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -1205,8 +1205,8 @@ pub(crate) mod tests {
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::vm_job_queue;
-    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::vm_job_queue;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::util_types::archival_mmr::ArchivalMmr;
 
     pub(crate) const DIFFICULTY_LIMIT_FOR_TESTS: u32 = 20_000;
@@ -1722,7 +1722,7 @@ pub(crate) mod tests {
         use crate::state::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::address::KeyType;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
-        use crate::triton_vm_job_queue::vm_job_queue;
+        use crate::application::triton_vm_job_queue::vm_job_queue;
 
         async fn deterministic_empty_block1_proposal() -> (Block, Timestamp, Network, Block) {
             let network = Network::Main;

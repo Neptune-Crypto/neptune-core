@@ -2113,7 +2113,7 @@ pub(crate) mod tests {
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
     impl WalletState {
         pub(crate) async fn new_from_wallet_entropy(

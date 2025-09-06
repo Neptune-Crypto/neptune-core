@@ -13,8 +13,8 @@ use super::prover_job::ProverJobSettings;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {

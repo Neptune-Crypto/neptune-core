@@ -53,7 +53,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;
 
@@ -1049,7 +1049,7 @@ pub(crate) mod tests {
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl MergeWitness {

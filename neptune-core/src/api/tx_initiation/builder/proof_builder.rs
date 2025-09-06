@@ -12,8 +12,8 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
-use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::vm_job_queue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 /// a builder for [Proof]
 ///

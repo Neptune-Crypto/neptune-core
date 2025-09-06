@@ -8,7 +8,7 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::state::transaction_details::TransactionDetails;
 use crate::state::transaction_kernel_id::TransactionKernelId;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 pub mod announcement;
 pub mod lock_script;
@@ -265,7 +265,7 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::mock_tx::make_mock_transaction;
     use crate::tests::shared_tokio_runtime;
-    use crate::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};
+    use crate::application::triton_vm_job_queue::{vm_job_queue, TritonVmJobPriority};
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 

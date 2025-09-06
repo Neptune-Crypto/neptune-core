@@ -37,7 +37,7 @@ use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::transaction_input::TxInput;
 use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
-use crate::triton_vm_job_queue::vm_job_queue;
+use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::GlobalStateLock;
 
 /// provides an API for building and sending neptune transactions.

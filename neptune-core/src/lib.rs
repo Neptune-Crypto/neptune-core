@@ -26,7 +26,6 @@
 pub mod api;
 pub mod application;
 pub mod connect_to_peers;
-pub mod job_queue;
 pub mod locks;
 pub mod macros;
 pub mod main_loop;
@@ -37,7 +36,6 @@ pub mod prelude;
 pub mod rpc_auth;
 pub mod rpc_server;
 pub mod state;
-pub mod triton_vm_job_queue;
 pub mod util_types;
 
 #[cfg(test)]

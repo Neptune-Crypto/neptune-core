@@ -42,7 +42,7 @@ use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::tests::shared::Randomness;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;

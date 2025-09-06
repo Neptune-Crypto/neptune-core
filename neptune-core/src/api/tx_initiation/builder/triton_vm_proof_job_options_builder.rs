@@ -6,7 +6,7 @@ use crate::models::blockchain::transaction::transaction_proof::TransactionProofT
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::state::tx_proving_capability::TxProvingCapability;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 
 /// a builder for [TritonVmProofJobOptions]
 ///

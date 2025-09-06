@@ -10,8 +10,8 @@ use super::wallet::address::SpendingKey;
 use super::wallet::change_policy::ChangePolicy;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
+use crate::application::triton_vm_job_queue::vm_job_queue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]
