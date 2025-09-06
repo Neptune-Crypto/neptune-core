@@ -683,6 +683,8 @@ pub(crate) mod tests {
     use tasm_lib::triton_vm::prelude::*;
 
     use super::*;
+    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
     use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
@@ -692,8 +694,6 @@ pub(crate) mod tests {
     use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared_tokio_runtime;
-    use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-    use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
     // The main tests are actually in [`../../single_proof.rs`].

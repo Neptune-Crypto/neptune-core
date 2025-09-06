@@ -21,7 +21,7 @@ pub(crate) struct TransactionNotification {
     /// A unique identifier of the transaction. Matches keys in the [mempool]
     /// data structure.
     ///
-    /// [mempool]: crate::models::state::mempool::Mempool
+    /// [mempool]: crate::state::mempool::Mempool
     pub(crate) txid: TransactionKernelId,
 
     /// The hash of the mutator set under which this transaction is valid.

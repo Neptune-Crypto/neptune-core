@@ -1327,10 +1327,7 @@ async fn main() -> Result<()> {
 //
 // Otherwise, we call cookie_hint() RPC to obtain data-dir.
 // But the API might be disabled, which we detect and fallback to the default data-dir.
-async fn get_cookie_hint(
-    client: &RPCClient,
-    args: &Config,
-) -> anyhow::Result<auth::CookieHint> {
+async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
     async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
         let network = client.network(context::current()).await??;
         let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;

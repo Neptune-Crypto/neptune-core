@@ -13,7 +13,7 @@
 //!
 //! ```rust
 //! # use std::sync::Arc;
-//! # use neptune_cash::triton_vm_job_queue::vm_job_queue;
+//! # use neptune_cash::application::triton_vm_job_queue::vm_job_queue;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 //! # use neptune_cash::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
@@ -123,7 +123,7 @@
 //! # use neptune_cash::api::export::TransactionProof;
 //! # use neptune_cash::api::export::TransactionDetails;
 //! # use neptune_cash::api::export::GlobalStateLock;
-//! # use neptune_cash::triton_vm_job_queue::vm_job_queue;
+//! # use neptune_cash::application::triton_vm_job_queue::vm_job_queue;
 //!
 //! # async fn example(tx_details: TransactionDetails, gsl: GlobalStateLock) -> anyhow::Result<TransactionProof> {
 //!

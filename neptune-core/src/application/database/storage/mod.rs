@@ -5,11 +5,15 @@
 //! Collection types backed by LevelDB.
 //!
 //! In particular:
-//!  - [`OrdinaryVec`](storage_vec::OrdinaryVec) provides a standard (in-memory) Vec
-//!    that implements the StorageVec trait.  It is mainly useful for tests and doctests.
-//!  - [`SimpleRustyStorage`](storage_schema::SimpleRustyStorage) provides atomic NeptuneLevelDb writes across
-//!    any number of [`DbtVec`](storage_schema::DbtVec) or [`DbtSingleton`](storage_schema::DbtSingleton) "tables".
-//!  - [`NeptuneLevelDb`](crate::database::NeptuneLevelDb) provides a convenient wrapper for the LevelDB API.
+//!  - [`OrdinaryVec`](storage_vec::OrdinaryVec) provides a standard (in-memory)
+//!    Vec that implements the StorageVec trait.  It is mainly useful for tests
+//!    and doctests.
+//!  - [`SimpleRustyStorage`](storage_schema::SimpleRustyStorage) provides
+//!    atomic NeptuneLevelDb writes across any number of
+//!    [`DbtVec`](storage_schema::DbtVec) or
+//!    [`DbtSingleton`](storage_schema::DbtSingleton) "tables".
+//!  - [`NeptuneLevelDb`](crate::application::database::NeptuneLevelDb) provides
+//!    a convenient wrapper for the LevelDB API.
 
 // For anyone reading this code and trying to understand the StorageVec trait and the DbSchema
 // in particular may help speed understanding.

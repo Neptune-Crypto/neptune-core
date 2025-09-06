@@ -42,8 +42,8 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 /// See issue #176.
 /// <https://github.com/Neptune-Crypto/neptune-core/issues/176>
 ///
-/// see [IncomingUtxo](crate::models::state::wallet::incoming_utxo::IncomingUtxo),
-/// [UtxoNotificationPayLoad](crate::models::state::wallet::utxo_notification::UtxoNotificationPayload)
+/// see [IncomingUtxo](crate::state::wallet::incoming_utxo::IncomingUtxo),
+/// [UtxoNotificationPayLoad](crate::state::wallet::utxo_notification::UtxoNotificationPayload)
 #[derive(Clone, Debug, Hash, GetSize, Serialize, Deserialize)]
 pub struct ExpectedUtxo {
     pub utxo: Utxo,

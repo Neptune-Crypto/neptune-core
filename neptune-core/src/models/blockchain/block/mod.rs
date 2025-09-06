@@ -1032,7 +1032,7 @@ impl Block {
     ///     the `mine_loop`. It is possible that despite (1), race conditions
     ///     arise, and they must be solved here.
     ///
-    /// [1]: crate::models::state::GlobalState::incoming_block_is_more_canonical
+    /// [1]: crate::state::GlobalState::incoming_block_is_more_canonical
     pub(crate) fn fork_choice_rule<'a>(
         current_tip: &'a Self,
         incoming_block: &'a Self,

@@ -62,7 +62,7 @@ impl TransactionKernel {
     /// transaction from [new_with_updated_mutator_set_records].
     ///
     ///
-    /// [new_with_updated_mutator_set_records]: super::Transaction
+    /// [new_with_updated_mutator_set_records]: crate::models::blockchain::transaction::Transaction
     pub(crate) fn txid(&self) -> TransactionKernelId {
         // Since the `Update` program allows permutation of inputs, we must sort
         // the digests of the absolute indices to arrive at a digest that is

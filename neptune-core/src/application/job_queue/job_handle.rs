@@ -56,10 +56,10 @@ impl JobHandle {
     /// Basic example:
     ///
     /// ```
-    /// use neptune_cash::job_queue::JobQueue;
-    /// use neptune_cash::job_queue::JobCompletion;
-    /// use neptune_cash::job_queue::traits::Job;
-    /// use neptune_cash::job_queue::errors::JobHandleError;
+    /// use neptune_cash::application::job_queue::JobQueue;
+    /// use neptune_cash::application::job_queue::JobCompletion;
+    /// use neptune_cash::application::job_queue::traits::Job;
+    /// use neptune_cash::application::job_queue::errors::JobHandleError;
     ///
     /// async fn add_and_cancel_job(job_queue: &mut JobQueue<u8>, job: Box<dyn Job>) -> Result<JobCompletion, JobHandleError> {
     ///
@@ -84,10 +84,10 @@ impl JobHandle {
     /// Example:
     ///
     /// ```
-    /// use neptune_cash::job_queue::JobQueue;
-    /// use neptune_cash::job_queue::JobCompletion;
-    /// use neptune_cash::job_queue::traits::Job;
-    /// use neptune_cash::job_queue::errors::JobHandleError;
+    /// use neptune_cash::application::job_queue::JobQueue;
+    /// use neptune_cash::application::job_queue::JobCompletion;
+    /// use neptune_cash::application::job_queue::traits::Job;
+    /// use neptune_cash::application::job_queue::errors::JobHandleError;
     ///
     /// async fn do_some_work(
     ///     job_queue: &mut JobQueue<u8>,

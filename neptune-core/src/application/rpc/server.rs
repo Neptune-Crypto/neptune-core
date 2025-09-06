@@ -8,8 +8,8 @@
 //!
 //! ```no_run
 //! use anyhow::Result;
-//! use neptune_cash::application::rpc::rpc_server::RPCClient;
-//! use neptune_cash::application::rpc::rpc_auth;
+//! use neptune_cash::application::rpc::server::RPCClient;
+//! use neptune_cash::application::rpc::auth;
 //! use tarpc::tokio_serde::formats::Json;
 //! use tarpc::serde_transport::tcp;
 //! use tarpc::client;
@@ -27,7 +27,7 @@
 //! let cookie_hint = client.cookie_hint(context::current()).await.unwrap().unwrap();
 //!
 //! // load the cookie file from disk and assign it to a token.
-//! let token: rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+//! let token: auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
 //!
 //! // query any RPC API, passing the auth token.  here we query block_height.
 //! let block_height = client.block_height(context::current(), token).await??;
@@ -39,7 +39,7 @@
 //! manually construct the appropriate json method call.  Examples of this will
 //! be forthcoming in the future.
 //!
-//! See [rpc_auth] for descriptions of the authentication mechanisms.
+//! See [auth] for descriptions of the authentication mechanisms.
 //!
 //! Every RPC method returns an [RpcResult] which is wrapped inside a
 //! [tarpc::Response] by the rpc server.
@@ -216,15 +216,15 @@ impl MempoolTransactionInfo {
 pub trait RPC {
     /******** READ DATA ********/
     // Place all methods that only read here
-    /// Returns a [rpc_auth::CookieHint] for purposes of zero-conf authentication
+    /// Returns a [auth::CookieHint] for purposes of zero-conf authentication
     ///
     /// The CookieHint provides a location for the cookie file used by this
     /// neptune-core instance as well as the [Network].
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -253,8 +253,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -281,8 +281,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -301,7 +301,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get local socket used for incoming peer-connections.
     /// let own_listen_address = client.own_listen_address_for_peers(context::current(), token).await??;
@@ -316,8 +316,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -336,7 +336,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get own instance ID.
     /// let own_instance_id = client.own_instance_id(context::current(), token).await??;
@@ -349,8 +349,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -369,7 +369,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the block height.
     /// let block_height = client.block_height(context::current(), token).await??;
@@ -391,8 +391,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -411,7 +411,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the blocks since wallet balance changed.
     /// let block_height = client.confirmations(context::current(), token).await??;
@@ -426,8 +426,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -446,7 +446,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the info about the peers we are connected to
     /// let peers = client.peer_info(context::current(), token).await??;
@@ -461,8 +461,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -481,7 +481,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the info about the peers that are negatively sanctioned
     /// let punished_peers = client.all_punished_peers(context::current(), token).await??;
@@ -494,8 +494,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -514,7 +514,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // number of latest blocks digests you want to get
     /// let n : usize = 10;
@@ -531,8 +531,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -551,7 +551,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set the way to look up for a block : it can be `Digest`, `Height`, `Genesis`, `Tip`
     /// let block_selector : BlockSelector = BlockSelector::Genesis;
@@ -596,8 +596,8 @@ pub trait RPC {
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
     /// use neptune_cash::models::blockchain::block::block_height::BlockHeight;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -616,7 +616,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set block height value to genesis bloc
     /// let height : BlockHeight = BlockHeight::genesis();
@@ -636,8 +636,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -656,7 +656,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set the way to look up for a block : it can be `Digest`, `Height`, `Genesis`, `Tip`
     /// let block_selector : BlockSelector = BlockSelector::Tip;
@@ -676,8 +676,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -696,7 +696,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // leaf index is set to 5
     /// let leaf_index : u64 = 5;
@@ -720,8 +720,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -740,7 +740,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set the way to look up for a block : it can be `Digest`, `Height`, `Genesis`, `Tip`
     /// let block_selector : BlockSelector = BlockSelector::Genesis;
@@ -759,8 +759,8 @@ pub trait RPC {
     /// excludes time-locked utxos
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -779,7 +779,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get sum of confirmed unspent UTXO
     /// let confirmed_available_balance = client.confirmed_available_balance(context::current(), token).await??;
@@ -792,8 +792,8 @@ pub trait RPC {
     /// includes mempool transactions, excludes time-locked utxos
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -812,7 +812,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get sum of unconfirmed unspent UTXOs
     /// let unconfirmed_available_balance = client.unconfirmed_available_balance(context::current(), token).await??;
@@ -825,8 +825,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -845,7 +845,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get history of transactions, a vec containing digest, block height, timestamp and neptune coins tuples.
     /// let history_transactions = client.history(context::current(), token).await??;
@@ -860,8 +860,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -880,7 +880,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the funds in the wallet
     /// let wallet_status = client.wallet_status(context::current(), token).await??;
@@ -893,8 +893,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -913,7 +913,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the number of expected utxos including already received ones.
     /// let wallet_status = client.num_expected_utxos(context::current(), token).await??;
@@ -950,9 +950,9 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::state::wallet::address::KeyType;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// use neptune_cash::state::wallet::address::KeyType;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -971,7 +971,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set cryptographic key type for receiving funds
     /// let key_type = KeyType::Generation;
@@ -990,8 +990,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1010,7 +1010,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get all known keys for every [KeyType]
     /// let known_keys = client.known_keys(context::current(), token ).await??;
@@ -1023,9 +1023,9 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::state::wallet::address::KeyType;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// use neptune_cash::state::wallet::address::KeyType;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1044,7 +1044,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // set a key type
     /// let key_type = KeyType::Symmetric;
@@ -1063,8 +1063,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1083,7 +1083,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the number of transactions in the mempool
     /// let mempool_tx_count = client.mempool_tx_count(context::current(), token ).await??;
@@ -1101,8 +1101,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1121,7 +1121,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // index to start from in the mempool
     /// let start_index : usize = 37;
@@ -1150,8 +1150,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1170,7 +1170,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the info used on dashboard overview tab
     /// let dashboard_data = client.dashboard_overview_data(context::current(), token).await??;
@@ -1186,8 +1186,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::application::config::network::Network;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1206,7 +1206,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // address to validate
     /// let address : String = "0x484389349834834DF23".to_string();
@@ -1229,8 +1229,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1249,7 +1249,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // address to validate
     /// let amount : String = "132".to_string();
@@ -1269,8 +1269,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1289,7 +1289,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // setting the amount to 47
     /// let amount : NativeCurrencyAmount = NativeCurrencyAmount::coins(47);
@@ -1308,8 +1308,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1328,7 +1328,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server to get the list of owned and unspent coins
     /// let own_coins = client.list_own_coins(context::current(), token ).await??;
@@ -1341,8 +1341,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1361,7 +1361,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // query neptune-core server instance to get its CPU temperature
     /// let cpu_temperature = client.cpu_temp(context::current(), token ).await??;
@@ -1419,8 +1419,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1439,7 +1439,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // sets the last block
     /// let last_block : BlockSelector = BlockSelector::Genesis;
@@ -1474,8 +1474,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1494,7 +1494,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // neptune-core server clears standing for all peers that are connected or not
     /// let _ = client.clear_all_standings(context::current(), token).await??;
@@ -1507,8 +1507,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1528,7 +1528,7 @@ pub trait RPC {
     /// let cookie_hint = client.cookie_hint(context::current()).await??;
     ///
     /// // load the cookie file from disk and assign it to a token
-    /// let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     ///
     /// // IP address 87.23.90.12 to clear standing
     /// let ip = IpAddr::V4(Ipv4Addr::new(87, 23, 90, 12));
@@ -1640,10 +1640,10 @@ pub trait RPC {
     /// # use anyhow::Result;
     /// # use neptune_cash::application::config::network::Network;
     /// # use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    /// # use neptune_cash::models::state::wallet::address::ReceivingAddress;
-    /// # use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::state::wallet::address::ReceivingAddress;
+    /// # use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use neptune_cash::api::export::ChangePolicy;
     /// # use neptune_cash::api::export::OutputFormat;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1665,7 +1665,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // List of receiving addresses and the amounts to send
     /// let outputs: Vec<OutputFormat> = vec![
@@ -1741,8 +1741,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1761,7 +1761,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     /// // Encryted value of utxo transfer
     /// let utxo_transfer_encrypted = "XXXXXXX".to_string();
@@ -1803,8 +1803,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1823,7 +1823,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // stops miner if running
     /// let _ = client.pause_miner(context::current(), token).await??;
@@ -1836,8 +1836,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1856,7 +1856,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // start miner if not running
     /// let _ = client.restart_miner(context::current(), token).await??;
@@ -1910,8 +1910,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1930,7 +1930,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // marks mutxos as abandoned
     /// let abandoned_monitored_utxos = client.prune_abandoned_monitored_utxos(context::current(), token).await??;
@@ -1948,8 +1948,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
-    /// # use neptune_cash::application::rpc::rpc_auth;
+    /// # use neptune_cash::application::rpc::server::RPCClient;
+    /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1968,7 +1968,7 @@ pub trait RPC {
     /// # let cookie_hint = client.cookie_hint(context::current()).await??;
     /// #
     /// # // load the cookie file from disk and assign it to a token
-    /// # let token : rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
+    /// # let token : auth::Token = auth::Cookie::try_load(&cookie_hint.data_directory).await?.into();
     /// #
     ///  // shutdowns the node
     /// let is_shutdown = client.shutdown(context::current(), token).await??;
