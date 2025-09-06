@@ -8,8 +8,8 @@
 //!
 //! ```no_run
 //! use anyhow::Result;
-//! use neptune_cash::rpc_server::RPCClient;
-//! use neptune_cash::rpc_auth;
+//! use neptune_cash::application::rpc::rpc_server::RPCClient;
+//! use neptune_cash::application::rpc::rpc_auth;
 //! use tarpc::tokio_serde::formats::Json;
 //! use tarpc::serde_transport::tcp;
 //! use tarpc::client;
@@ -66,12 +66,15 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
+use super::auth;
 use crate::api;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::config::network::Network;
 use crate::application::control::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::rpc::server::error::RpcError;
+use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -94,9 +97,6 @@ use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::rpc_auth;
-use crate::rpc_server::error::RpcError;
-use crate::rpc_server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::state::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::mining_status::MiningStatus;
 use crate::state::transaction_details::TransactionDetails;
@@ -223,8 +223,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -247,14 +247,14 @@ pub trait RPC {
     /// be able to call this method in order to bootstrap cookie-based
     /// authentication.
     ///
-    async fn cookie_hint() -> RpcResult<rpc_auth::CookieHint>;
+    async fn cookie_hint() -> RpcResult<auth::CookieHint>;
 
     /// Return the network this neptune-core instance is running
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -281,8 +281,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -308,7 +308,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn own_listen_address_for_peers(token: rpc_auth::Token) -> RpcResult<Option<SocketAddr>>;
+    async fn own_listen_address_for_peers(token: auth::Token) -> RpcResult<Option<SocketAddr>>;
 
     /// Return the node's instance-ID which is a globally unique random generated number
     /// set at startup used to ensure that the node does not connect to itself, or the
@@ -316,8 +316,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -343,14 +343,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn own_instance_id(token: rpc_auth::Token) -> RpcResult<InstanceId>;
+    async fn own_instance_id(token: auth::Token) -> RpcResult<InstanceId>;
 
     /// Returns the current block height.
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -376,12 +376,12 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn block_height(token: rpc_auth::Token) -> RpcResult<BlockHeight>;
+    async fn block_height(token: auth::Token) -> RpcResult<BlockHeight>;
 
     /// Return the guesser reward of the most favorable block proposal
     ///
     /// Returns None if no proposal is known building on the current tip.
-    async fn best_proposal(token: rpc_auth::Token) -> RpcResult<Option<BlockInfo>>;
+    async fn best_proposal(token: auth::Token) -> RpcResult<Option<BlockInfo>>;
 
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
@@ -391,8 +391,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -418,7 +418,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn confirmations(token: rpc_auth::Token) -> RpcResult<Option<BlockHeight>>;
+    async fn confirmations(token: auth::Token) -> RpcResult<Option<BlockHeight>>;
 
     /// Returns info about the peers we are connected to
     ///
@@ -426,8 +426,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -453,7 +453,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn peer_info(token: rpc_auth::Token) -> RpcResult<Vec<PeerInfo>>;
+    async fn peer_info(token: auth::Token) -> RpcResult<Vec<PeerInfo>>;
 
     /// Return info about all peers that have been negatively sanctioned.
     ///
@@ -461,8 +461,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -488,15 +488,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn all_punished_peers(token: rpc_auth::Token)
-        -> RpcResult<HashMap<IpAddr, PeerStanding>>;
+    async fn all_punished_peers(token: auth::Token) -> RpcResult<HashMap<IpAddr, PeerStanding>>;
 
     /// Returns the digest of the latest n blocks
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -525,15 +524,15 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn latest_tip_digests(token: rpc_auth::Token, n: usize) -> RpcResult<Vec<Digest>>;
+    async fn latest_tip_digests(token: auth::Token, n: usize) -> RpcResult<Vec<Digest>>;
 
     /// Returns information about the specified block if found
     ///
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -563,20 +562,20 @@ pub trait RPC {
     /// # }
     /// ```
     async fn block_info(
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockInfo>>;
 
     /// Return the block kernel if block is known.
     async fn block_kernel(
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockKernel>>;
 
     /// Return a hash map of [`AdditionRecord`]s to AOCL leaf indices for the
     /// outputs of a block, if it is known.
     async fn addition_record_indices_for_block(
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Vec<(AdditionRecord, Option<u64>)>>;
 
@@ -587,7 +586,7 @@ pub trait RPC {
     ///
     /// Does not attempt to decode the announcements.
     async fn announcements_in_block(
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Vec<Announcement>>>;
 
@@ -597,8 +596,8 @@ pub trait RPC {
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
     /// use neptune_cash::models::blockchain::block::block_height::BlockHeight;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -628,7 +627,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn block_digests_by_height(
-        token: rpc_auth::Token,
+        token: auth::Token,
         height: BlockHeight,
     ) -> RpcResult<Vec<Digest>>;
 
@@ -637,8 +636,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -668,7 +667,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn block_digest(
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Digest>>;
 
@@ -677,8 +676,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -707,11 +706,11 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn utxo_digest(token: rpc_auth::Token, leaf_index: u64) -> RpcResult<Option<Digest>>;
+    async fn utxo_digest(token: auth::Token, leaf_index: u64) -> RpcResult<Option<Digest>>;
 
     /// Returns the block digest in which the specified UTXO was created, if available
     async fn utxo_origin_block(
-        token: rpc_auth::Token,
+        token: auth::Token,
         addition_record: AdditionRecord,
         max_search_depth: Option<u64>,
     ) -> RpcResult<Option<Digest>>;
@@ -721,8 +720,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -752,7 +751,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn header(
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockHeader>>;
 
@@ -760,8 +759,8 @@ pub trait RPC {
     /// excludes time-locked utxos
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -787,15 +786,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn confirmed_available_balance(token: rpc_auth::Token)
-        -> RpcResult<NativeCurrencyAmount>;
+    async fn confirmed_available_balance(token: auth::Token) -> RpcResult<NativeCurrencyAmount>;
 
     /// Get sum of unconfirmed, unspent available UTXOs
     /// includes mempool transactions, excludes time-locked utxos
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -821,16 +819,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn unconfirmed_available_balance(
-        token: rpc_auth::Token,
-    ) -> RpcResult<NativeCurrencyAmount>;
+    async fn unconfirmed_available_balance(token: auth::Token) -> RpcResult<NativeCurrencyAmount>;
 
     /// Get the client's wallet transaction history
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -857,15 +853,15 @@ pub trait RPC {
     /// # }
     /// ```
     async fn history(
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)>>;
 
     /// Return information about funds in the wallet
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -891,14 +887,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn wallet_status(token: rpc_auth::Token) -> RpcResult<WalletStatus>;
+    async fn wallet_status(token: auth::Token) -> RpcResult<WalletStatus>;
 
     /// Return the number of expected UTXOs, including already received UTXOs.
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -924,7 +920,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn num_expected_utxos(token: rpc_auth::Token) -> RpcResult<u64>;
+    async fn num_expected_utxos(token: auth::Token) -> RpcResult<u64>;
 
     /// generate a new receiving address of the specified type
     ///
@@ -955,8 +951,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::state::wallet::address::KeyType;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -986,7 +982,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn next_receiving_address(
-        token: rpc_auth::Token,
+        token: auth::Token,
         key_type: KeyType,
     ) -> RpcResult<ReceivingAddress>;
 
@@ -994,8 +990,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1021,15 +1017,15 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn known_keys(token: rpc_auth::Token) -> RpcResult<Vec<SpendingKey>>;
+    async fn known_keys(token: auth::Token) -> RpcResult<Vec<SpendingKey>>;
 
     /// Return known keys for the provided [KeyType]
     ///
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::state::wallet::address::KeyType;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1059,7 +1055,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn known_keys_by_keytype(
-        token: rpc_auth::Token,
+        token: auth::Token,
         key_type: KeyType,
     ) -> RpcResult<Vec<SpendingKey>>;
 
@@ -1067,8 +1063,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1094,19 +1090,19 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn mempool_tx_count(token: rpc_auth::Token) -> RpcResult<usize>;
+    async fn mempool_tx_count(token: auth::Token) -> RpcResult<usize>;
 
     // TODO: Change to return current size and max size
-    async fn mempool_size(token: rpc_auth::Token) -> RpcResult<usize>;
+    async fn mempool_size(token: auth::Token) -> RpcResult<usize>;
 
-    async fn mempool_tx_ids(token: rpc_auth::Token) -> RpcResult<Vec<TransactionKernelId>>;
+    async fn mempool_tx_ids(token: auth::Token) -> RpcResult<Vec<TransactionKernelId>>;
 
     /// Return info about the transactions in the mempool
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1139,14 +1135,14 @@ pub trait RPC {
     /// # }
     /// ```
     async fn mempool_overview(
-        token: rpc_auth::Token,
+        token: auth::Token,
         start_index: usize,
         number: usize,
     ) -> RpcResult<Vec<MempoolTransactionInfo>>;
 
     /// Return transaction kernel by id if found in mempool.
     async fn mempool_tx_kernel(
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_kernel_id: TransactionKernelId,
     ) -> RpcResult<Option<TransactionKernel>>;
 
@@ -1154,8 +1150,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1182,7 +1178,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn dashboard_overview_data(
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<DashBoardOverviewDataFromClient>;
 
     /// Determine whether the user-supplied string is a valid address
@@ -1190,8 +1186,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::application::config::network::Network;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1224,7 +1220,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn validate_address(
-        token: rpc_auth::Token,
+        token: auth::Token,
         address: String,
         network: Network,
     ) -> RpcResult<Option<ReceivingAddress>>;
@@ -1233,8 +1229,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1264,7 +1260,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn validate_amount(
-        token: rpc_auth::Token,
+        token: auth::Token,
         amount: String,
     ) -> RpcResult<Option<NativeCurrencyAmount>>;
 
@@ -1273,8 +1269,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1304,7 +1300,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn amount_leq_confirmed_available_balance(
-        token: rpc_auth::Token,
+        token: auth::Token,
         amount: NativeCurrencyAmount,
     ) -> RpcResult<bool>;
 
@@ -1312,8 +1308,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1339,14 +1335,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn list_own_coins(token: rpc_auth::Token) -> RpcResult<Vec<CoinWithPossibleTimeLock>>;
+    async fn list_own_coins(token: auth::Token) -> RpcResult<Vec<CoinWithPossibleTimeLock>>;
 
     /// Get CPU temperature.
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1372,15 +1368,13 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn cpu_temp(token: rpc_auth::Token) -> RpcResult<Option<f32>>;
+    async fn cpu_temp(token: auth::Token) -> RpcResult<Option<f32>>;
 
     /// Get the proof-of-work puzzle for the current block proposal. Uses the
     /// node's secret key to populate the guesser digest.
     ///
     /// Returns `None` if no block proposal for the next block is known yet.
-    async fn pow_puzzle_internal_key(
-        token: rpc_auth::Token,
-    ) -> RpcResult<Option<ProofOfWorkPuzzle>>;
+    async fn pow_puzzle_internal_key(token: auth::Token) -> RpcResult<Option<ProofOfWorkPuzzle>>;
 
     /// Get the proof-of-work puzzle for the current block proposal. Like
     /// [Self::pow_puzzle_internal_key] but returned puzzle uses an externally
@@ -1391,7 +1385,7 @@ pub trait RPC {
     ///
     /// Returns `None` if no block proposal for the next block is known yet.
     async fn pow_puzzle_external_key(
-        token: rpc_auth::Token,
+        token: auth::Token,
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>>;
 
@@ -1402,7 +1396,7 @@ pub trait RPC {
     /// found, the endpoint [`Self::provide_new_tip()`] can be used to pass the
     /// solution onto a node.
     async fn full_pow_puzzle_external_key(
-        token: rpc_auth::Token,
+        token: auth::Token,
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>>;
 
@@ -1415,7 +1409,7 @@ pub trait RPC {
     /// and block 1 since genesis block was not actually mined and its timestamp
     /// doesn't carry the same meaning as those of later blocks.
     async fn block_intervals(
-        token: rpc_auth::Token,
+        token: auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Option<Vec<(u64, u64)>>>;
@@ -1425,8 +1419,8 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1459,7 +1453,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn block_difficulties(
-        token: rpc_auth::Token,
+        token: auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Vec<(u64, Difficulty)>>;
@@ -1468,10 +1462,10 @@ pub trait RPC {
 
     /// Broadcast transaction notifications for all transactions in this node's
     /// mempool.
-    async fn broadcast_all_mempool_txs(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn broadcast_all_mempool_txs(token: auth::Token) -> RpcResult<()>;
 
     /// Broadcast running node's current favorable block proposal.
-    async fn broadcast_block_proposal(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn broadcast_block_proposal(token: auth::Token) -> RpcResult<()>;
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
@@ -1480,8 +1474,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1507,14 +1501,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn clear_all_standings(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn clear_all_standings(token: auth::Token) -> RpcResult<()>;
 
     /// Clears standing for ip, whether connected or not
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1544,12 +1538,12 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn clear_standing_by_ip(token: rpc_auth::Token, ip: IpAddr) -> RpcResult<()>;
+    async fn clear_standing_by_ip(token: auth::Token, ip: IpAddr) -> RpcResult<()>;
 
     /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
-    async fn spendable_inputs(token: rpc_auth::Token) -> RpcResult<TxInputList>;
+    async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputList>;
 
     /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
     ///
@@ -1565,7 +1559,7 @@ pub trait RPC {
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
     async fn select_spendable_inputs(
-        token: rpc_auth::Token,
+        token: auth::Token,
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
     ) -> RpcResult<TxInputList>;
@@ -1579,7 +1573,7 @@ pub trait RPC {
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_outputs()]
     async fn generate_tx_outputs(
-        token: rpc_auth::Token,
+        token: auth::Token,
         outputs: Vec<OutputFormat>,
     ) -> RpcResult<TxOutputList>;
 
@@ -1587,7 +1581,7 @@ pub trait RPC {
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
     async fn generate_witness_proof(
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_details: TransactionDetails,
     ) -> RpcResult<TransactionProof>;
 
@@ -1597,7 +1591,7 @@ pub trait RPC {
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction()]
     async fn assemble_transaction(
-        token: rpc_auth::Token,
+        token: auth::Token,
         transaction_details: TransactionDetails,
         transaction_proof: TransactionProof,
     ) -> RpcResult<Transaction>;
@@ -1608,7 +1602,7 @@ pub trait RPC {
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction_artifacts()]
     async fn assemble_transaction_artifacts(
-        token: rpc_auth::Token,
+        token: auth::Token,
         transaction_details: TransactionDetails,
         transaction_proof: TransactionProof,
     ) -> RpcResult<TxCreationArtifacts>;
@@ -1619,7 +1613,7 @@ pub trait RPC {
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::record_and_broadcast_transaction()]
     async fn record_and_broadcast_transaction(
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_artifacts: TxCreationArtifacts,
     ) -> RpcResult<()>;
 
@@ -1648,8 +1642,8 @@ pub trait RPC {
     /// # use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::models::state::wallet::address::ReceivingAddress;
     /// # use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use neptune_cash::api::export::ChangePolicy;
     /// # use neptune_cash::api::export::OutputFormat;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1692,7 +1686,7 @@ pub trait RPC {
     /// # }
     /// ```
     async fn send(
-        token: rpc_auth::Token,
+        token: auth::Token,
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -1706,7 +1700,7 @@ pub trait RPC {
     /// thereby exposing not just the amounts but also the origins and
     /// destinations of the transfer.
     async fn send_transparent(
-        token: rpc_auth::Token,
+        token: auth::Token,
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -1722,13 +1716,13 @@ pub trait RPC {
     /// Returns Ok(true) if a transaction for upgrading was found
     /// Returns Ok(false) if no transaction for upgrading was found
     /// Returns an error if something else failed.
-    async fn upgrade(token: rpc_auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
+    async fn upgrade(token: auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
 
     /// todo: docs.
     ///
     /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
     async fn proof_type(
-        token: rpc_auth::Token,
+        token: auth::Token,
         txid: TransactionKernelId,
     ) -> RpcResult<TransactionProofType>;
 
@@ -1747,8 +1741,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1781,13 +1775,13 @@ pub trait RPC {
     /// # }
     /// ```
     async fn claim_utxo(
-        token: rpc_auth::Token,
+        token: auth::Token,
         utxo_transfer_encrypted: String,
         max_search_depth: Option<u64>,
     ) -> RpcResult<bool>;
 
     /// Delete all transactions from the mempool.
-    async fn clear_mempool(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn clear_mempool(token: auth::Token) -> RpcResult<()>;
 
     /// Pause receiving of blocks, block proposals, and transactions. If
     /// activated, no new blocks will be received. Transactions, blocks, and
@@ -1798,19 +1792,19 @@ pub trait RPC {
     /// Can be used to build a big transaction through the merge of multiple
     /// smaller transactions without risking that the smaller, unmerged
     /// transactions are mined.
-    async fn freeze(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn freeze(token: auth::Token) -> RpcResult<()>;
 
     /// Resume state updates. If state updates were paused, start receiving and
     /// transmitting blocks, block proposals, and transactions again. Otherwise,
     /// does nothing.
-    async fn unfreeze(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn unfreeze(token: auth::Token) -> RpcResult<()>;
 
     /// Stop miner if running
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1836,14 +1830,14 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn pause_miner(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn pause_miner(token: auth::Token) -> RpcResult<()>;
 
     /// Start miner if not running
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1869,7 +1863,7 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn restart_miner(token: rpc_auth::Token) -> RpcResult<()>;
+    async fn restart_miner(token: auth::Token) -> RpcResult<()>;
 
     /// mine a series of blocks to the node's wallet.
     ///
@@ -1885,7 +1879,7 @@ pub trait RPC {
     /// that they will be temporally very close to eachother.
     ///
     /// see [api::regtest::RegTest::mine_blocks_to_wallet()]
-    async fn mine_blocks_to_wallet(token: rpc_auth::Token, n_blocks: u32) -> RpcResult<()>;
+    async fn mine_blocks_to_wallet(token: auth::Token, n_blocks: u32) -> RpcResult<()>;
 
     /// Provide a PoW-solution to the current block proposal.
     ///
@@ -1893,7 +1887,7 @@ pub trait RPC {
     /// is broadcast to all peers on the network, and `true` is returned.
     /// Otherwise the provided solution is ignored, and `false` is returned.
     async fn provide_pow_solution(
-        token: rpc_auth::Token,
+        token: auth::Token,
         pow: BlockPow,
         proposal_id: Digest,
     ) -> RpcResult<bool>;
@@ -1907,7 +1901,7 @@ pub trait RPC {
     /// since proposal is provided by the caller. Can be used in conjuction with
     /// [`Self::full_pow_puzzle_external_key`].
     async fn provide_new_tip(
-        token: rpc_auth::Token,
+        token: auth::Token,
         pow: BlockPow,
         block_proposal: Block,
     ) -> RpcResult<bool>;
@@ -1916,8 +1910,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1943,19 +1937,19 @@ pub trait RPC {
     /// # Ok(())
     /// # }
     /// ```
-    async fn prune_abandoned_monitored_utxos(token: rpc_auth::Token) -> RpcResult<usize>;
+    async fn prune_abandoned_monitored_utxos(token: auth::Token) -> RpcResult<usize>;
 
     /// Set the tip of the blockchain state to a given block, identified by its
     /// hash. The block must be stored, but it does not need to live on the
     /// canonical chain.
-    async fn set_tip(token: rpc_auth::Token, indicated_tip: Digest) -> RpcResult<()>;
+    async fn set_tip(token: auth::Token, indicated_tip: Digest) -> RpcResult<()>;
 
     /// Gracious shutdown.
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// # use neptune_cash::rpc_server::RPCClient;
-    /// # use neptune_cash::rpc_auth;
+    /// # use neptune_cash::application::rpc::rpc_server::RPCClient;
+    /// # use neptune_cash::application::rpc::rpc_auth;
     /// # use tarpc::tokio_serde::formats::Json;
     /// # use tarpc::serde_transport::tcp;
     /// # use tarpc::client;
@@ -1980,7 +1974,7 @@ pub trait RPC {
     /// let is_shutdown = client.shutdown(context::current(), token).await??;
     /// # Ok(())
     /// # }
-    async fn shutdown(token: rpc_auth::Token) -> RpcResult<bool>;
+    async fn shutdown(token: auth::Token) -> RpcResult<bool>;
 }
 
 #[derive(Clone)]
@@ -1994,7 +1988,7 @@ pub(crate) struct NeptuneRPCServer {
     // list of tokens that are valid.  RPC clients must present a token that
     // matches one of these.  there should only be one of each `Token` variant
     // in the list (dups ignored).
-    valid_tokens: Vec<rpc_auth::Token>,
+    valid_tokens: Vec<auth::Token>,
 }
 
 impl NeptuneRPCServer {
@@ -2003,7 +1997,7 @@ impl NeptuneRPCServer {
         state: GlobalStateLock,
         rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
         data_directory: DataDirectory,
-        valid_tokens: Vec<rpc_auth::Token>,
+        valid_tokens: Vec<auth::Token>,
     ) -> Self {
         Self {
             state,
@@ -2262,13 +2256,13 @@ impl NeptuneRPCServer {
 
 impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
-    async fn cookie_hint(self, _: context::Context) -> RpcResult<rpc_auth::CookieHint> {
+    async fn cookie_hint(self, _: context::Context) -> RpcResult<auth::CookieHint> {
         log_slow_scope!(fn_name!());
 
         if self.state.cli().disable_cookie_hint {
             Err(error::RpcError::CookieHintDisabled)
         } else {
-            Ok(rpc_auth::CookieHint {
+            Ok(auth::CookieHint {
                 data_directory: self.data_directory().to_owned(),
                 network: self.state.cli().network,
             })
@@ -2286,7 +2280,7 @@ impl RPC for NeptuneRPCServer {
     async fn own_listen_address_for_peers(
         self,
         _context: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Option<SocketAddr>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2300,7 +2294,7 @@ impl RPC for NeptuneRPCServer {
     async fn own_instance_id(
         self,
         _context: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<InstanceId> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2309,11 +2303,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn block_height(
-        self,
-        _: context::Context,
-        token: rpc_auth::Token,
-    ) -> RpcResult<BlockHeight> {
+    async fn block_height(self, _: context::Context, token: auth::Token) -> RpcResult<BlockHeight> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2331,7 +2321,7 @@ impl RPC for NeptuneRPCServer {
     async fn best_proposal(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Option<BlockInfo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2357,7 +2347,7 @@ impl RPC for NeptuneRPCServer {
     async fn confirmations(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Option<BlockHeight>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2370,7 +2360,7 @@ impl RPC for NeptuneRPCServer {
     async fn utxo_digest(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         leaf_index: u64,
     ) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
@@ -2391,7 +2381,7 @@ impl RPC for NeptuneRPCServer {
     async fn utxo_origin_block(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         addition_record: AdditionRecord,
         max_search_depth: Option<u64>,
     ) -> RpcResult<Option<Digest>> {
@@ -2412,7 +2402,7 @@ impl RPC for NeptuneRPCServer {
     async fn block_digest(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
@@ -2434,7 +2424,7 @@ impl RPC for NeptuneRPCServer {
     async fn block_info(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockInfo>> {
         log_slow_scope!(fn_name!());
@@ -2475,7 +2465,7 @@ impl RPC for NeptuneRPCServer {
     async fn block_kernel(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockKernel>> {
         log_slow_scope!(fn_name!());
@@ -2501,7 +2491,7 @@ impl RPC for NeptuneRPCServer {
     async fn addition_record_indices_for_block(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Vec<(AdditionRecord, Option<u64>)>> {
         log_slow_scope!(fn_name!());
@@ -2528,7 +2518,7 @@ impl RPC for NeptuneRPCServer {
     async fn announcements_in_block(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Vec<Announcement>>> {
         log_slow_scope!(fn_name!());
@@ -2550,7 +2540,7 @@ impl RPC for NeptuneRPCServer {
     async fn block_digests_by_height(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         height: BlockHeight,
     ) -> RpcResult<Vec<Digest>> {
         log_slow_scope!(fn_name!());
@@ -2570,7 +2560,7 @@ impl RPC for NeptuneRPCServer {
     async fn latest_tip_digests(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         n: usize,
     ) -> RpcResult<Vec<Digest>> {
         log_slow_scope!(fn_name!());
@@ -2588,11 +2578,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn peer_info(
-        self,
-        _: context::Context,
-        token: rpc_auth::Token,
-    ) -> RpcResult<Vec<PeerInfo>> {
+    async fn peer_info(self, _: context::Context, token: auth::Token) -> RpcResult<Vec<PeerInfo>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -2611,7 +2597,7 @@ impl RPC for NeptuneRPCServer {
     async fn all_punished_peers(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<HashMap<IpAddr, PeerStanding>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2645,7 +2631,7 @@ impl RPC for NeptuneRPCServer {
     async fn validate_address(
         self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         address_string: String,
         network: Network,
     ) -> RpcResult<Option<ReceivingAddress>> {
@@ -2664,7 +2650,7 @@ impl RPC for NeptuneRPCServer {
     async fn validate_amount(
         self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         amount_string: String,
     ) -> RpcResult<Option<NativeCurrencyAmount>> {
         log_slow_scope!(fn_name!());
@@ -2682,7 +2668,7 @@ impl RPC for NeptuneRPCServer {
     async fn amount_leq_confirmed_available_balance(
         self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         amount: NativeCurrencyAmount,
     ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
@@ -2703,7 +2689,7 @@ impl RPC for NeptuneRPCServer {
     async fn confirmed_available_balance(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<NativeCurrencyAmount> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2722,7 +2708,7 @@ impl RPC for NeptuneRPCServer {
     async fn unconfirmed_available_balance(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<NativeCurrencyAmount> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2739,7 +2725,7 @@ impl RPC for NeptuneRPCServer {
     async fn wallet_status(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<WalletStatus> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2755,7 +2741,7 @@ impl RPC for NeptuneRPCServer {
     async fn num_expected_utxos(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<u64> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2773,7 +2759,7 @@ impl RPC for NeptuneRPCServer {
     async fn header(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockHeader>> {
         log_slow_scope!(fn_name!());
@@ -2794,7 +2780,7 @@ impl RPC for NeptuneRPCServer {
     async fn next_receiving_address(
         mut self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         key_type: KeyType,
     ) -> RpcResult<ReceivingAddress> {
         log_slow_scope!(fn_name!());
@@ -2812,7 +2798,7 @@ impl RPC for NeptuneRPCServer {
     async fn known_keys(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2830,7 +2816,7 @@ impl RPC for NeptuneRPCServer {
     async fn known_keys_by_keytype(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         key_type: KeyType,
     ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
@@ -2849,7 +2835,7 @@ impl RPC for NeptuneRPCServer {
     async fn mempool_tx_count(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2861,7 +2847,7 @@ impl RPC for NeptuneRPCServer {
     async fn mempool_size(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2872,7 +2858,7 @@ impl RPC for NeptuneRPCServer {
     async fn mempool_tx_ids(
         self,
         _context: ::tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Vec<TransactionKernelId>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2892,7 +2878,7 @@ impl RPC for NeptuneRPCServer {
     async fn history(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2915,7 +2901,7 @@ impl RPC for NeptuneRPCServer {
     async fn dashboard_overview_data(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<DashBoardOverviewDataFromClient> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3005,7 +2991,7 @@ impl RPC for NeptuneRPCServer {
     async fn clear_all_standings(
         mut self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3032,7 +3018,7 @@ impl RPC for NeptuneRPCServer {
     async fn clear_standing_by_ip(
         mut self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         ip: IpAddr,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
@@ -3059,7 +3045,7 @@ impl RPC for NeptuneRPCServer {
     async fn spendable_inputs(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<TxInputList> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3076,7 +3062,7 @@ impl RPC for NeptuneRPCServer {
     async fn select_spendable_inputs(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         policy: InputSelectionPolicy,
         spend_amount: NativeCurrencyAmount,
     ) -> RpcResult<TxInputList> {
@@ -3096,7 +3082,7 @@ impl RPC for NeptuneRPCServer {
     async fn generate_tx_outputs(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         outputs: Vec<OutputFormat>,
     ) -> RpcResult<TxOutputList> {
         log_slow_scope!(fn_name!());
@@ -3114,7 +3100,7 @@ impl RPC for NeptuneRPCServer {
     async fn generate_witness_proof(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_details: TransactionDetails,
     ) -> RpcResult<TransactionProof> {
         log_slow_scope!(fn_name!());
@@ -3131,7 +3117,7 @@ impl RPC for NeptuneRPCServer {
     async fn assemble_transaction(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         transaction_details: TransactionDetails,
         transaction_proof: TransactionProof,
     ) -> RpcResult<Transaction> {
@@ -3149,7 +3135,7 @@ impl RPC for NeptuneRPCServer {
     async fn assemble_transaction_artifacts(
         self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         transaction_details: TransactionDetails,
         transaction_proof: TransactionProof,
     ) -> RpcResult<TxCreationArtifacts> {
@@ -3167,7 +3153,7 @@ impl RPC for NeptuneRPCServer {
     async fn record_and_broadcast_transaction(
         mut self,
         _: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_artifacts: TxCreationArtifacts,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
@@ -3185,7 +3171,7 @@ impl RPC for NeptuneRPCServer {
     async fn send(
         mut self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -3205,7 +3191,7 @@ impl RPC for NeptuneRPCServer {
     async fn send_transparent(
         mut self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         outputs: Vec<OutputFormat>,
         change_policy: ChangePolicy,
         fee: NativeCurrencyAmount,
@@ -3224,7 +3210,7 @@ impl RPC for NeptuneRPCServer {
     async fn upgrade(
         mut self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_kernel_id: TransactionKernelId,
     ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
@@ -3310,7 +3296,7 @@ impl RPC for NeptuneRPCServer {
     async fn proof_type(
         self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         txid: TransactionKernelId,
     ) -> RpcResult<TransactionProofType> {
         log_slow_scope!(fn_name!());
@@ -3323,7 +3309,7 @@ impl RPC for NeptuneRPCServer {
     async fn claim_utxo(
         mut self,
         _ctx: context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         encrypted_utxo_notification: String,
         max_search_depth: Option<u64>,
     ) -> RpcResult<bool> {
@@ -3353,7 +3339,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn shutdown(self, _: context::Context, token: rpc_auth::Token) -> RpcResult<bool> {
+    async fn shutdown(self, _: context::Context, token: auth::Token) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -3371,7 +3357,7 @@ impl RPC for NeptuneRPCServer {
     async fn clear_mempool(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3387,7 +3373,7 @@ impl RPC for NeptuneRPCServer {
     async fn freeze(
         mut self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3408,7 +3394,7 @@ impl RPC for NeptuneRPCServer {
     async fn unfreeze(
         mut self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3421,7 +3407,7 @@ impl RPC for NeptuneRPCServer {
     async fn pause_miner(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3441,7 +3427,7 @@ impl RPC for NeptuneRPCServer {
     async fn restart_miner(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3461,7 +3447,7 @@ impl RPC for NeptuneRPCServer {
     async fn mine_blocks_to_wallet(
         mut self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         n_blocks: u32,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
@@ -3480,7 +3466,7 @@ impl RPC for NeptuneRPCServer {
     async fn provide_pow_solution(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         pow: BlockPow,
         proposal_id: Digest,
     ) -> RpcResult<bool> {
@@ -3511,7 +3497,7 @@ impl RPC for NeptuneRPCServer {
     async fn provide_new_tip(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         pow: BlockPow,
         proposal: Block,
     ) -> RpcResult<bool> {
@@ -3535,7 +3521,7 @@ impl RPC for NeptuneRPCServer {
     async fn prune_abandoned_monitored_utxos(
         mut self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<usize> {
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
@@ -3569,7 +3555,7 @@ impl RPC for NeptuneRPCServer {
     async fn set_tip(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         indicated_tip: Digest,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
@@ -3588,7 +3574,7 @@ impl RPC for NeptuneRPCServer {
     async fn list_own_coins(
         self,
         _context: ::tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Vec<CoinWithPossibleTimeLock>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3610,7 +3596,7 @@ impl RPC for NeptuneRPCServer {
     async fn cpu_temp(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Option<f32>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3622,7 +3608,7 @@ impl RPC for NeptuneRPCServer {
     async fn pow_puzzle_internal_key(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3654,7 +3640,7 @@ impl RPC for NeptuneRPCServer {
     async fn pow_puzzle_external_key(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<ProofOfWorkPuzzle>> {
         log_slow_scope!(fn_name!());
@@ -3678,7 +3664,7 @@ impl RPC for NeptuneRPCServer {
     async fn full_pow_puzzle_external_key(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>> {
         log_slow_scope!(fn_name!());
@@ -3708,7 +3694,7 @@ impl RPC for NeptuneRPCServer {
     async fn block_intervals(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Option<Vec<(u64, u64)>>> {
@@ -3756,7 +3742,7 @@ impl RPC for NeptuneRPCServer {
     async fn block_difficulties(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Vec<(u64, Difficulty)>> {
@@ -3796,7 +3782,7 @@ impl RPC for NeptuneRPCServer {
     async fn broadcast_all_mempool_txs(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3814,7 +3800,7 @@ impl RPC for NeptuneRPCServer {
     async fn broadcast_block_proposal(
         self,
         _context: tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3831,7 +3817,7 @@ impl RPC for NeptuneRPCServer {
     async fn mempool_overview(
         self,
         _context: ::tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         start_index: usize,
         number: usize,
     ) -> RpcResult<Vec<MempoolTransactionInfo>> {
@@ -3894,7 +3880,7 @@ impl RPC for NeptuneRPCServer {
     async fn mempool_tx_kernel(
         self,
         _context: ::tarpc::context::Context,
-        token: rpc_auth::Token,
+        token: auth::Token,
         tx_kernel_id: TransactionKernelId,
     ) -> RpcResult<Option<TransactionKernel>> {
         log_slow_scope!(fn_name!());
@@ -3920,7 +3906,7 @@ pub mod error {
     pub enum RpcError {
         // auth error
         #[error("auth error: {0}")]
-        Auth(#[from] rpc_auth::error::AuthError),
+        Auth(#[from] auth::error::AuthError),
 
         // catch-all error, eg for anyhow errors
         #[error("rpc call failed: {0}")]
@@ -4040,10 +4026,10 @@ mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_vec::traits::*;
+    use crate::application::rpc::server::NeptuneRPCServer;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::proof_abstractions::mast_hash::MastHash;
-    use crate::rpc_server::NeptuneRPCServer;
     use crate::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -4067,10 +4053,8 @@ mod tests {
 
         let data_directory = unit_test_data_directory(cli.network).unwrap();
 
-        let valid_tokens: Vec<rpc_auth::Token> = vec![rpc_auth::Cookie::try_new(&data_directory)
-            .await
-            .unwrap()
-            .into()];
+        let valid_tokens: Vec<auth::Token> =
+            vec![auth::Cookie::try_new(&data_directory).await.unwrap().into()];
 
         let rpc_to_main_tx = global_state_lock.rpc_server_to_main_tx();
 
@@ -4082,8 +4066,8 @@ mod tests {
         )
     }
 
-    async fn cookie_token(server: &NeptuneRPCServer) -> rpc_auth::Token {
-        rpc_auth::Cookie::try_load(server.data_directory())
+    async fn cookie_token(server: &NeptuneRPCServer) -> auth::Token {
+        auth::Cookie::try_load(server.data_directory())
             .await
             .unwrap()
             .into()
@@ -5744,7 +5728,7 @@ mod tests {
 
     mod send_tests {
         use super::*;
-        use crate::rpc_server::error::RpcError;
+        use crate::application::rpc::server::error::RpcError;
         use crate::tests::shared::blocks::mine_block_to_wallet_invalid_block_proof;
 
         #[traced_test]
