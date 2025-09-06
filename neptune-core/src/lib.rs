@@ -26,7 +26,6 @@
 pub mod api;
 pub mod application;
 pub mod connect_to_peers;
-pub mod locks;
 pub mod macros;
 pub mod main_loop;
 pub mod mine_loop;
@@ -79,8 +78,8 @@ use tracing::info;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
+use crate::application::locks::tokio as sync_tokio;
 use crate::connect_to_peers::call_peer;
-use crate::locks::tokio as sync_tokio;
 use crate::main_loop::MainLoopHandler;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;

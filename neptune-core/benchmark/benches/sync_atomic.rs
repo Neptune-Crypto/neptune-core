@@ -29,8 +29,8 @@
 //!     which seems acceptable for most uses.
 
 use divan::Bencher;
-use neptune_cash::locks::std::AtomicMutex;
-use neptune_cash::locks::std::AtomicRw;
+use neptune_cash::application::locks::std::AtomicMutex;
+use neptune_cash::application::locks::std::AtomicRw;
 
 fn main() {
     divan::main();

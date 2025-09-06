@@ -11,7 +11,7 @@ use super::dbtvec_private::DbtVecPrivate;
 use super::traits::*;
 use super::PendingWrites;
 use super::SimpleRustyReader;
-use crate::locks::tokio::AtomicRw;
+use crate::application::locks::tokio::AtomicRw;
 
 /// A LevelDb-backed Vec for use with DbSchema
 ///
