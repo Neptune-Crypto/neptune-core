@@ -24,8 +24,8 @@ use crossterm::terminal::enable_raw_mode;
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
 use neptune_cash::application::config::network::Network;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::RPCClient;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -182,7 +182,7 @@ impl DashboardApp {
         config: Arc<Config>,
         rpc_server: Arc<RPCClient>,
         network: Network,
-        token: rpc_auth::Token,
+        token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Self {
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
@@ -304,7 +304,7 @@ impl DashboardApp {
         config: Config,
         client: RPCClient,
         network: Network,
-        token: rpc_auth::Token,
+        token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Result<String, Box<dyn Error>> {
         // create app

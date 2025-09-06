@@ -8,11 +8,11 @@ use std::time::SystemTime;
 use bytesize::ByteSize;
 use itertools::Itertools;
 use neptune_cash::application::config::network::Network;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::models::blockchain::block::block_header::BlockHeader;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::RPCClient;
 use neptune_cash::state::mining_status::MiningStatus;
 use neptune_cash::state::tx_proving_capability::TxProvingCapability;
 use ratatui::layout::Margin;
@@ -92,7 +92,7 @@ pub struct OverviewScreen {
     in_focus: bool,
     data: Arc<std::sync::Mutex<OverviewData>>,
     server: Arc<RPCClient>,
-    token: rpc_auth::Token,
+    token: auth::Token,
     poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
@@ -101,7 +101,7 @@ impl OverviewScreen {
     pub fn new(
         rpc_server: Arc<RPCClient>,
         network: Network,
-        token: rpc_auth::Token,
+        token: auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Self {
         Self {
@@ -122,7 +122,7 @@ impl OverviewScreen {
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
-        token: rpc_auth::Token,
+        token: auth::Token,
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
         escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) {

@@ -24,11 +24,11 @@ use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use neptune_cash::application::config::data_directory::DataDirectory;
 use neptune_cash::application::config::network::Network;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::error::RpcError;
+use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
 use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::error::RpcError;
-use neptune_cash::rpc_server::RPCClient;
 use neptune_cash::state::wallet::address::KeyType;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::change_policy::ChangePolicy;
@@ -747,7 +747,7 @@ async fn main() -> Result<()> {
     let client = RPCClient::new(client::Config::default(), transport).spawn();
     let ctx = context::current();
 
-    let rpc_auth::CookieHint {
+    let auth::CookieHint {
         data_directory,
         network,
     } = match get_cookie_hint(&client, &args).await {
@@ -761,7 +761,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory).await {
+    let token: auth::Token = match auth::Cookie::try_load(&data_directory).await {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Unable to load RPC auth cookie. error = {e}");
@@ -1330,11 +1330,11 @@ async fn main() -> Result<()> {
 async fn get_cookie_hint(
     client: &RPCClient,
     args: &Config,
-) -> anyhow::Result<rpc_auth::CookieHint> {
-    async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<rpc_auth::CookieHint> {
+) -> anyhow::Result<auth::CookieHint> {
+    async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
         let network = client.network(context::current()).await??;
         let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;
-        Ok(rpc_auth::CookieHint {
+        Ok(auth::CookieHint {
             data_directory,
             network,
         })
