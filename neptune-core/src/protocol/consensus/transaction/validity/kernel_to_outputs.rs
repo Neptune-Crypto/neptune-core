@@ -16,7 +16,7 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::bfieldcodec_derive::BFieldCodec;
 
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
@@ -79,7 +79,7 @@ impl SecretWitness for KernelToOutputsWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        Hash::hash(&self.output_utxos).values().to_vec()
+        Tip5::hash(&self.output_utxos).values().to_vec()
     }
 
     fn program(&self) -> Program {
@@ -402,7 +402,7 @@ mod tests {
             let mut i = 0;
             while i < n {
                 let addition_record: AdditionRecord = commit(
-                    Hash::hash(&output_utxos[i]),
+                    Tip5::hash(&output_utxos[i]),
                     sender_randomnesses[i],
                     receiver_digests[i],
                 );
@@ -411,7 +411,7 @@ mod tests {
             }
 
             // authenticate the addition records against the txk mast hash
-            let addition_records_hash: Digest = Hash::hash(&addition_records);
+            let addition_records_hash: Digest = Tip5::hash(&addition_records);
             tasm::tasmlib_hashing_merkle_verify(
                 txk_digest,
                 TransactionKernelField::Outputs as u32,
@@ -420,7 +420,7 @@ mod tests {
             );
 
             // output hash of salted output UTXOs
-            let salted_output_utxos_hash: Digest = Hash::hash(salted_output_utxos);
+            let salted_output_utxos_hash: Digest = Tip5::hash(salted_output_utxos);
             tasm::tasmlib_io_write_to_stdout___digest(salted_output_utxos_hash);
         }
     }

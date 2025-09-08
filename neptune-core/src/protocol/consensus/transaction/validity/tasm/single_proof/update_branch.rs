@@ -16,7 +16,7 @@ use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::single_proof::DISCRIMINANT_FOR_UPDATE;
 use crate::protocol::consensus::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
@@ -88,13 +88,13 @@ impl UpdateWitness {
             old_proof,
             new_swbfi_bagged: new_msa.swbf_inactive.bag_peaks(),
             new_aocl: new_msa.aocl,
-            new_swbfa_hash: Hash::hash(&new_msa.swbf_active),
+            new_swbfa_hash: Tip5::hash(&new_msa.swbf_active),
             old_swbfi_bagged: old_msa.swbf_inactive.bag_peaks(),
             old_aocl: old_msa.aocl,
-            old_swbfa_hash: Hash::hash(&old_msa.swbf_active),
+            old_swbfa_hash: Tip5::hash(&old_msa.swbf_active),
             aocl_successor_proof,
-            outputs_hash: Hash::hash(&new_kernel.outputs),
-            announcements_hash: Hash::hash(&new_kernel.announcements),
+            outputs_hash: Tip5::hash(&new_kernel.outputs),
+            announcements_hash: Tip5::hash(&new_kernel.announcements),
         }
     }
 
@@ -718,15 +718,15 @@ pub(crate) mod tests {
             let new_aocl_mmr: MmrAccumulator = uw.new_aocl;
             let new_aocl_mmr_bagged = new_aocl_mmr.bag_peaks();
             let new_inactive_swbf_bagged: Digest = uw.new_swbfi_bagged;
-            let new_left: Digest = Hash::hash_pair(new_aocl_mmr_bagged, new_inactive_swbf_bagged);
+            let new_left: Digest = Tip5::hash_pair(new_aocl_mmr_bagged, new_inactive_swbf_bagged);
             let new_active_swbf_digest: Digest = uw.new_swbfa_hash;
             let default: Digest = Digest::default();
-            let new_right: Digest = Hash::hash_pair(new_active_swbf_digest, default);
-            let new_msah: Digest = Hash::hash_pair(new_left, new_right);
+            let new_right: Digest = Tip5::hash_pair(new_active_swbf_digest, default);
+            let new_msah: Digest = Tip5::hash_pair(new_left, new_right);
             tasm::tasmlib_hashing_merkle_verify(
                 new_txk_digest,
                 TransactionKernelField::MutatorSetHash as u32,
-                Hash::hash(&new_msah),
+                Tip5::hash(&new_msah),
                 TransactionKernelField::COUNT.next_power_of_two().ilog2(),
             );
 
@@ -734,14 +734,14 @@ pub(crate) mod tests {
             let old_aocl_mmr: MmrAccumulator = uw.old_aocl;
             let old_aocl_mmr_bagged = old_aocl_mmr.bag_peaks();
             let old_inactive_swbf_bagged: Digest = uw.old_swbfi_bagged;
-            let old_left: Digest = Hash::hash_pair(old_aocl_mmr_bagged, old_inactive_swbf_bagged);
+            let old_left: Digest = Tip5::hash_pair(old_aocl_mmr_bagged, old_inactive_swbf_bagged);
             let old_active_swbf_digest: Digest = uw.old_swbfa_hash;
-            let old_right: Digest = Hash::hash_pair(old_active_swbf_digest, default);
-            let old_msah: Digest = Hash::hash_pair(old_left, old_right);
+            let old_right: Digest = Tip5::hash_pair(old_active_swbf_digest, default);
+            let old_msah: Digest = Tip5::hash_pair(old_left, old_right);
             tasm::tasmlib_hashing_merkle_verify(
                 old_txk_digest,
                 TransactionKernelField::MutatorSetHash as u32,
-                Hash::hash(&old_msah),
+                Tip5::hash(&old_msah),
                 TransactionKernelField::COUNT.next_power_of_two().ilog2(),
             );
 
@@ -757,8 +757,8 @@ pub(crate) mod tests {
             // authenticate inputs
             let old_inputs = &uw.old_kernel.inputs;
             let new_inputs = &uw.new_kernel.inputs;
-            let old_inputs_hash: Digest = Hash::hash(old_inputs);
-            let new_inputs_hash: Digest = Hash::hash(new_inputs);
+            let old_inputs_hash: Digest = Tip5::hash(old_inputs);
+            let new_inputs_hash: Digest = Tip5::hash(new_inputs);
             tasm::tasmlib_hashing_merkle_verify(
                 old_txk_digest,
                 TransactionKernelField::Inputs as u32,
@@ -779,8 +779,8 @@ pub(crate) mod tests {
             assert!(!old_inputs.is_empty());
             let mut i: usize = 0;
             while i < old_inputs.len() {
-                old_index_set_digests.push(Hash::hash(&old_inputs[i].absolute_indices));
-                new_index_set_digests.push(Hash::hash(&new_inputs[i].absolute_indices));
+                old_index_set_digests.push(Tip5::hash(&old_inputs[i].absolute_indices));
+                new_index_set_digests.push(Tip5::hash(&new_inputs[i].absolute_indices));
                 i += 1;
             }
             old_index_set_digests.sort();
@@ -818,7 +818,7 @@ pub(crate) mod tests {
             );
 
             // fees are identical
-            let fee_hash: Digest = Hash::hash(&uw.new_kernel.fee);
+            let fee_hash: Digest = Tip5::hash(&uw.new_kernel.fee);
             tasm::tasmlib_hashing_merkle_verify(
                 old_txk_digest,
                 TransactionKernelField::Fee as u32,
@@ -850,9 +850,9 @@ pub(crate) mod tests {
 
             // timestamp increases or no change
             let new_timestamp: Timestamp = uw.new_kernel.timestamp;
-            let new_timestamp_hash: Digest = Hash::hash(&new_timestamp);
+            let new_timestamp_hash: Digest = Tip5::hash(&new_timestamp);
             let old_timestamp: Timestamp = uw.old_kernel.timestamp;
-            let old_timestamp_hash: Digest = Hash::hash(&old_timestamp);
+            let old_timestamp_hash: Digest = Tip5::hash(&old_timestamp);
             tasm::tasmlib_hashing_merkle_verify(
                 old_txk_digest,
                 TransactionKernelField::Timestamp as u32,

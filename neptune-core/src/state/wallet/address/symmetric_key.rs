@@ -15,6 +15,7 @@ use bech32::FromBase32;
 use bech32::ToBase32;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -23,7 +24,7 @@ use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::application::config::network::Network;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
@@ -115,7 +116,7 @@ impl SymmetricKey {
 
     /// returns the receiver preimage
     pub fn receiver_preimage(&self) -> Digest {
-        Hash::hash_varlen(&[&self.seed.values(), [BFieldElement::new(0)].as_slice()].concat())
+        Tip5::hash_varlen(&[&self.seed.values(), [BFieldElement::new(0)].as_slice()].concat())
     }
 
     /// returns the receiver postimage which is a hash of the receiver preimage
@@ -186,7 +187,7 @@ impl SymmetricKey {
 
     /// returns the unlock key
     pub fn unlock_key(&self) -> Digest {
-        Hash::hash_varlen(&[self.seed.values().to_vec(), vec![BFieldElement::new(1)]].concat())
+        Tip5::hash_varlen(&[self.seed.values().to_vec(), vec![BFieldElement::new(1)]].concat())
     }
 
     /// returns the spending lock which is a hash of unlock_key()

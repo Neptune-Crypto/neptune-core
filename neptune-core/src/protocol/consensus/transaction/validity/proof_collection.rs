@@ -17,7 +17,7 @@ use super::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::config::network::Network;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::collect_lock_scripts::CollectLockScripts;
@@ -97,8 +97,8 @@ impl ProofCollection {
 
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
         let txk_mast_hash_as_input = PublicInput::new(txk_mast_hash.reversed().values().to_vec());
-        let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
-        let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
+        let salted_inputs_hash = Tip5::hash(&primitive_witness.input_utxos);
+        let salted_outputs_hash = Tip5::hash(&primitive_witness.output_utxos);
         debug!("proving, txk hash: {}", txk_mast_hash);
         debug!("proving, salted inputs hash: {}", salted_inputs_hash);
         debug!("proving, salted outputs hash: {}", salted_outputs_hash);
@@ -214,8 +214,8 @@ impl ProofCollection {
     // produce ProofCollection with mock proofs
     pub(crate) fn produce_mock(primitive_witness: &PrimitiveWitness, valid_mock: bool) -> Self {
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
-        let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
-        let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
+        let salted_inputs_hash = Tip5::hash(&primitive_witness.input_utxos);
+        let salted_outputs_hash = Tip5::hash(&primitive_witness.output_utxos);
         debug!("proving, txk hash: {}", txk_mast_hash);
         debug!("proving, salted inputs hash: {}", salted_inputs_hash);
         debug!("proving, salted outputs hash: {}", salted_outputs_hash);
@@ -597,8 +597,8 @@ pub mod tests {
             let txk_mast_hash = primitive_witness.kernel.mast_hash();
             let txk_mast_hash_as_input =
                 PublicInput::new(txk_mast_hash.reversed().values().to_vec());
-            let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
-            let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
+            let salted_inputs_hash = Tip5::hash(&primitive_witness.input_utxos);
+            let salted_outputs_hash = Tip5::hash(&primitive_witness.output_utxos);
 
             let all_lock_scripts_halt = primitive_witness
                 .lock_scripts_and_witnesses

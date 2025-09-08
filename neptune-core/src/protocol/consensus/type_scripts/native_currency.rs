@@ -760,7 +760,6 @@ pub mod tests {
     use crate::application::config::network::Network;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::protocol::consensus::shared::Hash;
     use crate::protocol::consensus::transaction::announcement::Announcement;
     use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
@@ -803,7 +802,7 @@ pub mod tests {
 
             // authenticate coinbase against kernel mast hash
             let coinbase_leaf_index: u32 = TransactionKernelField::Coinbase as u32;
-            let coinbase_leaf: Digest = Hash::hash(&coinbase);
+            let coinbase_leaf: Digest = Tip5::hash(&coinbase);
             let kernel_tree_height: u32 = u32::try_from(TransactionKernel::MAST_HEIGHT).unwrap();
             tasm::tasmlib_hashing_merkle_verify(
                 tx_kernel_digest,
@@ -821,7 +820,7 @@ pub mod tests {
 
             // authenticate fee against kernel mast hash
             let fee_leaf_index: u32 = TransactionKernelField::Fee as u32;
-            let fee_leaf: Digest = Hash::hash(&fee);
+            let fee_leaf: Digest = Tip5::hash(&fee);
             tasm::tasmlib_hashing_merkle_verify(
                 tx_kernel_digest,
                 fee_leaf_index,
@@ -841,10 +840,10 @@ pub mod tests {
             );
 
             // authenticate inputs against salted commitment
-            assert_eq!(input_utxos_digest, Hash::hash(&input_salted_utxos));
+            assert_eq!(input_utxos_digest, Tip5::hash(&input_salted_utxos));
 
             // authenticate outputs against salted commitment
-            assert_eq!(output_utxos_digest, Hash::hash(&output_salted_utxos));
+            assert_eq!(output_utxos_digest, Tip5::hash(&output_salted_utxos));
 
             // get total input amount from inputs
             let mut total_input = NativeCurrencyAmount::coins(0);

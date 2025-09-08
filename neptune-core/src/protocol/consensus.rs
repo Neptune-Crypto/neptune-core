@@ -1,6 +1,5 @@
 pub mod block;
 pub mod consensus_rule_set;
-pub mod shared;
 pub mod transaction;
 pub mod type_scripts;
 

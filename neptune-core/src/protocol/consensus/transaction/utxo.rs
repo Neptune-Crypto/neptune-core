@@ -335,7 +335,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn hash_utxo_test(output in arb::<Utxo>()) {
-            let _digest = crate::Hash::hash(&output);
+            let _digest = Tip5::hash(&output);
         }
     }
 

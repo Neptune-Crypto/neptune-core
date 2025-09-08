@@ -31,7 +31,6 @@ use crate::util_types::mutator_set::authenticated_item::AuthenticatedItem;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::Hash;
 
 /// A list of UTXOs with an associated salt.
 ///
@@ -90,7 +89,7 @@ impl SaltedUtxos {
     pub fn cat(&self, other: SaltedUtxos) -> Self {
         Self {
             utxos: [self.utxos.clone(), other.utxos].concat(),
-            salt: Hash::hash_varlen(&[self.salt, other.salt].concat().to_vec()).values()[0..3]
+            salt: Tip5::hash_varlen(&[self.salt, other.salt].concat().to_vec()).values()[0..3]
                 .try_into()
                 .unwrap(),
         }
@@ -128,7 +127,7 @@ impl Display for PrimitiveWitness {
             Some(cb) => format!("Yes: {cb}"),
             None => "No".to_owned(),
         };
-        let utxo_digests = self.input_utxos.utxos.iter().map(Hash::hash);
+        let utxo_digests = self.input_utxos.utxos.iter().map(Tip5::hash);
         let kernel_merkle_tree = self.kernel.merkle_tree();
         let mut kernel_mt_leafs = kernel_merkle_tree.leafs();
         write!(
@@ -262,7 +261,7 @@ impl PrimitiveWitness {
         for lock_script_and_witness in &self.lock_scripts_and_witnesses {
             let lock_script = lock_script_and_witness.program.clone();
             let secret_input = lock_script_and_witness.nondeterminism();
-            let public_input = Hash::hash(self).reversed().encode().into();
+            let public_input = Tip5::hash(self).reversed().encode().into();
 
             // This could be a lengthy, CPU intensive call.
             // Also, the lock script is satisfied if it halts gracefully (i.e., without crashing).
@@ -299,7 +298,7 @@ impl PrimitiveWitness {
             .iter()
             .zip_eq(&self.input_membership_proofs)
         {
-            let item = Hash::hash(input_utxo);
+            let item = Tip5::hash(input_utxo);
             // TODO: write these functions in tasm
             if !self.mutator_set_accumulator.verify(item, membership_proof) {
                 let error = WitnessValidationError::InvalidMembershipProof {
@@ -803,7 +802,7 @@ pub mod neptune_arbitrary {
                             .iter()
                             .map(|utxo| {
                                 (
-                                    Hash::hash(utxo),
+                                    Tip5::hash(utxo),
                                     sender_randomnesses_input.pop().unwrap(),
                                     receiver_preimages_input.pop().unwrap(),
                                 )
@@ -1303,7 +1302,7 @@ mod tests {
                         for input_utxos in &input_utxoss {
                             for input_utxo in input_utxos {
                                 all_input_triples.push((
-                                    Hash::hash(input_utxo),
+                                    Tip5::hash(input_utxo),
                                     input_sender_randomnesses.pop().unwrap(),
                                     input_receiver_preimages.pop().unwrap(),
                                 ));

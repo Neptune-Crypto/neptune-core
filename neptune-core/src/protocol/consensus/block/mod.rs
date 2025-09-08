@@ -65,7 +65,7 @@ use crate::protocol::consensus::block::pow::GuesserBuffer;
 use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::channel::Cancelable;
@@ -432,7 +432,7 @@ impl Block {
         for ((receiving_address, _amount), utxo) in
             premine_distribution.iter().zip(Self::premine_utxos())
         {
-            let utxo_digest = Hash::hash(&utxo);
+            let utxo_digest = Tip5::hash(&utxo);
             // generate randomness for mutator set commitment
             // Sender randomness cannot be random because there is no sender.
             let bad_randomness = Self::premine_sender_randomness(network);

@@ -53,17 +53,17 @@ use crate::api::export::NeptuneProof;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
-use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
-use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
-use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::locks::tokio as sync_tokio;
 use crate::application::locks::tokio::AtomicRwReadGuard;
 use crate::application::locks::tokio::AtomicRwWriteGuard;
+use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
+use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::protocol::consensus::block::block_height::BlockHeight;
@@ -97,7 +97,6 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::ArchivalState;
-use crate::Hash;
 use crate::RPCServerToMain;
 use crate::WalletFileContext;
 use crate::VERSION;
@@ -1195,7 +1194,7 @@ impl GlobalState {
                 continue;
             }
 
-            let ms_item = Hash::hash(&incoming_utxo.utxo);
+            let ms_item = Tip5::hash(&incoming_utxo.utxo);
             let restored_msmp_res = ams_ref
                 .ams()
                 .restore_membership_proof(
@@ -1439,7 +1438,7 @@ impl GlobalState {
             debug!(
                 "Resyncing monitored UTXO number {}, with hash {}",
                 i,
-                Hash::hash(&monitored_utxo.utxo)
+                Tip5::hash(&monitored_utxo.utxo)
             );
 
             // If the UTXO was not confirmed yet, there is no
@@ -1522,7 +1521,7 @@ impl GlobalState {
 
                 // assert valid (if unspent)
                 assert!(monitored_utxo.spent_in_block.is_some() || previous_mutator_set
-                    .verify(Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
+                    .verify(Tip5::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
             }
 
             // walk forwards, applying
@@ -1570,7 +1569,7 @@ impl GlobalState {
 
                     membership_proof
                         .update_from_addition(
-                            Hash::hash(&monitored_utxo.utxo),
+                            Tip5::hash(&monitored_utxo.utxo),
                             &block_msa,
                             addition_record,
                         )
@@ -3403,7 +3402,7 @@ mod tests {
                 // Verify that the restored MUTXOs have MSMPs, and that they're
                 // valid.
                 for mutxo in mutxos {
-                    let ms_item = Hash::hash(&mutxo.utxo);
+                    let ms_item = Tip5::hash(&mutxo.utxo);
                     assert!(global_state
                         .chain
                         .light_state()

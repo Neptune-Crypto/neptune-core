@@ -1,10 +1,9 @@
 use itertools::Itertools;
 use strum::EnumCount;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::prelude::Digest;
 use tasm_lib::twenty_first::prelude::MerkleTree;
-
-use crate::protocol::consensus::shared::Hash;
 
 pub trait HasDiscriminant: Clone {
     fn discriminant(&self) -> usize;
@@ -23,8 +22,8 @@ pub trait MastHash {
     fn merkle_tree(&self) -> MerkleTree {
         let mut digests = self
             .mast_sequences()
-            .into_iter()
-            .map(|seq| Hash::hash_varlen(&seq))
+            .iter()
+            .map(|seq| Tip5::hash_varlen(seq))
             .collect_vec();
 
         // pad until length is a power of two

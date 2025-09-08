@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use itertools::Itertools;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -16,7 +17,7 @@ use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use crate::application::database::storage::storage_vec::traits::*;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::MutatorSetError;
@@ -108,7 +109,7 @@ where
         // extract modified leafs with indices
         let mut indices_and_new_leafs = chunk_index_to_chunk_new_state
             .iter()
-            .map(|(index, chunk)| (*index, Hash::hash(chunk)))
+            .map(|(index, chunk)| (*index, Tip5::hash(chunk)))
             .collect_vec();
         indices_and_new_leafs.sort_by_key(|(i, _d)| *i);
 
@@ -285,7 +286,7 @@ where
 
             // update archival mmr
             self.swbf_inactive
-                .mutate_leaf(chunk_index, Hash::hash(&new_chunk))
+                .mutate_leaf(chunk_index, Tip5::hash(&new_chunk))
                 .await;
 
             self.chunks.set(chunk_index, new_chunk).await;
@@ -383,7 +384,7 @@ where
         // if window slides, update filter
         // First update the inactive part of the SWBF, the SWBF MMR
         let new_chunk: Chunk = self.swbf_active.slid_chunk();
-        let chunk_digest: Digest = Hash::hash(&new_chunk);
+        let chunk_digest: Digest = Tip5::hash(&new_chunk);
         let new_chunk_index = self.swbf_inactive.num_leafs().await;
         self.swbf_inactive.append(chunk_digest).await; // ignore auth path
 

@@ -31,7 +31,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
@@ -95,7 +95,7 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
                 .mutator_set_accumulator
                 .swbf_inactive
                 .clone(),
-            swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.swbf_active),
+            swbfa_hash: Tip5::hash(&primitive_witness.mutator_set_accumulator.swbf_active),
             mast_path_mutator_set: primitive_witness
                 .kernel
                 .mast_path(TransactionKernelField::MutatorSetHash),
@@ -177,7 +177,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        Hash::hash(&self.input_utxos).values().to_vec()
+        Tip5::hash(&self.input_utxos).values().to_vec()
     }
 
     fn program(&self) -> Program {
@@ -224,7 +224,7 @@ impl RemovalRecordsIntegrityWitness {
                 nodes
                     .entry(wi_even)
                     .or_insert_with(|| rng.random::<Digest>());
-                let hash = Hash::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
+                let hash = Tip5::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
                 nodes.insert(wi >> 1, hash);
             }
             depth -= 1;
@@ -952,7 +952,7 @@ pub mod neptune_arbitrary {
                 .zip(membership_proofs.iter())
                 .map(|(utxo, msmp)| {
                     commit(
-                        Hash::hash(utxo),
+                        Tip5::hash(utxo),
                         msmp.sender_randomness,
                         msmp.receiver_preimage.hash(),
                     )
@@ -986,7 +986,7 @@ pub mod neptune_arbitrary {
                 .zip(membership_proofs.iter())
                 .map(|(utxo, msmp)| {
                     (
-                        Hash::hash(utxo),
+                        Tip5::hash(utxo),
                         msmp.sender_randomness,
                         msmp.receiver_preimage,
                         msmp.aocl_leaf_index,
@@ -1001,9 +1001,9 @@ pub mod neptune_arbitrary {
                 .collect_vec();
 
             let kernel = TransactionKernelModifier::default()
-                .mutator_set_hash(Hash::hash_pair(
-                    Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-                    Hash::hash_pair(swbfa_hash, Digest::default()),
+                .mutator_set_hash(Tip5::hash_pair(
+                    Tip5::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+                    Tip5::hash_pair(swbfa_hash, Digest::default()),
                 ))
                 .inputs(new_inputs)
                 .modify(arb_kernel);
@@ -1085,20 +1085,20 @@ mod tests {
             // authenticate the mutator set accumulator against the txk mast hash
             let aocl_mmr_bagged: Digest = aocl.bag_peaks();
             let inactive_swbf_bagged: Digest = swbfi.bag_peaks();
-            let left = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
+            let left = Tip5::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
             let active_swbf_digest: Digest = tasm::tasmlib_io_read_secin___digest();
             let default = Digest::default();
-            let right = Hash::hash_pair(active_swbf_digest, default);
-            let msah: Digest = Hash::hash_pair(left, right);
+            let right = Tip5::hash_pair(active_swbf_digest, default);
+            let msah: Digest = Tip5::hash_pair(left, right);
             tasm::tasmlib_hashing_merkle_verify(
                 txk_digest,
                 TransactionKernelField::MutatorSetHash as u32,
-                Hash::hash(&msah),
+                Tip5::hash(&msah),
                 TransactionKernel::MAST_HEIGHT as u32,
             );
 
             // authenticate divined removal records against txk mast hash
-            let removal_records_digest: Digest = Hash::hash(&rriw.removal_records);
+            let removal_records_digest: Digest = Tip5::hash(&rriw.removal_records);
             tasm::tasmlib_hashing_merkle_verify(
                 txk_digest,
                 TransactionKernelField::Inputs as u32,
@@ -1108,7 +1108,7 @@ mod tests {
 
             // authenticate coinbase against kernel mast hash
             let coinbase: Option<NativeCurrencyAmount> = rriw.coinbase;
-            let coinbase_leaf: Digest = Hash::hash(&coinbase);
+            let coinbase_leaf: Digest = Tip5::hash(&coinbase);
             tasm::tasmlib_hashing_merkle_verify(
                 txk_digest,
                 TransactionKernelField::Coinbase as u32,
@@ -1123,7 +1123,7 @@ mod tests {
             let mut input_index: usize = 0;
             while input_index < input_utxos.len() {
                 let utxo: &Utxo = &input_utxos[input_index];
-                let utxo_hash = Hash::hash(utxo);
+                let utxo_hash = Tip5::hash(utxo);
                 let claimed_absolute_indices: &AbsoluteIndexSet =
                     &rriw.removal_records[input_index].absolute_indices;
 
@@ -1154,7 +1154,7 @@ mod tests {
             }
 
             // compute and output hash of salted input UTXOs
-            let hash_of_inputs: Digest = Hash::hash(salted_input_utxos);
+            let hash_of_inputs: Digest = Tip5::hash(salted_input_utxos);
             tasm::tasmlib_io_write_to_stdout___digest(hash_of_inputs);
         }
     }

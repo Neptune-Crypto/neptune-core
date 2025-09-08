@@ -125,9 +125,9 @@ pub enum BaseSpendingKey {
     Symmetric(symmetric_key::SymmetricKey),
 }
 
-impl std::hash::Hash for BaseSpendingKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::hash::Hash::hash(&self.privacy_preimage(), state)
+impl std::Tip5::hash for BaseSpendingKey {
+    fn hash<H: std::Tip5::hasher>(&self, state: &mut H) {
+        std::Tip5::hash::hash(&self.privacy_preimage(), state)
     }
 }
 

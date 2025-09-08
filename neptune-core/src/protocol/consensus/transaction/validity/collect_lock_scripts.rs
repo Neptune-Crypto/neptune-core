@@ -20,13 +20,12 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 
-use crate::protocol::consensus::shared::Hash;
+use crate::prelude::triton_vm;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
-use crate::prelude::triton_vm;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct CollectLockScriptsWitness {
@@ -36,7 +35,7 @@ pub struct CollectLockScriptsWitness {
 impl SecretWitness for CollectLockScriptsWitness {
     fn standard_input(&self) -> PublicInput {
         PublicInput::new(
-            Hash::hash(&self.salted_input_utxos)
+            Tip5::hash(&self.salted_input_utxos)
                 .reversed()
                 .values()
                 .to_vec(),
@@ -223,7 +222,7 @@ mod tests {
             let input_utxos: &Vec<Utxo> = &salted_input_utxos.utxos;
 
             // verify that the divined data matches with the explicit input digest
-            let salted_input_utxos_hash: Digest = Hash::hash(salted_input_utxos);
+            let salted_input_utxos_hash: Digest = Tip5::hash(salted_input_utxos);
             assert_eq!(siu_digest, salted_input_utxos_hash);
 
             // iterate over all input UTXOs and output the lock script hashes

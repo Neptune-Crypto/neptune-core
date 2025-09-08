@@ -47,21 +47,21 @@ use super::wallet_status::WalletStatusElement;
 use crate::application::config::cli_args::Args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-use crate::application::loops::mine_loop::composer_outputs;
-use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_schema::RustyKey;
 use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
+use crate::application::loops::mine_loop::composer_outputs;
+use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
+use crate::protocol::channel::ClaimUtxoData;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::channel::ClaimUtxoData;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
@@ -75,7 +75,6 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::Hash;
 
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
@@ -744,7 +743,7 @@ impl WalletState {
 
         while let Some((i, monitored_utxo)) = stream.next().await {
             let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(Hash::hash(&monitored_utxo.utxo)),
+                Some(msmp) => msmp.1.compute_indices(Tip5::hash(&monitored_utxo.utxo)),
                 None => continue,
             };
 
@@ -1354,7 +1353,7 @@ impl WalletState {
 
             while let Some((i, monitored_utxo)) = stream.next().await {
                 let addition_record = monitored_utxo.addition_record();
-                let utxo_digest = Hash::hash(&monitored_utxo.utxo);
+                let utxo_digest = Tip5::hash(&monitored_utxo.utxo);
                 match monitored_utxo
                     .get_membership_proof_for_block(new_block.kernel.header.prev_block_digest)
                 {
@@ -1477,7 +1476,7 @@ impl WalletState {
                         .map(|t| t.standard_format())
                         .unwrap_or_else(|| "none".into()),
                 );
-                let utxo_digest = Hash::hash(&utxo);
+                let utxo_digest = Tip5::hash(&utxo);
                 let new_own_membership_proof =
                     msa_state.prove(utxo_digest, sender_randomness, receiver_preimage);
                 let aocl_index = new_own_membership_proof.aocl_leaf_index;
@@ -3128,7 +3127,7 @@ pub(crate) mod tests {
             assert!(genesis_block
                 .mutator_set_accumulator_after()
                 .unwrap()
-                .verify(Hash::hash(&utxo), &ms_membership_proof));
+                .verify(Tip5::hash(&utxo), &ms_membership_proof));
         }
     }
 
@@ -3142,8 +3141,8 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::composer_parameters;
         use crate::application::loops::mine_loop::guess_nonce;
         use crate::application::loops::mine_loop::GuessingConfiguration;
-        use crate::protocol::consensus::transaction::TransactionProof;
         use crate::protocol::channel::NewBlockFound;
+        use crate::protocol::consensus::transaction::TransactionProof;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::fake_create_block_transaction_for_tests;

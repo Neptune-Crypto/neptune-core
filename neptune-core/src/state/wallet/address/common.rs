@@ -9,7 +9,7 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::application::config::network::Network;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
@@ -25,7 +25,7 @@ pub(crate) fn network_hrp_char(network: Network) -> char {
 
 /// Derive a receiver id from a seed.
 pub fn derive_receiver_id(seed: Digest) -> BFieldElement {
-    Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(2)]].concat()).values()[0]
+    Tip5::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(2)]].concat()).values()[0]
 }
 
 /// Derive a seed and a nonce deterministically, in order to produce

@@ -55,7 +55,6 @@ use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
 use protocol::consensus::block::Block;
-use protocol::consensus::shared::Hash;
 use protocol::peer::handshake_data::HandshakeData;
 use state::wallet::wallet_file::WalletFileContext;
 use state::GlobalState;

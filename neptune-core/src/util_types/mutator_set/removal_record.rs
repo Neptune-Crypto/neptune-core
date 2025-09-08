@@ -18,6 +18,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -32,7 +33,7 @@ use super::shared::indices_to_hash_map;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::MutatorSetError;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
@@ -59,7 +60,7 @@ impl RemovalRecord {
 
         // window does slide
         let new_chunk = mutator_set.swbf_active.slid_chunk();
-        let new_chunk_digest: Digest = Hash::hash(&new_chunk);
+        let new_chunk_digest: Digest = Tip5::hash(&new_chunk);
 
         let next_batch_index = new_item_index / u64::from(BATCH_SIZE);
         let current_batch_index = next_batch_index - 1;
@@ -238,7 +239,7 @@ impl RemovalRecord {
             self.target_chunks
                 .iter()
                 .find(|(chunk_index, (mmr_proof, chunk))| {
-                    let leaf_digest = Hash::hash(chunk);
+                    let leaf_digest = Tip5::hash(chunk);
                     !mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
                 });
         if let Some((chunk_index, _)) = maybe_invalid_chunk {
@@ -270,6 +271,7 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
     use rand::Rng;
+    use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
 
     use super::*;
@@ -355,8 +357,8 @@ mod tests {
 
         let mut removal_record_alt: RemovalRecord = removal_record.clone();
         assert_eq!(
-            Hash::hash(&removal_record),
-            Hash::hash(&removal_record_alt),
+            Tip5::hash(&removal_record),
+            Tip5::hash(&removal_record_alt),
             "Same removal record must hash to same value"
         );
 
@@ -365,8 +367,8 @@ mod tests {
             .absolute_indices
             .increment_bloom_filter_index(NUM_TRIALS as usize / 4);
         assert_ne!(
-            Hash::hash(&removal_record),
-            Hash::hash(&removal_record_alt),
+            Tip5::hash(&removal_record),
+            Tip5::hash(&removal_record_alt),
             "Changing an index must produce a new hash"
         );
     }

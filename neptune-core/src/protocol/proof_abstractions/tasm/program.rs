@@ -190,7 +190,7 @@ pub mod tests {
     use super::*;
     use crate::api::export::Network;
     use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
-    use crate::protocol::consensus::shared::Hash;
+
     use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
     use crate::protocol::proof_abstractions::tasm::environment;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
@@ -358,7 +358,7 @@ pub mod tests {
 
     /// Derive a file name from the claim, includes the extension
     fn proof_filename(claim: &Claim) -> String {
-        let base_name = Hash::hash(claim).to_hex();
+        let base_name = Tip5::hash(claim).to_hex();
 
         format!("{base_name}.proof")
     }

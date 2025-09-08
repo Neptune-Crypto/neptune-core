@@ -6,16 +6,17 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
+use crate::prelude::twenty_first;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
-use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Copy, Clone, EnumCount)]
@@ -141,8 +142,8 @@ impl MastHash for BlockBody {
             .get_or_init(|| {
                 let mut digests = self
                     .mast_sequences()
-                    .into_iter()
-                    .map(|seq| crate::protocol::consensus::shared::Hash::hash_varlen(&seq))
+                    .iter()
+                    .map(|seq| Tip5::hash_varlen(seq))
                     .collect_vec();
 
                 // pad until length is a power of two

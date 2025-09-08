@@ -9,12 +9,13 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use triton_vm::prelude::Digest;
 
 use super::chunk::Chunk;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::prelude::triton_vm;
 
 type AuthenticatedChunk = (MmrMembershipProof, Chunk);
@@ -46,7 +47,7 @@ impl ChunkDictionary {
     pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
         self.dictionary
             .iter()
-            .map(|(k, (_mp, ch))| (*k, Hash::hash(ch)))
+            .map(|(k, (_mp, ch))| (*k, Tip5::hash(ch)))
             .collect_vec()
     }
 
@@ -62,7 +63,7 @@ impl ChunkDictionary {
     ) -> Vec<(u64, MmrMembershipProof, Digest)> {
         self.dictionary
             .iter()
-            .map(|(k, (mp, ch))| (*k, mp.clone(), Hash::hash(ch)))
+            .map(|(k, (mp, ch))| (*k, mp.clone(), Tip5::hash(ch)))
             .collect_vec()
     }
 
@@ -189,7 +190,7 @@ pub mod tests {
     async fn hash_test() {
         let chunkdict0 = ChunkDictionary::default();
         let chunkdict00 = ChunkDictionary::default();
-        assert_eq!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict00));
+        assert_eq!(Tip5::hash(&chunkdict0), Tip5::hash(&chunkdict00));
 
         // Insert elements
         let num_leaves = 3;
@@ -222,12 +223,12 @@ pub mod tests {
             (key3, value2.clone()),
         ]);
 
-        assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict1));
-        assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict2));
-        assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict3));
-        assert_ne!(Hash::hash(&chunkdict1), Hash::hash(&chunkdict2));
-        assert_ne!(Hash::hash(&chunkdict1), Hash::hash(&chunkdict3));
-        assert_ne!(Hash::hash(&chunkdict2), Hash::hash(&chunkdict3));
+        assert_ne!(Tip5::hash(&chunkdict0), Tip5::hash(&chunkdict1));
+        assert_ne!(Tip5::hash(&chunkdict0), Tip5::hash(&chunkdict2));
+        assert_ne!(Tip5::hash(&chunkdict0), Tip5::hash(&chunkdict3));
+        assert_ne!(Tip5::hash(&chunkdict1), Tip5::hash(&chunkdict2));
+        assert_ne!(Tip5::hash(&chunkdict1), Tip5::hash(&chunkdict3));
+        assert_ne!(Tip5::hash(&chunkdict2), Tip5::hash(&chunkdict3));
 
         // Construct similar data structure to `two_elements` but insert key/value pairs in opposite order
         let chunkdict3_alt = ChunkDictionary::new(vec![
@@ -238,13 +239,13 @@ pub mod tests {
 
         // Verify that keys are sorted deterministically when hashing chunk dictionary.
         // This test fails if the hash method does not sort the keys
-        assert_eq!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_alt));
+        assert_eq!(Tip5::hash(&chunkdict3), Tip5::hash(&chunkdict3_alt));
 
         // Negative: Construct data structure where the keys and values are switched
         let chunkdict3_switched =
             ChunkDictionary::new(vec![(key1, value2.clone()), (key2, value1), (key3, value2)]);
 
-        assert_ne!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_switched));
+        assert_ne!(Tip5::hash(&chunkdict3), Tip5::hash(&chunkdict3_switched));
     }
 
     #[apply(shared_tokio_runtime)]

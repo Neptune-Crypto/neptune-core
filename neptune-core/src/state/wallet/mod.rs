@@ -33,6 +33,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tasm_lib::prelude::Digest;
+    use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::XFieldElement;
     use tasm_lib::twenty_first::math::x_field_element::EXTENSION_DEGREE;
@@ -45,15 +46,15 @@ mod tests {
     use crate::api::export::Transaction;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::database::storage::storage_vec::traits::*;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::block_height::BlockHeight;
     use crate::protocol::consensus::block::block_transaction::BlockTransaction;
     use crate::protocol::consensus::block::Block;
     use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
-    use crate::protocol::consensus::shared::Hash;
+
     use crate::protocol::consensus::transaction::lock_script::LockScript;
     use crate::protocol::consensus::transaction::utxo::Utxo;
     use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -153,7 +154,7 @@ mod tests {
                 next_block
                     .mutator_set_accumulator_after()
                     .unwrap()
-                    .verify(Hash::hash(&genesis_block_utxo), &ms_membership_proof),
+                    .verify(Tip5::hash(&genesis_block_utxo), &ms_membership_proof),
                 "Membership proof must be valid after updating wallet state with generated blocks"
             );
         }
@@ -225,7 +226,7 @@ mod tests {
             .zip(alice_mutxos_block1.iter())
             .map(|(txo, mutxo)| {
                 (
-                    Hash::hash(&txo.utxo),
+                    Tip5::hash(&txo.utxo),
                     mutxo
                         .get_membership_proof_for_block(block_1.hash())
                         .unwrap(),
@@ -274,7 +275,7 @@ mod tests {
             .zip(alice_mutxos_block3.iter())
             .map(|(txo, mutxo)| {
                 (
-                    Hash::hash(&txo.utxo),
+                    Tip5::hash(&txo.utxo),
                     mutxo
                         .get_membership_proof_for_block(block_3.hash())
                         .unwrap(),
@@ -667,7 +668,7 @@ mod tests {
         for monitored_utxo in alice_monitored_utxos {
             assert!(
                 block_1.mutator_set_accumulator_after().unwrap().verify(
-                    Hash::hash(&monitored_utxo.utxo),
+                    Tip5::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(block_1.hash())
                         .unwrap()
@@ -718,7 +719,7 @@ mod tests {
                     .mutator_set_accumulator_after()
                     .unwrap()
                     .verify(
-                        Hash::hash(&monitored_utxo.utxo),
+                        Tip5::hash(&monitored_utxo.utxo),
                         &monitored_utxo
                             .get_membership_proof_for_block(first_block_after_spree.hash())
                             .unwrap()
@@ -791,7 +792,7 @@ mod tests {
         for monitored_utxo in &alice_monitored_utxos_at_2b {
             assert!(
                 block_2_b.mutator_set_accumulator_after().unwrap().verify(
-                    Hash::hash(&monitored_utxo.utxo),
+                    Tip5::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(block_2_b.hash())
                         .unwrap()
@@ -845,7 +846,7 @@ mod tests {
                     .mutator_set_accumulator_after()
                     .unwrap()
                     .verify(
-                        Hash::hash(&monitored_utxo.utxo),
+                        Tip5::hash(&monitored_utxo.utxo),
                         &monitored_utxo
                             .get_membership_proof_for_block(first_block_continuing_spree.hash())
                             .unwrap()
@@ -987,7 +988,7 @@ mod tests {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
                     || block_3_b.mutator_set_accumulator_after().unwrap().verify(
-                        Hash::hash(&monitored_utxo.utxo),
+                        Tip5::hash(&monitored_utxo.utxo),
                         &monitored_utxo
                             .get_membership_proof_for_block(block_3_b.hash())
                             .unwrap()
@@ -1039,7 +1040,7 @@ mod tests {
                         .mutator_set_accumulator_after()
                         .unwrap()
                         .verify(
-                            Hash::hash(&monitored_utxo.utxo),
+                            Tip5::hash(&monitored_utxo.utxo),
                             &monitored_utxo
                                 .get_membership_proof_for_block(
                                     second_block_continuing_spree.hash()

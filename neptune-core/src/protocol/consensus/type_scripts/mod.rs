@@ -28,7 +28,6 @@ use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::Hash;
 
 pub(crate) trait TypeScript: ConsensusProgram {
     type State: BFieldCodec;
@@ -59,8 +58,8 @@ pub(crate) trait TypeScriptWitness {
         PublicInput::new(
             [
                 self.transaction_kernel().mast_hash().reversed().values(),
-                Hash::hash(&self.salted_input_utxos()).reversed().values(),
-                Hash::hash(&self.salted_output_utxos()).reversed().values(),
+                Tip5::hash(&self.salted_input_utxos()).reversed().values(),
+                Tip5::hash(&self.salted_output_utxos()).reversed().values(),
             ]
             .concat()
             .to_vec(),

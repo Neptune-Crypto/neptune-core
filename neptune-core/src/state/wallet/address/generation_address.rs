@@ -27,6 +27,7 @@ use bech32::ToBase32;
 use bech32::Variant;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::lattice;
 use tasm_lib::twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
@@ -37,7 +38,7 @@ use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::application::config::network::Network;
-use crate::protocol::consensus::shared::Hash;
+
 use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::protocol::consensus::transaction::lock_script::LockScript;
 use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
@@ -169,9 +170,9 @@ impl GenerationSpendingKey {
 
     pub fn derive_from_seed(seed: Digest) -> Self {
         let privacy_preimage =
-            Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
+            Tip5::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
-            Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(1)]].concat());
+            Tip5::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(1)]].concat());
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (sk, _pk) = lattice::kem::keygen(randomness);
         let receiver_identifier = common::derive_receiver_id(seed);
