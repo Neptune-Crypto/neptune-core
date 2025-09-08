@@ -60,6 +60,18 @@ pub struct Args {
     #[clap(long)]
     pub disable_validation_in_block_import: bool,
 
+    /// Execute command when the best block changes (%s in cmd is replaced by
+    /// block hash).
+    ///
+    /// The node waits until the command has finished.
+    ///
+    /// If external command cannot be started, or if it does not return exit
+    /// code 0, entire node is stopped.
+    ///
+    /// Anything after the 1st space is interpreted as an argument. So the file
+    /// used here may not contain spaces.
+    pub(crate) block_notify: Option<String>,
+
     /// Ban connections to this node from IP address.
     ///
     /// This node can still make outgoing connections to IP address.
