@@ -1721,6 +1721,10 @@ impl GlobalState {
     /// not canonical that there is a connecting path. Assumes furthermore that
     /// the node is archival. If any of these assumptions are not met then this
     /// function returns an error.
+    ///
+    /// # Panics
+    ///
+    /// - If the stored block is found but does not have a mutator set update.
     pub(crate) async fn set_tip_to_stored_block(&mut self, block_digest: Digest) -> Result<()> {
         // If the node not archival, it cannot sync the wallet. So in this case,
         // abort early.
@@ -1736,11 +1740,6 @@ impl GlobalState {
             .get_block(block_digest)
             .await?
             .ok_or(anyhow::Error::msg(format!("unknown block {block_digest}")))?;
-
-        // Abort early if the block does not have a mutator set update.
-        if block.mutator_set_update().is_err() {
-            bail!("block does not have a mutator set update".to_string(),);
-        }
 
         let _ = self.set_new_tip_internal(block).await?;
 
@@ -1785,6 +1784,10 @@ impl GlobalState {
     /// be known.
     ///
     /// Returns a list of update-jobs that should be performed by this client.
+    ///
+    /// # Panics
+    ///
+    /// - If the new tip does not have a mutator set update.
     async fn set_new_tip_internal(&mut self, new_tip: Block) -> Result<Vec<MempoolUpdateJob>> {
         crate::macros::log_scope_duration!();
 
