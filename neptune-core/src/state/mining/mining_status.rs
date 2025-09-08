@@ -5,8 +5,8 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GuessingWorkInfo {

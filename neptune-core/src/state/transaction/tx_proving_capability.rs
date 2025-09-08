@@ -7,7 +7,7 @@ use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
 // note: we should consider merging TransactionProofType and TxProvingCapability
 

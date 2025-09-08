@@ -55,14 +55,14 @@ use crate::application::database::storage::storage_schema::RustyValue;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::channel::ClaimUtxoData;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::channel::ClaimUtxoData;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::transaction::transaction_kernel_id::TransactionKernelId;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -2096,10 +2096,10 @@ pub(crate) mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::models::blockchain::transaction::utxo::Coin;
-    use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
+    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::protocol::consensus::transaction::utxo::Coin;
+    use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -3142,8 +3142,8 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::composer_parameters;
         use crate::application::loops::mine_loop::guess_nonce;
         use crate::application::loops::mine_loop::GuessingConfiguration;
-        use crate::models::blockchain::transaction::TransactionProof;
-        use crate::models::channel::NewBlockFound;
+        use crate::protocol::consensus::transaction::TransactionProof;
+        use crate::protocol::channel::NewBlockFound;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
         use crate::tests::shared::fake_create_block_transaction_for_tests;
@@ -3431,7 +3431,7 @@ pub(crate) mod tests {
 
         use super::*;
         use crate::application::config::cli_args;
-        use crate::models::blockchain::block::block_height::BlockHeight;
+        use crate::protocol::consensus::block::block_height::BlockHeight;
         use crate::state::mempool::upgrade_priority::UpgradePriority;
         use crate::state::transaction::tx_proving_capability::TxProvingCapability;
         use crate::state::wallet::address::ReceivingAddress;
@@ -3852,7 +3852,7 @@ pub(crate) mod tests {
 
     mod expected_utxos {
         use super::*;
-        use crate::models::blockchain::transaction::lock_script::LockScript;
+        use crate::protocol::consensus::transaction::lock_script::LockScript;
         use crate::tests::shared::mock_tx::make_mock_transaction;
 
         #[traced_test]
@@ -4296,7 +4296,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-        use crate::models::blockchain::block::block_height::BlockHeight;
+        use crate::protocol::consensus::block::block_height::BlockHeight;
         use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::files::unit_test_data_directory;
         use crate::tests::shared::strategies::txkernel;
@@ -4771,9 +4771,9 @@ pub(crate) mod tests {
         use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
         use crate::application::loops::mine_loop::create_block_transaction;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
-        use crate::models::blockchain::block::block_height::BlockHeight;
-        use crate::models::blockchain::block::block_transaction::BlockTransaction;
-        use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use crate::protocol::consensus::block::block_height::BlockHeight;
+        use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+        use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::MainToPeerTask;
         use crate::PEER_CHANNEL_CAPACITY;
 

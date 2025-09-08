@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use tasm_lib::prelude::Digest;
 
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::proof_abstractions::mast_hash::MastHash;
 
 /// Represents a mempool state change.
 ///

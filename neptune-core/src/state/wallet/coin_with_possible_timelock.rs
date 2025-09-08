@@ -5,8 +5,8 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
 /// release date. For reporting purposes.
@@ -114,8 +114,8 @@ mod tests {
     use rand::RngCore;
 
     use super::CoinWithPossibleTimeLock;
-    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn sample_report() {

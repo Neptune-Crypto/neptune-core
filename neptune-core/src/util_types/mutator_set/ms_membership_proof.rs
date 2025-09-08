@@ -29,7 +29,7 @@ use super::shared::get_batch_mutation_argument_for_removal_record;
 use super::shared::prepare_authenticated_batch_modification_for_removal_record_reversion;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-use crate::models::blockchain::shared::Hash;
+use crate::protocol::consensus::shared::Hash;
 
 impl Error for MembershipProofError {}
 

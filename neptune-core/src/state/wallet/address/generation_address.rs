@@ -37,11 +37,11 @@ use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::application::config::network::Network;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::announcement::Announcement;
-use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::protocol::consensus::shared::Hash;
+use crate::protocol::consensus::transaction::announcement::Announcement;
+use crate::protocol::consensus::transaction::lock_script::LockScript;
+use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
+use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 pub(super) const GENERATION_FLAG_U8: u8 = 79;

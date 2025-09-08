@@ -1,7 +1,7 @@
 use std::ops::RangeInclusive;
 
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::Block;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::Block;
 
 /// Configuration settings for Scan Mode.
 ///

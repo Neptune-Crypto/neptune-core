@@ -3,8 +3,8 @@ use std::fmt;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::BlockHeight;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 
 /// A proposed block to extend the block chain with.

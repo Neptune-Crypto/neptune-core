@@ -7,7 +7,7 @@ use neptune_cash::api::export::BlockHeight;
 use neptune_cash::api::export::NativeCurrencyAmount;
 use neptune_cash::api::export::Network;
 use neptune_cash::api::export::Timestamp;
-use neptune_cash::models::blockchain::block::Block;
+use neptune_cash::protocol::consensus::block::Block;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use common::logging;

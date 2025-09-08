@@ -3,9 +3,9 @@
 use crate::application::config::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 
 /// a builder for [TritonVmProofJobOptions]

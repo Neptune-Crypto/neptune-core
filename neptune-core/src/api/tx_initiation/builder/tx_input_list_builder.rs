@@ -20,7 +20,7 @@ use rand::seq::SliceRandom;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::transaction_input::TxInput;
 
 /// defines sort ordering: ascending or descending.

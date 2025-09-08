@@ -11,12 +11,12 @@ use crate::application::config::data_directory::DataDirectory;
 use crate::application::database::create_db_if_missing;
 use crate::application::database::NeptuneLevelDb;
 use crate::application::database::WriteBatchAsync;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::difficulty_control::ProofOfWork;
-use crate::models::database::PeerDatabases;
-use crate::models::peer::peer_info::PeerInfo;
-use crate::models::peer::InstanceId;
-use crate::models::peer::PeerStanding;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
+use crate::protocol::database::PeerDatabases;
+use crate::protocol::peer::peer_info::PeerInfo;
+use crate::protocol::peer::InstanceId;
+use crate::protocol::peer::PeerStanding;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 

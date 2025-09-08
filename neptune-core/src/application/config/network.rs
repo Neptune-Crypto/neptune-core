@@ -6,8 +6,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
-use crate::models::blockchain::block::difficulty_control::Difficulty;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 #[derive(
     Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, strum::EnumIs, GetSize,

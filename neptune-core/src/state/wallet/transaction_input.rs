@@ -7,8 +7,8 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::unlocked_utxo::UnlockedUtxo;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;

@@ -27,7 +27,7 @@ use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
-use crate::models::blockchain::shared::Hash;
+use crate::protocol::consensus::shared::Hash;
 use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
@@ -556,7 +556,7 @@ mod tests {
         use rand::rng;
 
         use super::*;
-        use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+        use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
         use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
         #[proptest]

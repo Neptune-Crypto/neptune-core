@@ -77,26 +77,26 @@ use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::block_header::BlockPow;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::block_info::BlockInfo;
-use crate::models::blockchain::block::block_kernel::BlockKernel;
-use crate::models::blockchain::block::block_selector::BlockSelector;
-use crate::models::blockchain::block::difficulty_control::Difficulty;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::announcement::Announcement;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::channel::ClaimUtxoData;
-use crate::models::channel::RPCServerToMain;
-use crate::models::peer::peer_info::PeerInfo;
-use crate::models::peer::InstanceId;
-use crate::models::peer::PeerStanding;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::block::block_header::BlockHeader;
+use crate::protocol::consensus::block::block_header::BlockPow;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::block_info::BlockInfo;
+use crate::protocol::consensus::block::block_kernel::BlockKernel;
+use crate::protocol::consensus::block::block_selector::BlockSelector;
+use crate::protocol::consensus::block::difficulty_control::Difficulty;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::transaction::announcement::Announcement;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::consensus::transaction::TransactionProof;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::channel::ClaimUtxoData;
+use crate::protocol::channel::RPCServerToMain;
+use crate::protocol::peer::peer_info::PeerInfo;
+use crate::protocol::peer::InstanceId;
+use crate::protocol::peer::PeerStanding;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mining::mining_state::MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED;
 use crate::state::mining::mining_status::MiningStatus;
 use crate::state::transaction::transaction_details::TransactionDetails;
@@ -4027,9 +4027,9 @@ mod tests {
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_vec::traits::*;
     use crate::application::rpc::server::NeptuneRPCServer;
-    use crate::models::peer::NegativePeerSanction;
-    use crate::models::peer::PeerSanction;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::protocol::peer::NegativePeerSanction;
+    use crate::protocol::peer::PeerSanction;
+    use crate::protocol::proof_abstractions::mast_hash::MastHash;
     use crate::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -4601,7 +4601,7 @@ mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn utxo_origin_block_test(
         #[strategy(txkernel::with_lengths(0usize, 1usize, 0usize, false))]
-        transaction_kernel: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+        transaction_kernel: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         prop_assume!(!transaction_kernel.fee.is_negative());
 
@@ -4786,7 +4786,7 @@ mod tests {
     #[test_strategy::proptest(async = "tokio", cases = 5)]
     async fn announcements_in_block_test(
         #[strategy(txkernel::with_lengths(0usize, 2usize, NUM_ANNOUNCEMENTS_BLOCK1, false))]
-        tx_block1: crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+        tx_block1: crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel,
     ) {
         let network = Network::Main;
         let mut rpc_server = test_rpc_server(
@@ -4990,10 +4990,10 @@ mod tests {
         use rand::random;
 
         use super::*;
-        use crate::models::blockchain::block::block_header::BlockPow;
-        use crate::models::blockchain::block::pow::Pow;
-        use crate::models::blockchain::block::BlockProof;
-        use crate::models::blockchain::transaction::validity::neptune_proof::NeptuneProof;
+        use crate::protocol::consensus::block::block_header::BlockPow;
+        use crate::protocol::consensus::block::pow::Pow;
+        use crate::protocol::consensus::block::BlockProof;
+        use crate::protocol::consensus::transaction::validity::neptune_proof::NeptuneProof;
         use crate::state::mining::block_proposal::BlockProposal;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::state::wallet::address::KeyType;

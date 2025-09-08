@@ -10,7 +10,7 @@ use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::RPCClient;
-use neptune_cash::models::peer::peer_info::PeerInfo;
+use neptune_cash::protocol::peer::peer_info::PeerInfo;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;

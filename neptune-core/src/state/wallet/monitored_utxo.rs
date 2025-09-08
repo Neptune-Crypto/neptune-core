@@ -7,10 +7,10 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::archival_state::ArchivalState;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;

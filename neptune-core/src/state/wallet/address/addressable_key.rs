@@ -9,11 +9,11 @@ use super::common;
 use super::generation_address;
 use super::receiving_address::ReceivingAddress;
 use super::symmetric_key;
-use crate::models::blockchain::transaction::announcement::Announcement;
-use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::protocol::consensus::transaction::announcement::Announcement;
+use crate::protocol::consensus::transaction::lock_script::LockScript;
+use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::BFieldElement;
 

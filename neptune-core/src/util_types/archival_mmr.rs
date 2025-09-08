@@ -16,7 +16,7 @@ use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_
 
 use crate::application::database::storage::storage_schema::DbtVec;
 use crate::application::database::storage::storage_vec::traits::*;
-use crate::models::blockchain::shared::Hash;
+use crate::protocol::consensus::shared::Hash;
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///

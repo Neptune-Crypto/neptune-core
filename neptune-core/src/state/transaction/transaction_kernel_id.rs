@@ -9,7 +9,7 @@ use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::twenty_first::prelude::MerkleTree;
 
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 
 /// A unique identifier of a transaction whose value is unaffected by a
 /// transaction update.
@@ -137,8 +137,8 @@ mod tests {
     use rand::distr::StandardUniform;
     use test_strategy::proptest;
 
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::Transaction;
+    use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+    use crate::protocol::consensus::transaction::Transaction;
 
     impl Distribution<TransactionKernelId> for StandardUniform {
         fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernelId {

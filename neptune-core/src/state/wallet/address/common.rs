@@ -9,8 +9,8 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::application::config::network::Network;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::announcement::Announcement;
+use crate::protocol::consensus::shared::Hash;
+use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 /// returns human-readable-prefix for the given network

@@ -19,9 +19,9 @@ use super::network::Network;
 use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
@@ -690,7 +690,7 @@ mod tests {
     use std::ops::RangeBounds;
 
     use super::*;
-    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+    use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
 
     // extra methods for tests.
     impl Args {

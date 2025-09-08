@@ -14,7 +14,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use triton_vm::prelude::Digest;
 
 use super::chunk::Chunk;
-use crate::models::blockchain::shared::Hash;
+use crate::protocol::consensus::shared::Hash;
 use crate::prelude::triton_vm;
 
 type AuthenticatedChunk = (MmrMembershipProof, Chunk);

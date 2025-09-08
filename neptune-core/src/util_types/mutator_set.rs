@@ -4,7 +4,7 @@ use std::fmt;
 use tasm_lib::prelude::Digest;
 
 use self::addition_record::AdditionRecord;
-use crate::models::blockchain::shared::Hash;
+use crate::protocol::consensus::shared::Hash;
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
 pub mod active_window;

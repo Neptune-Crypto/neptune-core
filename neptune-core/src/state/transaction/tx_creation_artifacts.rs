@@ -5,11 +5,11 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::application::config::network::Network;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+use crate::protocol::consensus::transaction::primitive_witness::WitnessValidationError;
+use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::utxo_notification::PrivateNotificationData;
 

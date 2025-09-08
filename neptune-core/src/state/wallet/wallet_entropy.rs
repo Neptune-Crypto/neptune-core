@@ -11,7 +11,7 @@ use tasm_lib::twenty_first::xfe;
 use zeroize::ZeroizeOnDrop;
 
 use super::address::ReceivingAddress;
-use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::state::wallet::address::generation_address;
 use crate::state::wallet::address::symmetric_key;
 use crate::state::wallet::secret_key_material::SecretKeyMaterial;

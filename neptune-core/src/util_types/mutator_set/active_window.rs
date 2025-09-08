@@ -183,7 +183,7 @@ mod tests {
     use rand::RngCore;
 
     use super::*;
-    use crate::models::blockchain::shared::Hash;
+    use crate::protocol::consensus::shared::Hash;
 
     impl ActiveWindow {
         fn new_from(sbf: Vec<u32>) -> Self {

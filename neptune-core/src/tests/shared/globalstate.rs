@@ -8,12 +8,12 @@ use tokio::sync::mpsc;
 
 use crate::api::export::Network;
 use crate::application::config::cli_args;
-use crate::models::blockchain::block::Block;
-use crate::models::channel::MainToPeerTask;
-use crate::models::channel::PeerTaskToMain;
-use crate::models::peer::handshake_data::VersionString;
-use crate::models::peer::peer_info::PeerConnectionInfo;
-use crate::models::peer::peer_info::PeerInfo;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::channel::MainToPeerTask;
+use crate::protocol::channel::PeerTaskToMain;
+use crate::protocol::peer::handshake_data::VersionString;
+use crate::protocol::peer::peer_info::PeerConnectionInfo;
+use crate::protocol::peer::peer_info::PeerInfo;
 use crate::state::blockchain_state::BlockchainState;
 use crate::state::light_state::LightState;
 use crate::state::mempool::Mempool;

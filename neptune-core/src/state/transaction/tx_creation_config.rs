@@ -11,7 +11,7 @@ use super::super::wallet::utxo_notification::UtxoNotificationMedium;
 use super::tx_proving_capability::TxProvingCapability;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone)]

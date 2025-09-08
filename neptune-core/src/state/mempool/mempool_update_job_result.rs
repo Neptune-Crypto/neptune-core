@@ -1,6 +1,6 @@
 use crate::api::export::Transaction;
 use crate::api::export::TransactionKernelId;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 
 pub(crate) enum MempoolUpdateJobResult {
     Failure(TransactionKernelId),

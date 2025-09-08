@@ -5,9 +5,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumIter;
 
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

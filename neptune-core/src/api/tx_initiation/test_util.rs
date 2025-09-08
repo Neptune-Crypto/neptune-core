@@ -14,7 +14,7 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::tx_artifacts_builder::TxCreationArtifactsBuilder;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::state::StateLock;
 use crate::GlobalStateLock;

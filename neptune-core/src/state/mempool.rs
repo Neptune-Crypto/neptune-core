@@ -53,15 +53,15 @@ use tracing::warn;
 
 use crate::api::export::NeptuneProof;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::peer::transfer_transaction::TransactionProofQuality;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+use crate::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
+use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::consensus::transaction::TransactionProof;
+use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::state::mempool::mempool_event::MempoolEvent;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::merge_input_cache::MergeInputCache;
@@ -1207,16 +1207,16 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
-    use crate::models::blockchain::block::block_height::BlockHeight;
-    use crate::models::blockchain::block::block_transaction::BlockTransaction;
-    use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::models::blockchain::transaction::validity::single_proof::produce_single_proof;
-    use crate::models::blockchain::transaction::Transaction;
-    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-    use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-    use crate::models::shared::SIZE_20MB_IN_BYTES;
+    use crate::protocol::consensus::block::block_height::BlockHeight;
+    use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+    use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+    use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+    use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::protocol::consensus::transaction::validity::single_proof::produce_single_proof;
+    use crate::protocol::consensus::transaction::Transaction;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::protocol::shared::SIZE_20MB_IN_BYTES;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
     use crate::state::wallet::expected_utxo::UtxoNotifier;
@@ -3095,7 +3095,7 @@ mod tests {
         use test_strategy::proptest;
 
         use super::*;
-        use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+        use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
         #[apply(shared_tokio_runtime)]

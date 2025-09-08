@@ -1,4 +1,4 @@
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 
 /// A primitive-witness backed transaction that must be upgraded to be valid
 /// under a new mutator set.

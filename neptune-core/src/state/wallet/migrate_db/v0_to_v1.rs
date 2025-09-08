@@ -74,7 +74,7 @@ mod migration {
         use serde::Serialize;
         use tasm_lib::prelude::Digest;
 
-        use crate::models::blockchain::transaction::utxo::Utxo;
+        use crate::protocol::consensus::transaction::utxo::Utxo;
         use crate::state::wallet::sent_transaction::AoclLeafIndex;
         use crate::state::wallet::utxo_notification::UtxoNotificationMethod;
         use crate::state::NativeCurrencyAmount;

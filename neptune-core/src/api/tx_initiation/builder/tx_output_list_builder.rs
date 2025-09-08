@@ -8,9 +8,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::api::export::Timestamp;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::transaction_output::TxOutputList;

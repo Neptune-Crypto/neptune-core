@@ -5,9 +5,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 /// represents utxo and secrets necessary for recipient to claim it.

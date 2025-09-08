@@ -39,23 +39,23 @@ use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::difficulty_control::ProofOfWork;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::channel::MainToMiner;
-use crate::models::channel::MainToPeerTask;
-use crate::models::channel::MainToPeerTaskBatchBlockRequest;
-use crate::models::channel::MinerToMain;
-use crate::models::channel::PeerTaskToMain;
-use crate::models::channel::RPCServerToMain;
-use crate::models::peer::handshake_data::HandshakeData;
-use crate::models::peer::peer_info::PeerInfo;
-use crate::models::peer::transaction_notification::TransactionNotification;
-use crate::models::peer::PeerSynchronizationState;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::consensus::block::block_header::BlockHeader;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::consensus::transaction::TransactionProof;
+use crate::protocol::channel::MainToMiner;
+use crate::protocol::channel::MainToPeerTask;
+use crate::protocol::channel::MainToPeerTaskBatchBlockRequest;
+use crate::protocol::channel::MinerToMain;
+use crate::protocol::channel::PeerTaskToMain;
+use crate::protocol::channel::RPCServerToMain;
+use crate::protocol::peer::handshake_data::HandshakeData;
+use crate::protocol::peer::peer_info::PeerInfo;
+use crate::protocol::peer::transaction_notification::TransactionNotification;
+use crate::protocol::peer::PeerSynchronizationState;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::state::mempool::mempool_update_job::MempoolUpdateJob;
 use crate::state::mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use crate::state::mempool::upgrade_priority::UpgradePriority;
@@ -2454,12 +2454,12 @@ mod tests {
 
     mod proof_upgrader {
         use super::*;
-        use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-        use crate::models::blockchain::transaction::Transaction;
-        use crate::models::blockchain::transaction::TransactionProof;
-        use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-        use crate::models::peer::transfer_transaction::TransactionProofQuality;
-        use crate::models::proof_abstractions::timestamp::Timestamp;
+        use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+        use crate::protocol::consensus::transaction::Transaction;
+        use crate::protocol::consensus::transaction::TransactionProof;
+        use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+        use crate::protocol::peer::transfer_transaction::TransactionProofQuality;
+        use crate::protocol::proof_abstractions::timestamp::Timestamp;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::transaction_output::TxOutput;
 
@@ -2894,8 +2894,8 @@ mod tests {
         use rand::Rng;
 
         use super::*;
-        use crate::models::peer::PeerMessage;
-        use crate::models::peer::TransferConnectionStatus;
+        use crate::protocol::peer::PeerMessage;
+        use crate::protocol::peer::TransferConnectionStatus;
         use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
         use crate::tests::shared::to_bytes;
 

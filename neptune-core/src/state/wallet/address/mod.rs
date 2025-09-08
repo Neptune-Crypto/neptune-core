@@ -28,8 +28,8 @@ mod tests {
 
     use super::*;
     use crate::application::config::network::Network;
-    use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::consensus::transaction::utxo::Utxo;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
     use crate::state::Digest;
     use crate::tests::shared::mock_tx::make_mock_transaction;
@@ -90,8 +90,8 @@ mod tests {
 
     mod worker {
         use super::*;
-        use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-        use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
+        use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelModifier;
+        use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
 
         /// this tests the generate_announcement() and
         /// scan_for_announced_utxos() methods with a [SpendingKey]

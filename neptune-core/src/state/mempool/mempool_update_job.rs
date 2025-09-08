@@ -1,6 +1,6 @@
 use crate::api::export::NeptuneProof;
 use crate::api::export::TransactionKernelId;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::state::mempool::primitive_witness_update::PrimitiveWitnessUpdate;
 
 /// A task defined by the mempool for updating mutator-set related data for a

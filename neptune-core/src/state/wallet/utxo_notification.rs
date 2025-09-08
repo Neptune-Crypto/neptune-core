@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
-use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::state::wallet::address::ReceivingAddress;
 
 /// Enumerates the medium of exchange for UTXO-notifications.

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::models::blockchain::block::Block;
+use crate::protocol::consensus::block::Block;
 
 // perf: we make LightState an Arc<Block> so it can be
 // cheaply cloned and passed around, eg in

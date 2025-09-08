@@ -8,11 +8,11 @@ use serde::Serialize;
 
 use super::utxo_notification::UtxoNotificationMethod;
 use crate::application::config::network::Network;
-use crate::models::blockchain::transaction::announcement::Announcement;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::protocol::consensus::transaction::announcement::Announcement;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first::prelude::Digest;
 use crate::state::wallet::address::ReceivingAddress;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
@@ -618,8 +618,8 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::models::blockchain::transaction::utxo::Coin;
-    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use crate::protocol::consensus::transaction::utxo::Coin;
+    use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::address::KeyType;
     use crate::state::wallet::utxo_notification::UtxoNotificationMedium;

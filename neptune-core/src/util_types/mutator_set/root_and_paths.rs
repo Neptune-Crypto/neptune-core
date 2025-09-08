@@ -20,7 +20,7 @@ pub mod neptune_arbitrary {
     use proptest_arbitrary_interop::arb;
 
     use super::*;
-    use crate::models::blockchain::shared::Hash;
+    use crate::protocol::consensus::shared::Hash;
 
     impl Arbitrary for RootAndPaths {
         type Parameters = (usize, Vec<(u64, Digest)>);

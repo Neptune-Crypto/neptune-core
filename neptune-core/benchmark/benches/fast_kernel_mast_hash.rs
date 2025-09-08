@@ -6,8 +6,8 @@ fn main() {
 }
 
 mod fast_kernel_mast_hash_bench {
-    use neptune_cash::models::blockchain::block::block_header::BlockPow;
-    use neptune_cash::models::blockchain::block::pow::PowMastPaths;
+    use neptune_cash::protocol::consensus::block::block_header::BlockPow;
+    use neptune_cash::protocol::consensus::block::pow::PowMastPaths;
     use rayon::iter::IntoParallelIterator;
     use rayon::iter::ParallelIterator;
 

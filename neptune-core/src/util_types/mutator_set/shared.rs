@@ -7,7 +7,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 
 use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
-use crate::models::blockchain::shared::Hash;
+use crate::protocol::consensus::shared::Hash;
 
 pub const WINDOW_SIZE: u32 = 1 << 20;
 pub const CHUNK_SIZE: u32 = 1 << 12;

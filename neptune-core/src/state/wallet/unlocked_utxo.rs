@@ -2,8 +2,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
 
-use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::protocol::consensus::transaction::lock_script::LockScriptAndWitness;
+use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::tasm_lib::prelude::Digest;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;

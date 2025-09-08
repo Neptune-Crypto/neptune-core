@@ -12,7 +12,7 @@ use super::generation_address;
 use super::symmetric_key;
 use crate::api::export::KeyType;
 use crate::application::config::network::Network;
-use crate::models::blockchain::transaction::announcement::Announcement;
+use crate::protocol::consensus::transaction::announcement::Announcement;
 use crate::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 

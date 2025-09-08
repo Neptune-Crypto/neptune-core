@@ -10,7 +10,7 @@ use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFor
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::RPCClient;
-use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::state::wallet::address::KeyType;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::change_policy::ChangePolicy;
