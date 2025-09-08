@@ -13,10 +13,10 @@ use crate::application::database::NeptuneLevelDb;
 use crate::application::database::WriteBatchAsync;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
-use crate::protocol::database::PeerDatabases;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
+use crate::state::database::PeerDatabases;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 

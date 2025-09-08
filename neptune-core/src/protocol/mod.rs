@@ -1,6 +1,5 @@
 pub mod channel;
 pub mod consensus;
-pub mod database;
 pub mod peer;
 pub mod proof_abstractions;
 pub mod shared;

@@ -1,5 +1,6 @@
 pub mod archival_state;
 pub mod blockchain_state;
+pub mod database;
 pub mod light_state;
 pub mod mempool;
 pub mod mining;

@@ -5,12 +5,12 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
-use super::consensus::block::block_header::BlockHeader;
-use super::consensus::block::block_header::HeaderToBlockHashWitness;
-use super::consensus::block::block_height::BlockHeight;
-use super::peer::PeerStanding;
-use super::proof_abstractions::timestamp::Timestamp;
 use crate::application::database::NeptuneLevelDb;
+use crate::protocol::consensus::block::block_header::BlockHeader;
+use crate::protocol::consensus::block::block_header::HeaderToBlockHashWitness;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::peer::PeerStanding;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::application::config::network::Network;
-use crate::protocol::database::DATABASE_DIRECTORY_ROOT_NAME;
+use crate::state::database::DATABASE_DIRECTORY_ROOT_NAME;
 use crate::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
 use crate::state::archival_state::BLOCK_INDEX_DB_NAME;
 use crate::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;

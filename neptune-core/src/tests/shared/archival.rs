@@ -1,5 +1,5 @@
 use crate::protocol::consensus::block::Block;
-use crate::protocol::database::PeerDatabases;
+use crate::state::database::PeerDatabases;
 use crate::state::archival_state::ArchivalState;
 
 /// Set a new block as tip
