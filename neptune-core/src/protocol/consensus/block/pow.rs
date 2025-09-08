@@ -22,7 +22,7 @@ use tasm_lib::twenty_first::bfe_array;
 use crate::protocol::consensus::block::block_header::BlockHeader;
 use crate::protocol::consensus::block::block_kernel::BlockKernel;
 use crate::protocol::consensus::block::Block;
-use crate::protocol::channel::Cancelable;
+use crate::application::loops::channel::Cancelable;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::BFieldElement;
 

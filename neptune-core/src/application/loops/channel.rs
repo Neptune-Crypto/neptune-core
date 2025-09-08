@@ -9,13 +9,13 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 
-use super::consensus::block::block_height::BlockHeight;
-use super::consensus::block::difficulty_control::ProofOfWork;
-use super::consensus::block::Block;
-use super::consensus::transaction::Transaction;
-use super::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use super::peer::transaction_notification::TransactionNotification;
-use super::proof_abstractions::mast_hash::MastHash;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::block::difficulty_control::ProofOfWork;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::peer::transaction_notification::TransactionNotification;
+use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 

@@ -68,7 +68,7 @@ use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::protocol::channel::Cancelable;
+use crate::application::loops::channel::Cancelable;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;

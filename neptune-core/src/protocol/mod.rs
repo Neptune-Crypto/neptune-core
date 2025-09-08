@@ -1,4 +1,3 @@
-pub mod channel;
 pub mod consensus;
 pub mod peer;
 pub mod proof_abstractions;

@@ -55,7 +55,7 @@ use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
 use crate::application::loops::mine_loop::composer_outputs;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
-use crate::protocol::channel::ClaimUtxoData;
+use crate::application::loops::channel::ClaimUtxoData;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
 use crate::protocol::consensus::block::Block;
@@ -3141,7 +3141,7 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::composer_parameters;
         use crate::application::loops::mine_loop::guess_nonce;
         use crate::application::loops::mine_loop::GuessingConfiguration;
-        use crate::protocol::channel::NewBlockFound;
+        use crate::application::loops::channel::NewBlockFound;
         use crate::protocol::consensus::transaction::TransactionProof;
         use crate::tests::shared::blocks::fake_valid_block_proposal_from_tx;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;

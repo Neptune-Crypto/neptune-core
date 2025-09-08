@@ -91,8 +91,8 @@ use crate::protocol::consensus::transaction::transaction_proof::TransactionProof
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::protocol::channel::ClaimUtxoData;
-use crate::protocol::channel::RPCServerToMain;
+use crate::application::loops::channel::ClaimUtxoData;
+use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
