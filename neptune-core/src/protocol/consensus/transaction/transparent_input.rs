@@ -26,7 +26,7 @@ use crate::util_types::mutator_set::removal_record::absolute_index_set::Absolute
 ///    UTXOs;
 ///  - `IncomingUtxo` -- contains extra data and does not store the AOCL leaf
 ///    index;
-///  - [`UtxoTriple`](crate::models::blockchain::transaction::utxo_triple::UtxoTriple)
+///  - [`UtxoTriple`](crate::protocol::consensus::transaction::utxo_triple::UtxoTriple)
 ///    -- output counterpart to this struct, does not contain info needed to
 ///    re-derive the absolute index set because that information is not known by
 ///    the transaction initiator.

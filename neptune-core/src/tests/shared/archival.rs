@@ -1,6 +1,6 @@
 use crate::protocol::consensus::block::Block;
-use crate::state::database::PeerDatabases;
 use crate::state::archival_state::ArchivalState;
+use crate::state::database::PeerDatabases;
 
 /// Set a new block as tip
 pub(crate) async fn add_block_to_archival_state(

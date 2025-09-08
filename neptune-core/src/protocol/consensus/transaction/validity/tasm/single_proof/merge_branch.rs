@@ -29,6 +29,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
+use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
 use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransactionKernel;
 use crate::protocol::consensus::block::block_transaction::BlockTransactionKernel;
@@ -52,7 +53,6 @@ use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::SecretWitness;
-use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordList;

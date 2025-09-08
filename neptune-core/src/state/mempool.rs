@@ -1142,7 +1142,7 @@ impl Mempool {
     /// ```
     /// use bytesize::ByteSize;
     /// use neptune_cash::application::config::network::Network;
-    /// use neptune_cash::models::blockchain::block::Block;
+    /// use neptune_cash::protocol::consensus::block::Block;
     /// use neptune_cash::state::mempool::Mempool;
     /// use neptune_cash::state::transaction::tx_proving_capability::TxProvingCapability;
     ///

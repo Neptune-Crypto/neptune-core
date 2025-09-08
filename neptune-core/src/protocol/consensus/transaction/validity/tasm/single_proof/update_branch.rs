@@ -16,7 +16,6 @@ use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
-
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use crate::protocol::consensus::transaction::validity::single_proof::DISCRIMINANT_FOR_UPDATE;
 use crate::protocol::consensus::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;

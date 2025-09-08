@@ -4,8 +4,8 @@
 //! the wallet for change output(s).  see [TransactionDetailsBuilder::build()]
 //! for details.
 //!
-//! The resulting `TransactionDetails` contains all data needed for a [Transaction](crate::models::blockchain::transaction::Transaction)
-//! except for a [TransactionProof](crate::models::blockchain::transaction::TransactionProof).
+//! The resulting `TransactionDetails` contains all data needed for a [Transaction](crate::protocol::consensus::transaction::Transaction)
+//! except for a [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
 //!
 //! see [builder](super) for examples of using the builders together.
 use std::sync::Arc;

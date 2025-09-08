@@ -21,7 +21,7 @@ use crate::state::wallet::utxo_notification::PrivateNotificationData;
 ///
 /// A [Transaction] contains blinded data that can be sent over the network to
 /// other neptune-core nodes.  The [TransactionDetails] contains the unblinded
-/// data that the `Transaction` is generated from, minus the [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof).
+/// data that the `Transaction` is generated from, minus the [TransactionProof](crate::protocol::consensus::transaction::transaction_proof::TransactionProof).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxCreationArtifacts {
     pub(crate) transaction: Arc<Transaction>,

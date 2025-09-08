@@ -66,9 +66,9 @@ use crate::protocol::consensus::block::pow::Pow;
 use crate::protocol::consensus::block::pow::PowMastPaths;
 use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
 
+use crate::application::loops::channel::Cancelable;
 use crate::protocol::consensus::transaction::utxo::Coin;
 use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
-use crate::application::loops::channel::Cancelable;
 use crate::protocol::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::protocol::proof_abstractions::mast_hash::MastHash;
 use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
@@ -125,7 +125,7 @@ pub enum BlockProof {
 /// internals directly (bypassing encapsulation)
 ///
 /// ```compile_fail,E0594
-/// use neptune_cash::models::blockchain::block::Block;
+/// use neptune_cash::protocol::consensus::block::Block;
 /// use neptune_cash::application::config::network::Network;
 /// use neptune_cash::prelude::twenty_first::math::b_field_element::BFieldElement;
 /// use tasm_lib::prelude::Digest;
@@ -1182,11 +1182,11 @@ pub(crate) mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::network::Network;
+    use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+    use crate::application::database::NeptuneLevelDb;
     use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
-    use crate::application::database::storage::storage_schema::SimpleRustyStorage;
-    use crate::application::database::NeptuneLevelDb;
     use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;

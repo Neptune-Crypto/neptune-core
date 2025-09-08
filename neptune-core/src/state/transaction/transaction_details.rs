@@ -22,8 +22,10 @@ use crate::state::wallet::transaction_input::TxInputList;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-/// contains the unblinded data that a [Transaction](crate::models::blockchain::transaction::Transaction) is generated from,
-/// minus the [TransactionProof](crate::models::blockchain::transaction::TransactionProof).
+/// contains the unblinded data that a
+/// [Transaction](crate::protocol::consensus::transaction::Transaction) is
+/// generated from, minus the
+/// [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
 ///
 /// conceptually, `TransactionDetails` + `TransactionProof` --> `Transaction`.
 ///

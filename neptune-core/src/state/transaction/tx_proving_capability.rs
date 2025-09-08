@@ -15,7 +15,7 @@ use crate::protocol::consensus::transaction::transaction_proof::TransactionProof
 ///
 /// see also:
 /// * [TransactionProofType]
-/// * [TransactionProof](crate::models::blockchain::transaction::transaction_proof::TransactionProof)
+/// * [TransactionProof](crate::protocol::consensus::transaction::transaction_proof::TransactionProof)
 #[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, GetSize)]
 pub enum TxProvingCapability {
     LockScript,

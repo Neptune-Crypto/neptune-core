@@ -31,7 +31,6 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
-
 use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
 use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;

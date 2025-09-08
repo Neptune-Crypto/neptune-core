@@ -72,6 +72,8 @@ use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::config::network::Network;
+use crate::application::loops::channel::ClaimUtxoData;
+use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
@@ -91,8 +93,6 @@ use crate::protocol::consensus::transaction::transaction_proof::TransactionProof
 use crate::protocol::consensus::transaction::Transaction;
 use crate::protocol::consensus::transaction::TransactionProof;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::application::loops::channel::ClaimUtxoData;
-use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::peer::peer_info::PeerInfo;
 use crate::protocol::peer::InstanceId;
 use crate::protocol::peer::PeerStanding;
@@ -530,7 +530,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -594,8 +594,8 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-    /// use neptune_cash::models::blockchain::block::block_height::BlockHeight;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -635,7 +635,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -675,7 +675,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -719,7 +719,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1268,7 +1268,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    /// use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1418,7 +1418,7 @@ pub trait RPC {
     ///
     /// ```no_run
     /// # use anyhow::Result;
-    /// use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
+    /// use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
     /// # use neptune_cash::application::rpc::server::RPCClient;
     /// # use neptune_cash::application::rpc::auth;
     /// # use tarpc::tokio_serde::formats::Json;
@@ -1630,7 +1630,7 @@ pub trait RPC {
     /// `fee` represents the fee in native coins to pay the miner who mines
     /// the block that initially confirms the resulting transaction.
     ///
-    /// a [Digest] of the resulting [Transaction](crate::models::blockchain::transaction::Transaction) is returned on success, else [None].
+    /// a [Digest] of the resulting [Transaction](crate::protocol::consensus::transaction::Transaction) is returned on success, else [None].
     ///
     /// A list of the encoded transaction notifications is also returned. The
     /// relevant notifications should be sent to the transaction receiver(s) in
@@ -1639,7 +1639,7 @@ pub trait RPC {
     /// ```no_run
     /// # use anyhow::Result;
     /// # use neptune_cash::application::config::network::Network;
-    /// # use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    /// # use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     /// # use neptune_cash::state::wallet::address::ReceivingAddress;
     /// # use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
     /// # use neptune_cash::application::rpc::server::RPCClient;

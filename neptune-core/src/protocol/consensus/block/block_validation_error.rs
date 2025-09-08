@@ -1,6 +1,6 @@
 use crate::util_types::mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 
-/// The reasons why a [`Block`](crate::models::blockchain::block::Block) can be
+/// The reasons why a [`Block`](crate::protocol::consensus::block::Block) can be
 /// invalid.
 ///
 /// Conversely, defines what it means for a block to be "valid".

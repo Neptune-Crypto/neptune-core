@@ -23,6 +23,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 
+use crate::prelude::triton_vm;
 use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use crate::protocol::consensus::transaction::primitive_witness::SaltedUtxos;
 use crate::protocol::consensus::transaction::utxo::Coin;
@@ -30,7 +31,6 @@ use crate::protocol::consensus::transaction::utxo::Utxo;
 use crate::protocol::consensus::type_scripts::native_currency::NativeCurrency;
 use crate::protocol::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::protocol::proof_abstractions::SecretWitness;
-use crate::prelude::triton_vm;
 
 /// Maximum number of inputs/outputs allowed. Number of UTXOs must be strictly
 /// less than this number.
