@@ -83,7 +83,6 @@ pub mod neptune_arbitrary {
     use super::super::shared::CHUNK_SIZE;
     use super::*;
     use crate::util_types::mutator_set::commit;
-    use crate::Hash;
 
     #[cfg(any(test, feature = "arbitrary-impls"))]
     impl Arbitrary for MsaAndRecords {
@@ -196,7 +195,7 @@ pub mod neptune_arbitrary {
                         .collect_vec()
                         .prop_flat_map(move |swbf_chunks| {
                             // prepare input to pseudorandom mmr generator
-                            let swbf_leafs = swbf_chunks.iter().map(Hash::hash).collect_vec();
+                            let swbf_leafs = swbf_chunks.iter().map(Tip5::hash).collect_vec();
                             let swbf_indices_and_leafs = swbf_chunk_indices.iter().copied().zip(swbf_leafs.iter().copied()).collect_vec();
 
                             // prepare to unwrap

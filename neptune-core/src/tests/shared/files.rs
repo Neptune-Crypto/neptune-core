@@ -12,7 +12,7 @@ use rand::seq::SliceRandom;
 use tracing::debug;
 use tracing::Span;
 
-use crate::config_models::data_directory::DataDirectory;
+use crate::application::config::data_directory::DataDirectory;
 
 /// Create a randomly named `DataDirectory` so filesystem-bound tests can run
 /// in parallel. If this is not done, parallel execution of unit tests will

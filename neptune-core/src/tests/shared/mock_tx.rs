@@ -9,21 +9,21 @@ use crate::api::export::Network;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TxProvingCapability;
-use crate::config_models::cli_args;
-use crate::models::blockchain::block::block_transaction::BlockOrRegularTransaction;
-use crate::models::blockchain::block::block_transaction::BlockTransaction;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::consensus_rule_set::ConsensusRuleSet;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::models::blockchain::transaction::validity::single_proof::single_proof_claim;
-use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
-use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::verifier::cache_true_claim;
-use crate::models::state::tx_creation_config::TxCreationConfig;
-use crate::models::state::wallet::transaction_output::TxOutput;
-use crate::models::state::wallet::wallet_entropy::WalletEntropy;
+use crate::application::config::cli_args;
+use crate::protocol::consensus::block::block_transaction::BlockOrRegularTransaction;
+use crate::protocol::consensus::block::block_transaction::BlockTransaction;
+use crate::protocol::consensus::block::Block;
+use crate::protocol::consensus::consensus_rule_set::ConsensusRuleSet;
+use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+use crate::protocol::consensus::transaction::validity::single_proof::single_proof_claim;
+use crate::protocol::consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
+use crate::protocol::consensus::transaction::TransactionProof;
+use crate::protocol::proof_abstractions::mast_hash::MastHash;
+use crate::protocol::proof_abstractions::verifier::cache_true_claim;
+use crate::state::transaction::tx_creation_config::TxCreationConfig;
+use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -83,7 +83,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash_and_timestamp(
 ) -> Transaction {
     Transaction {
         kernel:
-            crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy {
+            crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy {
                 inputs,
                 outputs,
                 announcements: vec![],

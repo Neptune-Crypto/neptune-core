@@ -181,9 +181,9 @@ impl ActiveWindow {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use rand::RngCore;
+    use tasm_lib::prelude::Tip5;
 
     use super::*;
-    use crate::models::blockchain::shared::Hash;
 
     impl ActiveWindow {
         fn new_from(sbf: Vec<u32>) -> Self {
@@ -294,13 +294,13 @@ mod tests {
     }
 
     fn hash_unequal_prop() {
-        Hash::hash(&ActiveWindow::new());
+        Tip5::hash(&ActiveWindow::new());
 
         let mut aw_1 = ActiveWindow::new();
         aw_1.insert(1u32);
         let aw_2 = ActiveWindow::new();
 
-        assert_ne!(Hash::hash(&aw_1), Hash::hash(&aw_2));
+        assert_ne!(Tip5::hash(&aw_1), Tip5::hash(&aw_2));
     }
 
     #[test]

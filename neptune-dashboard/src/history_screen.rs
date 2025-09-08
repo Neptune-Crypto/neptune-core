@@ -8,11 +8,11 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
-use neptune_cash::models::blockchain::block::block_height::BlockHeight;
-use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::RPCClient;
+use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use num_traits::Zero;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -121,11 +121,11 @@ pub struct HistoryScreen {
     poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
     events: Events,
-    token: rpc_auth::Token,
+    token: auth::Token,
 }
 
 impl HistoryScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, token: auth::Token) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
         Self {
             active: false,
@@ -143,7 +143,7 @@ impl HistoryScreen {
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
-        token: rpc_auth::Token,
+        token: auth::Token,
         balance_updates: BalanceUpdateArc,
         escalatable_event: DashboardEventArc,
     ) -> ! {

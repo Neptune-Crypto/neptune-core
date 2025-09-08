@@ -22,24 +22,24 @@ use clap_complete::Shell;
 use itertools::Itertools;
 use neptune_cash::api::export::TransactionKernelId;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use neptune_cash::config_models::data_directory::DataDirectory;
-use neptune_cash::config_models::network::Network;
-use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use neptune_cash::models::state::wallet::address::KeyType;
-use neptune_cash::models::state::wallet::address::ReceivingAddress;
-use neptune_cash::models::state::wallet::change_policy::ChangePolicy;
-use neptune_cash::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use neptune_cash::models::state::wallet::secret_key_material::SecretKeyMaterial;
-use neptune_cash::models::state::wallet::utxo_notification::PrivateNotificationData;
-use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-use neptune_cash::models::state::wallet::wallet_file::WalletFile;
-use neptune_cash::models::state::wallet::wallet_file::WalletFileContext;
-use neptune_cash::models::state::wallet::wallet_status::WalletStatus;
-use neptune_cash::models::state::wallet::wallet_status::WalletStatusExportFormat;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::error::RpcError;
-use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::application::config::data_directory::DataDirectory;
+use neptune_cash::application::config::network::Network;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::error::RpcError;
+use neptune_cash::application::rpc::server::RPCClient;
+use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::state::wallet::address::KeyType;
+use neptune_cash::state::wallet::address::ReceivingAddress;
+use neptune_cash::state::wallet::change_policy::ChangePolicy;
+use neptune_cash::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use neptune_cash::state::wallet::secret_key_material::SecretKeyMaterial;
+use neptune_cash::state::wallet::utxo_notification::PrivateNotificationData;
+use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_cash::state::wallet::wallet_file::WalletFile;
+use neptune_cash::state::wallet::wallet_file::WalletFileContext;
+use neptune_cash::state::wallet::wallet_status::WalletStatus;
+use neptune_cash::state::wallet::wallet_status::WalletStatusExportFormat;
 use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;
@@ -747,7 +747,7 @@ async fn main() -> Result<()> {
     let client = RPCClient::new(client::Config::default(), transport).spawn();
     let ctx = context::current();
 
-    let rpc_auth::CookieHint {
+    let auth::CookieHint {
         data_directory,
         network,
     } = match get_cookie_hint(&client, &args).await {
@@ -761,7 +761,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory).await {
+    let token: auth::Token = match auth::Cookie::try_load(&data_directory).await {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Unable to load RPC auth cookie. error = {e}");
@@ -1327,14 +1327,11 @@ async fn main() -> Result<()> {
 //
 // Otherwise, we call cookie_hint() RPC to obtain data-dir.
 // But the API might be disabled, which we detect and fallback to the default data-dir.
-async fn get_cookie_hint(
-    client: &RPCClient,
-    args: &Config,
-) -> anyhow::Result<rpc_auth::CookieHint> {
-    async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<rpc_auth::CookieHint> {
+async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
+    async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
         let network = client.network(context::current()).await??;
         let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;
-        Ok(rpc_auth::CookieHint {
+        Ok(auth::CookieHint {
             data_directory,
             network,
         })

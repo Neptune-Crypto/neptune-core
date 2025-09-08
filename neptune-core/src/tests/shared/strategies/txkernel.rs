@@ -5,7 +5,7 @@ use proptest_arbitrary_interop::arb;
 use tasm_lib::prelude::Digest;
 
 use crate::api::export::{NativeCurrencyAmount, Timestamp};
-use crate::models::blockchain::transaction::transaction_kernel::{
+use crate::protocol::consensus::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelProxy,
 };
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -24,7 +24,7 @@ prop_compose! {
         inputs in collection::vec(super::removalrecord(), num_inputs),
         outputs in collection::vec(arb::<AdditionRecord>(), num_outputs),
         announcements in collection::vec(collection::vec(arb::<tasm_lib::triton_vm::prelude::BFieldElement>(), 10..59), num_announcements).prop_map(
-            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message| crate::models::blockchain::transaction::announcement::Announcement{message}))
+            |vecvec| itertools::Itertools::collect_vec(vecvec.into_iter().map(|message| crate::protocol::consensus::transaction::announcement::Announcement{message}))
         ),
         fee in arb::<NativeCurrencyAmount>(),
         coinbase in arb::<Option<NativeCurrencyAmount>>(),

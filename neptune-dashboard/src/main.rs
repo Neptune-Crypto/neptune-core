@@ -18,10 +18,10 @@ use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::LeaveAlternateScreen;
 use dashboard_app::Config;
 use dashboard_app::DashboardApp;
-use neptune_cash::config_models::data_directory::DataDirectory;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::error::RpcError;
-use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::application::config::data_directory::DataDirectory;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::error::RpcError;
+use neptune_cash::application::rpc::server::RPCClient;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
@@ -49,7 +49,7 @@ async fn main() {
     let client = RPCClient::new(client::Config::default(), transport).spawn();
 
     // Read what network the client is running and ensure that client is up and running
-    let rpc_auth::CookieHint {
+    let auth::CookieHint {
         data_directory,
         network,
     } = match get_cookie_hint(&client, &args).await {
@@ -63,7 +63,7 @@ async fn main() {
         }
     };
 
-    let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory).await {
+    let token: auth::Token = match auth::Cookie::try_load(&data_directory).await {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Unable to load RPC auth cookie. error = {e}");
@@ -109,14 +109,11 @@ async fn main() {
 //
 // Otherwise, we call cookie_hint() RPC to obtain data-dir.
 // But the API might be disabled, which we detect and fallback to the default data-dir.
-async fn get_cookie_hint(
-    client: &RPCClient,
-    args: &Config,
-) -> anyhow::Result<rpc_auth::CookieHint> {
-    async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<rpc_auth::CookieHint> {
+async fn get_cookie_hint(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
+    async fn fallback(client: &RPCClient, args: &Config) -> anyhow::Result<auth::CookieHint> {
         let network = client.network(context::current()).await??;
         let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;
-        Ok(rpc_auth::CookieHint {
+        Ok(auth::CookieHint {
             data_directory,
             network,
         })

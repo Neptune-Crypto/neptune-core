@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::api::tx_initiation::error::ProofRequirement;
-use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
-use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::application::triton_vm_job_queue::vm_job_queue;
+use crate::application::triton_vm_job_queue::TritonVmJobQueue;
+use crate::protocol::consensus::transaction::validity::neptune_proof::Proof;
+use crate::protocol::proof_abstractions::tasm::program::prove_consensus_program;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
-use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 /// a builder for [Proof]
 ///
@@ -33,7 +33,7 @@ use crate::triton_vm_job_queue::TritonVmJobQueue;
 /// use neptune_cash::api::export::NonDeterminism;
 /// use neptune_cash::api::tx_initiation::builder::proof_builder::ProofBuilder;
 /// use neptune_cash::api::tx_initiation::error::CreateProofError;
-/// use neptune_cash::triton_vm_job_queue::vm_job_queue;
+/// use neptune_cash::application::triton_vm_job_queue::vm_job_queue;
 ///
 /// async fn prove_claim(program: Program, claim: Claim, nondeterminism: NonDeterminism, gsl: &GlobalStateLock) -> Result<NeptuneProof, CreateProofError> {
 ///

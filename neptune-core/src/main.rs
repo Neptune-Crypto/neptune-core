@@ -2,7 +2,7 @@ use std::process;
 
 use anyhow::Result;
 use clap::Parser;
-use neptune_cash::config_models::cli_args;
+use neptune_cash::application::config::cli_args;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
 

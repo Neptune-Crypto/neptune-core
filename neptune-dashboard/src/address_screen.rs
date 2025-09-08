@@ -9,10 +9,10 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::api::export::KeyType;
-use neptune_cash::config_models::network::Network;
-use neptune_cash::models::state::wallet::address::SpendingKey;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::application::config::network::Network;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::RPCClient;
+use neptune_cash::state::wallet::address::SpendingKey;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -116,11 +116,11 @@ pub struct AddressScreen {
     escalatable_event: DashboardEventArc,
     events: Events,
     network: Network,
-    token: rpc_auth::Token,
+    token: auth::Token,
 }
 
 impl AddressScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: rpc_auth::Token) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: auth::Token) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
         AddressScreen {
             active: false,
@@ -139,7 +139,7 @@ impl AddressScreen {
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
-        token: rpc_auth::Token,
+        token: auth::Token,
         address_updates: AddressUpdateArc,
         escalatable_event: DashboardEventArc,
     ) -> ! {

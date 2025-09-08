@@ -18,9 +18,9 @@ pub mod neptune_arbitrary {
     use proptest::strategy::Just;
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
+    use tasm_lib::prelude::Tip5;
 
     use super::*;
-    use crate::models::blockchain::shared::Hash;
 
     impl Arbitrary for RootAndPaths {
         type Parameters = (usize, Vec<(u64, Digest)>);
@@ -86,7 +86,7 @@ pub mod neptune_arbitrary {
                             if let Entry::Vacant(entry) = nodes.entry(wi_even) {
                                 entry.insert(digests.pop().unwrap());
                             }
-                            let hash = Hash::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
+                            let hash = Tip5::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
                             nodes.insert(wi >> 1, hash);
                         }
                     }

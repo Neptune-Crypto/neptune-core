@@ -1,12 +1,12 @@
 //! This module implements a builder for [TritonVmProofJobOptions]
 
-use crate::config_models::network::Network;
-use crate::config_models::triton_vm_env_vars::TritonVmEnvVars;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::application::config::network::Network;
+use crate::application::config::triton_vm_env_vars::TritonVmEnvVars;
+use crate::application::triton_vm_job_queue::TritonVmJobPriority;
+use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 
 /// a builder for [TritonVmProofJobOptions]
 ///
@@ -130,7 +130,7 @@ impl TritonVmProofJobOptionsBuilder {
     /// use neptune_cash::api::export::TransactionProof;
     /// use neptune_cash::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
     /// use neptune_cash::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
-    /// use neptune_cash::triton_vm_job_queue::vm_job_queue;
+    /// use neptune_cash::application::triton_vm_job_queue::vm_job_queue;
     /// use std::time::Duration;
     ///
     /// async fn prove_with_timeout(tx_details: TransactionDetails, timeout: Duration) -> anyhow::Result<TransactionProof> {
@@ -171,7 +171,7 @@ impl TritonVmProofJobOptionsBuilder {
 
     /// add max_log2_padded_height_for_proofs
     ///
-    /// see [cli_args::Args::max_log2_padded_height_for_proofs](crate::config_models::cli_args::Args::max_log2_padded_height_for_proofs).
+    /// see [cli_args::Args::max_log2_padded_height_for_proofs](crate::application::config::cli_args::Args::max_log2_padded_height_for_proofs).
     ///
     /// default: None (no limit)
     pub fn max_log2_padded_height_for_proofs(mut self, max: u8) -> Self {

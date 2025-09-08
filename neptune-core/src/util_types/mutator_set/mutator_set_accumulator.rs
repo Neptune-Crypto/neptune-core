@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -27,7 +28,7 @@ use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
-use crate::models::blockchain::shared::Hash;
+
 use crate::util_types::mutator_set::aocl_to_swbfi_leaf_counts;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
@@ -85,7 +86,7 @@ impl MutatorSetAccumulator {
         // if window slides, update filter
         // First update the inactive part of the SWBF, the SWBF MMR
         let new_chunk: Chunk = self.swbf_active.slid_chunk();
-        let chunk_digest: Digest = Hash::hash(&new_chunk);
+        let chunk_digest: Digest = Tip5::hash(&new_chunk);
         let new_chunk_index = self.swbf_inactive.num_leafs();
         self.swbf_inactive.append(chunk_digest); // ignore auth path
 
@@ -235,7 +236,7 @@ impl MutatorSetAccumulator {
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         // compute commitment
-        let item_commitment = Hash::hash_pair(item, sender_randomness);
+        let item_commitment = Tip5::hash_pair(item, sender_randomness);
 
         // simulate adding to commitment list
         let aocl_leaf_index = self.aocl.num_leafs();
@@ -263,9 +264,9 @@ impl MutatorSetAccumulator {
         }
 
         // verify that a commitment to the item lives in the aocl mmr
-        let leaf = Hash::hash_pair(
-            Hash::hash_pair(item, membership_proof.sender_randomness),
-            Hash::hash_pair(
+        let leaf = Tip5::hash_pair(
+            Tip5::hash_pair(item, membership_proof.sender_randomness),
+            Tip5::hash_pair(
                 membership_proof.receiver_preimage,
                 Digest::new([BFieldElement::zero(); Digest::LEN]),
             ),
@@ -313,7 +314,7 @@ impl MutatorSetAccumulator {
                 membership_proof.target_chunks.get(&chunk_index).unwrap();
             let valid_auth_path = swbf_inactive_mp.verify(
                 chunk_index,
-                Hash::hash(swbf_inactive_chunk),
+                Tip5::hash(swbf_inactive_chunk),
                 &self.swbf_inactive.peaks(),
                 self.swbf_inactive.num_leafs(),
             );
@@ -370,12 +371,12 @@ impl MutatorSetAccumulator {
     pub fn hash(&self) -> Digest {
         let aocl_mmr_bagged = self.aocl.bag_peaks();
         let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = Hash::hash(&self.swbf_active);
+        let active_swbf_bagged = Tip5::hash(&self.swbf_active);
         let default = Digest::default();
 
-        Hash::hash_pair(
-            Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged),
-            Hash::hash_pair(active_swbf_bagged, default),
+        Tip5::hash_pair(
+            Tip5::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged),
+            Tip5::hash_pair(active_swbf_bagged, default),
         )
     }
 
@@ -419,14 +420,14 @@ impl MutatorSetAccumulator {
                 HashMap::new();
             for removal_record in &mut removal_records {
                 for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.iter_mut() {
-                    let chunk_hash = Hash::hash(chunk);
+                    let chunk_hash = Tip5::hash(chunk);
                     let prev_val =
                         mutation_data_preimage.insert(*chunk_index, (chunk, mmr_mp.to_owned()));
 
                     // Sanity check that all removal records agree on both chunks and MMR membership
                     // proofs.
                     if let Some((chnk, mm)) = prev_val {
-                        assert!(mm == *mmr_mp && chunk_hash == Hash::hash(chnk))
+                        assert!(mm == *mmr_mp && chunk_hash == Tip5::hash(chnk))
                     }
                 }
             }
@@ -456,7 +457,7 @@ impl MutatorSetAccumulator {
             // this part of the Bloom filter is represented.
             let swbf_inactive_mutation_data = mutation_data_preimage
                 .into_iter()
-                .map(|(k, v)| (k, Hash::hash(v.0), v.1))
+                .map(|(k, v)| (k, Tip5::hash(v.0), v.1))
                 .collect_vec();
 
             // Create a vector of pointers to the MMR-membership part of the mutator set membership
@@ -556,7 +557,7 @@ mod tests {
         use rand::rng;
 
         use super::*;
-        use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+        use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
         use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
         #[proptest]

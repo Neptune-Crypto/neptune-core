@@ -8,14 +8,14 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::api::export::Timestamp;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::transaction_output::TxOutput;
-use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::models::state::StateLock;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::state::wallet::address::ReceivingAddress;
+use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::state::StateLock;
 use crate::WalletState;
 
 // ##multicoin## :
@@ -214,7 +214,7 @@ impl TxOutputListBuilder {
     /// build the list of [TxOutput], with [StateLock]
     ///
     /// note: if you already acquired a read-lock or write-lock over
-    /// [GlobalState](crate::models::state::GlobalState) you should provide a
+    /// [GlobalState](crate::state::GlobalState) you should provide a
     /// ReadGuard or WriteGuard.  The builder will use the already-acquired
     /// lock, which can still be used afterwards.
     pub async fn build(self, state_lock: &StateLock<'_>) -> TxOutputList {

@@ -2,9 +2,9 @@
 use std::sync::Arc;
 
 use super::error;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
 

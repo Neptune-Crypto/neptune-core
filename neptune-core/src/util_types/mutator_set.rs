@@ -1,10 +1,10 @@
 use std::error::Error;
 use std::fmt;
 
-use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::{Digest, Tip5};
 
 use self::addition_record::AdditionRecord;
-use crate::models::blockchain::shared::Hash;
+
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
 pub mod active_window;
@@ -44,7 +44,7 @@ pub enum MutatorSetError {
 /// ness. The addition record is itself a commitment to the item.
 pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) -> AdditionRecord {
     let canonical_commitment =
-        Hash::hash_pair(Hash::hash_pair(item, sender_randomness), receiver_digest);
+        Tip5::hash_pair(Tip5::hash_pair(item, sender_randomness), receiver_digest);
 
     AdditionRecord::new(canonical_commitment)
 }

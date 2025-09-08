@@ -3,11 +3,11 @@
 //! see [builder](super) for examples of using the builders together.
 
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::state::transaction_details::TransactionDetails;
+use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
+use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernel;
+use crate::protocol::consensus::transaction::Transaction;
+use crate::protocol::consensus::transaction::TransactionProof;
+use crate::state::transaction::transaction_details::TransactionDetails;
 
 /// a builder for [Transaction]
 ///

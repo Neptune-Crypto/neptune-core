@@ -4,8 +4,8 @@
 //! the wallet for change output(s).  see [TransactionDetailsBuilder::build()]
 //! for details.
 //!
-//! The resulting `TransactionDetails` contains all data needed for a [Transaction](crate::models::blockchain::transaction::Transaction)
-//! except for a [TransactionProof](crate::models::blockchain::transaction::TransactionProof).
+//! The resulting `TransactionDetails` contains all data needed for a [Transaction](crate::protocol::consensus::transaction::Transaction)
+//! except for a [TransactionProof](crate::protocol::consensus::transaction::TransactionProof).
 //!
 //! see [builder](super) for examples of using the builders together.
 use std::sync::Arc;
@@ -17,24 +17,24 @@ use tasm_lib::prelude::Digest;
 use crate::api::export::TransparentInput;
 use crate::api::export::TransparentTransactionInfo;
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::transaction::announcement::Announcement;
-use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::utxo_triple::UtxoTriple;
-use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::wallet::address::KeyType;
-use crate::models::state::wallet::address::SpendingKey;
-use crate::models::state::wallet::change_policy::ChangePolicy;
-use crate::models::state::wallet::transaction_input::TxInput;
-use crate::models::state::wallet::transaction_input::TxInputList;
-use crate::models::state::wallet::transaction_output::TxOutput;
-use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::models::state::GlobalState;
-use crate::models::state::StateLock;
+use crate::protocol::consensus::block::block_height::BlockHeight;
+use crate::protocol::consensus::transaction::announcement::Announcement;
+use crate::protocol::consensus::transaction::lock_script::LockScript;
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::protocol::consensus::transaction::utxo_triple::UtxoTriple;
+use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::protocol::proof_abstractions::timestamp::Timestamp;
+use crate::state::transaction::transaction_details::TransactionDetails;
+use crate::state::wallet::address::KeyType;
+use crate::state::wallet::address::SpendingKey;
+use crate::state::wallet::change_policy::ChangePolicy;
+use crate::state::wallet::transaction_input::TxInput;
+use crate::state::wallet::transaction_input::TxInputList;
+use crate::state::wallet::transaction_output::TxOutput;
+use crate::state::wallet::transaction_output::TxOutputList;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::state::GlobalState;
+use crate::state::StateLock;
 use crate::Block;
 use crate::WalletState;
 

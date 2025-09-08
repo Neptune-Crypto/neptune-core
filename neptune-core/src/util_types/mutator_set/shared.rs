@@ -3,11 +3,11 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
-use crate::models::blockchain::shared::Hash;
 
 pub const WINDOW_SIZE: u32 = 1 << 20;
 pub const CHUNK_SIZE: u32 = 1 << 12;
@@ -82,7 +82,7 @@ pub fn get_batch_mutation_argument_for_removal_record(
                     // *old* (non-updated) MMR membership proof.
                     if !batch_modification_hash_map.contains_key(chunk_index) {
                         batch_modification_hash_map
-                            .insert(*chunk_index, (mmr_mp.to_owned(), Hash::hash(chunk)));
+                            .insert(*chunk_index, (mmr_mp.to_owned(), Tip5::hash(chunk)));
                     }
                 }
 
@@ -108,7 +108,7 @@ pub fn get_batch_mutation_argument_for_removal_record(
                                 // for-loop, we can calculate the hash of the updated chunk now.
                                 batch_modification_hash_map.insert(
                                     *chunk_index,
-                                    (mp.to_owned(), Hash::hash(&target_chunk)),
+                                    (mp.to_owned(), Tip5::hash(&target_chunk)),
                                 );
                             }
                         }
@@ -178,7 +178,7 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
                     // *old* (before reversion) MMR membership proof.
                     if !batch_modification_hash_map.contains_key(chunk_index) {
                         batch_modification_hash_map
-                            .insert(*chunk_index, (mmr_mp.to_owned(), Hash::hash(chunk)));
+                            .insert(*chunk_index, (mmr_mp.to_owned(), Tip5::hash(chunk)));
                     }
                 }
 
@@ -204,7 +204,7 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
                                 // for-loop, we can calculate the hash of the updated chunk now.
                                 batch_modification_hash_map.insert(
                                     *chunk_index,
-                                    (mp.to_owned(), Hash::hash(&target_chunk)),
+                                    (mp.to_owned(), Tip5::hash(&target_chunk)),
                                 );
                             }
                         }

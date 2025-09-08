@@ -7,14 +7,14 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
-use neptune_cash::config_models::network::Network;
-use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use neptune_cash::models::state::wallet::address::KeyType;
-use neptune_cash::models::state::wallet::address::ReceivingAddress;
-use neptune_cash::models::state::wallet::change_policy::ChangePolicy;
-use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::application::config::network::Network;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::RPCClient;
+use neptune_cash::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_cash::state::wallet::address::KeyType;
+use neptune_cash::state::wallet::address::ReceivingAddress;
+use neptune_cash::state::wallet::change_policy::ChangePolicy;
+use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
 use ratatui::layout::Alignment;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -68,11 +68,11 @@ pub struct SendScreen {
     reset_me: Arc<Mutex<ResetType>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     network: Network,
-    token: rpc_auth::Token,
+    token: auth::Token,
 }
 
 impl SendScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: rpc_auth::Token) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: auth::Token) -> Self {
         SendScreen {
             active: false,
             fg: Color::Gray,
@@ -94,7 +94,7 @@ impl SendScreen {
     #[expect(clippy::too_many_arguments)]
     async fn check_and_pay_sequence(
         rpc_client: Arc<RPCClient>,
-        token: rpc_auth::Token,
+        token: auth::Token,
         address: String,
         amount: String,
         fee: String,

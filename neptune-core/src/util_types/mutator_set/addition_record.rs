@@ -45,17 +45,18 @@ impl Display for AdditionRecord {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use rand::random;
+    use tasm_lib::prelude::Tip5;
 
     use super::*;
-    use crate::models::blockchain::shared::Hash;
+
     use crate::util_types::mutator_set::commit;
 
     #[test]
     fn get_size_test() {
         let addition_record_0: AdditionRecord = commit(
-            Hash::hash(&1492u128),
-            Hash::hash(&1522u128),
-            Hash::hash(&1521u128),
+            Tip5::hash(&1492u128),
+            Tip5::hash(&1522u128),
+            Tip5::hash(&1521u128),
         );
 
         assert_eq!(std::mem::size_of::<Digest>(), addition_record_0.get_size());
@@ -64,42 +65,42 @@ mod tests {
     #[test]
     fn hash_identity_test() {
         let addition_record_0: AdditionRecord = commit(
-            Hash::hash(&1492u128),
-            Hash::hash(&1522u128),
-            Hash::hash(&1521u128),
+            Tip5::hash(&1492u128),
+            Tip5::hash(&1522u128),
+            Tip5::hash(&1521u128),
         );
 
         let addition_record_1: AdditionRecord = commit(
-            Hash::hash(&1492u128),
-            Hash::hash(&1522u128),
-            Hash::hash(&1521u128),
+            Tip5::hash(&1492u128),
+            Tip5::hash(&1522u128),
+            Tip5::hash(&1521u128),
         );
 
         assert_eq!(
-            Hash::hash(&addition_record_0),
-            Hash::hash(&addition_record_1),
+            Tip5::hash(&addition_record_0),
+            Tip5::hash(&addition_record_1),
             "Two addition records with same commitments and same MMR AOCLs must agree."
         );
 
         let addition_record_2: AdditionRecord = commit(
-            Hash::hash(&1451u128),
-            Hash::hash(&1480u128),
-            Hash::hash(&1481u128),
+            Tip5::hash(&1451u128),
+            Tip5::hash(&1480u128),
+            Tip5::hash(&1481u128),
         );
 
         // Verify behavior with empty mutator sets. All empty MS' are the same.
         assert_ne!(
-            Hash::hash(&addition_record_0),
-            Hash::hash(&addition_record_2),
+            Tip5::hash(&addition_record_0),
+            Tip5::hash(&addition_record_2),
             "Two addition records with differing commitments but same MMR AOCLs must differ."
         );
     }
 
     #[test]
     fn serialization_test() {
-        let item = Hash::hash(&1492u128);
-        let sender_randomness = Hash::hash(&1522u128);
-        let receiver_digest = Hash::hash(&1583u128);
+        let item = Tip5::hash(&1492u128);
+        let sender_randomness = Tip5::hash(&1522u128);
+        let receiver_digest = Tip5::hash(&1583u128);
         let addition_record: AdditionRecord = commit(item, sender_randomness, receiver_digest);
         let json = serde_json::to_string(&addition_record).unwrap();
         let s_back = serde_json::from_str::<AdditionRecord>(&json).unwrap();

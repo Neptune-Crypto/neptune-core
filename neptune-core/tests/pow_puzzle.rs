@@ -6,9 +6,10 @@ use std::path::PathBuf;
 
 use common::genesis_node::GenesisNode;
 use common::logging;
-use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
-use neptune_cash::rpc_server::proof_of_work_puzzle::ProofOfWorkPuzzle;
-use neptune_cash::{api::export::Network, models::blockchain::block::block_header::BlockPow};
+use neptune_cash::api::export::Network;
+use neptune_cash::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
+use neptune_cash::protocol::consensus::block::block_header::BlockPow;
+use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 use crate::common::fetch_files::{test_helper_data_dir, try_fetch_file_from_server};

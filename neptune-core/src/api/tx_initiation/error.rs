@@ -5,11 +5,11 @@ use tasm_lib::prelude::Digest;
 use crate::api::export::BlockHeight;
 use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::RecordTransactionError;
-use crate::job_queue::errors::AddJobError;
-use crate::job_queue::errors::JobHandleError;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
-use crate::models::proof_abstractions::tasm::prover_job::ProverJobError;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::application::job_queue::errors::AddJobError;
+use crate::application::job_queue::errors::JobHandleError;
+use crate::protocol::consensus::transaction::transaction_proof::TransactionProofType;
+use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobError;
+use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 
 /// enumerates possible transaction send errors
 #[derive(Debug, Clone, thiserror::Error)]

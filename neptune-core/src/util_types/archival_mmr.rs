@@ -1,6 +1,7 @@
 use std::ops::RangeInclusive;
 
 use itertools::Itertools;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -14,9 +15,8 @@ use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
 
-use crate::database::storage::storage_schema::DbtVec;
-use crate::database::storage::storage_vec::traits::*;
-use crate::models::blockchain::shared::Hash;
+use crate::application::database::storage::storage_schema::DbtVec;
+use crate::application::database::storage::storage_vec::traits::*;
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///
@@ -72,7 +72,7 @@ where
                 .get(shared_advanced::left_sibling(node_index, height))
                 .await;
             returned_auth_path.push(left_sibling_hash);
-            acc_hash = Hash::hash_pair(left_sibling_hash, acc_hash);
+            acc_hash = Tip5::hash_pair(left_sibling_hash, acc_hash);
             self.digests.push(acc_hash).await;
             node_index += 1;
         }
@@ -97,7 +97,7 @@ where
                 shared_advanced::right_lineage_length_and_own_height(node_index);
             acc_hash = if right_lineage_count != 0 {
                 // node is right child
-                Hash::hash_pair(
+                Tip5::hash_pair(
                     self.digests
                         .get(shared_advanced::left_sibling(node_index, height))
                         .await,
@@ -105,7 +105,7 @@ where
                 )
             } else {
                 // node is left child
-                Hash::hash_pair(
+                Tip5::hash_pair(
                     acc_hash,
                     self.digests
                         .get(shared_advanced::right_sibling(node_index, height))
@@ -392,12 +392,11 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::database::storage::storage_schema::traits::*;
-    use crate::database::storage::storage_schema::SimpleRustyStorage;
-    use crate::database::storage::storage_vec::OrdinaryVec;
-    use crate::database::NeptuneLevelDb;
+    use crate::application::database::storage::storage_schema::traits::*;
+    use crate::application::database::storage::storage_schema::SimpleRustyStorage;
+    use crate::application::database::storage::storage_vec::OrdinaryVec;
+    use crate::application::database::NeptuneLevelDb;
     use crate::tests::shared_tokio_runtime;
-    use crate::Hash;
 
     type Storage = OrdinaryVec<Digest>;
 
@@ -994,7 +993,7 @@ pub(crate) mod tests {
             assert!(!mp_verifies_2);
         }
 
-        let new_leaf_hash: Digest = Hash::hash(&BFieldElement::new(201));
+        let new_leaf_hash: Digest = Tip5::hash(&BFieldElement::new(201));
         mmr.append(new_leaf_hash).await;
 
         let expected_num_leaves = 1 + num_leaves;
@@ -1004,7 +1003,7 @@ pub(crate) mod tests {
         assert_eq!(expected_node_count, mmr.count_nodes().await);
 
         for leaf_index in 0..num_leaves {
-            let new_leaf: Digest = Hash::hash(&BFieldElement::new(987223));
+            let new_leaf: Digest = Tip5::hash(&BFieldElement::new(987223));
             mmr.mutate_leaf(leaf_index, new_leaf).await;
             assert_eq!(new_leaf, mmr.get_leaf_async(leaf_index).await);
             assert_eq!(new_leaf, mmr.try_get_leaf(leaf_index).await.unwrap());

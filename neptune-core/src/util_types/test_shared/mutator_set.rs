@@ -5,15 +5,16 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::NeptuneLevelDb;
-use crate::models::blockchain::shared::Hash;
+use crate::application::database::storage::storage_vec::traits::*;
+use crate::application::database::NeptuneLevelDb;
+
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
@@ -323,7 +324,7 @@ pub fn pseudorandom_merkle_root_with_authentication_paths(
             nodes
                 .entry(wi_even)
                 .or_insert_with(|| rng.random::<Digest>());
-            let hash = Hash::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
+            let hash = Tip5::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
             nodes.insert(wi >> 1, hash);
         }
         depth -= 1;
@@ -361,9 +362,9 @@ fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: 
     let mut acc = leaf;
     for (shift, &p) in path.iter().enumerate() {
         if (index >> shift) & 1 == 1 {
-            acc = Hash::hash_pair(p, acc);
+            acc = Tip5::hash_pair(p, acc);
         } else {
-            acc = Hash::hash_pair(acc, p);
+            acc = Tip5::hash_pair(acc, p);
         }
     }
     acc == root

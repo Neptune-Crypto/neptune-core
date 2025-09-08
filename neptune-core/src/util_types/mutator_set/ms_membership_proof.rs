@@ -10,6 +10,7 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -29,7 +30,6 @@ use super::shared::get_batch_mutation_argument_for_removal_record;
 use super::shared::prepare_authenticated_batch_modification_for_removal_record_reversion;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-use crate::models::blockchain::shared::Hash;
 
 impl Error for MembershipProofError {}
 
@@ -100,7 +100,7 @@ impl MsMembershipProof {
                 .iter()
                 .all(|(chunk_index, (mmr_mp, chunk))| mmr_mp.verify(
                     *chunk_index,
-                    Hash::hash(chunk),
+                    Tip5::hash(chunk),
                     &mutator_set.swbf_inactive.peaks(),
                     mutator_set.swbf_inactive.num_leafs()
                 ))));
@@ -139,7 +139,7 @@ impl MsMembershipProof {
             "Number of SWBF MMR leafs must match current batch index"
         );
         let new_chunk = mutator_set.swbf_active.slid_chunk();
-        let new_chunk_digest: Digest = Hash::hash(&new_chunk);
+        let new_chunk_digest: Digest = Tip5::hash(&new_chunk);
 
         // Insert the new chunk digest into the accumulator-version of the
         // SWBF MMR to get its authentication path. It's important to convert the MMR
@@ -295,7 +295,7 @@ impl MsMembershipProof {
 
         // window does slide
         let new_chunk = mutator_set.swbf_active.slid_chunk();
-        let new_chunk_digest: Digest = Hash::hash(&new_chunk);
+        let new_chunk_digest: Digest = Tip5::hash(&new_chunk);
 
         // Get Bloom filter indices by recalculating them.
         let all_indices = AbsoluteIndexSet::compute(
@@ -642,7 +642,7 @@ pub mod tests {
 
         // Get an MMR membership proof by adding the 8th leaf
         let zero_chunk = Chunk::empty_chunk();
-        let mmr_mp = mmra.append(Hash::hash(&zero_chunk));
+        let mmr_mp = mmra.append(Tip5::hash(&zero_chunk));
 
         // Verify that the MMR membership proof has the expected length of 3 (sanity check)
         assert_eq!(3, mmr_mp.authentication_path.len());

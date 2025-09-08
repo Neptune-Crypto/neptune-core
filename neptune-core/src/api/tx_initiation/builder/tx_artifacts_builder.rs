@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::api::export::Transaction;
 use crate::api::export::TxCreationArtifacts;
 use crate::api::tx_initiation::error::CreateTxError;
-use crate::models::state::transaction_details::TransactionDetails;
+use crate::state::transaction::transaction_details::TransactionDetails;
 
 /// a builder for [TxCreationArtifacts]
 ///

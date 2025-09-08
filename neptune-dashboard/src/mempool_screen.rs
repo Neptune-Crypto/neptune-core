@@ -5,9 +5,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use itertools::Itertools;
-use neptune_cash::rpc_auth;
-use neptune_cash::rpc_server::MempoolTransactionInfo;
-use neptune_cash::rpc_server::RPCClient;
+use neptune_cash::application::rpc::auth;
+use neptune_cash::application::rpc::server::MempoolTransactionInfo;
+use neptune_cash::application::rpc::server::RPCClient;
 use num_traits::CheckedSub;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -41,11 +41,11 @@ pub struct MempoolScreen {
     poll_task: Option<Arc<std::sync::Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     page_start: Arc<std::sync::Mutex<usize>>,
-    token: rpc_auth::Token,
+    token: auth::Token,
 }
 
 impl MempoolScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, token: auth::Token) -> Self {
         MempoolScreen {
             active: false,
             fg: Color::Gray,
@@ -63,7 +63,7 @@ impl MempoolScreen {
     async fn run_polling_loop(
         page_start: Arc<std::sync::Mutex<usize>>,
         rpc_client: Arc<RPCClient>,
-        token: rpc_auth::Token,
+        token: auth::Token,
         mempool_transaction_info: Arc<std::sync::Mutex<Vec<MempoolTransactionInfo>>>,
         escalatable_event_arc: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) -> ! {
