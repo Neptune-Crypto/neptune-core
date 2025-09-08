@@ -28,12 +28,12 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
-use crate::application::control::connect_to_peers::answer_peer;
-use crate::application::control::connect_to_peers::call_peer;
-use crate::application::control::connect_to_peers::precheck_incoming_connection_is_allowed;
-use crate::application::control::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
-use crate::application::control::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
-use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::connect_to_peers::answer_peer;
+use crate::application::loops::connect_to_peers::call_peer;
+use crate::application::loops::connect_to_peers::precheck_incoming_connection_is_allowed;
+use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;

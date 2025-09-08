@@ -53,11 +53,11 @@ use crate::api::export::NeptuneProof;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::control::main_loop::proof_upgrader::ProofCollectionToSingleProof;
-use crate::application::control::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
-use crate::application::control::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
-use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
-use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
+use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::application::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::storage::storage_vec::Index;
@@ -2346,7 +2346,7 @@ mod tests {
     use crate::api::export::ReceivingAddress;
     use crate::api::export::TxOutputList;
     use crate::application::config::network::Network;
-    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_transaction::BlockTransaction;
@@ -5145,8 +5145,8 @@ mod tests {
         use num_traits::CheckedSub;
 
         use super::*;
-        use crate::application::control::mine_loop::create_block_transaction_from;
-        use crate::application::control::mine_loop::TxMergeOrigin;
+        use crate::application::loops::mine_loop::create_block_transaction_from;
+        use crate::application::loops::mine_loop::TxMergeOrigin;
 
         /// test scenario: onchain/symmetric.
         /// pass outcome: no funds loss

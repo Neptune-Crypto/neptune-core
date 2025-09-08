@@ -83,9 +83,9 @@ pub(crate) mod tests {
     use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
     use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
     use crate::application::config::cli_args;
-    use crate::application::control::mine_loop::compose_block_helper;
-    use crate::application::control::mine_loop::create_block_transaction_from;
-    use crate::application::control::mine_loop::TxMergeOrigin;
+    use crate::application::loops::mine_loop::compose_block_helper;
+    use crate::application::loops::mine_loop::create_block_transaction_from;
+    use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::application::triton_vm_job_queue::vm_job_queue;
     use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::models::blockchain::block::Block;

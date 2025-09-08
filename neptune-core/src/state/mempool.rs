@@ -1201,10 +1201,10 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::application::control::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
-    use crate::application::control::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
-    use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
-    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::loops::main_loop::proof_upgrader::PrimitiveWitnessToProofCollection;
+    use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+    use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_height::BlockHeight;

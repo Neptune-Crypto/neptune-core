@@ -72,7 +72,7 @@ use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::config::network::Network;
-use crate::application::control::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::macros::fn_name;

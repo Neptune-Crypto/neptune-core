@@ -24,7 +24,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::application::config::cli_args;
-use crate::application::control::peer_loop::PeerLoopHandler;
+use crate::application::loops::peer_loop::PeerLoopHandler;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;

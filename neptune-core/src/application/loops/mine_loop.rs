@@ -32,8 +32,8 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::application::config::network::Network;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
-use crate::application::control::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::job_queue::errors::JobHandleError;
+use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::triton_vm_job_queue::vm_job_queue;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;

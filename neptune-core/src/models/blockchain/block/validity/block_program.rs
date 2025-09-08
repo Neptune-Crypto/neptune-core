@@ -343,8 +343,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::application::control::mine_loop::create_block_transaction_from;
-    use crate::application::control::mine_loop::TxMergeOrigin;
+    use crate::application::loops::mine_loop::create_block_transaction_from;
+    use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_validation_error::BlockValidationError;

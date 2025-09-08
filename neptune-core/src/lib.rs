@@ -72,8 +72,8 @@ use tracing::info;
 use triton_vm::prelude::BFieldElement;
 
 use crate::application::config::data_directory::DataDirectory;
-use crate::application::control::connect_to_peers::call_peer;
-use crate::application::control::main_loop::MainLoopHandler;
+use crate::application::loops::connect_to_peers::call_peer;
+use crate::application::loops::main_loop::MainLoopHandler;
 use crate::application::locks::tokio as sync_tokio;
 use crate::application::rpc::server::RPC;
 use crate::models::channel::MainToMiner;
@@ -227,7 +227,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<MainLoopHandler> {
         let miner_join_handle = tokio::task::Builder::new()
             .name("miner")
             .spawn(async move {
-                application::control::mine_loop::mine(
+                application::loops::mine_loop::mine(
                     main_to_miner_rx,
                     miner_to_main_tx,
                     miner_state_lock,

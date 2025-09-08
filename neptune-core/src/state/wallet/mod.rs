@@ -45,7 +45,7 @@ mod tests {
     use crate::api::export::Transaction;
     use crate::application::config::cli_args;
     use crate::application::config::network::Network;
-    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::database::storage::storage_vec::traits::*;
     use crate::application::triton_vm_job_queue::TritonVmJobPriority;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;

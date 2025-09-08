@@ -15,8 +15,8 @@ use crate::api::export::Network;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
-use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
-use crate::application::control::mine_loop::make_coinbase_transaction_stateless;
+use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -291,7 +291,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         timestamp.unwrap_or_else(|| tip_block.header().timestamp + Timestamp::minutes(10));
 
     let (transaction, expected_composer_utxos) =
-        crate::application::control::mine_loop::create_block_transaction(
+        crate::application::loops::mine_loop::create_block_transaction(
             &tip_block,
             global_state_lock.clone(),
             timestamp,

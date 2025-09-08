@@ -6,8 +6,8 @@ use rand::SeedableRng;
 
 use crate::api::export::ReceivingAddress;
 use crate::application::config::network::Network;
-use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
-use crate::application::control::mine_loop::prepare_coinbase_transaction_stateless;
+use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
+use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::models::blockchain::block::block_transaction::BlockTransaction;
 use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use crate::models::blockchain::block::validity::block_program::BlockProgram;

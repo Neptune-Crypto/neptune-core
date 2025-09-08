@@ -1182,9 +1182,9 @@ pub(crate) mod tests {
     use crate::application::config::cli_args;
     use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
     use crate::application::config::network::Network;
-    use crate::application::control::mine_loop::composer_parameters::ComposerParameters;
-    use crate::application::control::mine_loop::prepare_coinbase_transaction_stateless;
-    use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
+    use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
+    use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
+    use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::application::database::storage::storage_schema::SimpleRustyStorage;
     use crate::application::database::NeptuneLevelDb;
     use crate::application::triton_vm_job_queue::vm_job_queue;
@@ -1716,9 +1716,9 @@ pub(crate) mod tests {
         use rand::SeedableRng;
 
         use super::*;
-        use crate::application::control::mine_loop::create_block_transaction_from;
-        use crate::application::control::mine_loop::tests::make_coinbase_transaction_from_state;
-        use crate::application::control::mine_loop::TxMergeOrigin;
+        use crate::application::loops::mine_loop::create_block_transaction_from;
+        use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
+        use crate::application::loops::mine_loop::TxMergeOrigin;
         use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::state::transaction::tx_creation_config::TxCreationConfig;
         use crate::state::wallet::address::KeyType;

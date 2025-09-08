@@ -14,7 +14,7 @@ use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionPr
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::application::config::fee_notification_policy::FeeNotificationPolicy;
 use crate::application::config::network::Network;
-use crate::application::control::main_loop::upgrade_incentive::UpgradeIncentive;
+use crate::application::loops::main_loop::upgrade_incentive::UpgradeIncentive;
 use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
