@@ -33,6 +33,10 @@ impl BlockProposal {
         Self::None
     }
 
+    pub(crate) fn has_own(&self) -> bool {
+        matches!(self, Self::OwnComposition(_))
+    }
+
     pub fn expect(&self, msg: &str) -> &Block {
         match self {
             BlockProposal::OwnComposition((block, _)) => block,
@@ -96,6 +100,9 @@ pub(crate) enum BlockProposalRejectError {
 
     /// Block proposal comes from a peer that's not whitelisted
     NotWhiteListed,
+
+    /// Block proposal is rejected because we already built one locally.
+    HasOwnBlockProposal,
 }
 
 impl fmt::Display for BlockProposalRejectError {
@@ -124,6 +131,9 @@ impl fmt::Display for BlockProposalRejectError {
             }
             BlockProposalRejectError::NotWhiteListed => {
                 write!(f, "Proposal received from non-whitelisted peer")
+            }
+            BlockProposalRejectError::HasOwnBlockProposal => {
+                write!(f, "Proposal received but we already built one locally")
             }
         }
     }

@@ -12,7 +12,6 @@ pub mod wallet;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -828,6 +827,10 @@ impl GlobalState {
             });
         }
 
+        if self.mining_state.block_proposal.has_own() {
+            return Err(BlockProposalRejectError::HasOwnBlockProposal);
+        }
+
         let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
             x.total_guesser_reward()
                 .expect("block in state must be valid")
@@ -858,6 +861,10 @@ impl GlobalState {
                 received: incoming_proposal_prev_block_digest,
                 expected: current_tip_digest,
             });
+        }
+
+        if self.mining_state.block_proposal.has_own() {
+            return Err(BlockProposalRejectError::HasOwnBlockProposal);
         }
 
         let maybe_existing_fee = self.mining_state.block_proposal.map(|x| {
