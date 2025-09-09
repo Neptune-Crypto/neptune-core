@@ -1183,6 +1183,7 @@ pub(crate) mod tests {
     use crate::application::config::network::Network;
     use crate::application::database::storage::storage_schema::SimpleRustyStorage;
     use crate::application::database::NeptuneLevelDb;
+    use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
     use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
     use crate::application::loops::mine_loop::prepare_coinbase_transaction_stateless;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state;
@@ -1439,6 +1440,7 @@ pub(crate) mod tests {
         let network = Network::Main;
         let a_wallet_secret = WalletEntropy::new_random();
         let a_key = a_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let coinbase_distribution = CoinbaseDistribution::solo(a_key.to_address().into());
         let genesis = Block::genesis(network);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
         let now = genesis.header().timestamp + Timestamp::days(1);
@@ -1447,7 +1449,7 @@ pub(crate) mod tests {
         let step = 0.05;
         while guesser_fraction + step <= 1f64 {
             let composer_parameters = ComposerParameters::new(
-                a_key.to_address().into(),
+                coinbase_distribution.clone(),
                 rng.random(),
                 None,
                 guesser_fraction,

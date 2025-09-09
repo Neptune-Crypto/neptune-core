@@ -54,7 +54,7 @@ use crate::application::database::storage::storage_vec::traits::*;
 use crate::application::database::storage::storage_vec::Index;
 use crate::application::database::NeptuneLevelDb;
 use crate::application::loops::channel::ClaimUtxoData;
-use crate::application::loops::mine_loop::composer_outputs;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::application::loops::mine_loop::composer_parameters::ComposerParameters;
 use crate::protocol::consensus::block::block_height::BlockHeight;
 use crate::protocol::consensus::block::mutator_set_update::MutatorSetUpdate;
@@ -170,7 +170,8 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
-    /// Generate [`ComposerParameters`] for composing the next block.
+    /// Generate [`ComposerParameters`] for composing the next block, sending
+    /// the entire coinbase reward to an address of the wallet.
     ///
     ///  # Panics
     ///
@@ -186,9 +187,10 @@ impl WalletState {
         let sender_randomness_for_composer = self
             .wallet_entropy
             .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
+        let coinbase_distribution = CoinbaseDistribution::solo(reward_address);
 
         ComposerParameters::new(
-            reward_address,
+            coinbase_distribution,
             sender_randomness_for_composer,
             Some(receiver_preimage),
             guesser_fraction,
@@ -1269,11 +1271,8 @@ impl WalletState {
             if let Some(receiver_preimage) = composer_parameters.maybe_receiver_preimage() {
                 // derive the composer fee UTXOs as the own miner would have
                 let coinbase_amount = Block::block_subsidy(new_block.header().height);
-                let composer_txos = composer_outputs(
-                    coinbase_amount,
-                    composer_parameters.clone(),
-                    new_block.header().timestamp,
-                );
+                let composer_txos =
+                    composer_parameters.tx_outputs(coinbase_amount, new_block.header().timestamp);
 
                 for composer_output in composer_txos.iter() {
                     // compute what the addition record would have been
@@ -3347,8 +3346,9 @@ pub(crate) mod tests {
             // below test function.
             tx_spending_guesser_fee.proof = TransactionProof::invalid();
 
+            let coinbase_distribution = CoinbaseDistribution::solo(a_key.to_address().into());
             let composer_parameters = ComposerParameters::new(
-                a_key.to_address().into(),
+                coinbase_distribution,
                 rng.random(),
                 Some(a_key.receiver_preimage()),
                 0.5f64,

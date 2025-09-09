@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tasm_lib::prelude::Digest;
 
 use super::mining_status::MiningStatus;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
 use crate::state::BlockProposal;
 use crate::Block;
 
@@ -18,9 +19,10 @@ pub struct MiningState {
     /// main loop.
     pub block_proposal: BlockProposal,
 
-    /// The block proposals that were exported to external guessers. Not persisted. Only contains
-    /// block proposals pertaining to the next block height. All other proposals are forgotten when
-    /// a new block is received.
+    /// The block proposals that were exported to external guessers. Not
+    /// persisted. Only contains block proposals pertaining to the next block
+    /// height. All exported proposals are forgotten when a new block is
+    /// received.
     pub(crate) exported_block_proposals: HashMap<Digest, Block>,
 
     /// Indicates whether the guessing or composing task is running, and if so,

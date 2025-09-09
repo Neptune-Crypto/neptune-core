@@ -800,6 +800,7 @@ impl GlobalState {
     ///  - If `next_block_height` is genesis.
     pub(crate) fn composer_parameters(&self, next_block_height: BlockHeight) -> ComposerParameters {
         assert!(!next_block_height.is_genesis());
+
         self.wallet_state.composer_parameters(
             next_block_height,
             self.cli.guesser_fraction,

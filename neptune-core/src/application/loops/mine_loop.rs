@@ -1,3 +1,4 @@
+pub mod coinbase_distribution;
 pub(crate) mod composer_parameters;
 use std::cmp::max;
 use std::sync::Arc;
@@ -55,7 +56,6 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::transaction::transaction_details::TransactionDetails;
 use crate::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::state::wallet::transaction_output::TxOutput;
 use crate::state::wallet::transaction_output::TxOutputList;
 use crate::state::GlobalStateLock;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
@@ -378,80 +378,6 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     Ok((transaction, composer_outputs))
 }
 
-/// Produce outputs spending a given portion of the coinbase amount. Returns
-/// two outputs unless this composition awards the entire coinbase amount to
-/// the guesser, in which case zero outputs are returned.
-///
-/// The coinbase amount is usually set to the block subsidy for this block
-/// height.
-///
-/// There are two equal-value outputs because one is liquid immediately, and the
-/// other is locked for 3 years. The portion of the entire block subsidy that
-/// goes to the composer is determined by the `guesser_fee_fraction` field of
-/// the composer parameters.
-///
-/// The sum of the value of the outputs is guaranteed to not exceed the
-/// coinbase amount, since the guesser fee fraction is guaranteed to be in the
-/// range \[0;1\].
-///
-/// Returns: Either the empty list, or two outputs, one immediately liquid, the
-/// other timelocked for three years, as required by the consensus rules.
-///
-/// # Panics
-///
-/// If the provided guesser fee fraction is not between 0 and 1 (inclusive).
-pub(crate) fn composer_outputs(
-    coinbase_amount: NativeCurrencyAmount,
-    composer_parameters: ComposerParameters,
-    timestamp: Timestamp,
-) -> TxOutputList {
-    let guesser_fee =
-        coinbase_amount.lossy_f64_fraction_mul(composer_parameters.guesser_fee_fraction());
-
-    let amount_to_composer = coinbase_amount
-        .checked_sub(&guesser_fee)
-        .expect("total_composer_fee cannot exceed coinbase_amount");
-
-    if amount_to_composer.is_zero() {
-        return Vec::<TxOutput>::default().into();
-    }
-
-    // Note that this calculation guarantees that at least half of the coinbase
-    // is timelocked, as a rounding error in the last digit subtracts from the
-    // liquid amount. This quality is required by the NativeCurrency type
-    // script.
-    let mut liquid_composer_amount = amount_to_composer;
-    liquid_composer_amount.div_two();
-    let timelocked_composer_amount = amount_to_composer
-        .checked_sub(&liquid_composer_amount)
-        .expect("Amount to composer must be larger than liquid amount to composer.");
-
-    let owned = true;
-    let liquid_coinbase_output = TxOutput::native_currency(
-        liquid_composer_amount,
-        composer_parameters.sender_randomness(),
-        composer_parameters.reward_address(),
-        composer_parameters.notification_policy().into(),
-        owned,
-    );
-
-    // Set the time lock to 3 years (minimum) plus 30 minutes margin, since the
-    // timestamp might be bumped by future merges. These timestamp bumps affect
-    // only the `timestamp` field of the transaction kernel and not the state
-    // of the `TimeLock` type script. So in the end you might end up with a
-    // transaction whose time-locked portion is not time-locked long enough.
-    let timelocked_coinbase_output = TxOutput::native_currency(
-        timelocked_composer_amount,
-        composer_parameters.sender_randomness(),
-        composer_parameters.reward_address(),
-        composer_parameters.notification_policy().into(),
-        owned,
-    )
-    .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
-
-    vec![liquid_coinbase_output, timelocked_coinbase_output].into()
-}
-
 /// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
 /// transaction.
 ///
@@ -469,7 +395,7 @@ pub(crate) fn prepare_coinbase_transaction_stateless(
     info!("Creating coinbase for block of height {next_block_height}.");
 
     let coinbase_amount = Block::block_subsidy(next_block_height);
-    let composer_outputs = composer_outputs(coinbase_amount, composer_parameters, timestamp);
+    let composer_outputs = composer_parameters.tx_outputs(coinbase_amount, timestamp);
     let total_composer_fee = composer_outputs.total_native_coins();
 
     let guesser_fee = coinbase_amount
@@ -1046,6 +972,7 @@ pub(crate) mod tests {
     use crate::application::config::network::Network;
     use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
     use crate::application::job_queue::errors::JobHandleError;
+    use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
@@ -1911,7 +1838,7 @@ pub(crate) mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn coinbase_transaction_has_one_timelocked_and_one_liquid_output() {
+    async fn solo_coinbase_transaction_has_one_timelocked_and_one_liquid_output() {
         for notification_policy in [
             FeeNotificationPolicy::OffChain,
             FeeNotificationPolicy::OnChainGeneration,
@@ -2002,39 +1929,36 @@ pub(crate) mod tests {
     #[test]
     fn composer_outputs_has_length_zero_if_guesser_fraction_is_1() {
         let mut rng = rand::rng();
-        let address = SymmetricKey::from_seed(rng.random()).into();
+        let address = SymmetricKey::from_seed(rng.random());
+        let coinbase_distribution = CoinbaseDistribution::solo(address.into());
         let composer_parameters = ComposerParameters::new(
-            address,
+            coinbase_distribution,
             rng.random(),
             None,
             1.0,
             FeeNotificationPolicy::OffChain,
         );
-        let composer_outputs = composer_outputs(
-            NativeCurrencyAmount::coins(1),
-            composer_parameters,
-            Timestamp::now(),
-        );
+
+        let composer_outputs =
+            composer_parameters.tx_outputs(NativeCurrencyAmount::coins(1), Timestamp::now());
         assert!(composer_outputs.is_empty());
     }
 
     #[test]
     fn composer_outputs_has_length_two_if_guesser_fraction_is_between_0_and_1() {
         let mut rng = rand::rng();
-        let address = SymmetricKey::from_seed(rng.random()).into();
+        let address = SymmetricKey::from_seed(rng.random());
+        let coinbase_distribution = CoinbaseDistribution::solo(address.into());
         let guesser_fraction = rng.random_range(0f64..=0.99999f64);
         let composer_parameters = ComposerParameters::new(
-            address,
+            coinbase_distribution,
             rng.random(),
             None,
             guesser_fraction,
             FeeNotificationPolicy::OffChain,
         );
-        let composer_outputs = composer_outputs(
-            NativeCurrencyAmount::coins(1),
-            composer_parameters,
-            Timestamp::now(),
-        );
+        let composer_outputs =
+            composer_parameters.tx_outputs(NativeCurrencyAmount::coins(1), Timestamp::now());
         assert_eq!(2, composer_outputs.len());
     }
 
