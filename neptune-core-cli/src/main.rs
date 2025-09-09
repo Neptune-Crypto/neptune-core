@@ -1,3 +1,4 @@
+pub(crate) mod models;
 mod parser;
 
 use std::io;
@@ -16,7 +17,6 @@ use anyhow::ensure;
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::Parser;
-use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
 use itertools::Itertools;
@@ -42,46 +42,17 @@ use neptune_cash::state::wallet::wallet_status::WalletStatus;
 use neptune_cash::state::wallet::wallet_status::WalletStatusExportFormat;
 use rand::Rng;
 use regex::Regex;
-use serde::Deserialize;
-use serde::Serialize;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
 
+use crate::models::claim_utxo::ClaimUtxoFormat;
+use crate::models::utxo_transfer_entry::UtxoTransferEntry;
 use crate::parser::beneficiary::Beneficiary;
 use crate::parser::hex_digest::HexDigest;
 
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
-
-/// represents data format of input to claim-utxo
-#[derive(Debug, Clone, Subcommand)]
-enum ClaimUtxoFormat {
-    /// reads a utxo-transfer json file
-    File {
-        /// path to the file
-        path: PathBuf,
-    },
-    Raw {
-        /// The encrypted UTXO notification payload.
-        ciphertext: String,
-    },
-}
-
-/// represents a UtxoTransfer entry in a utxo-transfer file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UtxoTransferEntry {
-    pub data_format: String,
-    pub recipient_abbrev: String,
-    pub recipient: String,
-    pub ciphertext: String,
-}
-
-impl UtxoTransferEntry {
-    fn data_format() -> String {
-        "neptune-utxo-transfer-v1.0".to_string()
-    }
-}
 
 #[derive(Debug, Clone, Parser)]
 enum Command {
