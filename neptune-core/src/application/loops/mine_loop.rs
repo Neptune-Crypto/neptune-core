@@ -1061,7 +1061,7 @@ pub(crate) mod tests {
     use crate::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
-    use crate::tests::shared::blocks::fake_deterministic_successor;
+    use crate::tests::shared::blocks::fake_valid_deterministic_successor;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash;
@@ -1273,7 +1273,7 @@ pub(crate) mod tests {
             .await;
 
         // Update state with block that does not include mempool-transaction
-        let block1 = fake_deterministic_successor(&genesis_block, network).await;
+        let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
         alice.set_new_tip(block1.clone()).await.unwrap();
 
         assert!(

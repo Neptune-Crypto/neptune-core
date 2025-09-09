@@ -12,6 +12,7 @@ pub mod wallet;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -808,8 +809,8 @@ impl GlobalState {
     }
 
     /// Returns true iff the incoming block proposal is more favorable than the
-    /// one we're currently working on. Returns false if client is a composer,
-    /// as it's assumed that they prefer guessing on their own block.
+    /// one we're currently working on. Returns false if peer is either not
+    /// whitelisted, or if all foreign block proposals should be rejected.
     ///
     /// Favor [`Self::favor_incoming_block_proposal`] whenever the digests are
     /// available, as this function can return false positives in case of a
@@ -819,10 +820,6 @@ impl GlobalState {
         incoming_block_height: BlockHeight,
         incoming_guesser_fee: NativeCurrencyAmount,
     ) -> Result<(), BlockProposalRejectError> {
-        if self.cli().compose {
-            return Err(BlockProposalRejectError::Composing);
-        }
-
         let expected_height = self.chain.light_state().header().height.next();
         if incoming_block_height != expected_height {
             return Err(BlockProposalRejectError::WrongHeight {
@@ -848,17 +845,13 @@ impl GlobalState {
     }
 
     /// Returns true iff the incoming block proposal is more favorable than the
-    /// one we're currently working on. Returns false if client is a composer,
-    /// as it's assumed that they prefer guessing on their own block.
+    /// one we're currently working on. Returns false if block proposal does not
+    /// have expected parent.
     pub(crate) fn favor_incoming_block_proposal(
         &self,
         incoming_proposal_prev_block_digest: Digest,
         incoming_guesser_fee: NativeCurrencyAmount,
     ) -> Result<(), BlockProposalRejectError> {
-        if self.cli().compose {
-            return Err(BlockProposalRejectError::Composing);
-        }
-
         let current_tip_digest = self.chain.light_state().hash();
         if incoming_proposal_prev_block_digest != current_tip_digest {
             return Err(BlockProposalRejectError::WrongParent {

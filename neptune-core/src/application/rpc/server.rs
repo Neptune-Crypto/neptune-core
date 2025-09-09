@@ -4997,7 +4997,7 @@ mod tests {
         use crate::state::mining::block_proposal::BlockProposal;
         use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
         use crate::state::wallet::address::KeyType;
-        use crate::tests::shared::blocks::fake_deterministic_successor;
+        use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::blocks::invalid_empty_block;
 
         #[test]
@@ -5060,7 +5060,7 @@ mod tests {
             .await;
 
             let genesis = Block::genesis(network);
-            let block1 = fake_deterministic_successor(&genesis, network).await;
+            let block1 = fake_valid_deterministic_successor(&genesis, network).await;
             bob.state
                 .lock_mut(|x| {
                     x.mining_state.block_proposal =

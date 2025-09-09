@@ -470,7 +470,10 @@ async fn fake_block_successor(
 
 /// Return a fake, deterministic, empty block for testing purposes, with a
 /// specified successsor and specified network. Does not have valid PoW.
-pub(crate) async fn fake_deterministic_successor(predecessor: &Block, network: Network) -> Block {
+pub(crate) async fn fake_valid_deterministic_successor(
+    predecessor: &Block,
+    network: Network,
+) -> Block {
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     fake_valid_block_proposal_successor_for_test(
         predecessor,
@@ -615,11 +618,11 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
 
     #[apply(shared_tokio_runtime)]
-    async fn fake_deterministic_successor_is_deterministic() {
+    async fn fake_valid_deterministic_successor_is_deterministic() {
         let network = Network::Main;
         let block = Block::genesis(network);
-        let ret0 = fake_deterministic_successor(&block, network).await;
-        let ret1 = fake_deterministic_successor(&block, network).await;
+        let ret0 = fake_valid_deterministic_successor(&block, network).await;
+        let ret1 = fake_valid_deterministic_successor(&block, network).await;
         assert_eq!(ret0, ret1);
     }
 }

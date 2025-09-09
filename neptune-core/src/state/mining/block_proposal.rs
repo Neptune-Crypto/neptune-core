@@ -76,9 +76,6 @@ impl BlockProposal {
 /// block proposal is most likely from another peer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BlockProposalRejectError {
-    /// Denotes that this instance is itself composing blocks
-    Composing,
-
     /// Incoming block proposal does not have prev_block_digest matching current tip
     WrongParent { received: Digest, expected: Digest },
 
@@ -93,12 +90,17 @@ pub(crate) enum BlockProposalRejectError {
         current: Option<NativeCurrencyAmount>,
         received: NativeCurrencyAmount,
     },
+
+    /// All foreign block proposals are ignored
+    IgnoreAllForeign,
+
+    /// Block proposal comes from a peer that's not whitelisted
+    NotWhiteListed,
 }
 
 impl fmt::Display for BlockProposalRejectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BlockProposalRejectError::Composing => write!(f, "Making own composition"),
             BlockProposalRejectError::WrongHeight { received, expected } => write!(
                 f,
                 "Expected block height: {}\nProposal block height: {}",
@@ -117,6 +119,12 @@ impl fmt::Display for BlockProposalRejectError {
                     .map(|c| format!("{}", c))
                     .unwrap_or("None".to_string())
             ),
+            BlockProposalRejectError::IgnoreAllForeign => {
+                write!(f, "Ignoring all foreign proposals")
+            }
+            BlockProposalRejectError::NotWhiteListed => {
+                write!(f, "Proposal received from non-whitelisted peer")
+            }
         }
     }
 }

@@ -1473,26 +1473,22 @@ impl PeerLoopHandler {
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
                 let peer_ip = self.peer_address.ip();
-                if !self
-                    .global_state_lock
-                    .cli()
-                    .accept_block_proposal_from(peer_ip)
-                {
-                    debug!(
-                        "Ignoring proposal notification because they are not whitelisted. \
-                     Peer IP: {peer_ip}"
-                    );
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
                 let verdict = self
                     .global_state_lock
-                    .lock_guard()
-                    .await
-                    .favor_incoming_block_proposal_legacy(
-                        block_proposal_notification.height,
-                        block_proposal_notification.guesser_fee,
-                    );
+                    .cli()
+                    .accept_block_proposal_from(peer_ip);
+
+                // Avoid acquiring lock if ip validation failed
+                let verdict = verdict.map(async |_| {
+                    self.global_state_lock
+                        .lock_guard()
+                        .await
+                        .favor_incoming_block_proposal_legacy(
+                            block_proposal_notification.height,
+                            block_proposal_notification.guesser_fee,
+                        )
+                });
+
                 match verdict {
                     Ok(_) => {
                         peer.send(PeerMessage::BlockProposalRequest(
@@ -1534,13 +1530,17 @@ impl PeerLoopHandler {
             PeerMessage::BlockProposal(new_proposal) => {
                 debug!("Got block proposal from peer.");
 
-                if !self
+                let peer_ip = self.peer_address.ip();
+                let verdict = self
                     .global_state_lock
                     .cli()
-                    .accept_block_proposal_from(self.peer_address.ip())
-                {
-                    warn!("Got block proposal from unwanted peer");
-                    self.punish(NegativePeerSanction::UnwantedMessage).await?;
+                    .accept_block_proposal_from(peer_ip);
+
+                // Avoid taking any locks if we don't accept block proposals
+                // from this IP
+                if verdict.is_err() {
+                    self.punish(NegativePeerSanction::BlockProposalFromBlockedPeer)
+                        .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -3619,7 +3619,7 @@ mod tests {
         use crate::application::triton_vm_job_queue::vm_job_queue;
         use crate::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
         use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-        use crate::tests::shared::blocks::fake_deterministic_successor;
+        use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
         #[traced_test]
@@ -3916,7 +3916,7 @@ mod tests {
                 let tx_synced_to_genesis = upgrade(pw_genesis.clone(), consensus_rule_set).await;
 
                 let genesis_block = Block::genesis(network);
-                let block1 = fake_deterministic_successor(&genesis_block, network).await;
+                let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
                 state_lock
                     .lock_guard_mut()
                     .await
@@ -3976,6 +3976,11 @@ mod tests {
     }
 
     mod block_proposals {
+        use std::net::IpAddr;
+
+        use crate::application::loops::channel::BlockProposalNotification;
+        use crate::tests::shared::blocks::fake_valid_deterministic_successor;
+
         use super::*;
 
         struct TestSetup {
@@ -3988,16 +3993,27 @@ mod tests {
             peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         }
 
-        async fn genesis_setup(network: Network) -> TestSetup {
+        async fn genesis_setup(cli: cli_args::Args) -> TestSetup {
+            let network = cli.network;
+            let peer_count = 1;
             let (peer_broadcast_tx, from_main_rx, to_main_tx, to_main_rx, alice, _hsd) =
-                get_test_genesis_setup(network, 0, cli_args::Args::default())
+                get_test_genesis_setup(network, peer_count, cli)
                     .await
                     .unwrap();
             let peer_hsd = get_dummy_handshake_data_for_genesis(network);
+            let peer_ip = alice
+                .lock_guard()
+                .await
+                .net
+                .peer_map
+                .keys()
+                .next()
+                .unwrap()
+                .to_owned();
             let peer_loop_handler = PeerLoopHandler::new(
                 to_main_tx.clone(),
                 alice.clone(),
-                get_dummy_socket_address(0),
+                peer_ip,
                 peer_hsd,
                 true,
                 1,
@@ -4018,43 +4034,109 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
+        async fn reject_foreign_block_proposals_and_notifications() {
+            let network = Network::Main;
+            let reject_all = cli_args::Args {
+                ignore_foreign_compositions: true,
+                network,
+                ..Default::default()
+            };
+            let other_ip: IpAddr = "255.254.253.252".parse().unwrap();
+            let not_whitelisted = cli_args::Args {
+                whitelisted_composers: vec![other_ip],
+                network,
+                ..Default::default()
+            };
+
+            let block1 =
+                fake_valid_deterministic_successor(&Block::genesis(network), network).await;
+
+            let msgs = [
+                PeerMessage::BlockProposalNotification(BlockProposalNotification::from(&block1)),
+                PeerMessage::BlockProposal(Box::new(block1)),
+            ];
+
+            for msg in msgs {
+                for cli in [reject_all.clone(), not_whitelisted.clone()] {
+                    let TestSetup {
+                        peer_broadcast_tx,
+                        mut peer_loop_handler,
+                        mut to_main_rx,
+                        from_main_rx,
+                        mut peer_state,
+                        to_main_tx,
+                        ..
+                    } = genesis_setup(cli).await;
+
+                    let mock = Mock::new(vec![
+                        Action::Read(msg.clone()),
+                        Action::Read(PeerMessage::Bye),
+                    ]);
+                    peer_loop_handler
+                        .run(mock, from_main_rx, &mut peer_state)
+                        .await
+                        .unwrap();
+
+                    assert_eq!(
+                        TryRecvError::Empty,
+                        to_main_rx.try_recv().unwrap_err(),
+                        "No message to main on rejected proposal"
+                    );
+
+                    drop(to_main_tx);
+                    drop(peer_broadcast_tx);
+                }
+            }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
         async fn accept_block_proposal_height_one() {
             // Node knows genesis block, receives a block proposal for block 1
             // and must accept this. Verify that main loop is informed of block
-            // proposal.
-            let TestSetup {
-                peer_broadcast_tx,
-                mut peer_loop_handler,
-                mut to_main_rx,
-                from_main_rx,
-                mut peer_state,
-                to_main_tx,
-                genesis_block,
-            } = genesis_setup(Network::Main).await;
-            let block1 = fake_valid_block_for_tests(
-                &peer_loop_handler.global_state_lock,
-                StdRng::seed_from_u64(5550001).random(),
-            )
-            .await;
-
-            let mock = Mock::new(vec![
-                Action::Read(PeerMessage::BlockProposal(Box::new(block1))),
-                Action::Read(PeerMessage::Bye),
-            ]);
-            peer_loop_handler
-                .run(mock, from_main_rx, &mut peer_state)
-                .await
-                .unwrap();
-
-            match to_main_rx.try_recv().unwrap() {
-                PeerTaskToMain::BlockProposal(block) => {
-                    assert_eq!(genesis_block.hash(), block.header().prev_block_digest);
-                }
-                _ => panic!("Expected main loop to be informed of block proposal"),
+            // proposal. Even though node is composing, proposal must still be
+            // accepted since foreign proposals are not ignored.
+            let not_composer = cli_args::Args::default();
+            let composer = cli_args::Args {
+                compose: true,
+                ..Default::default()
             };
 
-            drop(to_main_tx);
-            drop(peer_broadcast_tx);
+            for cli in [not_composer, composer] {
+                let TestSetup {
+                    peer_broadcast_tx,
+                    mut peer_loop_handler,
+                    mut to_main_rx,
+                    from_main_rx,
+                    mut peer_state,
+                    to_main_tx,
+                    genesis_block,
+                } = genesis_setup(cli).await;
+                let block1 = fake_valid_block_for_tests(
+                    &peer_loop_handler.global_state_lock,
+                    StdRng::seed_from_u64(5550001).random(),
+                )
+                .await;
+
+                let mock = Mock::new(vec![
+                    Action::Read(PeerMessage::BlockProposal(Box::new(block1))),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+                peer_loop_handler
+                    .run(mock, from_main_rx, &mut peer_state)
+                    .await
+                    .unwrap();
+
+                match to_main_rx.try_recv().unwrap() {
+                    PeerTaskToMain::BlockProposal(block) => {
+                        assert_eq!(genesis_block.hash(), block.header().prev_block_digest);
+                    }
+                    _ => panic!("Expected main loop to be informed of block proposal"),
+                };
+
+                drop(to_main_tx);
+                drop(peer_broadcast_tx);
+            }
         }
 
         #[traced_test]
@@ -4063,6 +4145,7 @@ mod tests {
             // Node knows genesis block, receives a block proposal notification
             // for block 1 and must accept this by requesting the block
             // proposal from peer.
+            let cli = cli_args::Args::default();
             let TestSetup {
                 peer_broadcast_tx,
                 mut peer_loop_handler,
@@ -4071,7 +4154,7 @@ mod tests {
                 mut peer_state,
                 to_main_tx,
                 ..
-            } = genesis_setup(Network::Main).await;
+            } = genesis_setup(cli).await;
             let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
                 StdRng::seed_from_u64(5550001).random(),

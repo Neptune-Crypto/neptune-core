@@ -2260,7 +2260,7 @@ mod tests {
     mod update_mempool_txs {
         use super::*;
         use crate::api::export::NativeCurrencyAmount;
-        use crate::tests::shared::blocks::fake_deterministic_successor;
+        use crate::tests::shared::blocks::fake_valid_deterministic_successor;
         use crate::tests::shared::mock_tx::genesis_tx_with_proof_type;
 
         #[traced_test]
@@ -2275,7 +2275,7 @@ mod tests {
             let fee = NativeCurrencyAmount::coins(1);
 
             let genesis_block = Block::genesis(network);
-            let block1 = fake_deterministic_successor(&genesis_block, network).await;
+            let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
             let cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 ..Default::default()

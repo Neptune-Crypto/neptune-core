@@ -22,6 +22,7 @@ use crate::application::triton_vm_job_queue::TritonVmJobPriority;
 use crate::protocol::consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::protocol::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::protocol::proof_abstractions::tasm::prover_job::ProverJobSettings;
+use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::transaction::tx_proving_capability::TxProvingCapability;
 use crate::state::wallet::scan_mode_configuration::ScanModeConfiguration;
 
@@ -230,6 +231,10 @@ pub struct Args {
     ///          `--whitelisted-composer=2001:db8:3333:4444:5555:6666:7777:8888`
     #[clap(long = "whitelisted-composer")]
     pub(crate) whitelisted_composers: Vec<IpAddr>,
+
+    /// If set, all composition from peers will be ignored.
+    #[clap(long)]
+    pub(crate) ignore_foreign_compositions: bool,
 
     /// Regulates the fraction of the block subsidy that a composer sends to the
     /// guesser.
@@ -627,7 +632,14 @@ impl Args {
     }
 
     /// Check if block proposal should be accepted from this IP address.
-    pub(crate) fn accept_block_proposal_from(&self, ip_address: IpAddr) -> bool {
+    pub(crate) fn accept_block_proposal_from(
+        &self,
+        ip_address: IpAddr,
+    ) -> Result<(), BlockProposalRejectError> {
+        if self.ignore_foreign_compositions {
+            return Err(BlockProposalRejectError::IgnoreAllForeign);
+        }
+
         let ip_address = match ip_address {
             IpAddr::V4(_) => ip_address,
             IpAddr::V6(v6) => match v6.to_ipv4() {
@@ -635,7 +647,13 @@ impl Args {
                 None => ip_address,
             },
         };
-        self.whitelisted_composers.is_empty() || self.whitelisted_composers.contains(&ip_address)
+        if !self.whitelisted_composers.is_empty()
+            && !self.whitelisted_composers.contains(&ip_address)
+        {
+            return Err(BlockProposalRejectError::NotWhiteListed);
+        }
+
+        Ok(())
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {
