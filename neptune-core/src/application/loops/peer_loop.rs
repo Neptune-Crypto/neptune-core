@@ -3978,10 +3978,9 @@ mod tests {
     mod block_proposals {
         use std::net::IpAddr;
 
+        use super::*;
         use crate::application::loops::channel::BlockProposalNotification;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
-
-        use super::*;
 
         struct TestSetup {
             peer_loop_handler: PeerLoopHandler,

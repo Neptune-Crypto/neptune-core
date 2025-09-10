@@ -973,6 +973,7 @@ pub(crate) mod tests {
     use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
     use crate::application::job_queue::errors::JobHandleError;
     use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
+    use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
     use crate::application::triton_vm_job_queue::TritonVmJobQueue;
     use crate::protocol::consensus::block::mock_block_generator::MockBlockGenerator;
     use crate::protocol::consensus::transaction::transaction_kernel::TransactionKernelProxy;
@@ -985,6 +986,7 @@ pub(crate) mod tests {
     use crate::state::mining::mining_status::MiningStatus;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::transaction::tx_proving_capability::TxProvingCapability;
+    use crate::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::state::wallet::transaction_output::TxOutput;
     use crate::state::wallet::wallet_entropy::WalletEntropy;
@@ -1450,6 +1452,55 @@ pub(crate) mod tests {
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
         assert!(block_2.is_valid(&block_1, mocked_now, network).await);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_proposal_with_custom_coinbase_distribution_is_valid() {
+        let network = Network::Main;
+        let cli = cli_args::Args::default_with_network(network);
+        let mut alice = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
+        let address: ReceivingAddress = alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_entropy
+            .composer_fee_key()
+            .to_address()
+            .into();
+        let coinbase_distribution = vec![
+            CoinbaseOutput::timelocked(address.clone(), 400),
+            CoinbaseOutput::liquid(address.clone(), 300),
+            CoinbaseOutput::liquid(address.clone(), 200),
+            CoinbaseOutput::timelocked(address.clone(), 100),
+        ];
+        let coinbase_distribution = CoinbaseDistribution::try_new(coinbase_distribution).unwrap();
+
+        alice
+            .lock_guard_mut()
+            .await
+            .mining_state
+            .set_coinbase_distribution(coinbase_distribution);
+
+        let (sender_1, receiver_1) = oneshot::channel();
+        let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
+        let genesis_block = Block::genesis(network);
+        let block1_timestamp = genesis_block.header().timestamp + Timestamp::hours(2);
+        compose_block(
+            genesis_block.clone(),
+            alice.clone(),
+            sender_1,
+            cancel_compose_rx.clone(),
+            block1_timestamp,
+        )
+        .await
+        .unwrap();
+
+        let (block_1, _) = receiver_1.await.unwrap();
+        assert!(
+            block_1
+                .is_valid(&genesis_block, block1_timestamp, network)
+                .await
+        );
     }
 
     /// This test mines a single block at height 1 on the main network
@@ -1960,6 +2011,29 @@ pub(crate) mod tests {
         let composer_outputs =
             composer_parameters.tx_outputs(NativeCurrencyAmount::coins(1), Timestamp::now());
         assert_eq!(2, composer_outputs.len());
+    }
+
+    #[test]
+    fn composer_outputs_respect_manually_set_coinbase_distribution() {
+        let mut rng = rand::rng();
+        let address = GenerationReceivingAddress::derive_from_seed(rng.random());
+        let coinbase_distribution = vec![
+            CoinbaseOutput::timelocked(address.into(), 500),
+            CoinbaseOutput::liquid(address.into(), 251),
+            CoinbaseOutput::liquid(address.into(), 249),
+        ];
+        let coinbase_distribution = CoinbaseDistribution::try_new(coinbase_distribution).unwrap();
+        let guesser_fraction = rng.random_range(0f64..=0.99999f64);
+        let composer_parameters = ComposerParameters::new(
+            coinbase_distribution,
+            rng.random(),
+            None,
+            guesser_fraction,
+            FeeNotificationPolicy::OnChainGeneration,
+        );
+        let composer_outputs =
+            composer_parameters.tx_outputs(NativeCurrencyAmount::coins(1), Timestamp::now());
+        assert_eq!(3, composer_outputs.len());
     }
 
     #[traced_test]

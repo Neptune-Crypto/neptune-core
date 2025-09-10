@@ -9,9 +9,9 @@ use crate::api::export::ReceivingAddress;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinbaseOutput {
-    fraction_in_promille: u32,
-    recipient: ReceivingAddress,
-    timelocked: bool,
+    pub fraction_in_promille: u32,
+    pub recipient: ReceivingAddress,
+    pub timelocked: bool,
 }
 
 impl CoinbaseOutput {
@@ -41,14 +41,14 @@ impl CoinbaseOutput {
         &self.recipient
     }
 
-    pub(super) fn timelocked(&self) -> bool {
+    pub(super) fn is_timelocked(&self) -> bool {
         self.timelocked
     }
 }
 
 /// A coinbase distribution describing how the output in the locally produced
 /// block proposal should be distributed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CoinbaseDistribution {
     coinbase_outputs: Vec<CoinbaseOutput>,
 }
@@ -66,7 +66,13 @@ impl CoinbaseDistribution {
     /// a) All fractions sum to 1000 ‰
     /// b) Has at least one liquid and one timelocked output
     /// c) All timelocked outputs sum to at least 500 ‰.
-    fn try_new(outputs: Vec<CoinbaseOutput>) -> Result<Self> {
+    /// d) All fractions are non-negative
+    ///
+    /// If the above rules are followed, the distribution is guaranteed to be
+    /// consensus-compatible.
+    // All constructors should go through this interface to ensure consensus-
+    // compatibility.
+    pub(crate) fn try_new(outputs: Vec<CoinbaseOutput>) -> Result<Self> {
         ensure!(
             1000 == outputs.iter().map(|x| x.fraction_in_promille).sum::<u32>(),
             "Output fractions must sum to 1000 ‰."

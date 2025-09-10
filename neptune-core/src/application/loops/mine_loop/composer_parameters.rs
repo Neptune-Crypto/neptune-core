@@ -105,7 +105,7 @@ impl ComposerParameters {
                 owned,
             );
 
-            if coinbase_output.timelocked() {
+            if coinbase_output.is_timelocked() {
                 let small_delta = Timestamp::minutes(30);
                 let release_date = timestamp + MINING_REWARD_TIME_LOCK_PERIOD + small_delta;
                 tx_output = tx_output.with_time_lock(release_date);
@@ -142,7 +142,7 @@ impl ComposerParameters {
     ///
     /// Note that the receiver preimage is not known in a *cold composing*
     /// scenario, where the composer fee UTXOs are sent to a foreign
-    /// [`ReceivingAddress`].
+    /// [`crate::state::wallet::address::ReceivingAddress`].
     pub(crate) fn maybe_receiver_preimage(&self) -> Option<Digest> {
         self.maybe_receiver_preimage
     }

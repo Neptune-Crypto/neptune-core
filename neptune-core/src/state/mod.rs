@@ -801,10 +801,13 @@ impl GlobalState {
     pub(crate) fn composer_parameters(&self, next_block_height: BlockHeight) -> ComposerParameters {
         assert!(!next_block_height.is_genesis());
 
+        let coinbase_distribution = self.mining_state.overridden_coinbase_distribution();
+
         self.wallet_state.composer_parameters(
             next_block_height,
             self.cli.guesser_fraction,
             self.cli.fee_notification,
+            coinbase_distribution,
         )
     }
 

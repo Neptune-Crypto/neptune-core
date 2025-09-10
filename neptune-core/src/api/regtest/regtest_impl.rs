@@ -135,10 +135,12 @@ impl RegTestPrivate {
         let next_block_height = tip_block.header().height + 1;
         let guesser_fraction = 0.5;
         let fee_notification_policy = Default::default();
+        let overridden_coinbase_distribution = gs.mining_state.overridden_coinbase_distribution();
         let composer_parameters = gs.wallet_state.composer_parameters(
             next_block_height,
             guesser_fraction,
             fee_notification_policy,
+            overridden_coinbase_distribution,
         );
 
         let guesser_key = gs.wallet_state.wallet_entropy.guesser_fee_key();

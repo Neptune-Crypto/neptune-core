@@ -170,8 +170,10 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
-    /// Generate [`ComposerParameters`] for composing the next block, sending
-    /// the entire coinbase reward to an address of the wallet.
+    /// Generate [`ComposerParameters`] for composing the next block. If a
+    /// coinbase distribution is specified, that will be used. If no coinbase
+    /// distribution is specified, the entire coinbase reward goes to an address
+    /// of the wallet.
     ///
     ///  # Panics
     ///
@@ -181,13 +183,16 @@ impl WalletState {
         next_block_height: BlockHeight,
         guesser_fraction: f64,
         fee_notification: FeeNotificationPolicy,
+        coinbase_distribution: Option<CoinbaseDistribution>,
     ) -> ComposerParameters {
         let reward_address = self.wallet_entropy.prover_fee_address();
         let receiver_preimage = self.wallet_entropy.composer_fee_key().receiver_preimage();
         let sender_randomness_for_composer = self
             .wallet_entropy
             .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
-        let coinbase_distribution = CoinbaseDistribution::solo(reward_address);
+
+        let coinbase_distribution =
+            coinbase_distribution.unwrap_or(CoinbaseDistribution::solo(reward_address));
 
         ComposerParameters::new(
             coinbase_distribution,
@@ -1261,10 +1266,12 @@ impl WalletState {
         // try to reproduce composer fee UTXOs, assuming it was our block
         if let Some(guesser_fraction) = scan_mode_configuration.maybe_guesser_fraction() {
             // derive the composer parameters as the own miner would have
+            let overriden_coinbase_distribution = None;
             let composer_parameters = self.composer_parameters(
                 new_block.header().height,
                 guesser_fraction,
                 FeeNotificationPolicy::OffChain,
+                overriden_coinbase_distribution,
             );
 
             // if we have the necessary info to claim them

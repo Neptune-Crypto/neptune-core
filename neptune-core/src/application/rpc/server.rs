@@ -75,6 +75,8 @@ use crate::application::config::network::Network;
 use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseDistribution;
+use crate::application::loops::mine_loop::coinbase_distribution::CoinbaseOutput;
 use crate::application::rpc::server::error::RpcError;
 use crate::application::rpc::server::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use crate::macros::fn_name;
@@ -1865,6 +1867,30 @@ pub trait RPC {
     /// ```
     async fn restart_miner(token: auth::Token) -> RpcResult<()>;
 
+    /// Set coinbase distribution for this node's block proposals. This
+    /// distribution will be in effect until it is overwritted or manually
+    /// unset. The value set through this command stays in effect regardless of
+    /// whether the block's proposals are mined or not. Only by overwriting this
+    /// value by calling this function again, or by unsetting this value through
+    /// [`RPC::unset_coinbase_distribution()`] can this effect be overturned.
+    ///
+    /// To guarantee that the set coinbase distribution is applied to the *next*
+    /// locally produced block proposal, this function call can be followed up
+    /// by a call to first [`RPC::pause_miner()`] and then
+    /// [`RPC::restart_miner()`]. If this is not done, the node may continue
+    /// working on an already started block proposal with another distribution.
+    async fn set_coinbase_distribution(
+        token: auth::Token,
+        coinbase_distribution: Vec<CoinbaseOutput>,
+    ) -> RpcResult<()>;
+
+    /// Remove a coinbase distribution from state, thus defaulting back to
+    /// rewarding the node's own wallet with the composer's coinbase outputs.
+    ///
+    /// Can be used to delete coinbase distributions set through
+    /// [`RPC::set_coinbase_distribution()`].
+    async fn unset_coinbase_distribution(token: auth::Token) -> RpcResult<()>;
+
     /// mine a series of blocks to the node's wallet.
     ///
     /// Can be used only if the network uses mock blocks.
@@ -3444,6 +3470,52 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn set_coinbase_distribution(
+        mut self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+        coinbase_distribution: Vec<CoinbaseOutput>,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let coinbase_distribution = match CoinbaseDistribution::try_new(coinbase_distribution) {
+            Ok(cd) => cd,
+            Err(err) => return Err(RpcError::InvalidCoinbaseDistribution(err.to_string())),
+        };
+
+        if self.state.cli().mine() {
+            let mut state = self.state.lock_guard_mut().await;
+            state
+                .mining_state
+                .set_coinbase_distribution(coinbase_distribution);
+        } else {
+            warn!("Cannot set coinbase distribution as node is not mining");
+        }
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn unset_coinbase_distribution(
+        mut self,
+        _context: tarpc::context::Context,
+        token: auth::Token,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        if self.state.cli().mine() {
+            let mut state = self.state.lock_guard_mut().await;
+            state.mining_state.unset_coinbase_distribution();
+        } else {
+            warn!("Cannot unset coinbase distribution as node is not mining");
+        }
+
+        Ok(())
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn mine_blocks_to_wallet(
         mut self,
         _context: tarpc::context::Context,
@@ -3939,6 +4011,9 @@ pub mod error {
 
         #[error("Cannot pause state updates while client is syncing")]
         CannotPauseWhileSyncing,
+
+        #[error("Invalid coinbase distribution: {0}")]
+        InvalidCoinbaseDistribution(String),
     }
 
     impl From<tx_initiation::error::CreateTxError> for RpcError {
