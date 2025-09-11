@@ -1402,6 +1402,81 @@ pub trait RPC {
         guesser_fee_address: ReceivingAddress,
     ) -> RpcResult<Option<(Block, ProofOfWorkPuzzle)>>;
 
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
+    async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputList>;
+
+    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
+    ///
+    /// see [InputSelectionPolicy]
+    ///
+    /// pub enum InputSelectionPolicy {
+    ///     Random,
+    ///     ByNativeCoinAmount(SortOrder),
+    ///     ByUtxoSize(SortOrder),
+    /// }
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
+    async fn select_spendable_inputs(
+        token: auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList>;
+
+    /// generate tx outputs from list of OutputFormat.
+    ///
+    /// OutputFormat can be address:amount, address:amount:medium, address:utxo,
+    /// address:utxo:medium, tx_output, etc.
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_outputs()]
+    async fn generate_tx_outputs(
+        token: auth::Token,
+        outputs: Vec<OutputFormat>,
+    ) -> RpcResult<TxOutputList>;
+
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
+    async fn generate_witness_proof(
+        token: auth::Token,
+        tx_details: TransactionDetails,
+    ) -> RpcResult<TransactionProof>;
+
+    /// assemble a transaction from TransactionDetails and a TransactionProof.
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction()]
+    async fn assemble_transaction(
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction>;
+
+    /// assemble transaction artifacts from TransactionDetails and a TransactionProof.
+    ///
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction_artifacts()]
+    async fn assemble_transaction_artifacts(
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<TxCreationArtifacts>;
+
+    /// todo: docs.
+    ///
+    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
+    async fn proof_type(
+        token: auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TransactionProofType>;
+
     /******** BLOCKCHAIN STATISTICS ********/
     // Place all endpoints that relate to statistics of the blockchain here
 
@@ -1542,73 +1617,6 @@ pub trait RPC {
     /// ```
     async fn clear_standing_by_ip(token: auth::Token, ip: IpAddr) -> RpcResult<()>;
 
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::spendable_inputs()]
-    async fn spendable_inputs(token: auth::Token) -> RpcResult<TxInputList>;
-
-    /// retrieve spendable inputs sufficient to cover spend_amount by applying selection policy.
-    ///
-    /// see [InputSelectionPolicy]
-    ///
-    /// pub enum InputSelectionPolicy {
-    ///     Random,
-    ///     ByNativeCoinAmount(SortOrder),
-    ///     ByUtxoSize(SortOrder),
-    /// }
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::select_spendable_inputs()]
-    async fn select_spendable_inputs(
-        token: auth::Token,
-        policy: InputSelectionPolicy,
-        spend_amount: NativeCurrencyAmount,
-    ) -> RpcResult<TxInputList>;
-
-    /// generate tx outputs from list of OutputFormat.
-    ///
-    /// OutputFormat can be address:amount, address:amount:medium, address:utxo,
-    /// address:utxo:medium, tx_output, etc.
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_tx_outputs()]
-    async fn generate_tx_outputs(
-        token: auth::Token,
-        outputs: Vec<OutputFormat>,
-    ) -> RpcResult<TxOutputList>;
-
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::generate_witness_proof()]
-    async fn generate_witness_proof(
-        token: auth::Token,
-        tx_details: TransactionDetails,
-    ) -> RpcResult<TransactionProof>;
-
-    /// assemble a transaction from TransactionDetails and a TransactionProof.
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction()]
-    async fn assemble_transaction(
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<Transaction>;
-
-    /// assemble transaction artifacts from TransactionDetails and a TransactionProof.
-    ///
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::assemble_transaction_artifacts()]
-    async fn assemble_transaction_artifacts(
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<TxCreationArtifacts>;
-
     /// record transaction and initiate broadcast to peers
     ///
     /// todo: docs.
@@ -1719,14 +1727,6 @@ pub trait RPC {
     /// Returns Ok(false) if no transaction for upgrading was found
     /// Returns an error if something else failed.
     async fn upgrade(token: auth::Token, tx_kernel_id: TransactionKernelId) -> RpcResult<bool>;
-
-    /// todo: docs.
-    ///
-    /// meanwhile see [tx_initiation::initiator::TransactionInitiator::proof_type()]
-    async fn proof_type(
-        token: auth::Token,
-        txid: TransactionKernelId,
-    ) -> RpcResult<TransactionProofType>;
 
     /// claim a utxo
     ///
@@ -3068,114 +3068,6 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn spendable_inputs(
-        self,
-        _: context::Context,
-        token: auth::Token,
-    ) -> RpcResult<TxInputList> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .spendable_inputs(Timestamp::now())
-            .await)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn select_spendable_inputs(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        policy: InputSelectionPolicy,
-        spend_amount: NativeCurrencyAmount,
-    ) -> RpcResult<TxInputList> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
-            .await
-            .into())
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn generate_tx_outputs(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        outputs: Vec<OutputFormat>,
-    ) -> RpcResult<TxOutputList> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .generate_tx_outputs(outputs)
-            .await)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn generate_witness_proof(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        tx_details: TransactionDetails,
-    ) -> RpcResult<TransactionProof> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .generate_witness_proof(Arc::new(tx_details)))
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn assemble_transaction(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<Transaction> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .assemble_transaction(&transaction_details, transaction_proof)?)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn assemble_transaction_artifacts(
-        self,
-        _: context::Context,
-        token: auth::Token,
-        transaction_details: TransactionDetails,
-        transaction_proof: TransactionProof,
-    ) -> RpcResult<TxCreationArtifacts> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self
-            .state
-            .api()
-            .tx_initiator()
-            .assemble_transaction_artifacts(transaction_details, transaction_proof)?)
-    }
-
-    // documented in trait. do not add doc-comment.
     async fn record_and_broadcast_transaction(
         mut self,
         _: context::Context,
@@ -3316,19 +3208,6 @@ impl RPC for NeptuneRPCServer {
             .await;
 
         Ok(true)
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn proof_type(
-        self,
-        _ctx: context::Context,
-        token: auth::Token,
-        txid: TransactionKernelId,
-    ) -> RpcResult<TransactionProofType> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        Ok(self.state.api().tx_initiator().proof_type(txid).await?)
     }
 
     // // documented in trait. do not add doc-comment.
@@ -3760,6 +3639,127 @@ impl RPC for NeptuneRPCServer {
         let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header);
 
         Ok(Some((proposal, puzzle)))
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn spendable_inputs(
+        self,
+        _: context::Context,
+        token: auth::Token,
+    ) -> RpcResult<TxInputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .spendable_inputs(Timestamp::now())
+            .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn select_spendable_inputs(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        policy: InputSelectionPolicy,
+        spend_amount: NativeCurrencyAmount,
+    ) -> RpcResult<TxInputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .select_spendable_inputs(policy, spend_amount, Timestamp::now())
+            .await
+            .into())
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_tx_outputs(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        outputs: Vec<OutputFormat>,
+    ) -> RpcResult<TxOutputList> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .generate_tx_outputs(outputs)
+            .await)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_witness_proof(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        tx_details: TransactionDetails,
+    ) -> RpcResult<TransactionProof> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .generate_witness_proof(Arc::new(tx_details)))
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn assemble_transaction(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<Transaction> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .assemble_transaction(&transaction_details, transaction_proof)?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn assemble_transaction_artifacts(
+        self,
+        _: context::Context,
+        token: auth::Token,
+        transaction_details: TransactionDetails,
+        transaction_proof: TransactionProof,
+    ) -> RpcResult<TxCreationArtifacts> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self
+            .state
+            .api()
+            .tx_initiator()
+            .assemble_transaction_artifacts(transaction_details, transaction_proof)?)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn proof_type(
+        self,
+        _ctx: context::Context,
+        token: auth::Token,
+        txid: TransactionKernelId,
+    ) -> RpcResult<TransactionProofType> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        Ok(self.state.api().tx_initiator().proof_type(txid).await?)
     }
 
     // documented in trait. do not add doc-comment.
