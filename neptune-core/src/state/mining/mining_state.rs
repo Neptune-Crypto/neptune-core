@@ -52,10 +52,7 @@ impl MiningState {
             .map(|x| x.to_owned())
     }
 
-    pub(crate) fn set_coinbase_distribution(
-        &mut self,
-        coinbase_distribution: CoinbaseDistribution,
-    ) {
+    pub fn set_coinbase_distribution(&mut self, coinbase_distribution: CoinbaseDistribution) {
         info!(
             "Changing coinbase distribution to length of {}. Distribution:\n{}",
             coinbase_distribution.len(),

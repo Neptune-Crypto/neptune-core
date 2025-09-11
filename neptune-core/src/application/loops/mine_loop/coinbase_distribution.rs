@@ -72,7 +72,7 @@ impl CoinbaseDistribution {
     /// consensus-compatible.
     // All constructors should go through this interface to ensure consensus-
     // compatibility.
-    pub(crate) fn try_new(outputs: Vec<CoinbaseOutput>) -> Result<Self> {
+    pub fn try_new(outputs: Vec<CoinbaseOutput>) -> Result<Self> {
         ensure!(
             1000 == outputs.iter().map(|x| x.fraction_in_promille).sum::<u32>(),
             "Output fractions must sum to 1000 ‰."
