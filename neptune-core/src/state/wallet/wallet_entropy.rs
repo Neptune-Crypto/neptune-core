@@ -50,7 +50,7 @@ impl WalletEntropy {
 
     /// Returns the spending key for prover rewards, *i.e.*, composer fee or
     /// proof-upgrader (gobbling) fee.
-    pub(crate) fn composer_fee_key(&self) -> generation_address::GenerationSpendingKey {
+    pub fn composer_fee_key(&self) -> generation_address::GenerationSpendingKey {
         self.nth_generation_spending_key(0u64)
     }
 

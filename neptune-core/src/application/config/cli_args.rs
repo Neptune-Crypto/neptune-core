@@ -243,7 +243,7 @@ pub struct Args {
     /// The remainder goes to the composer. This flag is ignored if the
     /// `compose` flag is not set.
     #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
-    pub(crate) guesser_fraction: f64,
+    pub guesser_fraction: f64,
 
     /// The minimum fraction that a guesser will require from the composer
     /// before they start guessing. Block proposals with a guesser fraction
