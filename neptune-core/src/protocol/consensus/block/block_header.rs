@@ -172,7 +172,7 @@ impl BlockHeader {
         }
     }
 
-    pub(crate) fn was_guessed_by(&self, address: ReceivingAddress) -> bool {
+    pub fn was_guessed_by(&self, address: &ReceivingAddress) -> bool {
         let address_receiver_digest = address.privacy_digest();
         let address_lock_script_hash = address.lock_script_hash();
         self.guesser_receiver_data.receiver_digest == address_receiver_digest
